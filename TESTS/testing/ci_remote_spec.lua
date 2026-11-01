@@ -98,10 +98,21 @@ return function(H)
       "os: a hosted gate job is other, whatever image it runs on"
     )
     eq(
-      remote.pick_run({ { id = 1, name = "ci", created_at = "2026-10-31T11:00:00Z" } }, "CI").id,
+      remote.pick_run(
+        { { id = 1, name = "ci", event = "push", created_at = "2026-10-31T11:00:00Z" } },
+        "CI"
+      ).id,
       1,
       "pick: the workflow name is compared without case"
     )
+    local push = { id = 1, name = "CI", event = "push", created_at = "2026-10-31T11:00:00Z" }
+    local pr = { id = 2, name = "CI", event = "pull_request", created_at = "2026-10-31T12:00:00Z" }
+    eq(
+      remote.pick_run({ push, pr }, "CI").id,
+      1,
+      "pick: the push run wins over a newer pull_request run"
+    )
+    eq(remote.pick_run({ pr }, "CI"), nil, "pick: a pull_request run alone is no run")
   end
 
   do

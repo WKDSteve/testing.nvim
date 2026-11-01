@@ -412,7 +412,8 @@ Per repository:
    `main` is then an older commit's verdict.
 3. `GET /repos/<o>/<r>/actions/runs?head_sha=<sha>&per_page=20`, only the runs whose workflow is named
    `ci_remote.workflow` (default `CI`, compared without case: `ci` is the same; `--workflow` overrides it for every
-   repository), the newest by `created_at`. A
+   repository) that a `push` started (`event == "push"`: a pull-request run of the same workflow on the same SHA is no
+   verdict for the branch), the newest by `created_at`. A
    path-filtered sibling workflow (`pages`, `release-engine`) can be created after the CI run for the same push and must
    not become the verdict.
 4. `GET .../runs/<id>/jobs`: each job goes to the cell `ubuntu`, `windows` or `macos` by its name, else, on a

@@ -296,8 +296,9 @@ local function trim_list(list, trim)
   return out
 end
 
----The newest run of `workflow` (by `created_at`, then id); nil when there is none. The name is compared without
----case: the repositories spell their CI workflow `CI` and `ci`.
+---The newest run of `workflow` (by `created_at`, then id) that a push started; nil when there is none. The name is
+---compared without case: the repositories spell their CI workflow `CI` and `ci`. A pull-request run of the same
+---workflow on the same SHA (a fast-forward PR) is not the verdict of the commit on the branch.
 ---@param runs table[]
 ---@param workflow string
 ---@return table|nil
@@ -305,7 +306,7 @@ function M.pick_run(runs, workflow)
   local best
   workflow = workflow:lower()
   for _, r in ipairs(runs) do
-    if r.name and r.name:lower() == workflow then
+    if r.name and r.name:lower() == workflow and r.event == "push" then
       local key = (r.created_at or "") .. ("%020d"):format(r.id)
       if not best or key > best.key then
         best = { key = key, run = r }

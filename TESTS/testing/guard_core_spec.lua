@@ -350,15 +350,22 @@ return function(H)
     return (uv.hrtime() - s) / 1e3 / n
   end
   bench(200)
-  local bare = bench(3000)
-  h = guard.install({ guards = { clock = "error" } })
-  h:begin_case({ id = "o::b" })
-  local guarded = bench(3000)
-  h:end_case()
-  h:uninstall()
+  -- Bare and guarded rounds alternate and the smallest difference counts: a shared runner that stalls one
+  -- round (27.8 us once on macOS CI) cannot fail the budget, while a wrapper that really costs more than
+  -- the budget is slower in every round.
+  local best = math.huge
+  for _ = 1, 5 do
+    local bare = bench(3000)
+    h = guard.install({ guards = { clock = "error" } })
+    h:begin_case({ id = "o::b" })
+    local guarded = bench(3000)
+    h:end_case()
+    h:uninstall()
+    best = math.min(best, guarded - bare)
+  end
   vim.fn.delete(tmp)
   ok(
-    guarded - bare < 25,
-    ("wrapper overhead of an open+close+time call is %.1f us (budget 25 us)"):format(guarded - bare)
+    best < 25,
+    ("wrapper overhead of an open+close+time call is %.1f us (budget 25 us)"):format(best)
   )
 end
