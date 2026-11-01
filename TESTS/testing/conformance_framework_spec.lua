@@ -167,6 +167,17 @@ return function(H)
     has(problem_text, "rule NEW-99", "and named")
     has(problem_text, "needs a reason", "a waiver with an empty reason is refused")
 
+    -- a waiver of a check that did not run (--only) is not stale: that check made no findings to match
+    S.write(
+      f .. "/.testing.lua",
+      'return { plugin = "goodp", conformance = { waivers = { { check = "K6", rule = "NEW-06", reason = "waiver of a check that is not run" } } } }'
+    )
+    report = conformance.run(f, { only = { "K15" }, probe = probe })
+    ok(
+      not table.concat(report.problems, "\n"):find("matched no finding", 1, true),
+      "a waiver of a check that was not selected is not reported as stale"
+    )
+
     -- a waiver cannot hide another check's finding
     S.write(
       f .. "/.testing.lua",

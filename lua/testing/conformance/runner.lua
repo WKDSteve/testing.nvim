@@ -237,9 +237,17 @@ end
 ---@param waivers Testing.Conformance.Waiver[]
 ---@param now? integer Unix time (specs); the day of `expires` is compared with today's UTC date, so a waiver
 ---  expires at the same instant on every machine whatever its time zone.
----@return string[] stale Waivers that matched nothing, expired ones, and unscoped ones that hide errors.
+---@return string[] stale Waivers of a check that ran and matched nothing, expired ones, and unscoped ones that hide errors.
 function M.apply_waivers(results, waivers, now)
   local used, hidden_errors, expired = {}, {}, {}
+  -- a check that did not run (not selected by --only, skipped, errored) produced no findings: its waivers cannot be
+  -- told stale, and removing them would drop valid waivers
+  local ran = {}
+  for _, res in ipairs(results) do
+    if res.id and res.status ~= "n/a" and res.status ~= "error" then
+      ran[res.id] = true
+    end
+  end
   local today = os.date("!%Y-%m-%d", now or os.time()) --[[@as string]]
   for i, w in ipairs(waivers) do
     expired[i] = w.expires ~= nil and w.expires < today
@@ -276,7 +284,7 @@ function M.apply_waivers(results, waivers, now)
         hidden_errors[i]
       )
     end
-    if not used[i] and not expired[i] then
+    if not used[i] and not expired[i] and ran[w.check] then
       stale[#stale + 1] = ("waiver %d (check %s%s%s) matched no finding: remove it"):format(
         i,
         w.check,
