@@ -95,6 +95,9 @@ commit, and no commit reachable from a remote-tracking ref (a commit you fetched
 remote). Anything else prints the `testing ci trust` command for a review and releases nothing. A deleted branch, a
 tag, a remote tip that was never fetched, and a push without an `origin` release nothing. The call never fails the
 push. It is opt-in (`--auto-trust`): without it the hook releases nothing.
+The release happens before git sends the push: a push that is then rejected leaves an entry for a commit that is not on
+GitHub, which does no harm (it names exactly that content). `trust --pushed` reads git's lines from stdin, so run
+it by hand only with a pipe.
 
 This is a convenience of the maintainer, not a review. Git cannot prove who wrote a commit: a commit you made
 from foreign text (copied code, a patch, a cherry-pick of a commit you never fetched) counts as made here. The pull

@@ -518,8 +518,6 @@ local function summary(sv, repo, prev, sha, ctx)
   end
 end
 
----`testing ci trust ...`.
----@param argv string[]
 ---Run git in `cwd`; the lines of its output, or nil when it fails.
 ---@param cwd string
 ---@param args string[]
@@ -635,6 +633,8 @@ function M.trust_pushed(stdin, sv, ctx)
   return 0
 end
 
+---`testing ci trust ...`.
+---@param argv string[]
 ---@param sv { out: fun(s: string), err: fun(s: string), cwd?: string }
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@return integer
