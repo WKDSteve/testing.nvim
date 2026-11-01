@@ -1,4 +1,5 @@
 ---@module 'testing.run.watch'
+-- handrolled-ok: debounce with a max-wait cooldown that lib.nvim.debounce does not express
 ---@brief `--watch`: run, then re-run the affected spec files whenever something changes.
 ---@description
 --- Two parts. The LOOP (`M.new`) is plain Lua over seams: a clock, a file-system source, a scanner, a

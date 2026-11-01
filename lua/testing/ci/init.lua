@@ -1,4 +1,5 @@
 ---@module 'testing.ci'
+-- handrolled-ok: the file name .ci-last.json, not a clock subtraction
 -- @cache-allow env
 -- (a step's own `env` is set for an in-process step and the outer values are put back: no hidden input of a spec)
 ---@brief `testing ci`: run the pipeline of a repository, described in the `ci` section of its `.testing.lua`.

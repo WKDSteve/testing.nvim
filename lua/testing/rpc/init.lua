@@ -1,4 +1,5 @@
 ---@module 'testing.rpc'
+-- handrolled-ok: a kill-retry interval inside vim.wait, not a throttle
 ---@brief RPC child driver: an embedded, headless, isolated Neovim that a spec drives like a user would.
 ---@description
 --- `require("testing.rpc").spawn(opts)` starts
