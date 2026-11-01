@@ -239,6 +239,33 @@ return function(H)
       { "a", "日", "", "b" },
       "the second cell of a wide character is empty"
     )
+    -- the cursor of the snapshot is in the CURRENT window, also right after a switch (screenrow() kept the old one)
+    c.cmd("tabnew")
+    c.api.nvim_buf_set_lines(0, 0, -1, false, { "upper one", "upper two", "upper three" })
+    c.cmd("belowright split | enew")
+    c.api.nvim_buf_set_lines(0, 0, -1, false, { "lower" })
+    local lower_win = c.api.nvim_get_current_win()
+    c.api.nvim_win_set_cursor(0, { 1, 3 })
+    local upper_win = c.api.nvim_tabpage_list_wins(0)[1]
+    c.api.nvim_set_current_win(upper_win)
+    c.api.nvim_win_set_cursor(0, { 3, 4 })
+    local up = c.screen()
+    local upper_pos = c.fn.win_screenpos(upper_win)
+    eq(
+      up.cursor,
+      { row = upper_pos[1] + 2, col = upper_pos[2] + 4 },
+      "cursor: in the upper window after the switch"
+    )
+    c.api.nvim_set_current_win(lower_win)
+    local low = c.screen()
+    local lower_pos = c.fn.win_screenpos(lower_win)
+    eq(
+      low.cursor,
+      { row = lower_pos[1], col = lower_pos[2] + 3 },
+      "cursor: in the lower window after switching back"
+    )
+    c.cmd("tabclose!")
+
     -- a snapshot of the real screen: written once, matched again, a change differs; the clock is masked
     local snap_root = S.new_dir()
     local screen_mod = require("testing.screen")
