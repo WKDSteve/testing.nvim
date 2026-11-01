@@ -678,5 +678,13 @@ return function(H)
 
   vim.env.TESTING_OVERVIEW_SECRET = nil
 
+  -- docs/map is rewritten by docmap while a run is going: the fs guard of this repository must not count it
+  local project = dofile(vim.fn.getcwd() .. "/.testing.lua")
+  local fs = project.guards.fs
+  ok(
+    type(fs) == "table" and fs.mode == "error" and vim.tbl_contains(fs.ignore or {}, "map"),
+    "the tree snapshot ignores the generated docs/map: " .. vim.inspect(fs)
+  )
+
   vim.fn.delete(tmp, "rf")
 end
