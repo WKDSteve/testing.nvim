@@ -296,6 +296,23 @@ return function(H)
   eq(#a.current().assertions, 2, "and records nothing")
   project.reconcile(state)
   eq(#a.current().assertions, 2, "reconcile: every collected failure was seen, nothing is added")
+
+  -- a check of the project that returns nothing on success answers true once it is known as a check and recorded as
+  -- passed (`if not H.ok(...) then ...`): the full run, where the check is already learned, must not differ
+  do
+    local a3 = new_case_ctx()
+    local plain = {
+      ok = function(value, msg)
+        if not value then
+          error("FAIL " .. tostring(msg), 0)
+        end
+      end,
+    }
+    local H3 = project.new(a3, plain, { ok = true })
+    eq(H3.ok(true, "fine"), true, "a passing check answers true")
+    eq(H3.ok(false, "bad"), false, "a failing check answers false")
+    eq(#a3.current().assertions, 2, "both are recorded")
+  end
   -- after the file ended the wrappers pass straight through
   local before = #a.current().assertions
   H2.check("late", function() end)

@@ -363,6 +363,8 @@ local function wrap(state, key, original)
       state.claimed_printed = claimed_before + own_printed
     end
 
+    -- a check that returned normally was recorded as passed: the spec may ask for it (`if not H.ok(...) then`)
+    local passed = false
     if res[1] then
       if is_collector then
         local grew = 0
@@ -407,6 +409,7 @@ local function wrap(state, key, original)
         else
           local file, line = call_site(state)
           record(state, key, true, nil, file, line)
+          passed = known
         end
       elseif entered_in_assert == 0 then
         -- the project's counter grew by more than the assertions recorded INSIDE this call: the helper is an
@@ -420,7 +423,13 @@ local function wrap(state, key, original)
         if known or counted then
           local file, line = call_site(state)
           record(state, key, true, nil, file, line)
+          passed = true
         end
+      end
+      -- a project's check that returns nothing on success answers `true` here, as it answers `false` on a recorded
+      -- failure: whether it is "learned" as a check (a full run) or not yet (a single file) must not change the answer
+      if passed and res[2] == nil then
+        return true
       end
       return unpack_fn(res, 2, res.n)
     end
