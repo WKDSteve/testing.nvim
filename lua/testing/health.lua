@@ -58,6 +58,7 @@ local REQUIRED_LIB = {
   { "lib.nvim.net.github", "GitHub requests and the token of testing ci remote" },
   { "lib.nvim.git", "the head of a repository in testing call fleet|repo" },
   { "lib.nvim.contract.doc", "head, digest and size limit of the testing-export/1 documents" },
+  { "lib.nvim.debounce", "the lint check after a save" },
 }
 
 ---Kernel modules the CLI and the in-process driver need; a failure here is a defect of the plugin
