@@ -441,29 +441,29 @@ function M.on_save(buf)
       st.debounce.cancel()
     end
     st.debounce_ms = M.DEBOUNCE_MS
-    st.debounce = require("lib.nvim.debounce").new(function(gen, file)
-      if M.pending[buf] ~= st or st.gen ~= gen or not vim.api.nvim_buf_is_valid(buf) then
+    st.debounce = require("lib.nvim.debounce").new(function(saved_gen, saved_file)
+      if M.pending[buf] ~= st or st.gen ~= saved_gen or not vim.api.nvim_buf_is_valid(buf) then
         return
       end
       if st.proc then
         pcall(st.proc.kill, st.proc, 15)
         st.proc = nil
       end
-      local root = require("testing.bindings.usrcmds").resolve_root(nil, file)
-      if not M.lintable(root, file) then
+      local root = require("testing.bindings.usrcmds").resolve_root(nil, saved_file)
+      if not M.lintable(root, saved_file) then
         return
       end
       st.proc = M.run({
         root = root,
         scope = "file",
-        files = { vim.fs.normalize(file) },
+        files = { vim.fs.normalize(saved_file) },
         on_save = true,
         quiet = true,
         current = function()
-          return M.pending[buf] == st and st.gen == gen
+          return M.pending[buf] == st and st.gen == saved_gen
         end,
         on_done = function()
-          if M.pending[buf] == st and st.gen == gen then
+          if M.pending[buf] == st and st.gen == saved_gen then
             st.proc = nil
           end
         end,
