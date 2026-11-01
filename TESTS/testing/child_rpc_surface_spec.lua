@@ -239,7 +239,8 @@ return function(H)
       { "a", "日", "", "b" },
       "the second cell of a wide character is empty"
     )
-    -- the cursor of the snapshot is in the CURRENT window, also right after a switch (screenrow() kept the old one)
+    -- the cursor of the snapshot is in the CURRENT window, also right after a switch (pinned as it is; the stale cursor of
+    -- the filetree sheet could not be reproduced here, see ROADMAP task rpc-screen-cursor-nicht-reproduzierbar)
     c.cmd("tabnew")
     c.api.nvim_buf_set_lines(0, 0, -1, false, { "upper one", "upper two", "upper three" })
     c.cmd("belowright split | enew")

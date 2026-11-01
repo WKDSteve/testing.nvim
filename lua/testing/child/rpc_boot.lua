@@ -444,19 +444,6 @@ function M.messages()
   return vim.split(out, "\n", { plain = true })
 end
 
----The screen cell of the cursor (1-based row and column).
----@return { row: integer, col: integer }
-function M.cursor_cell()
-  local mode = vim.api.nvim_get_mode().mode:sub(1, 1)
-  if ("niVvsR" .. string.char(22)):find(mode, 1, true) then
-    local pos = vim.fn.win_screenpos(0)
-    if pos[1] > 0 and pos[2] > 0 then
-      return { row = pos[1] + vim.fn.winline() - 1, col = pos[2] + vim.fn.wincol() - 1 }
-    end
-  end
-  return { row = vim.fn.screenrow(), col = vim.fn.screencol() }
-end
-
 local ATTR_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 ---A text grid of the screen. `lines[r]` is row r with one character per cell (a wide character's
@@ -467,9 +454,6 @@ local ATTR_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 ---the attribute ' ') for the second cell of a wide character; `testing.screen` masks by column with them.
 ---Needs an attached UI (the parent attaches one before the first call): without a UI nvim does not
 ---draw and `screenstring()` is empty.
----`cursor` is the cell of the cursor in the CURRENT window (its screen position plus the cursor's place in it):
----`screenrow()`/`screencol()` keep the place of the last draw, which is the window that was current before a
----switch. The command line, a terminal and a prompt keep them (the cursor is not in a window text there).
 ---@return table screen
 function M.screen()
   vim.cmd("redraw")
@@ -511,7 +495,7 @@ function M.screen()
   end
   return {
     size = { rows = rows, cols = cols },
-    cursor = M.cursor_cell(),
+    cursor = { row = vim.fn.screenrow(), col = vim.fn.screencol() },
     mode = vim.api.nvim_get_mode().mode,
     lines = lines,
     attrs = attrs,
