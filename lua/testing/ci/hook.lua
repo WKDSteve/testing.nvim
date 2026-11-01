@@ -2,7 +2,7 @@
 ---@brief `testing ci hook install|remove`: a `pre-push` hook that asks `testing ci verify` first and runs a profile only when needed.
 ---@description
 --- ```
---- testing ci hook install [--run=<profile>] [--verify=<profile>] [--root=<dir>]
+--- testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
 --- testing ci hook remove [--root=<dir>]
 --- ```
 ---
@@ -30,10 +30,12 @@ M.LEGACY_MARK = "# MyPlugins ci pre-push hook"
 M.DEFAULT_RUN = "fast"
 
 M.USAGE = table.concat({
-  "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--root=<dir>]",
+  "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
   "       testing ci hook remove [--root=<dir>]",
   "  --run=<profile>     the profile the hook runs when the state is not proven (default: fast)",
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
+  "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
+  "                      were made here (no merge, none from a remote): testing ci trust --pushed",
   "  --root=<dir>        the repository (default: the current directory)",
   "  `git push --no-verify` skips the hook. A pre-push hook that is not ours is never touched.",
 }, "\n")
@@ -53,11 +55,18 @@ local function safe_word(s)
 end
 
 ---Text of the hook. No backslashes: it runs in Git Bash and in Linux sh alike.
----@param o { run: string, verify?: string, driver_dir: string }
+---@param o { run: string, verify?: string, driver_dir: string, auto_trust?: boolean }
 ---@return string
 function M.text(o)
   local verify = o.verify and (" --profile=" .. o.verify) or ""
-  return table.concat({
+  -- git gives the hook what it pushes on stdin; read once, before a step can take it. A release never blocks a push.
+  local read_refs = o.auto_trust
+      and {
+        'refs="$(cat)"',
+        "trust_pushed() { printf '%s\\n' \"$refs\" | testing_ci trust --pushed >&2 || true; }",
+      }
+    or {}
+  local lines = {
     "#!/bin/sh",
     M.MARK .. " (git push --no-verify skips it)",
     'root="$(git rev-parse --show-toplevel)" || exit 1',
@@ -77,13 +86,29 @@ function M.text(o)
     "unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE",
     "unset GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE",
     'testing_ci() { nvim -n -i NONE --headless -u NONE -l "$driver" ci "$@"; }',
-    ("testing_ci verify%s && exit 0"):format(verify),
+    "@READ_REFS@",
+    ("testing_ci verify%s && %s"):format(
+      verify,
+      o.auto_trust and "{ trust_pushed; exit 0; }" or "exit 0"
+    ),
     'echo "pre-push: not proven, running testing ci --profile=' .. o.run .. '"',
     ('testing_ci --profile=%s --reuse || { echo "pre-push: testing ci is red, push blocked (git push --no-verify skips it)" >&2; exit 1; }'):format(
       o.run
     ),
+    "@TRUST_LAST@",
     "",
-  }, "\n")
+  }
+  local out = {}
+  for _, line in ipairs(lines) do
+    if line == "@READ_REFS@" then
+      vim.list_extend(out, read_refs)
+    elseif line == "@TRUST_LAST@" then
+      out[#out + 1] = o.auto_trust and "trust_pushed" or nil
+    else
+      out[#out + 1] = line
+    end
+  end
+  return table.concat(out, "\n")
 end
 
 ---Hook folder of a checkout, as git sees it (a worktree's `.git` is a file, `core.hooksPath` may move it).
@@ -134,6 +159,7 @@ end
 ---@field action "install"|"remove"|nil
 ---@field run string
 ---@field verify? string
+---@field auto_trust boolean
 ---@field root string
 ---@field help boolean
 
@@ -142,13 +168,15 @@ end
 ---@return string|nil problem
 function M.parse(argv)
   ---@type Testing.Ci.Hook.Args
-  local args = { run = M.DEFAULT_RUN, root = ".", help = false }
+  local args = { run = M.DEFAULT_RUN, root = ".", help = false, auto_trust = false }
   for i, a in ipairs(argv) do
     local key, value = a:match("^%-%-([%w%-]+)=(.*)$")
     if a == "-h" or a == "--help" then
       args.help = true
     elseif i == 1 and (a == "install" or a == "remove") then
       args.action = a
+    elseif a == "--auto-trust" then
+      args.auto_trust = true
     elseif key == "run" or key == "verify" or key == "root" then
       if value == "" then
         return nil, ("--%s needs a value"):format(key)
@@ -235,7 +263,12 @@ function M.main(argv, sv)
   local atomic = require("lib.nvim.fs.write.atomic")
   local ok, err = atomic(
     path,
-    M.text({ run = args.run, verify = args.verify, driver_dir = driver_dir }),
+    M.text({
+      run = args.run,
+      verify = args.verify,
+      driver_dir = driver_dir,
+      auto_trust = args.auto_trust,
+    }),
     { mkdirp = true }
   )
   if not ok then

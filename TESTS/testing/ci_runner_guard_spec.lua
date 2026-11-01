@@ -604,6 +604,105 @@ return function(H)
     end
   end
 
+  -- ------------------------------------------------------------------ `trust --pushed`: own commits only
+
+  do
+    local root = tmp()
+    local function git(...)
+      local r = vim.system({ "git", "-C", root, ... }, { text = true }):wait()
+      ok(r.code == 0, "git " .. table.concat({ ... }, " ") .. ": " .. tostring(r.stderr))
+      return vim.trim(r.stdout or "")
+    end
+    local function commit(msg)
+      git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", msg)
+      return git("rev-parse", "HEAD")
+    end
+    git("init", "-q")
+    git("symbolic-ref", "HEAD", "refs/heads/main")
+    git("remote", "add", "origin", "https://github.com/WKDSteve/pushed-spec.git")
+    local base = commit("base")
+    git("update-ref", "refs/remotes/origin/main", base)
+    local zero = ("0"):rep(40)
+    local store = tmp()
+    local function push(lines)
+      local o = sink()
+      o.sv.cwd = root
+      local code = guard.trust_pushed(lines, o.sv, { root = store, now = 1000 })
+      eq(code, 0, "pushed: never fails the push")
+      return joined(o), (guard.read(guard.store_path(store)))
+    end
+    local function line(sha, remote)
+      return ("refs/heads/main %s refs/heads/main %s\n"):format(sha, remote or base)
+    end
+
+    local mine = commit("mine")
+    local out, repos = push(line(mine))
+    has(out, "released", "pushed: a commit made here is released")
+    eq(repos["wkdsteve/pushed-spec"].shas[1].sha, mine, "pushed: the tip is on the list")
+
+    -- a foreign commit, fetched from another branch, then built upon: not released
+    git("checkout", "-q", "-b", "other", base)
+    local foreign = commit("foreign")
+    git("update-ref", "refs/remotes/origin/other", foreign)
+    git("checkout", "-q", "main")
+    git("reset", "-q", "--hard", foreign)
+    local on_foreign = commit("on top of the foreign one")
+    store = tmp()
+    out, repos = push(line(on_foreign))
+    has(out, "came from a remote", "pushed: a fetched foreign commit is not released")
+    has(out, "testing ci trust", "pushed: ... the review is named")
+    eq(repos["wkdsteve/pushed-spec"], nil, "pushed: ... and nothing is on the list")
+
+    -- a merge commit: not released
+    git("checkout", "-q", "-b", "side", base)
+    commit("side work")
+    git("checkout", "-q", "main")
+    git("reset", "-q", "--hard", base)
+    local m1 = commit("main work")
+    git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "merge",
+      "-q",
+      "--no-ff",
+      "-m",
+      "merge",
+      "side"
+    )
+    local merged = git("rev-parse", "HEAD")
+    out, repos = push(line(merged, base))
+    has(out, "merge commit", "pushed: a merge is not released")
+    eq(repos["wkdsteve/pushed-spec"], nil, "pushed: ... nothing on the list")
+    ok(m1 ~= merged, "pushed: (setup)")
+
+    -- a remote the checkout does not know, a deleted branch, a tag: nothing
+    git("reset", "-q", "--hard", m1)
+    out = push(line(m1, ("c"):rep(40)))
+    has(out, "not known here", "pushed: a remote tip that was never fetched is not released")
+    repos = select(2, push(("refs/heads/main %s refs/heads/main %s\n"):format(zero, base)))
+    eq(repos["wkdsteve/pushed-spec"], nil, "pushed: a deletion releases nothing")
+    repos = select(2, push(("refs/tags/v1 %s refs/tags/v1 %s\n"):format(m1, zero)))
+    eq(repos["wkdsteve/pushed-spec"], nil, "pushed: a tag releases nothing")
+    vim.fn.delete(root, "rf")
+  end
+
+  do
+    local plain = require("testing.ci.hook").text({ run = "fast", driver_dir = "/x" })
+    lacks(plain, "trust --pushed", "hook: no release unless asked for")
+    local with =
+      require("testing.ci.hook").text({ run = "fast", driver_dir = "/x", auto_trust = true })
+    has(with, "trust --pushed", "hook: --auto-trust releases the pushed commits")
+    has(with, 'refs="$(cat)"', "hook: ... reading git's lines once")
+    has(with, "exit 0; }", "hook: ... also when the state was already proven")
+    eq(
+      require("testing.ci.hook").parse({ "install", "--auto-trust" }).auto_trust,
+      true,
+      "hook: the flag"
+    )
+  end
+
   -- ------------------------------------------------------------------ the entry through `testing ci`
 
   do

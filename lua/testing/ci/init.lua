@@ -41,7 +41,7 @@ M.USAGE = table.concat({
   "       testing ci list [--json] [--root=<dir>]",
   "       testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]",
   "       testing ci overview [<root>...] [--repos-root=<dir>] [--out=<file.html>] [--json] [--no-remote] ...",
-  "       testing ci hook install|remove [--run=<profile>] [--verify=<profile>] [--root=<dir>]",
+  "       testing ci hook install|remove [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
   "       testing ci runner-guard check|install|remove|status [--runners=<dir>]",
   "       testing ci trust [<owner/repo>] [<sha>] [--show|--list|--revoke|--mode=<m>] [--runners=<dir>]",
   "                  [--junit=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]",

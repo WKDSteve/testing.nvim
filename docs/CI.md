@@ -244,7 +244,7 @@ skips a suite whose stamp does not verify, and a suite with options after `--` a
 ## The pre-push hook
 
 ```
-testing ci hook install [--run=<profile>] [--verify=<profile>] [--root=<dir>]
+testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
 testing ci hook remove [--root=<dir>]
 ```
 
@@ -260,7 +260,8 @@ deletes it. The hook computes no verdict of its own:
 `<repo>/.deps/testing.nvim`, `<repo>/../testing.nvim`, then the checkout `install` ran from. Both profiles must exist
 in the `ci` section, or `install` refuses (exit `2`) and writes nothing.
 
-The hook proves `HEAD`, not the refs a push names (git hands those on stdin; they are ignored). It runs the `--run`
+The hook proves `HEAD`, not the refs a push names (git hands those on stdin; they are ignored, except with `--auto-trust`, which
+releases own commits for the runner guard after a green hook: [RUNNER-GUARD.md](RUNNER-GUARD.md#releasing-your-own-pushes-pre-push)). It runs the `--run`
 profile, which writes `ci-<run>.json`, while `verify` asks for the `--verify` profile (default `ci.default`): to make
 the second push of the same state pass at once, install with `--verify=<run>` or run the default profile once.
 

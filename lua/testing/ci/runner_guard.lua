@@ -46,6 +46,7 @@ M.USAGE = table.concat({
   "usage: testing ci runner-guard check",
   "       testing ci runner-guard install|remove|status [--runners=<dir>]",
   "       testing ci trust [<owner/repo>] [<sha>] [--show] [--note=<text>] [--runners=<dir>]",
+  "       testing ci trust --pushed   (the pre-push hook: git's lines on stdin; own local commits only)",
   "       testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off [<owner/repo>]",
   "  The runner folder is $TESTING_RUNNER_ROOT, else `actions-runners` in your home folder (docs/RUNNER-GUARD.md).",
 }, "\n")
@@ -403,7 +404,7 @@ function M.parse_trust(argv)
   ---@type table
   local a = { positional = {} }
   for _, x in ipairs(argv) do
-    if x == "--show" or x == "--list" or x == "--revoke" then
+    if x == "--show" or x == "--list" or x == "--revoke" or x == "--pushed" then
       a[x:sub(3)] = true
     elseif x:match("^%-%-mode=") then
       a.mode = x:sub(8)
@@ -519,6 +520,121 @@ end
 
 ---`testing ci trust ...`.
 ---@param argv string[]
+---Run git in `cwd`; the lines of its output, or nil when it fails.
+---@param cwd string
+---@param args string[]
+---@return string[]|nil
+local function git_lines(cwd, args)
+  local ok, proc = pcall(vim.system, vim.list_extend({ "git", "-C", cwd }, args), { text = true })
+  if not ok then
+    return nil
+  end
+  local r = proc:wait(30000)
+  if r.code ~= 0 then
+    return nil
+  end
+  return vim.split(vim.trim(r.stdout or ""), "\n", { plain = true, trimempty = true })
+end
+
+---Is every commit that `local_sha` adds to `remote_sha` one that was made here? Made here means: no merge, and
+---not reachable from any remote-tracking ref (a fetched foreign commit, also one merged in, is reachable from the
+---remote it came from or arrives as a merge). Git cannot prove who wrote a commit; this is a convenience of the
+---maintainer, not a review (docs/RUNNER-GUARD.md, "Limits").
+---@param cwd string
+---@param local_sha string
+---@param remote_sha string
+---@return boolean
+---@return string|nil why
+local function made_here(cwd, local_sha, remote_sha)
+  local new_branch = remote_sha:match("^0+$") ~= nil
+  local base = new_branch and {} or { remote_sha }
+  local added = vim.list_extend({ "rev-list", local_sha, "--not" }, base)
+  if new_branch then
+    added[#added + 1] = "--remotes"
+  end
+  local mine = git_lines(cwd, added)
+  if not mine then
+    return false, "the range is not known here (fetch first)"
+  end
+  if #mine == 0 then
+    return false, "nothing new to release"
+  end
+  local local_only = {}
+  for _, c in ipairs(git_lines(cwd, { "rev-list", local_sha, "--not", "--remotes" }) or {}) do
+    local_only[c] = true
+  end
+  for _, c in ipairs(mine) do
+    if not local_only[c] then
+      return false, "commit " .. c:sub(1, 12) .. " came from a remote"
+    end
+  end
+  local merges =
+    git_lines(cwd, vim.list_extend({ "rev-list", "--merges", local_sha, "--not" }, base))
+  if not merges or #merges > 0 then
+    return false, "the range holds a merge commit"
+  end
+  return true
+end
+
+---`testing ci trust --pushed`: the pre-push hook releases the tip of every branch it pushes when all of what it
+---adds was made here. Anything else is left to `testing ci trust`. Never fails the push (exit 0).
+---@param stdin string The lines git gives a pre-push hook: `<local ref> <local sha> <remote ref> <remote sha>`.
+---@param sv { out: fun(s: string), err: fun(s: string), cwd?: string }
+---@param ctx? Testing.RunnerGuard.Ctx
+---@return integer
+function M.trust_pushed(stdin, sv, ctx)
+  local cwd = sv.cwd or "."
+  local repo = repo_of_cwd(ctx, cwd)
+  local key = repo_key(repo)
+  if not key then
+    sv.err("testing ci trust --pushed: no origin to name a repository: nothing released")
+    return 0
+  end
+  local path = M.store_path(M.root(ctx))
+  for line in (stdin or ""):gmatch("[^\r\n]+") do
+    local lref, lsha, rref, rsha = line:match("^(%S+) (%x+) (%S+) (%x+)$")
+    if
+      lsha
+      and #lsha == 40
+      and #rsha == 40
+      and not lsha:match("^0+$")
+      and rref:match("^refs/heads/")
+    then
+      lsha, rsha = lsha:lower(), rsha:lower()
+      local good, why = made_here(cwd, lsha, rsha)
+      if not good then
+        sv.out(
+          ("not released (%s): %s; after a review: testing ci trust %s %s"):format(
+            lref,
+            why,
+            repo,
+            lsha:sub(1, 12)
+          )
+        )
+      else
+        local now = ctx and ctx.now or os.time()
+        local done, err = update(path, function(rs)
+          local e = rs[key] or { mode = "auto", shas = {} }
+          rs[key] = e
+          e.shas = vim.tbl_filter(function(x)
+            return x.sha ~= lsha
+          end, e.shas)
+          e.shas[#e.shas + 1] = { sha = lsha, at = now, note = "pre-push: made here, no merge" }
+          while #e.shas > M.MAX_SHAS do
+            table.remove(e.shas, 1)
+          end
+        end)
+        if done then
+          sv.out(("released: %s %s (made here)"):format(key, lsha))
+        else
+          sv.err("testing ci trust --pushed: " .. tostring(err))
+        end
+      end
+    end
+  end
+  return 0
+end
+
 ---@param sv { out: fun(s: string), err: fun(s: string), cwd?: string }
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@return integer
@@ -528,6 +644,9 @@ function M.trust_main(argv, sv, ctx)
     sv.err("testing ci trust: " .. problem)
     sv.err(M.USAGE)
     return 2
+  end
+  if a.pushed then
+    return M.trust_pushed(io.read("*a"), sv, ctx)
   end
   local path = M.store_path(M.root(ctx, a.runners))
   if a.list then

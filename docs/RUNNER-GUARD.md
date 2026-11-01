@@ -83,12 +83,29 @@ testing ci runner-guard remove       # takes our line out of each .env and delet
 Then stop and start the runners. The list stays (`testing ci trust --revoke <repo>` empties one repository, deleting
 `reviewed.json` all). A single repository can be taken out with `--mode=off`.
 
+## Releasing your own pushes (pre-push)
+
+```sh
+testing ci hook install --auto-trust     # the pre-push hook, plus the release below
+```
+
+After the hook is green it calls `testing ci trust --pushed`, which reads the lines git gives a pre-push hook and
+releases the tip of each pushed branch **only if every commit the push adds was made on this machine**: no merge
+commit, and no commit reachable from a remote-tracking ref (a commit you fetched, also one built upon, comes from a
+remote). Anything else prints the `testing ci trust` command for a review and releases nothing. A deleted branch, a
+tag, a remote tip that was never fetched, and a push without an `origin` release nothing. The call never fails the
+push. It is opt-in (`--auto-trust`): without it the hook releases nothing.
+
+This is a convenience of the maintainer, not a review. Git cannot prove who wrote a commit: a commit you made
+from foreign text (copied code, a patch, a cherry-pick of a commit you never fetched) counts as made here. The pull
+request path stays closed in any case (rule 2).
+
 ## Limits
 
 - It stops foreign code that you did not release. It does not stop code you released after a careless review, and not
   someone who can already write to your runner folder or your user account.
-- A push of your own to a public repository needs a `trust` call before its run goes through, until an automatic
-  release of your own pushes exists (tracked as a follow-up).
+- A push of your own to a public repository needs a `trust` call before its run goes through, unless the pre-push
+  hook releases it (next section).
 - Running jobs in a sandbox (own Windows account, Windows Sandbox, container) would limit the damage of a
   missed review too; it is not part of this guard.
 - `testing.nvim`'s own workspace trust (`docs/CLI.md`, `testing trust`) does not help here: `CI=true` makes every
