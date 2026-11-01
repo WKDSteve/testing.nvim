@@ -347,6 +347,9 @@ return function(H)
         "git: the head of origin/<branch> is asked for"
       )
       res = { code = 0, stdout = g.sha .. "\n" .. g.msg }
+      if vim.tbl_contains(args, "--format=%ct") then
+        res = { code = 0, stdout = tostring(g.ts or 0) .. "\n" }
+      end
       -- `log.showSignature=true` in the user's config: gpg's lines come first unless switched off
       if g.signed and not vim.tbl_contains(args, "--no-show-signature") then
         res.stdout = "gpg: Signature made Sat Oct 31 2026\ngpg: Good signature\n" .. res.stdout
@@ -609,6 +612,27 @@ return function(H)
   lacks(echo.out, TOKEN, "redaction: the token is not in the document")
   has(vim.json.decode(echo.out).repos[1].error, "Bearer ***", "redaction: ... it reads ***")
 
+  -- free texts of the GitHub answer (a job name, a non-gating job, a note) are redacted in the document
+  do
+    local recs = {
+      {
+        dir = "/work/repo",
+        repo = "x/y",
+        overall = "success",
+        note = "see " .. TOKEN,
+        os = { ubuntu = { state = "success", job = "test " .. TOKEN .. " (ubuntu)" } },
+        non_gating = { { name = "lint " .. TOKEN, state = "success" } },
+      },
+    }
+    local d = remote.document(recs, { token = TOKEN }, {})
+    local text = vim.json.encode(d)
+    lacks(text, TOKEN, "document: the token is in no free text")
+    has(d.repos[1].os.ubuntu.job, "<TOKEN>", "document: a job name reads <TOKEN>")
+    has(d.repos[1].non_gating[1].name, "<TOKEN>", "document: a non-gating job name reads <TOKEN>")
+    has(d.repos[1].note, "<TOKEN>", "document: a note reads <TOKEN>")
+    has(recs[1].os.ubuntu.job, TOKEN, "document: the records themselves are not changed")
+  end
+
   -- lib.nvim.net.github throwing (an older one, curl missing): unknown and exit 3, no crash
   do
     local github = require("lib.nvim.net.github")
@@ -708,24 +732,28 @@ return function(H)
     eq(vim.json.decode(again.out).repos[1].overall, "failure", "jobs etag: ... the new list counts")
   end
 
-  -- two checkouts of one repository at different commits keep their own cache
+  -- two checkouts of one GitHub repository are one row: the CI is asked once, for the checkout whose origin commit
+  -- is newer; the other is named in the note (a stale second clone must not show an old state)
   do
     local one = repo("twin-one", "https://github.com/WKDSteve/twin", sha("8"))
     local two = repo("twin-two", "https://github.com/WKDSteve/twin", sha("9"))
+    GIT[one].ts, GIT[two].ts = 100, 200
     API[R .. "twin/actions/runs"] = { etag = '"runs-twin"', body = '{"workflow_runs":[]}' }
-    run({ "--json", one, two })
-    run({ "--json", one, two })
-    local etags = {}
-    for _, r in ipairs(requests) do
-      if r.path == R .. "twin/actions/runs" then
-        etags[r.query.head_sha] = r.etag or "none"
+    local rows = vim.json.decode(run({ "--json", one, two }).out).repos
+    eq(#rows, 1, "twins: one row for one repository")
+    eq(rows[1].sha, sha("9"), "twins: the checkout with the newer origin commit wins")
+    has(rows[1].note, "further clone: twin-one", "twins: the other checkout is named")
+    local twin_asked = 0
+    for i = 1, #requests do
+      if requests[i].path == R .. "twin/actions/runs" then
+        twin_asked = twin_asked + 1
       end
     end
-    eq(
-      etags,
-      { [sha("8")] = '"runs-twin"', [sha("9")] = '"runs-twin"' },
-      "twins: each checkout asks conditionally"
-    )
+    eq(twin_asked, 1, "twins: the CI is asked once")
+    -- the order on the command line does not decide
+    GIT[one].ts, GIT[two].ts = 300, 200
+    local flipped = vim.json.decode(run({ "--json", two, one }).out).repos
+    eq(flipped[1].sha, sha("8"), "twins: the newer commit wins whatever the order")
   end
 
   -- past the deadline: a late answer changes nothing, starts nothing, writes nothing

@@ -401,6 +401,13 @@ testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] 
 The latest GitHub Actions run of the CI workflow per repository, one cell per system. It runs nothing locally and
 never fetches: it asks GitHub about the commit the last `git fetch` brought.
 
+Two checkouts of the same GitHub repository (the same `owner/repo` of `origin`) are one row and the CI is asked once.
+The checkout whose `origin/<branch>` commit is newer wins (a stale second clone shows an old state); on a tie one that
+was named on the command line beats one found below a `--repos-root`, then the first directory in byte order. The note
+of the row says `further clone: <directory name>`. `testing ci overview` and the export use the same rule. In `--json`
+the free texts that come from GitHub (job names, notes, errors) are redacted as `testing export` redacts them: the
+token of the adapter is `<TOKEN>`, a secret of the environment `<ENV>`, a path of this machine a placeholder.
+
 Per repository:
 
 1. `owner/repo` from `git remote get-url origin` (`https://github.com/o/r(.git)`, `git@github.com:o/r.git`,

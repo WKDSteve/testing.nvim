@@ -795,9 +795,68 @@ function M.resolve(args, left_out)
   return out
 end
 
+---Two checkouts of the same GitHub repository (`owner/repo` of `origin`) are one repository: the CI is asked once.
+---The checkout whose `origin/<branch>` commit is newer wins (a stale second clone shows an old state); on a tie one
+---that was named on the command line (not found below a `--repos-root`), then the first directory in byte order.
+---A checkout whose origin cannot be read, or is not on GitHub, is never merged.
+---@param repos { dir: string, from_root: boolean }[]
+---@return { dir: string, from_root: boolean }[] kept
+---@return table<string, string[]> clones For a kept directory: the names of the other checkouts of its repository.
+function M.dedupe_clones(repos)
+  local started = {}
+  for i, r in ipairs(repos) do
+    local cfg = repo_config(r.dir)
+    started[i] = {
+      url = M.deps.git(r.dir, { "remote", "get-url", "origin" }),
+      time = M.deps.git(
+        r.dir,
+        { "log", "-1", "--no-show-signature", "--format=%ct", "origin/" .. cfg.branch, "--" }
+      ),
+    }
+  end
+  local groups, order = {}, {}
+  for i, r in ipairs(repos) do
+    local url = started[i].url:wait()
+    local commit_time = started[i].time:wait()
+    local owner, repo
+    if url.code == 0 then
+      owner, repo = M.parse_origin(url.stdout or "")
+    end
+    local key = owner and (owner .. "/" .. repo):lower() or ("dir:" .. r.dir)
+    if not groups[key] then
+      groups[key] = {}
+      order[#order + 1] = key
+    end
+    local g = groups[key]
+    g[#g + 1] = {
+      r = r,
+      ts = tonumber(vim.trim(commit_time.code == 0 and commit_time.stdout or "")) or 0,
+    }
+  end
+  local kept, clones = {}, {}
+  for _, key in ipairs(order) do
+    local g = groups[key]
+    table.sort(g, function(a, b)
+      if a.ts ~= b.ts then
+        return a.ts > b.ts
+      end
+      if a.r.from_root ~= b.r.from_root then
+        return not a.r.from_root
+      end
+      return a.r.dir < b.r.dir
+    end)
+    kept[#kept + 1] = g[1].r
+    for i = 2, #g do
+      clones[g[1].r.dir] = clones[g[1].r.dir] or {}
+      table.insert(clones[g[1].r.dir], vim.fs.basename(g[i].r.dir))
+    end
+  end
+  return kept, clones
+end
+
 ---The records of `repos`, sorted by name; the token source (or why there is none).
 ---@param repos { dir: string, from_root: boolean }[]
----@param opts { workflow?: string, state_dir: string }
+---@param opts { workflow?: string, state_dir: string, clones?: table<string, string[]> } `clones`: the result of `M.dedupe_clones` when the caller did it
 ---@return table[] records
 ---@return { token_source?: string, token_error?: string, token?: string } info `token`: the token the adapter used
 ---(whatever its source, `gh auth token` included), so that a caller that writes documents can redact it as a value
@@ -805,6 +864,10 @@ end
 function M.collect(repos, opts)
   local now = M.deps.now()
   local records, non_gating = {}, {}
+  local clones = opts.clones
+  if not clones then
+    repos, clones = M.dedupe_clones(repos)
+  end
 
   -- git facts: two processes per repository, started together in slices and waited for together
   local SLICE = 16
@@ -872,6 +935,9 @@ function M.collect(repos, opts)
         end
         non_gating[rec] = lowered
         records[#records + 1] = rec
+        if clones[s.r.dir] then
+          rec.clones = clones[s.r.dir]
+        end
       end
     end
   end
@@ -929,6 +995,10 @@ function M.collect(repos, opts)
 
   for _, rec in ipairs(records) do
     rec.message = nil
+    if rec.clones then
+      local more = "further clone: " .. table.concat(rec.clones, ", ")
+      rec.note = (rec.note and rec.note ~= "") and (rec.note .. "; " .. more) or more
+    end
   end
   table.sort(records, function(a, b)
     if a.repo ~= b.repo then
@@ -951,8 +1021,50 @@ function M.document(records, info, opts)
     workflow = opts.workflow,
     token_source = info.token_source,
     token_error = info.token_error,
-    repos = records,
+    repos = M.redact_records(records, info.token, opts.state_dir),
   }
+end
+
+---The keys of a record that hold free text from GitHub (job names, a commit message, an error text).
+---@type table<string, true>
+local FREE_TEXT = { job = true, name = true, note = true, error = true, message = true }
+
+---A copy of `records` whose free texts are redacted as `testing-export/1` redacts them: the token of the adapter
+---(whatever its source) is `<TOKEN>`, a secret of the environment `<ENV>`, a path of this machine a placeholder. The
+---texts of a GitHub answer are not trusted: a job name can hold anything.
+---@param records table[]
+---@param token? string
+---@param state_dir? string
+---@return table[]
+function M.redact_records(records, token, state_dir)
+  local export = require("testing.export")
+  local overview = require("testing.ci.overview")
+  local secrets = export.secrets()
+  local function clean(v, dir)
+    if type(token) == "string" and #token >= export.SECRET_MIN and v:find(token, 1, true) then
+      v = v:gsub(vim.pesc(token), "<TOKEN>")
+    end
+    for _, sec in ipairs(secrets) do
+      if v:find(sec, 1, true) then
+        v = v:gsub(vim.pesc(sec), "<ENV>")
+      end
+    end
+    return overview.clean(v, dir, state_dir) or ""
+  end
+  local function walk(t, dir)
+    for k, v in pairs(t) do
+      if type(v) == "table" then
+        walk(v, dir)
+      elseif type(v) == "string" and FREE_TEXT[k] then
+        t[k] = clean(v, dir)
+      end
+    end
+  end
+  local out = vim.deepcopy(records)
+  for _, rec in ipairs(out) do
+    walk(rec, rec.dir or "")
+  end
+  return out
 end
 
 ---@type table<string, string>
@@ -1066,7 +1178,7 @@ function M.main(argv, sv)
   if args.json then
     sv.out(
       require("lib.nvim.json.canonical").encode(
-        M.document(records, info, { workflow = args.workflow })
+        M.document(records, info, { workflow = args.workflow, state_dir = state_dir })
       )
     )
   else
