@@ -406,7 +406,7 @@ function M.run(o)
 end
 
 ---Per buffer: the pending timer, the running child and the generation of the last save.
----@type table<integer, { timer?: uv.uv_timer_t, proc?: table, gen: integer }>
+---@type table<integer, { debounce?: Lib.Debounce.Handle, debounce_ms?: integer, proc?: table, gen: integer }>
 M.pending = {}
 
 ---@param buf integer
@@ -416,9 +416,8 @@ local function forget(buf)
     return
   end
   M.pending[buf] = nil
-  if st.timer and not st.timer:is_closing() then
-    st.timer:stop()
-    st.timer:close()
+  if st.debounce then
+    st.debounce.cancel()
   end
   if st.proc then
     pcall(st.proc.kill, st.proc, 15)
@@ -436,14 +435,13 @@ function M.on_save(buf)
   M.pending[buf] = st
   st.gen = st.gen + 1
   local gen = st.gen
-  if not st.timer or st.timer:is_closing() then
-    st.timer = vim.uv.new_timer()
-  end
-  st.timer:stop()
-  st.timer:start(
-    M.DEBOUNCE_MS,
-    0,
-    vim.schedule_wrap(function()
+  -- The window is fixed at creation: rebuilt when DEBOUNCE_MS changed since the last save.
+  if not st.debounce or st.debounce_ms ~= M.DEBOUNCE_MS then
+    if st.debounce then
+      st.debounce.cancel()
+    end
+    st.debounce_ms = M.DEBOUNCE_MS
+    st.debounce = require("lib.nvim.debounce").new(function(gen, file)
       if M.pending[buf] ~= st or st.gen ~= gen or not vim.api.nvim_buf_is_valid(buf) then
         return
       end
@@ -470,8 +468,9 @@ function M.on_save(buf)
           end
         end,
       })
-    end)
-  )
+    end, st.debounce_ms)
+  end
+  st.debounce.call(gen, file)
 end
 
 ---Whether a save of `file` is worth a child: the root is a project (a `.testing.lua`, or a `lua/` folder a pipeline
