@@ -156,6 +156,10 @@ Rules specific to the stamp:
   `dirty`. Any other untracked file the job creates before `verify` still does: keep the checkout clean.
 - `stamp` records the keys before the run and refuses to write when an input changed while the specs ran (a formatter
   or a spec that rewrites a source): `testing: stamp: not written: an input changed while the run was going`, exit `1`.
+  A `testing ci` step whose cases all passed but whose stamp was refused is red with that line as its reason (also in the
+  agent report), however many guard lines follow it. The spec files of a project that uses `testing.sheet` (the RPC
+  clicker) have about 160 testing.nvim files in their key: that is the real `require` closure of `testing.sheet` (rpc,
+  child, guard, ledger, ...), and a change there while the run goes is a moved input, named in the message.
 - A skipped job is not a failed job, but what a required status check does with a skipped job is **not established**
   here: the workflow-syntax page fetched on 2026-10-07 says only that a workflow skipped by `paths` filtering leaves its
   checks "Pending". Do not use `paths-ignore` on the workflow; try the job-level `if` on a throwaway branch with the

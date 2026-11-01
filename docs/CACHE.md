@@ -497,8 +497,12 @@ stamp is still bound to one OS and architecture: `testing stamp` on Linux and `t
 runs, and the stamp lists those. After the run the keys are computed again; if any file has another key now (an editor
 that saved, a formatter, a spec that rewrote a source during the run), the run was green against the earlier content
 only, and the stamp is **not written** (`testing: stamp: not written: an input changed while the run was going`, exit
-1, the same rule that keeps the result cache from storing such a file). The same goes for a changed runner, Neovim or
-configuration digest and for a checkout whose commit or tree moved during the run. The keys of after the run are
+1, the same rule that keeps the result cache from storing such a file). The message names the first key line that
+moved for each file, e.g. `TESTS/a_spec.lua [dep ext:lib.nvim/lua/lib/x.lua]`: an `ext:` input lies outside the
+checkout (another session changed a dependency while the run was going), not in the project. The same goes for a changed runner, Neovim or
+configuration digest and for a checkout whose commit or tree moved during the run (the message says which of `git`,
+`commit` and `tree` differs, and which git call failed with what exit code; a git call that fails is asked once more
+before the stamp is refused, so a held `index.lock` does not cost the stamp). The keys of after the run are
 computed with the runtime path, the environment and `package.path` of before it: an in-process spec that changes those
 (they are no input that moved) cannot make the stamp unwritable, but a file can. A file the run itself made
 `nondeterministic` (the key gave another result than before) is listed as not provable. `head.dirty` is set when the

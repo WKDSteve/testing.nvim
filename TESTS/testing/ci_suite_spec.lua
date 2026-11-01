@@ -567,6 +567,36 @@ return function(H)
     eq(run(root, "--", "--help").code, 2, "-- --help: exit 2")
   end
 
+  -- every case passes, `testing stamp` refuses the stamp (a spec rewrites its own module while the run goes): the
+  -- red step names the refusal as its reason, in the terminal and the agent report
+  do
+    local REWRITE = table.concat({
+      "return function(H)",
+      "  H.ok(require('proj.mod').value == 1, 'the module')",
+      "  local here = debug.getinfo(1, 'S').source:sub(2):gsub('\\\\', '/')",
+      "  local f = assert(io.open(here:gsub('TESTS/s_spec.lua$', 'lua/proj/mod.lua'), 'wb'))",
+      "  f:write('return { value = 1, moved = true }\\n')",
+      "  f:close()",
+      "end",
+      "",
+    }, "\n")
+    local root = project(
+      "suite-stamp-refused",
+      "{ profiles = { full = { 'suite' } }, steps = { suite = { preset = 'suite' } } }",
+      { ["TESTS/s_spec.lua"] = REWRITE }
+    )
+    local res = run(root)
+    eq(res.code, 1, "stamp refused: exit 1 (" .. res.err .. ")")
+    local step = doc_of(root).steps[1]
+    eq(step.state, "red", "stamp refused: the step is red")
+    has(
+      tostring(step.reason),
+      "not written",
+      "stamp refused: the reason is the refusal, not nothing"
+    )
+    has(res.out, "not written", "stamp refused: the terminal shows it")
+  end
+
   -- a suite whose own verdict is green-partial (a skipped case): the ci run is partial, no sentinel
   do
     local SKIP = table.concat({

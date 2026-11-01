@@ -514,6 +514,48 @@ return function(H)
     "and is listed as not provable, the key of before is not kept"
   )
 
+  -- a moved file names the first key line that differs (an input outside the checkout, here)
+  local pb = { rec("TESTS/a_spec.lua", K1) }
+  pb[1].parts = { "spec TESTS/a_spec.lua=h1", "dep ext:lib.nvim/lua/lib/x.lua=h2" }
+  local pa = rec("TESTS/a_spec.lua", K2)
+  pa.parts = { "spec TESTS/a_spec.lua=h1", "dep ext:lib.nvim/lua/lib/x.lua=h3" }
+  local _, moved2, moved_why = write.reconcile(pb, { pa })
+  eq(moved2, { "TESTS/a_spec.lua" }, "the file moved")
+  has(moved_why["TESTS/a_spec.lua"], "ext:lib.nvim/lua/lib/x.lua", "and the moved input is named")
+
+  -- the git facts: what differs is named, a failed call is told
+  local named = write.fact_differences(
+    { git = true, commit = ("a"):rep(40), tree = TREE },
+    { git = false, commit = nil, tree = TREE, failed = { "status (exit 128)" } }
+  )
+  eq(#named, 3, "git, commit and the failed call: " .. vim.inspect(named))
+  has(table.concat(named, ";"), "status (exit 128)", "the failed call and its exit code")
+  eq(
+    write.fact_differences({ git = true, tree = TREE }, { git = true, tree = TREE }),
+    {},
+    "equal facts"
+  )
+
+  -- a git call that fails once is repeated once; a call that keeps failing is reported
+  local n_status = 0
+  local flaky = collect.git_facts("/x", function(argv)
+    if argv[2] == "status" then
+      n_status = n_status + 1
+      if n_status == 1 then
+        return { code = 128, stdout = "", stderr = "index.lock" }
+      end
+      return { code = 0, stdout = "", stderr = "" }
+    end
+    return { code = 0, stdout = (argv[3] == "HEAD" and ("e"):rep(40) or TREE) .. "\n", stderr = "" }
+  end)
+  eq(
+    { flaky.git, n_status, flaky.failed },
+    { true, 2, nil },
+    "a status that failed once is asked again"
+  )
+  local broken = collect.git_facts("/x", fake("", { no_commit = true }))
+  eq(broken.failed, { "rev-parse HEAD (exit 128)" }, "a call that fails twice is named")
+
   -- ---------------------------------------------------------------- reasons are cleaned
   eq(
     collect.clean_reason("reads 'C:/p/x' here\nand\27[31m there", "C:/p"),

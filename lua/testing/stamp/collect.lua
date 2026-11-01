@@ -161,6 +161,7 @@ end
 ---@field dirty? boolean Uncommitted changes below the project directory (untracked files count).
 ---@field changes? string[] The first changed paths.
 ---@field changed_count? integer
+---@field failed? string[] The git calls that still failed after one retry (`rev-parse HEAD (exit 128)`).
 
 ---@param s any
 ---@return string|nil
@@ -204,11 +205,23 @@ function M.git_facts(root, run)
   else
     answers = git.run_parallel(argvs, root)
   end
+  -- a git call that fails once (an `index.lock` held by another session, load) is repeated once: a stamp must not be
+  -- refused for a hiccup, while a real change of HEAD still differs on the second answer
+  local names = { "rev-parse HEAD", "rev-parse HEAD:./", "status" }
+  local failed = {}
+  for i, argv in ipairs(argvs) do
+    if answers[i].code ~= 0 then
+      answers[i] = (run or git.default_run)(argv, root)
+    end
+    if answers[i].code ~= 0 then
+      failed[#failed + 1] = ("%s (exit %s)"):format(names[i], tostring(answers[i].code))
+    end
+  end
   local status = answers[3]
   if status.code ~= 0 then
-    return { git = false }
+    return { git = false, failed = failed }
   end
-  local facts = { git = true }
+  local facts = { git = true, failed = #failed > 0 and failed or nil }
   if answers[1].code == 0 then
     facts.commit = object_id(answers[1].stdout)
   end

@@ -696,10 +696,16 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   vim.list_extend(argv, rest)
 
   local errors, last = {}, {}
+  -- the line `testing stamp` prints when it refuses the stamp: kept apart, the guard lines after it would push it out
+  -- of `last` (MAX_ERRORS) and a red step would end without its reason
+  local refusal
   local function sink(fn)
     return function(s)
       fn(s)
       for line in tostring(s):gmatch("[^\n]+") do
+        if command == "stamp" and line:match("^testing: stamp: not written") then
+          refusal = line
+        end
         last[#last + 1] = line
         if #last > MAX_ERRORS then
           table.remove(last, 1)
@@ -802,6 +808,12 @@ local function run_inprocess(planned, root, suite_args, sv, o)
       result.reason = "no stamp: the suite is green-partial"
     elseif code == 1 then
       result.state = "red"
+      -- every case passed, the stamp was refused: say why (the refusal line is no finding)
+      if command == "stamp" and refusal and (result.findings_total or 0) == 0 then
+        result.reason = (refusal:gsub("^testing: stamp: ", ""))
+        table.insert(errors, 1, refusal)
+        errors[MAX_ERRORS + 1] = nil
+      end
     else
       result.state = code == M.EXIT_USAGE and "error" or "infra"
     end

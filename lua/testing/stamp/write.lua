@@ -123,10 +123,7 @@ function M.before_run(o)
   if not gok then
     return { error = tostring(facts) }
   end
-  -- the key lines are for the details of a changed file in `verify`; they would only sit in memory during the run
-  for _, r in ipairs(records) do
-    r.parts = nil
-  end
+  -- the key lines stay in memory during the run, to name the input that moved (`reconcile`); `after_run` drops them
   return { records = records, env = env, facts = facts, frozen = frozen }
 end
 
@@ -138,12 +135,13 @@ end
 ---@param after Testing.Stamp.Current[]
 ---@return Testing.Stamp.Current[] records
 ---@return string[] moved Files whose inputs differ after the run, in byte order.
+---@return table<string, string> why For a moved file: the first key line that differs (`dep ext:lib.nvim/x.lua`).
 function M.reconcile(before, after)
   local now = {}
   for _, r in ipairs(after) do
     now[r.file] = r
   end
-  local records, moved, seen = {}, {}, {}
+  local records, moved, seen, why = {}, {}, {}, {}
   for _, r in ipairs(before) do
     seen[r.file] = true
     local n = now[r.file]
@@ -154,6 +152,12 @@ function M.reconcile(before, after)
     else
       moved[#moved + 1] = r.file
       records[#records + 1] = r
+      if n and r.parts and n.parts then
+        local d = require("testing.cache.explain").diff(r.parts, n.parts)[1]
+        if d then
+          why[r.file] = d.kind == d.name and d.kind or (d.kind .. " " .. d.name)
+        end
+      end
     end
   end
   for _, r in ipairs(after) do
@@ -164,7 +168,36 @@ function M.reconcile(before, after)
   table.sort(moved, function(a, b)
     return stamp.bytecmp(a, b) < 0
   end)
-  return records, moved
+  return records, moved, why
+end
+
+---Say which of the git facts differ between before and after the run.
+---@param a Testing.Stamp.GitFacts before
+---@param b Testing.Stamp.GitFacts after
+---@return string[] differences
+function M.fact_differences(a, b)
+  local out = {}
+  local function add(name, x, y)
+    if x ~= y then
+      out[#out + 1] = ("%s %s -> %s"):format(
+        name,
+        tostring(x and tostring(x):sub(1, 12)),
+        tostring(y and tostring(y):sub(1, 12))
+      )
+    end
+  end
+  add("git", a.git, b.git)
+  add("commit", a.commit, b.commit)
+  add("tree", a.tree, b.tree)
+  for _, side in ipairs({ { "before", a }, { "after", b } }) do
+    if side[2].failed then
+      out[#out + 1] = ("git failed %s the run: %s"):format(
+        side[1],
+        table.concat(side[2].failed, ", ")
+      )
+    end
+  end
+  return out
 end
 
 ---@class Testing.Stamp.AfterRun
@@ -225,7 +258,10 @@ function M.after_run(o)
   -- those (they are no input that moved), and only a file can make the keys differ
   local after_records, after_env =
     collect.records(plan, sv, o.run_opts, o.ordered, o.disc, pre.frozen)
-  local records, moved = M.reconcile(pre.records, after_records)
+  local records, moved, why = M.reconcile(pre.records, after_records)
+  for _, r in ipairs(pre.records) do
+    r.parts = nil
+  end
   if #moved > 0 then
     local names = {}
     for i, f in ipairs(moved) do
@@ -233,7 +269,7 @@ function M.after_run(o)
         names[#names + 1] = ("... and %d more"):format(#moved - 5)
         break
       end
-      names[#names + 1] = f
+      names[#names + 1] = why[f] and ("%s [%s]"):format(f, why[f]) or f
     end
     err(
       project.safe_line(
@@ -261,7 +297,11 @@ function M.after_run(o)
     or after_facts.tree ~= facts.tree
   then
     err(
-      "testing: stamp: not written: the checkout (commit or tree) changed while the run was going: the stamp would describe another state than the one the keys are about"
+      project.safe_line(
+        ("testing: stamp: not written: the checkout (commit or tree) changed while the run was going (%s): the stamp would describe another state than the one the keys are about"):format(
+          table.concat(M.fact_differences(facts, after_facts), "; ")
+        )
+      )
     )
     return false
   end
