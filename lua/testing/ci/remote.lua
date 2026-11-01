@@ -803,35 +803,48 @@ end
 ---@return { dir: string, from_root: boolean }[] kept
 ---@return table<string, string[]> clones For a kept directory: the names of the other checkouts of its repository.
 function M.dedupe_clones(repos)
-  local started = {}
-  for i, r in ipairs(repos) do
-    local cfg = repo_config(r.dir)
-    started[i] = {
-      url = M.deps.git(r.dir, { "remote", "get-url", "origin" }),
-      time = M.deps.git(
-        r.dir,
-        { "log", "-1", "--no-show-signature", "--format=%ct", "origin/" .. cfg.branch, "--" }
-      ),
-    }
+  -- nothing to merge: no git process at all
+  if #repos < 2 then
+    return repos, {}
   end
   local groups, order = {}, {}
-  for i, r in ipairs(repos) do
-    local url = started[i].url:wait()
-    local commit_time = started[i].time:wait()
-    local owner, repo
-    if url.code == 0 then
-      owner, repo = M.parse_origin(url.stdout or "")
+  -- two processes per repository, started together in slices (as `M.collect` does) and waited for together
+  local SLICE = 16
+  for first = 1, #repos, SLICE do
+    local started = {}
+    for i = first, math.min(first + SLICE - 1, #repos) do
+      local dir = repos[i].dir
+      started[i] = {
+        url = M.deps.git(dir, { "remote", "get-url", "origin" }),
+        time = M.deps.git(dir, {
+          "log",
+          "-1",
+          "--no-show-signature",
+          "--format=%ct",
+          "origin/" .. repo_config(dir).branch,
+          "--",
+        }),
+      }
     end
-    local key = owner and (owner .. "/" .. repo):lower() or ("dir:" .. r.dir)
-    if not groups[key] then
-      groups[key] = {}
-      order[#order + 1] = key
+    for i = first, math.min(first + SLICE - 1, #repos) do
+      local r = repos[i]
+      local url = started[i].url:wait()
+      local commit_time = started[i].time:wait()
+      local owner, repo
+      if url.code == 0 then
+        owner, repo = M.parse_origin(url.stdout or "")
+      end
+      local key = owner and (owner .. "/" .. repo):lower() or ("dir:" .. r.dir)
+      if not groups[key] then
+        groups[key] = {}
+        order[#order + 1] = key
+      end
+      local g = groups[key]
+      g[#g + 1] = {
+        r = r,
+        ts = tonumber(vim.trim(commit_time.code == 0 and commit_time.stdout or "")) or 0,
+      }
     end
-    local g = groups[key]
-    g[#g + 1] = {
-      r = r,
-      ts = tonumber(vim.trim(commit_time.code == 0 and commit_time.stdout or "")) or 0,
-    }
   end
   local kept, clones = {}, {}
   for _, key in ipairs(order) do
