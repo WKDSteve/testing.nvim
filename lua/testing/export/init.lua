@@ -145,6 +145,72 @@ end
 ---@field head fun(dir: string): Testing.Export.Head|nil
 ---@field remote fun(repos: { dir: string, from_root: boolean }[], opts: { state_dir: string }): table[], table
 
+---What `prefetch` found per directory (the answers of the five git questions of a repository), or nil: asked one by
+---one. Set for the duration of one build only.
+---@type table<string, table<string, { code: integer, stdout: string }>>|nil
+local prefetched
+
+---The answer of a prefetched git question as `lib.nvim.git` gives it (trimmed output, nil when it failed or is empty).
+---@param dir string
+---@param field string
+---@return string|nil text
+---@return boolean known Whether the question was prefetched.
+local function fetched(dir, field)
+  local c = prefetched and prefetched[dir]
+  local res = c and c[field]
+  if not res then
+    return nil, false
+  end
+  if res.code ~= 0 or type(res.stdout) ~= "string" then
+    return nil, true
+  end
+  local text = vim.trim(res.stdout)
+  return text ~= "" and text or nil, true
+end
+
+---Ask the git questions of every repository together instead of one after another: a fleet of 65 repositories
+---needed ~14.5 s with 5 synchronous calls each. Three processes per repository (`status --porcelain=v2 --branch` gives
+---the commit, the branch and whether the tree is dirty at once; the root commits; the shallow flag), at most
+---`WINDOW` of them at a time. The answers are the same ones `M.deps.identity`, `shallow` and `head` give.
+---@param dirs string[]
+local function prefetch(dirs)
+  local git = require("lib.nvim.git")
+  local WINDOW = 32
+  local cache = {}
+  local queue = {}
+  local ro = { timeout_ms = 10000, read_only = true, no_lazy_fetch = true }
+  for _, dir in ipairs(dirs) do
+    cache[dir] = {}
+    queue[#queue + 1] =
+      { dir, "status", { "status", "--porcelain=v2", "--branch" }, { read_only = true } }
+    queue[#queue + 1] = { dir, "roots", { "rev-list", "--max-parents=0", "HEAD" }, ro }
+    queue[#queue + 1] = { dir, "shallow", { "rev-parse", "--is-shallow-repository" }, ro }
+  end
+  local next_job, running = 1, 0
+  local function pump()
+    while running < WINDOW and next_job <= #queue do
+      local job = queue[next_job]
+      next_job = next_job + 1
+      running = running + 1
+      local ropts = vim.deepcopy(job[4])
+      ropts.dir = job[1]
+      local okr = pcall(git.run_async, job[3], ropts, function(res)
+        cache[job[1]][job[2]] = res
+        running = running - 1
+        pump()
+      end)
+      if not okr then
+        running = running - 1
+      end
+    end
+  end
+  pump()
+  vim.wait(300000, function()
+    return running <= 0 and next_job > #queue
+  end, 2)
+  prefetched = cache
+end
+
 ---Replaced by a spec: the key of a repository, its head and the CI adapter.
 ---@type Testing.Export.Deps
 M.deps = {
@@ -153,6 +219,17 @@ M.deps = {
   ---@param dir string
   ---@return string|nil
   identity = function(dir)
+    local roots_text, known = fetched(dir, "roots")
+    if known then
+      local roots = {}
+      for sha in (roots_text or ""):gmatch("%x+") do
+        if #sha >= 40 then
+          roots[#roots + 1] = sha:lower()
+        end
+      end
+      table.sort(roots)
+      return roots[1]
+    end
     local res = require("lib.nvim.git").run(
       { "rev-list", "--max-parents=0", "HEAD" },
       { dir = dir, timeout_ms = 10000, read_only = true, no_lazy_fetch = true }
@@ -180,6 +257,10 @@ M.deps = {
   ---@param dir string
   ---@return boolean
   shallow = function(dir)
+    local text, known = fetched(dir, "shallow")
+    if known then
+      return text == "true"
+    end
     local res = require("lib.nvim.git").run(
       { "rev-parse", "--is-shallow-repository" },
       { dir = dir, timeout_ms = 10000, read_only = true, no_lazy_fetch = true }
@@ -193,6 +274,27 @@ M.deps = {
   ---@param dir string
   ---@return Testing.Export.Head|nil
   head = function(dir)
+    local st, known = fetched(dir, "status")
+    if known then
+      -- `# branch.oid <sha>|(initial)`, `# branch.head <name>|(detached)`, then one line per changed path
+      local sha, branch, dirty
+      dirty = false
+      for line in (st or ""):gmatch("[^\r\n]+") do
+        local oid = line:match("^# branch%.oid (%x+)$")
+        local name = line:match("^# branch%.head (.+)$")
+        if oid then
+          sha = oid
+        elseif name then
+          branch = name ~= "(detached)" and name or nil
+        elseif line:sub(1, 1) ~= "#" then
+          dirty = true
+        end
+      end
+      if not sha then
+        return nil
+      end
+      return { sha = sha:lower(), branch = branch, dirty = dirty }
+    end
     local git = require("lib.nvim.git")
     local o = { dir = dir }
     local sha = git.head_hash(o)
@@ -210,6 +312,9 @@ M.deps = {
     return require("testing.ci.remote").collect(repos, opts)
   end,
 }
+
+---The real seams, to tell a spec's stand-in from them.
+local DEFAULT_DEPS = vim.tbl_extend("force", {}, M.deps)
 
 -- ── small helpers ────────────────────────────────────────────────────────────
 
@@ -955,6 +1060,7 @@ end
 ---`ci_local`, `counts` are `null`, `cases_red` is 0 and `local_read` is false. The workstation, where nothing runs.
 ---@field classes? table The export form only: the options of `lib.nvim.data_classes.load` (`path`, `dir`, `env`, `os`);
 ---nil reads this device's `areas.json`. A spec always names its own file.
+---@field lock? { timeout_ms?: integer, stale_ms?: integer } `testing.export.folder` only: the wait for the folder's lock (specs).
 ---@field warn? fun(msg: string) The export form only: told about what does not go into a document but the user should
 ---know (a shallow clone, whose key differs from that of a full clone). The commands print it on stderr.
 
@@ -1031,6 +1137,21 @@ end
 ---@field n_private integer
 ---@field n_unclassified integer
 ---@field problem string|nil Why nothing (or less) could be released: no `areas.json`, an unusable one.
+
+---Prefetch for the real git seams only (a spec that replaced one of them keeps its own answers); the answers live
+---until the next build.
+---@param dirs string[]
+local function prefetch_real(dirs)
+  prefetched = nil
+  if
+    M.deps.identity == DEFAULT_DEPS.identity
+    and M.deps.shallow == DEFAULT_DEPS.shallow
+    and M.deps.head == DEFAULT_DEPS.head
+    and #dirs > 1
+  then
+    pcall(prefetch, dirs)
+  end
+end
 
 ---@param dirs string[]
 ---@param info { excluded: string[] }
@@ -1162,6 +1283,8 @@ local function protect(fn)
   tokens_cache = {}
   local ok, res, err, kind = pcall(fn)
   secrets_cache, tokens_cache = outer, outer_tokens
+  -- the git answers of a prefetch are the state of this build only
+  prefetched = nil
   if not ok then
     return nil, tostring(res)
   end
@@ -1188,6 +1311,9 @@ function M.fleet(opts)
     local released, classed = dirs, nil
     if form == "export" then
       released, classed = M.release(dirs, opts.classes)
+    end
+    prefetch_real(released)
+    if form == "export" then
       warn_shallow(released, opts)
     end
     local remote, remote_info = ask_remote(released, opts)
@@ -1363,6 +1489,7 @@ function M.export(opts)
     end
     ---@cast info { excluded: string[], missing: string[] }
     local released, classed = M.release(dirs, o.classes)
+    prefetch_real(released)
     warn_shallow(released, o)
     local remote, remote_info = ask_remote(released, o)
     local fleet, by_key = build_fleet(released, info, o, remote, remote_info, classed)

@@ -532,12 +532,60 @@ end
 ---@field warnings string[]
 ---@field bundle Testing.Export.Bundle
 
----Write the export folder: the documents of `testing.export.export`, the manifest last.
+---How long a second writer waits for the first one (milliseconds), and how old a lock must be to be a crashed
+---writer's: a fleet export takes seconds, a lock older than the second value was left by a dead process.
+M.LOCK_TIMEOUT_MS = 60000
+M.LOCK_STALE_MS = 600000
+
+---The lock file (without `.lock`) that serialises the writers of one export folder: in the state directory, never in
+---the folder (which is committed as it is and refuses what its manifest does not own).
+---@param out string
+---@param state_dir? string
+---@return string
+function M.lock_path(out, state_dir)
+  local dir = state_dir or vim.fn.stdpath("state")
+  local id = vim.fn.sha256(norm(out)):sub(1, 16)
+  return vim.fs.normalize(dir) .. "/testing-export-" .. id
+end
+
+local write_unlocked
+
+---Write the export folder: the documents of `testing.export.export`, the manifest last. One writer per folder at a
+---time (a lock in the state directory); a second one waits, and gives up with exit 2 after `M.LOCK_TIMEOUT_MS`.
 ---@param out string
 ---@param opts Testing.Export.Opts
 ---@return Testing.Export.Folder.Result|nil result
 ---@return { code: integer, message: string }|nil err
 function M.write(out, opts)
+  local lock = opts.lock or {}
+  local locked, res, err = require("testing.statelock").with(
+    M.lock_path(out, opts.state_dir),
+    function()
+      return write_unlocked(out, opts)
+    end,
+    {
+      timeout_ms = lock.timeout_ms or M.LOCK_TIMEOUT_MS,
+      stale_ms = lock.stale_ms or M.LOCK_STALE_MS,
+    }
+  )
+  if not locked then
+    return nil,
+      {
+        code = M.EXIT_USAGE,
+        message = ("another export is writing %s (%s): nothing was written"):format(
+          out,
+          tostring(res)
+        ),
+      }
+  end
+  return res, err
+end
+
+---@param out string
+---@param opts Testing.Export.Opts
+---@return Testing.Export.Folder.Result|nil result
+---@return { code: integer, message: string }|nil err
+function write_unlocked(out, opts)
   local export = require("testing.export")
   local state, problem = M.inspect(out)
   if not state then
