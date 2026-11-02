@@ -201,12 +201,12 @@ Trailing blanks are cut in both blocks, line endings are LF (a CRLF checkout sti
 literal, `{ row = 24 }` a whole row, `{ row = 1, col = 70, cols = 11, rows = 1 }` a rectangle of screen cells
 (1-based). A masked cell is `#` in both blocks; masking either half of a wide character masks both. Attribute
 letters are given again after masking, so a masked clock with a highlight of its own does not shift the letters
-of everything behind it. `roots = { repo =, home =, tmp = }` and `replace = { { from =, to = } }` put
+of everything behind it. `roots = { repo =, home =, tmp =, state = }` (`<REPO>`, `<HOME>`, `<TMP>`, `<STATE>`) and `replace = { { from =, to = } }` put
 placeholders in the text rows (this changes their width, not the width of the attribute rows); `cursor = false`,
 `mode = false` leave those lines out.
 
 Make screens comparable across machines with the child's options: a fixed `size` per snapshot (name it in the
-snapshot name, `confirm.80x24`), the deterministic locale and time zone (default), and a colour scheme the
+snapshot name, `confirm.80x24`; a name is letters, digits, `_`, `-` and inner dots, up to 100 characters, and neither ends in a dot nor starts with a Windows device name such as `con` or `nul.x`, because the name becomes a file name on every platform), the deterministic locale and time zone (default), and a colour scheme the
 minit sets. The cache key of a spec that loads `testing.screen` (a literal `require`, in the spec or in a project file it
 loads) contains the snapshot folder of that spec (`<dir>/<spec>/`) by itself; `dir` is `.testing.lua`
 `snapshots.dir` (handed down in `TESTING_SNAPSHOTS_DIR`), else `opts.dir`, else the default. A snapshot that another

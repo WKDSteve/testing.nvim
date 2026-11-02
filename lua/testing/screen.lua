@@ -12,7 +12,7 @@
 ---   text (`{ text = "..." }`) and rectangles by screen cell (`{ row = 24 }`, `{ row = 1, col = 70,
 ---   cols = 11 }`; 1-based, `rows`/`cols` default to one row / the rest of the row). A masked cell
 ---   shows `#` and its attribute `#`; a wide character is masked as a whole. `replace` /
----   `roots` put placeholders (`<REPO>`, `<HOME>`, `<TMP>`) in place of paths (this changes the
+---   `roots` put placeholders (`<REPO>`, `<HOME>`, `<TMP>`, `<STATE>`) in place of paths (this changes the
 ---   width of the text row, not of the attribute row). Attribute letters are given again in order
 ---   of first appearance AFTER masking, so a masked clock with its own highlight does not shift the
 ---   letters of everything behind it.
@@ -59,7 +59,7 @@ local MAX_DIFF_ROWS = 12
 ---@class Testing.Screen.Opts
 ---@field masks? (string|table)[] Lua patterns, `{ text = s }`, `{ pattern = p }` or `{ row, col?, rows?, cols? }`.
 ---@field replace? { from: string, to: string }[] Plain replacements in the text rows.
----@field roots? { repo?: string, home?: string, tmp?: string } Paths shown as `<REPO>`, `<HOME>`, `<TMP>`.
+---@field roots? { repo?: string, home?: string, tmp?: string, state?: string } Paths shown as `<REPO>`, `<HOME>`, `<TMP>`, `<STATE>`.
 ---@field cursor? boolean Keep the cursor in the snapshot (default true).
 ---@field mode? boolean Keep the mode in the snapshot (default true).
 ---@field dir? string Snapshot directory relative to `root` (default `TESTS/__snapshots__`).
@@ -234,7 +234,7 @@ local function replacements(opts)
   for _, r in ipairs(opts.replace or {}) do
     list[#list + 1] = { from = r.from, to = r.to }
   end
-  local names = { repo = "<REPO>", home = "<HOME>", tmp = "<TMP>" }
+  local names = { repo = "<REPO>", home = "<HOME>", tmp = "<TMP>", state = "<STATE>" }
   for key, token in pairs(names) do
     local p = opts.roots and opts.roots[key]
     if type(p) == "string" and p ~= "" then
@@ -369,6 +369,13 @@ local function spec_on_stack()
   return nil
 end
 
+---Names Windows keeps for devices: `CON.snap` is the console there, with any extension and in any case.
+local RESERVED = { CON = true, PRN = true, AUX = true, NUL = true }
+for i = 1, 9 do
+  RESERVED["COM" .. i] = true
+  RESERVED["LPT" .. i] = true
+end
+
 ---Path of the snapshot `name` for the spec file.
 ---@param name string
 ---@param opts? Testing.Screen.Opts
@@ -380,9 +387,11 @@ function M.path(name, opts)
     or not name:match("^[%w][%w_.%-]*$")
     or name:find("..", 1, true)
     or #name > 100
+    or name:sub(-1) == "."
+    or RESERVED[name:match("^[^.]*"):upper()]
   then
     return nil,
-      ("snapshot name %q: letters, digits, '_', '-', '.' (no '..'), at most 100 characters"):format(
+      ("snapshot name %q: letters, digits, '_', '-', '.' (no '..', no trailing '.', no Windows device name), at most 100 characters"):format(
         tostring(name)
       )
   end

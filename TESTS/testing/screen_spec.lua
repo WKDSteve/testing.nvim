@@ -130,6 +130,11 @@ return function(H)
       local n = screen.normalize(s, { roots = { tmp = "C:/tmp", repo = "C:/tmp/x" } })
       eq(n.text[1], "<REPO>\\f.lua", "the longer root wins, backslash spelling replaced")
       eq(n.attrs[1], "aaaaaaaaaaaaaaaa", "attributes untouched by placeholders")
+      local st = screen.normalize(
+        shot({ chars("C:\\st\\nvim\\x  ") }, { "aaaaaaaaaaaaaaaa" }),
+        { roots = { state = "C:/st/nvim" } }
+      )
+      eq(st.text[1], "<STATE>\\x", "<STATE> is a placeholder like the other three")
       local rep = screen.normalize(s, { replace = { { from = "f.lua", to = "<F>" } } })
       has(rep.text[1], "<F>", "a plain replacement")
     end
@@ -197,7 +202,21 @@ return function(H)
       )
       local _, rel3 = screen.path("x", { root = root .. "/nope", file = spec })
       eq(rel3, "TESTS/__snapshots__/dialog_spec/x.snap", "a spec outside the root: its base name")
-      for _, bad in ipairs({ "", "../x", "a/b", "a..b", ".x", ("n"):rep(101) }) do
+      for _, bad in ipairs({
+        "",
+        "../x",
+        "a/b",
+        "a..b",
+        ".x",
+        ("n"):rep(101),
+        "con",
+        "NUL.80x24",
+        "Com1",
+        "lpt9.x",
+        "a.",
+        "a\nb",
+        "a\0b",
+      }) do
         local np, why = screen.path(bad, { root = root, file = spec })
         ok(np == nil and why:find("snapshot name", 1, true) ~= nil, "name refused: " .. bad)
       end
