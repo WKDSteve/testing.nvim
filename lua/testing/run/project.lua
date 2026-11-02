@@ -1023,6 +1023,44 @@ local function write_reports(ctx)
   return json_text, spec_lines, nil
 end
 
+---`testing stamp`: a stamp only for the verdict `green`; a run that earned none exits 1 (asked for, not given).
+---Only a run whose reports are all in place is stamped (a failed report file is exit 3, and a stamp is proof). The
+---step comes BEFORE the first line of the report is printed: that line says "exit 0" or "exit 1" and `GREEN` only
+---where the sentinel is printed, so it has to know. The report files (`--json`, `--junit`, `--github`) are written
+---by then and describe the cases; they say nothing about the stamp, which shows in the exit code, in the stderr
+---line `stamp: not written` and in the verdict of the stdout reporters (`term`, `agent`), rendered again here.
+---@param ctx { plan: Testing.Cli.RunPlan, sv: Testing.Run.Services, run_opts: Testing.Run.Options, ordered: table[], disc: table, stamp_pre: any, res: Testing.Result, verdict: Testing.Verdict, printer: table, primary: string, code: integer, err: fun(s: string) }
+---@return integer code The exit code (1 when a stamp was asked for and not given).
+local function apply_stamp(ctx)
+  local plan, sv, run_opts, ordered, disc = ctx.plan, ctx.sv, ctx.run_opts, ctx.ordered, ctx.disc
+  local res, verdict, printer, primary, err =
+    ctx.res, ctx.verdict, ctx.printer, ctx.primary, ctx.err
+  local code, stamp_pre = ctx.code, ctx.stamp_pre
+  if plan.stamp and not printer.infra_failed then
+    local sok, stamped = pcall(require("testing.stamp.write").after_run, {
+      plan = plan,
+      sv = sv,
+      run_opts = run_opts,
+      ordered = ordered,
+      disc = disc,
+      pre = stamp_pre,
+      res = res,
+      verdict = verdict,
+      err = err,
+    })
+    if not sok then
+      err("testing: stamp: not written: " .. tostring(stamped))
+    end
+    if not (sok and stamped) and code == M.EXIT_OK then
+      code = M.EXIT_FAILED
+      if primary == "term" or primary == "agent" then
+        printer.render(require("testing.report.verdict").stamp_refused(verdict))
+      end
+    end
+  end
+  return code
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1602,34 +1640,20 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     return report_exit
   end
 
-  -- `testing stamp`: a stamp only for the verdict `green`; a run that earned none exits 1 (asked for, not given).
-  -- Only a run whose reports are all in place is stamped (a failed report file is exit 3, and a stamp is proof). The
-  -- step comes BEFORE the first line of the report is printed: that line says "exit 0" or "exit 1" and `GREEN` only
-  -- where the sentinel is printed, so it has to know. The report files (`--json`, `--junit`, `--github`) are written
-  -- by then and describe the cases; they say nothing about the stamp, which shows in the exit code, in the stderr
-  -- line `stamp: not written` and in the verdict of the stdout reporters (`term`, `agent`), rendered again here.
-  if plan.stamp and not printer.infra_failed then
-    local sok, stamped = pcall(require("testing.stamp.write").after_run, {
-      plan = plan,
-      sv = sv,
-      run_opts = run_opts,
-      ordered = ordered,
-      disc = disc,
-      pre = stamp_pre,
-      res = res,
-      verdict = verdict,
-      err = err,
-    })
-    if not sok then
-      err("testing: stamp: not written: " .. tostring(stamped))
-    end
-    if not (sok and stamped) and code == M.EXIT_OK then
-      code = M.EXIT_FAILED
-      if primary == "term" or primary == "agent" then
-        render_primary(require("testing.report.verdict").stamp_refused(verdict))
-      end
-    end
-  end
+  code = apply_stamp({
+    plan = plan,
+    sv = sv,
+    run_opts = run_opts,
+    ordered = ordered,
+    disc = disc,
+    stamp_pre = stamp_pre,
+    res = res,
+    verdict = verdict,
+    printer = printer,
+    primary = primary,
+    code = code,
+    err = err,
+  })
   flush_primary(printer.infra_failed and "a report file could not be written (see stderr)" or nil)
   for _, line in ipairs(spec_lines) do
     out(line)
