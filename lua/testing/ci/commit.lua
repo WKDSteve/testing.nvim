@@ -381,13 +381,14 @@ local function unknown_steps(doc)
   return out
 end
 
----Check one commit.
+---Check one commit (the body of `M.check`).
 ---@param root string
 ---@param sha string
 ---@param args Testing.Ci.Commit.Args
----@param say fun(s: string) Progress (quiet in the agent report).
----@return table result One entry of `commits` in `testing-ci-commit/1`.
-function M.check(root, sha, args, say)
+---@param say fun(s: string)
+---@param snaps Testing.Ci.Snapshot[] Filled with the snapshots made, so a failure can still remove them.
+---@return table result
+local function check(root, sha, args, say, snaps)
   local base, problem
   if args.base then
     base, problem = snapshot.resolve(root, args.base)
@@ -442,7 +443,6 @@ function M.check(root, sha, args, say)
     end
   end
 
-  local snaps = {}
   local function cleanup()
     for _, s in ipairs(snaps) do
       if args.keep then
@@ -561,6 +561,27 @@ function M.check(root, sha, args, say)
       canonical.encode(kept) .. "\n",
       { mkdirp = true }
     )
+  end
+  return r
+end
+
+---Check one commit.
+---@param root string
+---@param sha string
+---@param args Testing.Ci.Commit.Args
+---@param say fun(s: string) Progress (quiet in the agent report).
+---@return table result One entry of `commits` in `testing-ci-commit/1`.
+function M.check(root, sha, args, say)
+  local snaps = {}
+  local ok, r = pcall(check, root, sha, args, say, snaps)
+  if not ok then
+    -- an internal failure must not leave a worktree registered until the sweep
+    if not args.keep then
+      for _, s in ipairs(snaps) do
+        pcall(snapshot.remove, s)
+      end
+    end
+    error(r, 0)
   end
   return r
 end

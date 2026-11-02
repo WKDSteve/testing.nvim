@@ -239,6 +239,24 @@ return function(H)
     has(r.problems[1] or "", "the base did not run (exit 3)", "base did not run: ... and why")
     r = commit.check(tmp, ("a"):rep(40), args, function() end)
     eq({ r.reused, runs }, { false, 4 }, "base did not run: not kept, asked again")
+    local removed = 0
+    snapshot.remove = function()
+      removed = removed + 1
+      return true
+    end
+    commit.run_ci = function()
+      error("boom in the child")
+    end
+    local okc, why = pcall(
+      commit.check,
+      tmp,
+      ("a"):rep(40),
+      vim.tbl_extend("force", args, { force = true }),
+      function() end
+    )
+    eq(okc, false, "an internal failure: raised")
+    has(tostring(why), "boom in the child", "an internal failure: ... the message")
+    eq(removed, 1, "an internal failure: the snapshot is removed")
     snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
     snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
     vim.fn.delete(tmp, "rf")
