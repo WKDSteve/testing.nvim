@@ -88,6 +88,105 @@ return function(H)
     "a green repository has none"
   )
 
+  -- ── guard, lint and sheet findings (built by testing.finding.from_*) ──
+  local guard_src = finding.from_guards({
+    id = "TESTS/x::g",
+    file = "TESTS/x_spec.lua",
+    line = 5,
+    guards = {
+      {
+        guard = "fs",
+        severity = "warn",
+        message = "wrote " .. fx.beta .. "/f.txt",
+        stack = "at x",
+      },
+    },
+  })
+  eq(#guard_src, 1, "one finding per guard finding")
+  local gd = finding.build(guard_src[1], ctx)
+  eq(gd.kind, "guard", "kind guard")
+  ok(gd.excerpt:find(fx.beta, 1, true) == nil, "the path in a guard message is redacted")
+  local moved = finding.from_guards({
+    id = "TESTS/x::g",
+    file = "TESTS/x_spec.lua",
+    line = 90,
+    guards = {
+      {
+        guard = "fs",
+        severity = "warn",
+        message = "wrote " .. fx.beta .. "/f.txt",
+        stack = "at y",
+      },
+    },
+  })
+  eq(
+    finding.build(moved[1], ctx).fp,
+    gd.fp,
+    "a guard finding that moved (line, stack) keeps its fp"
+  )
+
+  local lint_src = finding.from_lint({
+    checks = {
+      {
+        name = "stylua",
+        findings = { { file = "lua/a.lua", line = 3, message = "format", check = "stylua" } },
+      },
+      { name = "luacheck", findings = {} },
+    },
+  })
+  eq(#lint_src, 1, "one finding per lint finding")
+  local ld = finding.build(lint_src[1], ctx)
+  eq(
+    { ld.kind, ld.rule, ld.where.file, ld.where.line },
+    { "lint", "stylua", "lua/a.lua", 3 },
+    "lint finding"
+  )
+  local lint_moved = finding.from_lint({
+    checks = {
+      {
+        name = "stylua",
+        findings = { { file = "lua/a.lua", line = 40, message = "format", check = "stylua" } },
+      },
+    },
+  })
+  eq(finding.build(lint_moved[1], ctx).fp, ld.fp, "a lint finding that moved keeps its fp")
+
+  local sheet = require("testing.sheet")
+  local sh = assert(
+    sheet.validate({ id = "s1", title = "S one", task = "a/one", steps = { { keys = "x" } } })
+  )
+  local sheet_src = finding.from_sheets({
+    {
+      root = fx.beta,
+      rel = "TESTS/sheets/s1.sheet.lua",
+      sheet = sh,
+      case = { status = "fail", message = "boom" },
+      snapshots = {},
+    },
+    {
+      root = fx.beta,
+      rel = "TESTS/sheets/ok.sheet.lua",
+      sheet = assert(sheet.validate({ id = "ok", title = "Ok", steps = { { keys = "x" } } })),
+      case = { status = "pass" },
+      snapshots = {},
+    },
+    { root = fx.beta, rel = "TESTS/sheets/bad.sheet.lua", error = "does not load", snapshots = {} },
+  })
+  eq(#sheet_src, 2, "red and unloadable sheets give findings, a green one does not")
+  local sd = finding.build(sheet_src[1], ctx)
+  eq(
+    { sd.kind, sd.repro },
+    { "sheet", "testing sheets run --task a/one" },
+    "sheet finding with its repro"
+  )
+
+  -- all of them in one list, next to the findings of the state
+  local all = finding.collect(
+    ctx,
+    vim.list_extend(vim.list_extend(vim.list_slice(guard_src), lint_src), sheet_src)
+  )
+  eq(#all, 4 + 1 + 1 + 2, "collect adds the extra sources to those of the state")
+
   -- ── every document validates against the schema file ──
   local schema_file = vim.fs.normalize(
     vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))

@@ -211,14 +211,98 @@ function M.sources(dir, state_dir)
   return out
 end
 
----The findings of a repository, sorted by `fp`; a repository the data classes do not release gives none.
+---The sources of the guard findings of one case of a run (`case.guards[]`): one finding per guard and message. The
+---identity names the case, the guard and its id (or its first message line), never a line number or a stack.
+---@param case table A case of the Result-IR with `id`, `file`, `line`, `guards`.
+---@return Testing.Finding.Source[]
+function M.from_guards(case)
+  local out = {}
+  for _, g in ipairs(case.guards or {}) do
+    local first = tostring(g.message or ""):match("^[^\r\n]*") or ""
+    out[#out + 1] = {
+      kind = "guard",
+      identity = ("%s|%s|%s"):format(case.id, g.guard, g.id or first),
+      title = ("guard %s: %s"):format(tostring(g.guard), first),
+      excerpt = g.stack and (tostring(g.message) .. "\n" .. g.stack) or tostring(g.message),
+      where = case.file and { file = case.file, line = case.line } or nil,
+      run = { source = "local" },
+      repro = ("testing . --file %s"):format(case.file or ""),
+      rule = g.id,
+    }
+  end
+  return out
+end
+
+---The sources of the findings of a `testing-lint/1` document: one per finding of a check. The identity is the check,
+---the file and the message, not the line, so a finding that only moved is the same finding.
+---@param doc table The document of `testing lint --json`.
+---@return Testing.Finding.Source[]
+function M.from_lint(doc)
+  local out = {}
+  for _, check in ipairs(doc.checks or {}) do
+    for _, f in ipairs(check.findings or {}) do
+      local line = tonumber(f.line)
+      out[#out + 1] = {
+        kind = "lint",
+        identity = ("%s|%s|%s"):format(
+          tostring(f.check or check.name),
+          tostring(f.file),
+          tostring(f.message)
+        ),
+        title = ("%s: %s"):format(tostring(f.check or check.name), tostring(f.message)),
+        excerpt = ("%s%s: %s"):format(
+          tostring(f.file),
+          line and (":" .. line) or "",
+          tostring(f.message)
+        ),
+        where = f.file and { file = tostring(f.file), line = line } or nil,
+        run = { source = "local" },
+        repro = ("testing lint %s"):format(tostring(f.file or "")),
+        rule = f.check or check.name,
+      }
+    end
+  end
+  return out
+end
+
+---The sources of the findings of test sheets that need a person to act: red (failed, stale or does not load).
+---@param entries table[] The entries of `testing.sheet.report` (`sheet`, `rel`, `case`, `stale`, `error`).
+---@return Testing.Finding.Source[]
+function M.from_sheets(entries)
+  local tasks = require("testing.sheet.tasks")
+  local out = {}
+  for _, e in ipairs(entries) do
+    local word = tasks.state_word(e)
+    if word == "red" or word == "stale" then
+      local id = e.sheet and e.sheet.id or e.rel
+      out[#out + 1] = {
+        kind = "sheet",
+        identity = ("sheet|%s"):format(id),
+        title = ("sheet %s: %s"):format(e.sheet and e.sheet.title or e.rel, word),
+        excerpt = e.error or (e.case and (e.case.message or e.case.status)) or e.stale,
+        where = { file = e.rel },
+        run = { source = "local" },
+        repro = e.sheet and e.sheet.task and ("testing sheets run --task %s"):format(e.sheet.task)
+          or nil,
+      }
+    end
+  end
+  return out
+end
+
+---The findings of a repository's state plus extra sources (guard findings of a run, a lint document, sheets).
 ---@param ctx Testing.Finding.Ctx
+---@param extra? Testing.Finding.Source[]
+
+---Sorted by `fp`; a repository the data classes do not release gives none.
 ---@return table[]|nil docs
 ---@return string|nil err
 ---@return string|nil kind
-function M.collect(ctx)
+function M.collect(ctx, extra)
   local docs = {}
-  for _, src in ipairs(M.sources(ctx.dir, ctx.state_dir)) do
+  local sources = M.sources(ctx.dir, ctx.state_dir)
+  vim.list_extend(sources, extra or {})
+  for _, src in ipairs(sources) do
     local doc, err, kind = M.build(src, ctx)
     if not doc then
       return nil, err, kind
