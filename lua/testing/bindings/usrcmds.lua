@@ -610,6 +610,7 @@ function M.ask(question, choices, cb)
     local shown = pcall(kit.confirm, {
       question = question,
       choices = choices,
+      default = 1, -- "the first is the harmless one"; the kit would focus the last button otherwise
       on_answer = function(choice)
         for index, label in ipairs(choices) do
           if label == choice then
