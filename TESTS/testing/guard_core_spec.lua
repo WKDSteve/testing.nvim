@@ -350,22 +350,24 @@ return function(H)
     return (uv.hrtime() - s) / 1e3 / n
   end
   bench(200)
-  -- Bare and guarded rounds alternate and the smallest difference counts: a shared runner that stalls one
-  -- round (27.8 us once on macOS CI) cannot fail the budget, while a wrapper that really costs more than
-  -- the budget is slower in every round.
-  local best = math.huge
+  -- Bare and guarded rounds alternate; each side keeps its fastest round and the overhead is the difference
+  -- of those two minima. A stall only makes a round slower, so a shared runner that stalls one round
+  -- (27.8 us once on macOS CI) cannot fail the budget. The minimum of per-round differences would be wrong:
+  -- a stalled BARE round shrinks (even negates) its difference and hides a real wrapper cost. A wrapper
+  -- that really costs more than the budget is slower in every guarded round.
+  local best_bare, best_guarded = math.huge, math.huge
   for _ = 1, 5 do
-    local bare = bench(3000)
+    best_bare = math.min(best_bare, bench(3000))
     h = guard.install({ guards = { clock = "error" } })
     h:begin_case({ id = "o::b" })
-    local guarded = bench(3000)
+    best_guarded = math.min(best_guarded, bench(3000))
     h:end_case()
     h:uninstall()
-    best = math.min(best, guarded - bare)
   end
   vim.fn.delete(tmp)
+  local overhead = best_guarded - best_bare
   ok(
-    best < 25,
-    ("wrapper overhead of an open+close+time call is %.1f us (budget 25 us)"):format(best)
+    overhead < 25,
+    ("wrapper overhead of an open+close+time call is %.1f us (budget 25 us)"):format(overhead)
   )
 end
