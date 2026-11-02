@@ -244,16 +244,12 @@ return function(H)
         "requires[1].reason",
         "a requirement without a reason"
       )
-      refused(
-        {
-          id = "a",
-          title = "T",
-          steps = { { keys = "x" } },
-          requires = { { lua = "x", reason = "r", y = 1 } },
-        },
-        "requires[1]: unknown field",
-        "a requirement with an unknown field"
-      )
+      refused({
+        id = "a",
+        title = "T",
+        steps = { { keys = "x" } },
+        requires = { { lua = "x", reason = "r", y = 1 } },
+      }, "requires[1]: unknown field", "a requirement with an unknown field")
 
       local bad = vim.deepcopy(good)
       bad.sizes = { { rows = 24, cols = 80 } }

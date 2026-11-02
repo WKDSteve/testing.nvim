@@ -50,7 +50,11 @@ return function(H)
       return map[name]
     end
   end
-  eq(tier3.browsers_dir({ getenv = env({ PLAYWRIGHT_BROWSERS_PATH = "/pw" }) }), "/pw", "the variable decides")
+  eq(
+    tier3.browsers_dir({ getenv = env({ PLAYWRIGHT_BROWSERS_PATH = "/pw" }) }),
+    "/pw",
+    "the variable decides"
+  )
   eq(
     tier3.browsers_dir({ getenv = env({ PLAYWRIGHT_BROWSERS_PATH = "0", LOCALAPPDATA = "C:/L" }) }),
     "C:/L/ms-playwright",
@@ -62,8 +66,20 @@ return function(H)
   local browsers = tier3.browsers({
     getenv = env({ PLAYWRIGHT_BROWSERS_PATH = "/pw" }),
     list_dir = function()
-      return { "chromium-1200", "chromium_headless_shell-1248", "chromium-1100", "firefox-1543", "ffmpeg-1011", ".links", "webkit-x" }
+      return {
+        "chromium-1200",
+        "chromium_headless_shell-1248",
+        "chromium-1100",
+        "firefox-1543",
+        "ffmpeg-1011",
+        ".links",
+        "webkit-x",
+      }
     end,
   })
-  eq(browsers, { chromium = { "1100", "1200", "1248" }, firefox = { "1543" } }, "engines with sorted revisions, the rest ignored")
+  eq(
+    browsers,
+    { chromium = { "1100", "1200", "1248" }, firefox = { "1543" } },
+    "engines with sorted revisions, the rest ignored"
+  )
 end

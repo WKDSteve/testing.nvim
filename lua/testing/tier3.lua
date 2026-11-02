@@ -21,7 +21,13 @@ local M = {}
 
 ---@type { name: string, tier: string, env: string, purpose: string, exe: string }[]
 local TOOLS = {
-  { name = "node", tier = "3", env = "TESTING_NODE", purpose = "runs the Playwright specs", exe = "node" },
+  {
+    name = "node",
+    tier = "3",
+    env = "TESTING_NODE",
+    purpose = "runs the Playwright specs",
+    exe = "node",
+  },
   {
     name = "tauri-driver",
     tier = "3",

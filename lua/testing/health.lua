@@ -691,7 +691,9 @@ local function check_tier3(health)
   table.sort(names)
   if #names == 0 then
     health.info(
-      ("no Playwright browser in %s; browser cases are reported skips"):format(tier3.browsers_dir() or "(unknown cache)")
+      ("no Playwright browser in %s; browser cases are reported skips"):format(
+        tier3.browsers_dir() or "(unknown cache)"
+      )
     )
   end
   for _, engine in ipairs(names) do
