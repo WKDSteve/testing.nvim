@@ -580,6 +580,21 @@ Discovery compares directories by their real path, **case-folded on a case-insen
 and `tests/` are one directory there (Windows, macOS, WSL `/mnt/*`) and a spec is never listed twice.
 On a case-sensitive file system nothing is folded.
 
+## Workstation
+
+On the Tricentis workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) nothing unsigned may be built or
+started (EDR). `testing.machine` is the one place that decides; the command line (`testing.cli`) and the editor
+(`:Testing ci`, `:Testing ci repos`) ask it. Allowed there: `export`, `call`, `ci remote`, `ci overview`,
+`ci verify --json`, `lint` without `--fix`, and the help. Everything else (`run`, `fast`, `ci` with a run, `ci repos`,
+`sheets run`, `migrate`, ...) is refused with exit `2`, a message, and nothing started. A value that is neither
+`workstation` nor `default` is refused as a typo, for every command. `TESTING_ALLOW_WORKSTATION=1` lifts the refusal
+where it is allowed on purpose (the same switch as `testing sheets run`).
+
+`testing export` writes the same folder as on the private machine; without local runs only the CI state is in it and
+`local` is `null`. `ci remote` takes only `$TESTING_GITHUB_TOKEN` there, a fine-grained read-only token (Actions and
+Metadata read): `gh auth token` (the account's broad login) and `GITHUB_TOKEN` are not tried, and the token appears in
+no output or document.
+
 ## Environment
 
 | Variable | Effect |

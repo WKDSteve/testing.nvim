@@ -1,4 +1,5 @@
 ---@module 'testing.ci.remote'
+-- @cache-env TESTING_GITHUB_TOKEN NVIM_MACHINE_ROLE
 ---@brief `testing ci remote`: the latest GitHub Actions run of the CI workflow per repository, per system.
 ---@description
 --- ```
@@ -21,7 +22,8 @@
 --- `[skip ci]` and no run), no_run (no run of the workflow for the commit), no_github.
 ---
 --- The token: `$TESTING_GITHUB_TOKEN` (a fine-grained read-only token: Actions and Metadata read), else `gh auth
---- token`; never `GITHUB_TOKEN` (`lib.nvim.net.github.token`). It goes to curl through its config on stdin and appears
+--- token`; never `GITHUB_TOKEN` (`lib.nvim.net.github.token`). On the workstation only
+--- `$TESTING_GITHUB_TOKEN` (no `gh auth token`: the account's broad login). It goes to curl through its config on stdin and appears
 --- in no output, no document, no cache file and no error text.
 ---
 --- Requests are conditional: per checkout the ETag and the last answer live in
@@ -113,6 +115,17 @@ M.deps = {
   ---@return string|nil token
   ---@return string source_or_reason
   token = function()
+    -- the workstation: only the dedicated read-only token; `gh auth token` is the broad login of the account
+    if require("testing.machine").is_workstation() then
+      local value = vim.trim(vim.uv.os_getenv(M.TOKEN_ENV) or "")
+      if value == "" then
+        return nil,
+          ("$%s is not set (the workstation takes only the read-only token, not `gh auth token`)"):format(
+            M.TOKEN_ENV
+          )
+      end
+      return value, "env:" .. M.TOKEN_ENV
+    end
     return require("lib.nvim.net.github").token({ env_var = M.TOKEN_ENV })
   end,
   ---@type Lib.Net.Github.Transport|nil nil: real curl.

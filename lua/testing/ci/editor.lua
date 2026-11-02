@@ -828,6 +828,10 @@ end
 ---@return boolean started
 ---@return string|nil err
 function M.run_repos(o)
+  local refused = require("testing.machine").run_refusal("repos")
+  if refused then
+    return false, refused
+  end
   local entry = M.state["*repos*"] or {}
   M.state["*repos*"] = entry
   if entry.running then
@@ -914,6 +918,10 @@ end
 ---@return boolean started
 ---@return string|nil err
 function M.run(o)
+  local refused = require("testing.machine").run_refusal("run")
+  if refused then
+    return false, refused
+  end
   local k = key(o.root)
   local entry = M.state[k] or {}
   M.state[k] = entry

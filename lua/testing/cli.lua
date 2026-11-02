@@ -62,6 +62,7 @@ M.OWN_ARGS = { migrate = true, conformance = true, surface = true }
 ---@field color? boolean Forces the colour decision of the terminal reporter.
 ---@field env? table<string, string|nil> Environment that chooses the reporter (`TESTING_REPORTER`, `TESTING_AGENT`, `AI_AGENT`, `CLAUDECODE`); only `scripts/testing.lua` sets it.
 ---@field trust? Testing.Trust.Ctx Arms the workspace trust gate for this call (`testing.trust`); only `scripts/testing.lua` sets it, so a Lua caller of `main` is not gated. `--trust` in the arguments sets its `save`.
+---@field getenv? fun(name: string): string|nil Replaces the environment read of the machine role (`testing.machine`; specs).
 ---@field script? string Path of the entry script (the `rerun:` line of the agent reporter).
 ---@field budget? table Replaces single seams of `testing budget` (`testing.budget.main`): `run`, `machine`.
 ---@field cache_dir? string Replaces `stdpath('cache')` for the result cache (specs).
@@ -577,6 +578,13 @@ end
 local function execute(argv, sv)
   local out, err = sv.out, sv.err
   local usage = args_mod.usage()
+
+  -- the workstation runs nothing (docs/CLI.md, Workstation): only the reading commands go on
+  local refusal = require("testing.machine").refusal(argv, sv.getenv)
+  if refusal then
+    err(refusal)
+    return M.EXIT_USAGE
+  end
 
   if argv[1] == "migrate" then
     return run_migrate(vim.list_slice(argv, 2), sv)
