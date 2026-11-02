@@ -86,9 +86,7 @@ M.DEFAULTS = {
         "loaded_ruby_provider",
       },
       ignore_options = {},
-      -- lib.nvim exports its roots into the environment when it loads (`NVIM_CONFIG_DIR`,
-      -- `LIB_NVIM_ROOTS_EXPORTED`): its own runtime, never a leak of the spec.
-      ignore_env = { "NVIM_CONFIG_DIR", "LIB_NVIM_ROOTS_EXPORTED" },
+      ignore_env = {},
       ignore_globals = {},
       ignore_highlights = {},
       -- User command names and keymap left-hand sides (prefix match) a plugin's `setup()` leaves on purpose.

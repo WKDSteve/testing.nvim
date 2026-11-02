@@ -85,6 +85,9 @@ M.RUNTIME_VAR_PREFIXES = {
   "did_load_",
   "_lsp_enabled_",
 }
+---Environment variables lib.nvim exports when it loads (exact names): its own runtime. Not a default of
+---`ignore_env`: a list in `.testing.lua` replaces the defaults, and these must hold whatever a repo lists.
+M.RUNTIME_ENV = { NVIM_CONFIG_DIR = true, LIB_NVIM_ROOTS_EXPORTED = true }
 ---The groupless autocmd the runtime registers the first time `vim.lsp` is loaded (`desc` is how the runtime names
 ---it): matched by event AND desc, so an autocmd of a spec on `VimLeavePre` is still a finding.
 M.RUNTIME_AUTOCMDS = { VimLeavePre = { ["vim.lsp: exit handler"] = true } }
@@ -324,7 +327,7 @@ function CAPTURE.env(self)
   local res = {}
   for k, v in pairs(vim.fn.environ()) do
     -- `=C:` and friends: Windows keeps the per-drive cwd in hidden variables
-    if k:sub(1, 1) ~= "=" and not has_prefix(k, self.cfg.ignore_env) then
+    if k:sub(1, 1) ~= "=" and not M.RUNTIME_ENV[k] and not has_prefix(k, self.cfg.ignore_env) then
       res[k] = v
     end
   end

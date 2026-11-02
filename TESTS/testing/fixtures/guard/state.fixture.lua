@@ -288,7 +288,11 @@ B.case("red_noise_lookalikes", {
 -- what the first load of `vim.lsp` leaves behind and the environment lib.nvim exports are the runtime's: GREEN;
 -- the same shapes under another name are RED
 B.case("green_lsp_and_lib_runtime", {
-  cfg = only_state({ categories = { autocmds = "error", vars = "error", env = "error" } }),
+  -- (a repo's own `ignore_env` replaces the defaults of the list: the runtime names must hold anyway)
+  cfg = only_state({
+    categories = { autocmds = "error", vars = "error", env = "error" },
+    ignore_env = { "SOME_OTHER_" },
+  }),
   body = function()
     vim.api.nvim_create_autocmd(
       "VimLeavePre",

@@ -215,8 +215,8 @@ fleet runs): `vim.g.markdown_*`, `java_*`, `typescript_*`, `pandoc#*`, `lua_vers
 `did_load_*`, `_lsp_enabled_*`; the groupless `VimLeavePre` autocmd `vim.lsp: exit handler` (matched by
 event and `desc`: a spec's own `VimLeavePre` autocmd is still a finding); the global value of the `syntax` option; `_G.re`; highlight groups defined with
 `default = true` (every `$VIMRUNTIME/syntax/*.vim` does); the jobs of the clipboard provider
-(`win32yank`, `xclip`, `pbcopy`, `wl-copy`, ...). `ignore_env` starts with `NVIM_CONFIG_DIR` and
-`LIB_NVIM_ROOTS_EXPORTED` (what lib.nvim exports when it loads; your entries are added). The lists are `RUNTIME_*` / `CLIPBOARD_PROVIDERS` in
+(`win32yank`, `xclip`, `pbcopy`, `wl-copy`, ...). The environment variables `NVIM_CONFIG_DIR` and
+`LIB_NVIM_ROOTS_EXPORTED` (what lib.nvim exports when it loads) are in that list too, whatever `ignore_env` holds. The lists are `RUNTIME_*` / `CLIPBOARD_PROVIDERS` in
 [`state.lua`](../lua/testing/guard/state.lua). `g:loaded_<plugin>` flags are NOT ignored: they are the
 plugin's own and can stop a later `:runtime plugin/...` in the same editor.
 
