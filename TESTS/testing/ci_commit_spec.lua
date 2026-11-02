@@ -352,4 +352,153 @@ return function(H)
     commit.run_ci, commit.runner_key = saved.run_ci, saved.runner_key
     vim.fn.delete(tmp, "rf")
   end
+
+  -- the base runs only the red spec files of the suite, and the commit and its base share one cache folder
+  do
+    local tree = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-narrow"
+    vim.fn.mkdir(tree .. "/TESTS", "p")
+    for _, name in ipairs({ "a_spec.lua", "b_spec.lua" }) do
+      vim.fn.writefile({ "return function() end" }, tree .. "/TESTS/" .. name)
+    end
+    local function red(file)
+      return { step = "suite", file = file, text = "boom" }
+    end
+    local out, narrowed = commit.base_suite_args(
+      { red("TESTS/b_spec.lua"), red("TESTS/a_spec.lua"), red("TESTS/a_spec.lua") },
+      { "--jobs", "2" },
+      tree
+    )
+    eq(
+      { out, narrowed },
+      { { "--jobs", "2", "--file", "TESTS/a_spec.lua", "--file", "TESTS/b_spec.lua" }, true },
+      "base: the red files, once each, sorted"
+    )
+    out, narrowed = commit.base_suite_args({ red("TESTS\\a_spec.lua") }, {}, tree)
+    eq(
+      { out, narrowed },
+      { { "--file", "TESTS/a_spec.lua" }, true },
+      "base: a backslash path is the same file"
+    )
+    out, narrowed = commit.base_suite_args(
+      { red("TESTS/a_spec.lua"), red("TESTS/renamed_spec.lua") },
+      {},
+      tree
+    )
+    eq(
+      { out, narrowed },
+      { {}, false },
+      "base: a red file that is not at the base (a rename) runs the whole suite"
+    )
+    narrowed = select(
+      2,
+      commit.base_suite_args(
+        { red("TESTS/a_spec.lua"), { step = "suite", text = "red", whole = true } },
+        {},
+        tree
+      )
+    )
+    eq(narrowed, false, "base: the suite step red as a whole runs the whole suite")
+    narrowed = select(
+      2,
+      commit.base_suite_args(
+        { red("TESTS/a_spec.lua"), { step = "suite", text = "no file" } },
+        {},
+        tree
+      )
+    )
+    eq(narrowed, false, "base: a finding without a file runs the whole suite")
+    narrowed = select(
+      2,
+      commit.base_suite_args({ { step = "stylua", file = "lua/x.lua", text = "diff" } }, {}, tree)
+    )
+    eq(narrowed, false, "base: no red suite finding: nothing to narrow")
+    for _, sel in ipairs({ { "--file", "x" }, { "--file=x" }, { "--changed" }, { "--only", "x" } }) do
+      out, narrowed = commit.base_suite_args({ red("TESTS/a_spec.lua") }, sel, tree)
+      eq(
+        { out, narrowed },
+        { sel, false },
+        "base: options that select already are kept: " .. sel[1]
+      )
+    end
+
+    eq(
+      commit.shared_cache_args({ "--cached" }, "/c"),
+      { "--cached", "--cache-dir", "/c" },
+      "cache: --cached shares a folder"
+    )
+    eq(
+      commit.shared_cache_args({ "--jobs", "2" }, "/c"),
+      { "--jobs", "2" },
+      "cache: without --cached nothing changes"
+    )
+    eq(
+      commit.shared_cache_args({ "--cached", "--cache-dir", "/mine" }, "/c"),
+      { "--cached", "--cache-dir", "/mine" },
+      "cache: the caller's folder wins"
+    )
+
+    -- through `check`: the commit runs everything, the base only the red file; both with the same cache folder
+    local tmp = tree .. "-state"
+    vim.fn.mkdir(tmp, "p")
+    local saved = { create = snapshot.create, remove = snapshot.remove, run_ci = commit.run_ci }
+    local saved_parent, saved_changed = snapshot.parent, snapshot.changed_files
+    snapshot.parent = function()
+      return ("b"):rep(40)
+    end
+    snapshot.changed_files = function()
+      return { "lua/x.lua" }
+    end
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = tree, state = tmp }
+    end
+    snapshot.remove = function()
+      return true
+    end
+    local seen = {}
+    commit.run_ci = function(snap, _, extra, suite_args)
+      seen[#seen + 1] = { sha = snap.sha:sub(1, 1), extra = extra, suite = suite_args }
+      return 1,
+        {
+          profile = "full",
+          steps = {
+            {
+              name = "suite",
+              state = "red",
+              findings = { { file = "TESTS/a_spec.lua", text = "boom" } },
+            },
+          },
+        },
+        ""
+    end
+    local args = commit.parse({ ("a"):rep(40), "--state-dir=" .. tmp, "--", "--cached" })
+    args.state_dir = tmp
+    local r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq(r.verdict, "known-red", "narrowed base: red at both: known")
+    local cache = tmp .. "/ci-commit/cache"
+    has(
+      table.concat(seen[1].suite, " "),
+      "--cached --cache-dir",
+      "the commit's run shares the cache"
+    )
+    eq(
+      seen[1].suite[#seen[1].suite],
+      seen[2].suite[#seen[1].suite],
+      "the base shares the same folder"
+    )
+    eq(
+      vim.list_slice(seen[2].suite, #seen[2].suite - 1),
+      { "--file", "TESTS/a_spec.lua" },
+      "the base runs only the red file"
+    )
+    ok(
+      not table.concat(seen[1].suite, " "):find("--file", 1, true),
+      "the commit's run is not narrowed"
+    )
+    ok(cache ~= nil, "cache folder named")
+
+    snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
+    snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
+    vim.fn.delete(tree, "rf")
+    vim.fn.delete(tmp, "rf")
+  end
 end

@@ -277,6 +277,14 @@ A new finding of the suite is confirmed before it counts: its spec files run onc
 (`--step=<suite> -- --file <file>`). A finding that is not red again is `flaky` (a spec that is red only under load),
 not the commit's fault; a step that takes no file selection keeps its new findings as they are.
 
+The suite at the base is not run whole either: it gets a `--file` for every spec file that is red at the commit (a
+finding of the commit is in one of them). The whole suite runs at the base when that cannot be said for sure: the
+suite options already select (`--file`, `--changed`, `--only`), the suite step is red without a finding that has a
+file, or a red file does not exist at the base (a renamed spec file). With `--cached` among the suite options
+(`testing ci commit <rev> -- --cached`) the commit and its base share one cache folder (`ci-commit/cache` in the state
+directory), so a spec file that did not change between the two does not run again; without `--cache-dir` the cache of
+a snapshot would be its own, as it is per project root.
+
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position); equal findings count as often as they occur. A red step without findings (an
 exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says

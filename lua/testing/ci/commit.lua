@@ -459,6 +459,76 @@ function M.confirm(snap, root, profile, new_items, suite_args)
   return still, flaky
 end
 
+---The suite options of the run at the base: those of the commit's run plus a `--file` for every spec file that is red
+---at the commit, so the base runs those files and not the whole suite (a finding of the commit is in one of them, and
+---the base is asked about exactly the findings of the commit). The whole suite runs when that cannot be said for sure:
+---the options already select (`--file`, `--changed`, `--only`), a red suite step has no finding with a file (the step
+---itself is red), a red file does not exist at the base (a renamed spec file: its old name is the base's), or no
+---suite finding is red at all.
+---@param items Testing.Ci.Baseline.Item[] The findings of the red steps at the commit (`baseline.classify(doc).new`).
+---@param suite_args string[]
+---@param base_tree string The base's snapshot.
+---@return string[] suite_args
+---@return boolean narrowed
+function M.base_suite_args(items, suite_args, base_tree)
+  for _, a in ipairs(suite_args) do
+    if
+      a == "--file"
+      or a:match("^%-%-file=")
+      or a == "--changed"
+      or a == "--only"
+      or a:match("^%-%-only=")
+    then
+      return suite_args, false
+    end
+  end
+  local files, seen = {}, {}
+  for _, it in ipairs(items) do
+    if it.step == "suite" then
+      if it.whole or not it.file or it.file == "" then
+        return suite_args, false
+      end
+      local rel = it.file:gsub("\\", "/")
+      if not seen[rel] then
+        seen[rel] = true
+        if not vim.uv.fs_stat(base_tree .. "/" .. rel) then
+          return suite_args, false
+        end
+        files[#files + 1] = rel
+      end
+    end
+  end
+  if #files == 0 then
+    return suite_args, false
+  end
+  table.sort(files)
+  local out = vim.deepcopy(suite_args)
+  for _, f in ipairs(files) do
+    vim.list_extend(out, { "--file", f })
+  end
+  return out, true
+end
+
+---With `--cached` among the suite options, the commit and its base share one cache folder: the cache of a run is
+---per project root, and two snapshots are two roots, so without it the base would run every file again. An entry is
+---keyed on everything the file can reach, so a file that did not change between the two is the same answer.
+---@param suite_args string[]
+---@param dir string The folder to share.
+---@return string[] suite_args
+function M.shared_cache_args(suite_args, dir)
+  local cached = false
+  for _, a in ipairs(suite_args) do
+    if a == "--cache-dir" or a:match("^%-%-cache%-dir=") then
+      return suite_args
+    end
+    cached = cached or a == "--cached"
+  end
+  if not cached then
+    return suite_args
+  end
+  return vim.list_extend(vim.deepcopy(suite_args), { "--cache-dir", dir })
+end
+
 ---The `unknown step <name>` problems of a run (a step the base does not have yet).
 ---@param doc table|nil
 ---@return string[]
@@ -558,7 +628,9 @@ local function check(root, sha, args, say, snaps)
   snaps[#snaps + 1] = head_snap
   local extra = args.profile and { "--profile=" .. args.profile } or {}
   say(("ci commit %s: testing ci at the commit"):format(sha:sub(1, 7)))
-  local code, head_doc, tail = M.run_ci(head_snap, root, extra, args.suite_args)
+  local suite_args =
+    M.shared_cache_args(args.suite_args, memory_dir(root, args.state_dir) .. "/cache")
+  local code, head_doc, tail = M.run_ci(head_snap, root, extra, suite_args)
   r.head = head_doc or vim.NIL
   r.steps_head = step_states(head_doc)
   if head_doc and head_doc.profile and head_doc.profile ~= vim.NIL then
@@ -599,12 +671,19 @@ local function check(root, sha, args, say, snaps)
       -- the base runs the profile the commit ran (its default may differ)
       local profile = type(r.profile) == "string" and { "--profile=" .. r.profile } or {}
       local base_code
+      -- only the spec files that are red at the commit run at the base (a run of the whole suite takes minutes)
+      local base_suite_args, narrowed = M.base_suite_args(cls0.new, suite_args, base_snap.tree)
+      if narrowed then
+        say(
+          ("ci commit %s: the suite at the base runs only the red spec files"):format(sha:sub(1, 7))
+        )
+      end
       for _ = 1, 2 do
         base_code, base_doc, tail = M.run_ci(
           base_snap,
           root,
           vim.list_extend(vim.deepcopy(profile), { "--step=" .. table.concat(steps, ",") }),
-          args.suite_args
+          base_suite_args
         )
         -- a step the base does not have yet is new as a whole: run the others
         local missing = base_code == M.EXIT_USAGE and unknown_steps(base_doc) or {}
@@ -635,7 +714,7 @@ local function check(root, sha, args, say, snaps)
     local still, flaky = cls.new, {}
     if base_doc and #cls.new > 0 then
       say(("ci commit %s: the new findings once more at the commit"):format(sha:sub(1, 7)))
-      still, flaky = M.confirm(head_snap, root, r.profile, cls.new, args.suite_args)
+      still, flaky = M.confirm(head_snap, root, r.profile, cls.new, suite_args)
     end
     r.new, r.known, r.fixed, r.flaky, r.exact =
       items_doc(still), items_doc(cls.known), items_doc(cls.fixed), items_doc(flaky), cls.exact
