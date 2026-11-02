@@ -27,9 +27,9 @@ mkdir -p "$state"
 key=$(printf '%s' /some/checkout | cksum | cut -d' ' -f1)
 lock="$state/suite-lock-$key"
 rm -f "$lock"
-if [ "$kind" = live ]; then sleep 30 & hp=$!; else ( : ) & hp=$!; wait "$hp"; fi
-if [ "$kind" = junk ]; then printf 'x y
-' >"$lock"; elif [ "$age" != none ]; then printf '%s %s\n' "$hp" "$(( $(date +%s) - age ))" >"$lock"; fi
+if [ "$kind" = live ] || [ "$kind" = junk ]; then sleep 30 & hp=$!; else ( : ) & hp=$!; wait "$hp"; fi
+if [ "$kind" = junk ]; then printf '%s junk
+' "$hp" >"$lock"; elif [ "$age" != none ]; then printf '%s %s\n' "$hp" "$(( $(date +%s) - age ))" >"$lock"; fi
 suite_lock_acquire "$state" /some/checkout
 echo "owned=$SUITE_LOCK_OWNED"
 suite_lock_release
