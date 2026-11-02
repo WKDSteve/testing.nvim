@@ -812,6 +812,7 @@ end
 ---@field grace integer
 ---@field poll integer
 ---@field timeouts Testing.Child.Timeouts
+---@field selector Testing.Select.Selector
 ---@field notes string[]
 ---@field unattached table[]
 ---@field live Testing.Isolated.Slot[] Slots whose child is running.
@@ -1064,6 +1065,111 @@ local function run_child(ctx, slot)
   child.cleanup(plan)
 end
 
+---@param ctx Testing.Isolated.Ctx
+local function supervise(ctx)
+  local child, live, state = ctx.child, ctx.live, ctx.state
+  local hrtime = vim.uv.hrtime
+  local t = hrtime() / 1e6
+  for _, slot in ipairs(live) do
+    local h = slot.handle
+    if h and not h.exited then
+      if h.kill_requested_ms then
+        if h.first_kill_ms == nil then
+          h.first_kill_ms = h.kill_requested_ms
+        end
+        if t - h.first_kill_ms > M.REAP_MS and child.abandon then
+          -- the kill did not end the process: stop waiting for it (an absolute upper bound)
+          child.abandon(h)
+        elseif t - h.kill_requested_ms > M.KILL_RETRY_MS then
+          child.kill_tree_async(h)
+          h.kill_requested_ms = t
+        end
+      elseif state.stopped then
+        h.reason = "cancel"
+        child.kill_tree_async(h)
+      else
+        if h.stall_limit then
+          local st = vim.uv.fs_stat(slot.fragment or slot.plan.fragment)
+          local size = st and st.size or 0
+          if size ~= h.frag_size then
+            h.frag_size = size
+            h.progress_ms = t
+            local over
+            over, h.frag_scanned =
+              M.scan_file_over(slot.fragment or slot.plan.fragment, h.frag_scanned or 0, size)
+            if over then
+              -- the file's cases are over: finishing and quitting (slow on a loaded machine) is no stuck case
+              h.stall_limit = nil
+            end
+          end
+        end
+        if h.deadline and t >= h.deadline then
+          h.reason = "file"
+          child.kill_tree_async(h)
+        elseif
+          h.stall_limit
+          and h.frag_size > 0 -- before the first record only the file deadline counts (loading the file)
+          and t - h.progress_ms > h.stall_limit
+        then
+          h.reason = "stall"
+          child.kill_tree_async(h)
+        end
+      end
+    end
+  end
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function run_inproc(ctx, slot)
+  local opts, o, root, selector, timeouts = ctx.opts, ctx.o, ctx.root, ctx.selector, ctx.timeouts
+  local notes, unattached = ctx.notes, ctx.unattached
+  local entry = slot.entry
+  if opts.on_file_start and not slot.not_first then
+    pcall(opts.on_file_start, entry.rel)
+  end
+  local lf
+  if opts.lf then
+    local ids = select_mod.lf_ids(entry.rel, opts.lf)
+    lf = ids and { [entry.rel] = ids } or nil
+  end
+  local guard_ok, report = pcall(inproc.run, {
+    root = root,
+    files = {
+      entry --[[@as Testing.Discover.File]],
+    },
+    selector = selector,
+    lf = lf,
+    timeouts = timeouts,
+    assertions = o.assertions,
+    seed = opts.seed,
+    skip_facts = true,
+    clock = opts.clock,
+    soft = opts.soft,
+    guard_cfg = opts.guard_cfg
+      and options_mod.guard_config(o, { root = root, seed = opts.seed, in_child = false }),
+  })
+  if not guard_ok then
+    fail_slot(slot, ("%s: internal error: %s"):format(entry.rel, tostring(report)))
+    return
+  end
+  for _, n in ipairs(report.notes or {}) do
+    -- the same diagnostic of every in-process file is one line
+    if not vim.tbl_contains(notes, n) then
+      notes[#notes + 1] = n
+    end
+  end
+  vim.list_extend(unattached, report.unattached or {})
+  for _, c in ipairs(report.result.cases) do
+    if c.file == "<late>" then
+      c.file = entry.rel
+      c.id = entry.rel .. "::late assertions"
+    end
+  end
+  slot.cases = report.result.cases
+  slot.state = "done"
+end
+
 ---Run the planned files; same report as `inproc.run`.
 ---@param opts Testing.Isolated.Opts
 ---@return Testing.Inproc.Report
@@ -1153,6 +1259,7 @@ function M.run(opts)
     grace = grace,
     poll = poll,
     timeouts = timeouts,
+    selector = selector,
     notes = notes,
     unattached = unattached,
     live = live,
@@ -1497,107 +1604,7 @@ function M.run(opts)
   end
 
   -- ---- supervisor ------------------------------------------------------------------------
-  local function supervise()
-    local t = hrtime() / 1e6
-    for _, slot in ipairs(live) do
-      local h = slot.handle
-      if h and not h.exited then
-        if h.kill_requested_ms then
-          if h.first_kill_ms == nil then
-            h.first_kill_ms = h.kill_requested_ms
-          end
-          if t - h.first_kill_ms > M.REAP_MS and child.abandon then
-            -- the kill did not end the process: stop waiting for it (an absolute upper bound)
-            child.abandon(h)
-          elseif t - h.kill_requested_ms > M.KILL_RETRY_MS then
-            child.kill_tree_async(h)
-            h.kill_requested_ms = t
-          end
-        elseif state.stopped then
-          h.reason = "cancel"
-          child.kill_tree_async(h)
-        else
-          if h.stall_limit then
-            local st = vim.uv.fs_stat(slot.fragment or slot.plan.fragment)
-            local size = st and st.size or 0
-            if size ~= h.frag_size then
-              h.frag_size = size
-              h.progress_ms = t
-              local over
-              over, h.frag_scanned =
-                M.scan_file_over(slot.fragment or slot.plan.fragment, h.frag_scanned or 0, size)
-              if over then
-                -- the file's cases are over: finishing and quitting (slow on a loaded machine) is no stuck case
-                h.stall_limit = nil
-              end
-            end
-          end
-          if h.deadline and t >= h.deadline then
-            h.reason = "file"
-            child.kill_tree_async(h)
-          elseif
-            h.stall_limit
-            and h.frag_size > 0 -- before the first record only the file deadline counts (loading the file)
-            and t - h.progress_ms > h.stall_limit
-          then
-            h.reason = "stall"
-            child.kill_tree_async(h)
-          end
-        end
-      end
-    end
-  end
-
-  ---@param slot Testing.Isolated.Slot
-  local function run_inproc(slot)
-    local entry = slot.entry
-    if opts.on_file_start and not slot.not_first then
-      pcall(opts.on_file_start, entry.rel)
-    end
-    local lf
-    if opts.lf then
-      local ids = select_mod.lf_ids(entry.rel, opts.lf)
-      lf = ids and { [entry.rel] = ids } or nil
-    end
-    local guard_ok, report = pcall(inproc.run, {
-      root = root,
-      files = {
-        entry --[[@as Testing.Discover.File]],
-      },
-      selector = selector,
-      lf = lf,
-      timeouts = timeouts,
-      assertions = o.assertions,
-      seed = opts.seed,
-      skip_facts = true,
-      clock = opts.clock,
-      soft = opts.soft,
-      guard_cfg = opts.guard_cfg
-        and options_mod.guard_config(o, { root = root, seed = opts.seed, in_child = false }),
-    })
-    if not guard_ok then
-      fail_slot(slot, ("%s: internal error: %s"):format(entry.rel, tostring(report)))
-      return
-    end
-    for _, n in ipairs(report.notes or {}) do
-      -- the same diagnostic of every in-process file is one line
-      if not vim.tbl_contains(notes, n) then
-        notes[#notes + 1] = n
-      end
-    end
-    vim.list_extend(unattached, report.unattached or {})
-    for _, c in ipairs(report.result.cases) do
-      if c.file == "<late>" then
-        c.file = entry.rel
-        c.id = entry.rel .. "::late assertions"
-      end
-    end
-    slot.cases = report.result.cases
-    slot.state = "done"
-  end
-
   local next_commit = 1
-
   ---@param slot Testing.Isolated.Slot
   local function commit(slot)
     if slot.kind == "unselected" then
@@ -1646,7 +1653,7 @@ function M.run(opts)
         end
       else
         if slot.kind == "inproc" and slot.state ~= "done" then
-          run_inproc(slot)
+          run_inproc(ctx, slot)
         end
         if slot.state ~= "done" then
           return
@@ -1676,7 +1683,7 @@ function M.run(opts)
       if state.fatal then
         error(state.fatal, 0)
       end
-      supervise()
+      supervise(ctx)
       commit_ready()
       if next_commit > #slots then
         break
@@ -1690,7 +1697,7 @@ function M.run(opts)
     state.stopped = true
     local deadline = hrtime() / 1e6 + M.REAP_MS
     while any_alive() and hrtime() / 1e6 < deadline do
-      supervise()
+      supervise(ctx)
       vim.wait(poll)
     end
   end
