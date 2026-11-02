@@ -283,8 +283,8 @@ return function(H)
     has(text, "JOB REFUSED", "check: ... loudly")
     has(
       text,
-      "testing ci trust WKDSteve/tasks.nvim " .. SHA,
-      "check: ... with the command to release it"
+      'scripts/testing.lua" ci trust WKDSteve/tasks.nvim ' .. SHA,
+      "check: ... with the command to release it (the real call, `testing` is not on the PATH)"
     )
 
     code = run_check(env(), true)

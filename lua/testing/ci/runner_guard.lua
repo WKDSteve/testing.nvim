@@ -308,6 +308,9 @@ local function gh(ctx, args)
   return r.stdout or ""
 end
 
+---@type fun(ctx?: Testing.RunnerGuard.Ctx): string, string
+local tools
+
 ---`testing ci runner-guard check`: the hook.
 ---@param sv { out: fun(s: string), err: fun(s: string) }
 ---@param ctx? Testing.RunnerGuard.Ctx
@@ -346,8 +349,12 @@ local function check(sv, ctx)
     and facts.event ~= "pull_request"
     and facts.event ~= "pull_request_target"
   then
+    -- `testing` is not on the PATH: name the call that works from anywhere
+    local nvim, script = tools(ctx)
     sv.err(
-      ("runner-guard: review it, then: testing ci trust %s %s   (and re-run the job)"):format(
+      ('runner-guard: review it, then: "%s" -n -i NONE --headless -u NONE -l "%s" ci trust %s %s   (and re-run the job)'):format(
+        nvim,
+        script,
         repo,
         facts.sha
       )
@@ -820,7 +827,7 @@ end
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@return string nvim
 ---@return string script
-local function tools(ctx)
+function tools(ctx)
   local nvim = ctx and ctx.nvim or vim.v.progpath
   local script = ctx and ctx.script
   if not script then

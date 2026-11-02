@@ -55,7 +55,10 @@ runner (`-NoGuard` leaves it out).
 
 ## Releasing a commit
 
-A refused push run says so in its log ("Set up job") and names the command:
+A refused push run says so in its log ("Set up job") and names the command. `testing` is usually not on the PATH, so the
+log prints the call that works from anywhere (`"<nvim>" -n -i NONE --headless -u NONE -l "<checkout>/scripts/testing.lua"
+ci trust <repo> <sha>`); the examples below write it short as `testing`, put the call in an alias or a wrapper script of
+your own:
 
 ```sh
 testing ci trust WKDSteve/tasks.nvim --show        # what changed since the last reviewed commit; records nothing
