@@ -102,6 +102,10 @@ return {
       "luacheck",
       "lua-language-server",
       "bash",
+      -- pty_spec.lua: testing.pty reads the recording with `cat` and removes it with `rm` (on Linux, where
+      -- tmux runs directly; on Windows both run inside WSL)
+      "cat",
+      "rm",
       "cmd",
       "ps",
       "does-not-exist",
