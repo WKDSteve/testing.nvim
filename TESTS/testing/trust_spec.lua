@@ -311,6 +311,12 @@ return function(H)
     local real_state = base .. "/real-state"
     eq(
       trust.store_from_args({ "run", ".", "--state-dir", real_state }),
+      nil,
+      "store_from_args: no store there, the default one"
+    )
+    put(real_state .. "/testing/trust.json", ('{"v":%d,"entries":[]}'):format(trust.VERSION))
+    eq(
+      trust.store_from_args({ "run", ".", "--state-dir", real_state }),
       real_state .. "/testing/trust.json",
       "store_from_args: split form"
     )

@@ -20,6 +20,7 @@ return function(H)
   -- The probe: `$1` the library, `$2` the state directory, `$3` the age of the planted lock in seconds (or "none"),
   -- `$4` "live" (the planted holder is a running process) or "dead". Prints what the second suite sees.
   local probe = [[
+set -u
 . "$1"
 state="$2"; age="$3"; kind="$4"
 mkdir -p "$state"
@@ -27,7 +28,8 @@ key=$(printf '%s' /some/checkout | cksum | cut -d' ' -f1)
 lock="$state/suite-lock-$key"
 rm -f "$lock"
 if [ "$kind" = live ]; then sleep 30 & hp=$!; else ( : ) & hp=$!; wait "$hp"; fi
-if [ "$age" != none ]; then printf '%s %s\n' "$hp" "$(( $(date +%s) - age ))" >"$lock"; fi
+if [ "$kind" = junk ]; then printf 'x y
+' >"$lock"; elif [ "$age" != none ]; then printf '%s %s\n' "$hp" "$(( $(date +%s) - age ))" >"$lock"; fi
 suite_lock_acquire "$state" /some/checkout
 echo "owned=$SUITE_LOCK_OWNED"
 suite_lock_release
@@ -70,6 +72,12 @@ kill "$hp" 2>/dev/null
   ok(
     out:find("owned=1", 1, true) and not out:find("warning", 1, true),
     "a lock older than 6 h is taken over: " .. out
+  )
+
+  out = run("5", "junk")
+  ok(
+    out:find("owned=1", 1, true) and not out:find("warning", 1, true),
+    "a lock file with junk in it is taken over, not a crash under set -u: " .. out
   )
 
   vim.fn.delete(base, "rf")

@@ -23,7 +23,8 @@ suite_lock_acquire() {
   max="${SUITE_LOCK_MAX_AGE:-21600}"
   if [ -f "$file" ]; then
     read -r holder since <"$file" 2>/dev/null || true
-    since="${since:-0}"
+    case "${since:-}" in '' | *[!0-9]*) since=0 ;; esac
+    case "${holder:-}" in '' | *[!0-9]*) holder="" ;; esac
     if [ -n "${holder:-}" ] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null \
       && [ $((now - since)) -lt "$max" ]; then
       printf '\033[33m%s\033[0m\n' "warning: another full suite is running in this checkout (pid $holder, started $((now - since)) s ago): two at once make ci_runner_guard_spec and ci_editor_spec time out. Wait for it, or run in a worktree of its own." >&2
