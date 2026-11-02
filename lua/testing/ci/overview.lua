@@ -551,25 +551,26 @@ end
 ---@return table[]
 function M.collect(dirs, opts, sv)
   local by_dir, why = {}, nil
+  -- two checkouts of one GitHub repository are one row, with or without the question to GitHub (git only: the
+  -- origin and the commit time); the other checkout is named in the note of the kept one
+  local list = {}
+  for i, dir in ipairs(dirs) do
+    list[i] = { dir = dir, from_root = false }
+  end
+  local clones
+  local okd, kept, found = pcall(require("testing.ci.remote").dedupe_clones, list)
+  if okd then
+    list = kept
+    clones = found
+    dirs = vim.tbl_map(function(r)
+      return r.dir
+    end, kept)
+  end
   if opts.no_remote then
     why = "not asked (--no-remote)"
   elseif not pcall(require, "lib.nvim.net.github") then
     why = "lib.nvim has no net.github"
   else
-    local list = {}
-    for i, dir in ipairs(dirs) do
-      list[i] = { dir = dir, from_root = false }
-    end
-    -- two checkouts of one GitHub repository are one row (the CI is asked once); the other is named in the note
-    local clones
-    local okd, kept, found = pcall(require("testing.ci.remote").dedupe_clones, list)
-    if okd then
-      list = kept
-      clones = found
-      dirs = vim.tbl_map(function(r)
-        return r.dir
-      end, kept)
-    end
     local ok, records = pcall(
       M.deps.remote,
       list,

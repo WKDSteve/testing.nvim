@@ -408,7 +408,7 @@ never fetches: it asks GitHub about the commit the last `git fetch` brought.
 Two checkouts of the same GitHub repository (the same `owner/repo` of `origin`) are one row and the CI is asked once.
 The checkout whose `origin/<branch>` commit is newer wins (a stale second clone shows an old state); on a tie one that
 was named on the command line beats one found below a `--repos-root`, then the first directory in byte order. The note
-of the row says `further clone: <directory name>`. `testing ci overview` and the export use the same rule. In `--json`
+of the row says `further clone: <directory name>`. `testing ci overview` (also with `--no-remote`, git only) and the export (`testing export`, `call fleet`: the merged checkout is named in `info.merged`) use the same rule. In `--json`
 the free texts that come from GitHub (job names, notes, errors) are redacted as `testing export` redacts them: the
 token of the adapter is `<TOKEN>`, a secret of the environment `<ENV>`, a path of this machine a placeholder.
 

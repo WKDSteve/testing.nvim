@@ -116,10 +116,23 @@ return function(H)
     eq(fixture.read(out .. "/fleet.json"):find("shallow", 1, true), nil, "fleet.json: neither")
   end
 
-  -- ── two clones of the same repository: the error names the cause ──
+  -- ── two clones of the same repository (one origin): one repository, the other is named as merged ──
   do
     local a = base .. "/one/dup.nvim"
     local b = base .. "/two/dup.nvim"
+    fixture.write(a .. "/.testing.lua", "return {}\n")
+    fixture.write(b .. "/.testing.lua", "return {}\n")
+    local restore = fixture.install()
+    local dirs, info = export.resolve({ roots = { a, b } })
+    restore()
+    eq(#dirs, 1, "one origin: one repository")
+    eq(#info.merged, 1, "the other checkout is named as merged")
+  end
+
+  -- ── two clones whose origin cannot be read are not merged: the error names the cause ──
+  do
+    local a = base .. "/one/gamma.nvim"
+    local b = base .. "/two/gamma.nvim"
     fixture.write(a .. "/.testing.lua", "return {}\n")
     fixture.write(b .. "/.testing.lua", "return {}\n")
     local restore = fixture.install()

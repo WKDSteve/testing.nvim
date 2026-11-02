@@ -899,12 +899,12 @@ end
 ---The repositories of a selection, sorted by name, and how many were left out (vaults, excludes).
 ---@param sel Testing.Export.Selection
 ---@return string[]|nil dirs
----@return { excluded: string[], missing: string[] }|string info_or_problem
+---@return { excluded: string[], missing: string[], merged?: string[] }|string info_or_problem
 function M.resolve(sel)
   local overview = require("testing.ci.overview")
   local cfg = vim.deepcopy(require("testing.config.DEFAULTS").project.ci_overview)
   -- `resolve` reads the four lists only; the flags of the overview's own command line are off
-  return overview.resolve({
+  local dirs, info = overview.resolve({
     roots = sel.roots or {},
     repos_roots = sel.repos_roots or {},
     include = sel.include or {},
@@ -913,6 +913,35 @@ function M.resolve(sel)
     no_remote = false,
     help = false,
   }, cfg)
+  if not dirs or #dirs < 2 then
+    return dirs, info
+  end
+  -- two checkouts of one GitHub repository are one repository (as in `testing ci overview`): the newer one is
+  -- exported, git only; a checkout whose origin cannot be read is kept
+  local list = {}
+  for i, dir in ipairs(dirs) do
+    list[i] = { dir = dir, from_root = false }
+  end
+  local okd, kept = pcall(require("testing.ci.remote").dedupe_clones, list)
+  if not okd then
+    return dirs, info
+  end
+  local keep = {}
+  for _, r in ipairs(kept) do
+    keep[r.dir] = true
+  end
+  local merged, out = {}, {}
+  for _, dir in ipairs(dirs) do
+    if keep[dir] then
+      out[#out + 1] = dir
+    else
+      merged[#merged + 1] = vim.fs.basename(dir)
+    end
+  end
+  if type(info) == "table" then
+    info.merged = merged
+  end
+  return out, info
 end
 
 ---@class Testing.Export.Opts: Testing.Export.Selection
