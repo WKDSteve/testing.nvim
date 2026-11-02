@@ -965,6 +965,64 @@ local function print_trailer(ctx)
   end
 end
 
+---The report data of the run: the sanitized IR (when a report needs it), the lines of the sanitized spec
+---reporters and the `--json` file. A report that cannot be built or written ends the run with exit 3: the second
+---result is then the exit code (and the held lines are flushed as one INFRA line).
+---@param ctx { args: table, root: string, res: Testing.Result, inproc: table, reports: table, printer: table, primary: string, sanitized_specs: string[], out: fun(s: string), err: fun(s: string) }
+---@return string|nil json_text The sanitized IR as JSON (nil when no report needed it).
+---@return string[] spec_lines
+---@return integer|nil exit_code Set when the run ends here.
+local function write_reports(ctx)
+  local args, root, res, inproc, reports = ctx.args, ctx.root, ctx.res, ctx.inproc, ctx.reports
+  local printer, primary, sanitized_specs, out, err =
+    ctx.printer, ctx.primary, ctx.sanitized_specs, ctx.out, ctx.err
+  local emit, flush_primary = printer.emit, printer.flush
+  local need_ir = #sanitized_specs > 0 or primary == "json" or args.json ~= nil
+  local ir, json_text
+  if need_ir then
+    local serr
+    ir, json_text, serr = inproc.sanitize(res, root)
+    if not ir then
+      err("testing: " .. tostring(serr))
+      flush_primary("the report could not be built: " .. tostring(serr))
+      return nil, {}, M.EXIT_INFRA
+    end
+    if type(ir.warnings) == "table" and #ir.warnings > 0 then
+      err(
+        ("testing: note: the IR carries %d privacy warning(s) (see `warnings`)"):format(
+          #ir.warnings
+        )
+      )
+    end
+  end
+  local spec_lines = {}
+  if #sanitized_specs > 0 then
+    local outputs, errors =
+      reports.run_reporters(ir --[[@as Testing.Result]], { reporters = sanitized_specs })
+    emit(outputs, errors, function(line)
+      spec_lines[#spec_lines + 1] = line
+    end)
+  end
+  local json_failed
+  if args.json then
+    local path = vim.fs.normalize(vim.fn.fnamemodify(args.json, ":p"))
+    local wrote, werr =
+      require("lib.nvim.fs.write.atomic")(path, json_text --[[@as string]], { mkdirp = true })
+    if not wrote then
+      err(("testing: cannot write %s: %s"):format(path, tostring(werr)))
+      json_failed = ("cannot write %s"):format(util.clean(path))
+    end
+  end
+  if json_failed then
+    flush_primary(json_failed)
+    for _, line in ipairs(spec_lines) do
+      out(line)
+    end
+    return json_text, spec_lines, M.EXIT_INFRA
+  end
+  return json_text, spec_lines, nil
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1524,52 +1582,24 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     out = out,
     err = err,
   })
-  local emit, flush_primary, render_primary = printer.emit, printer.flush, printer.render
+  local flush_primary, render_primary = printer.flush, printer.render
   if primary == "term" or primary == "agent" then
     render_primary(verdict)
   end
-  local need_ir = #sanitized_specs > 0 or primary == "json" or args.json ~= nil
-  local ir, json_text
-  if need_ir then
-    local serr
-    ir, json_text, serr = inproc.sanitize(res, root)
-    if not ir then
-      err("testing: " .. tostring(serr))
-      flush_primary("the report could not be built: " .. tostring(serr))
-      return M.EXIT_INFRA
-    end
-    if type(ir.warnings) == "table" and #ir.warnings > 0 then
-      err(
-        ("testing: note: the IR carries %d privacy warning(s) (see `warnings`)"):format(
-          #ir.warnings
-        )
-      )
-    end
-  end
-  local spec_lines = {}
-  if #sanitized_specs > 0 then
-    local outputs, errors =
-      reports.run_reporters(ir --[[@as Testing.Result]], { reporters = sanitized_specs })
-    emit(outputs, errors, function(line)
-      spec_lines[#spec_lines + 1] = line
-    end)
-  end
-  local json_failed
-  if args.json then
-    local path = vim.fs.normalize(vim.fn.fnamemodify(args.json, ":p"))
-    local wrote, werr =
-      require("lib.nvim.fs.write.atomic")(path, json_text --[[@as string]], { mkdirp = true })
-    if not wrote then
-      err(("testing: cannot write %s: %s"):format(path, tostring(werr)))
-      json_failed = ("cannot write %s"):format(util.clean(path))
-    end
-  end
-  if json_failed then
-    flush_primary(json_failed)
-    for _, line in ipairs(spec_lines) do
-      out(line)
-    end
-    return M.EXIT_INFRA
+  local json_text, spec_lines, report_exit = write_reports({
+    args = args,
+    root = root,
+    res = res,
+    inproc = inproc,
+    reports = reports,
+    printer = printer,
+    primary = primary,
+    sanitized_specs = sanitized_specs,
+    out = out,
+    err = err,
+  })
+  if report_exit then
+    return report_exit
   end
 
   -- `testing stamp`: a stamp only for the verdict `green`; a run that earned none exits 1 (asked for, not given).
