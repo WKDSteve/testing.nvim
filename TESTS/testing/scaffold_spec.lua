@@ -645,6 +645,39 @@ return function(H)
   )
   vim.fn.delete(real_state, "rf")
 
+  -- the plain run's history lands in the developer's real state directory too: the spec process gets a throwaway one,
+  -- the real one goes to the runner as `--state-dir` (the editor's test explorer reads it there)
+  local run_state = vim.fn.tempname() .. "-run-state"
+  local plain_run = run(
+    { bash, "scripts/test.sh" },
+    run_proj,
+    vim.tbl_extend("force", deps_env, { XDG_STATE_HOME = run_state })
+  )
+  eq(plain_run.code, 0, "test.sh: green: " .. plain_run.stdout .. plain_run.stderr)
+  ok(
+    #vim.fn.globpath(run_state, "**/runs.jsonl", true, true) > 0,
+    "test.sh: the run history is below the real state directory"
+  )
+  vim.fn.delete(run_state, "rf")
+  -- an `--state-dir` of the caller wins over the real one
+  local own_state = vim.fn.tempname() .. "-own-state"
+  local own_run = run(
+    { bash, "scripts/test.sh", "--state-dir", own_state },
+    run_proj,
+    vim.tbl_extend("force", deps_env, { XDG_STATE_HOME = run_state })
+  )
+  eq(own_run.code, 0, "test.sh --state-dir: green: " .. own_run.stdout .. own_run.stderr)
+  ok(
+    #vim.fn.globpath(own_state, "**/runs.jsonl", true, true) > 0,
+    "test.sh: the caller's --state-dir wins"
+  )
+  ok(
+    #vim.fn.globpath(run_state, "**/runs.jsonl", true, true) == 0,
+    "and the real one is left alone"
+  )
+  vim.fn.delete(own_state, "rf")
+  vim.fn.delete(run_state, "rf")
+
   -- the generated spec can fail: break the module and the verdict changes
   vim.fn.writefile({ 'error("module is broken")' }, run_proj .. "/lua/runme/init.lua")
   local red = run({ bash, "scripts/test.sh" }, run_proj, deps_env)

@@ -10,6 +10,10 @@ stdpath('state')/testing/<project>/last.json   the last result per case, merged 
 stdpath('state')/testing/<project>/prev.json   the one before it
 ```
 
+`stdpath('state')` is the editor's real one for `testing run --state-dir <dir>` too: the generated `scripts/test.sh` asks for it
+before it gives the specs a throwaway state and hands it down as that argument, so a run through the script updates the
+same `last.json` the explorer reads.
+
 Every run writes it after the history (`testing.run.project`). It is a convenience, never part of the verdict:
 a failing write is a note (`testing: note: result not stored: ...`) and the run goes on.
 

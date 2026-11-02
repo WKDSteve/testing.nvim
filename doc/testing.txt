@@ -301,6 +301,9 @@ Selection ~
                      the change reaches (docmap.nvim). A hint, it never
                      changes what runs here. Also `affected.consumers` in
                      `.testing.lua`.
+  --state-dir {dir}  State directory of the run history (default stdpath('state')).
+                     scripts/test.sh hands the real one down; the specs keep
+                     a throwaway one.
   --cache-dir {dir}  Base directory of the result cache (default stdpath('cache');
                      env TESTING_CACHE_HOME; the flag wins). `cache = {
                      project_key = ... }` in .testing.lua names the project

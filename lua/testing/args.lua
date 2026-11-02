@@ -110,6 +110,7 @@ M.AGENT_BUDGET_MIN = 200
 ---@field cache_audit_text? string `--cache-audit <0..1|all>` as typed
 ---@field cache_audit? number `--cache-audit`: the share of the cache hits (0..1; `all` = 1) that run anyway and are compared with the stored result
 ---@field cache_dir? string `--cache-dir <dir>`: replaces `stdpath('cache')` as the base of the result cache
+---@field state_dir? string `--state-dir <dir>`: replaces `stdpath('state')` for the run history (`runs.jsonl`), the timings and the key-flip memory
 ---@field cache_clear boolean `--cache-clear`: delete the cache of this project and exit
 ---@field affected? boolean|string `--affected` / `--affected=<rev>`: the specs the changes since `<rev>` (default `HEAD~1`) can reach
 ---@field changed boolean `--changed`: the specs the working tree against `HEAD` can reach
@@ -164,6 +165,14 @@ local OPTIONS = {
     field = "cache_dir",
     arg = "<dir>",
     help = "base directory of the result cache (default: stdpath('cache'); env TESTING_CACHE_HOME); the project folder is below it",
+  },
+  {
+    name = "state_dir",
+    long = "state-dir",
+    kind = "value",
+    field = "state_dir",
+    arg = "<dir>",
+    help = "state directory of the run history (default: stdpath('state')); `scripts/test.sh` hands the real one down, because the specs run with a throwaway one",
   },
   {
     name = "json",

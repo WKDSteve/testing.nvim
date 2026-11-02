@@ -747,6 +747,12 @@ local function execute(argv, sv)
     argv = clean_argv(argv),
   }
 
+  -- where the run history lives: `--state-dir`, else `stdpath('state')` (the specs still get the throwaway one of
+  -- `scripts/test.sh`: the directory is an argument of the runner, never an environment variable)
+  if args.state_dir then
+    sv.state_dir = abs(args.state_dir)
+  end
+
   -- where the result cache lives: `--cache-dir`, else `TESTING_CACHE_HOME` (read by the entry script and handed
   -- down in `env`), else `stdpath('cache')`; and the folder name, `cache.project_key` or the checkout path
   if args.cache_dir then
