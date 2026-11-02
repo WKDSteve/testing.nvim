@@ -174,7 +174,7 @@ An option that is accepted by the parser but not implemented is **refused** with
 | Option | Meaning |
 | --- | --- |
 | `--reporter <name>` | Terminal reporter (`term`, `github`, `junit`, `json`, `agent`). Without it: `TESTING_REPORTER`, then a coding-agent environment (`agent`), else `term`; see [Environment](#environment). |
-| `--agent-budget <n>`, `--format <text\|jsonl>` | Only with the `agent` reporter (otherwise exit `2`): the character budget of the failure part (default 4000, at least 200; what does not fit is counted in a `more:` line) and the shape (`text`, or `jsonl`: one JSON object per line). |
+| `--agent-budget <n>`, `--format <text\|jsonl>` | Only with the `agent` reporter (otherwise exit `2`): the character budget of the failure part (default 4000, at least 200; what does not fit is counted in a `more:` line) and the shape (`text`, or `jsonl`: one JSON object per line). When the text report leaves something out, the complete report is written to `last-failures.md` in the project's state directory and the `more:` line names that file (no second run needed). |
 | `--json <file>` | Write the Result-IR (`schema_version = 1`) and validate it again. |
 | `--junit <file>` | Write a JUnit XML report. |
 | `--events <file\|->` | Write the events of the run while it goes (NDJSON: `run_start` with the plan, `file_start`, `case`, `file_end`, `run_done`; with `testing fast` also `phase_done`; with `--watch` also `watch_change`), for a supervisor that wants to show a run live. `-` is stdout (the reporter then prints to stderr). See [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md#events-stream). |

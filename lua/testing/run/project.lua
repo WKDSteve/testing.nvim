@@ -1201,6 +1201,13 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   local function render_primary(shown)
     local reporter_opts = primary == "term" and term_options(sv, args, #res.cases)
       or agent_options(sv, args)
+    -- the agent report names a file with everything it had to leave out, so that nobody has to run it again
+    local full_file
+    if primary == "agent" and reporter_opts.format ~= "jsonl" then
+      full_file = require("testing.history").dir(root, { state_dir = sv.state_dir })
+        .. "/last-failures.md"
+      reporter_opts.full_file = full_file
+    end
     res.run.verdict = shown
     -- the real IR, like `term`: paths are made relative by the reporter itself
     local outputs, errors = reports.run_reporters(res, {
@@ -1212,6 +1219,24 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     emit(outputs, errors, function(line)
       held[#held + 1] = line
     end)
+    if full_file then
+      local cut = false
+      for _, line in ipairs(held) do
+        cut = cut or line:find("^more: ") ~= nil
+      end
+      if cut then
+        res.run.verdict = shown
+        local full = vim.tbl_extend(
+          "force",
+          {},
+          reporter_opts,
+          { budget = 2 ^ 30, full_file = false }
+        )
+        local text = table.concat(require("testing.report.agent").render(res, full), "\n") .. "\n"
+        res.run.verdict = verdict
+        pcall(require("lib.nvim.fs.write.atomic"), full_file, text, { mkdirp = true })
+      end
+    end
   end
   if primary == "term" or primary == "agent" then
     render_primary(verdict)

@@ -47,6 +47,7 @@ local M = {}
 ---@field format? "text"|"jsonl"
 ---@field command? string The command a `rerun:` line starts with (default `DEFAULTS.command`).
 ---@field line_max? integer Longest value / message line in characters (default 160).
+---@field full_file? string A file the caller writes the complete report to when this one leaves something out: the `more:` line names it instead of asking for a second run.
 
 ---@type { budget: integer, format: "text"|"jsonl", command: string, line_max: integer }
 M.DEFAULTS = {
@@ -735,9 +736,12 @@ local function render_text(result, v, groups, guards, o)
     if left_guards > 0 then
       what[#what + 1] = ("%d guard finding(s)"):format(left_guards)
     end
-    lines[#lines + 1] = ("more: %s not shown (budget %d chars); all of them: --json <file> or --agent-budget <n>"):format(
+    local all = o.full_file and (util.clean(o.full_file) .. " (or --agent-budget <n>)")
+      or "--json <file> or --agent-budget <n>"
+    lines[#lines + 1] = ("more: %s not shown (budget %d chars); all of them: %s"):format(
       table.concat(what, " and "),
-      o.budget
+      o.budget,
+      all
     )
   end
   return lines
