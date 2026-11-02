@@ -299,7 +299,14 @@ return function(H)
       end
       if vim.tbl_contains(suite_args, "--file") then
         confirm_args = { extra = extra, suite = suite_args }
-        if red_again then
+        if red_again == "measured" then
+          -- the same spec red again, its message with another measured number
+          return 1,
+            suite("red", { { file = "TESTS/x_spec.lua", line = 3, text = "took 312 ms" } }),
+            ""
+        elseif red_again == "whole" then
+          return 1, suite("red", {}), ""
+        elseif red_again then
           return 1, suite("red", BOOM), ""
         end
         return 0, suite("green", {}), ""
@@ -325,6 +332,12 @@ return function(H)
     red_again = true
     r = commit.check(tmp, ("a"):rep(40), args, function() end)
     eq({ r.verdict, #r.new, #r.flaky }, { "regression", 1, 0 }, "red again: a regression")
+    red_again = "measured"
+    r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq(r.verdict, "regression", "red again with another text: still a regression (by file)")
+    red_again = "whole"
+    r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq(r.verdict, "regression", "the step red again without findings: still a regression")
 
     local mem = commit.internal.memory_path
     local p1 = mem(tmp, ("a"):rep(40), args, ("b"):rep(40))

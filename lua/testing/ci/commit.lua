@@ -397,8 +397,9 @@ local function step_states(doc)
   return out
 end
 
----Run the spec files of new findings once more at the commit: a finding that is not red again is flaky (red under
----load, green alone), not a regression. A step that takes no file selection (not the suite) keeps its findings new.
+---Run the spec files of new findings once more at the commit: a finding whose spec file is not red again is flaky
+---(red under load, green alone), not a regression. A file that is red again keeps all its new findings, and so does a
+---step that is red again without findings or takes no file selection (not the suite).
 ---@param snap Testing.Ci.Snapshot The commit's snapshot.
 ---@param root string
 ---@param profile any The profile the commit ran.
@@ -430,20 +431,18 @@ function M.confirm(snap, root, profile, new_items, suite_args)
     local code, doc = M.run_ci(snap, root, extra, sel)
     -- 2: the step takes no file selection (not the suite) or another usage problem: nothing is confirmed
     if (code == M.EXIT_OK or code == M.EXIT_FAILED) and doc then
-      local pool = {}
+      -- by file, not by text: a message with a measured number differs between two runs of the same red spec
+      local red_files, red_whole = {}, false
       for _, s in ipairs(doc.steps or {}) do
         if s.name == step and baseline.is_red(s) then
+          red_whole = red_whole or #(s.findings or {}) == 0
           for _, f in ipairs(s.findings or {}) do
-            local k = baseline.key(step, f)
-            pool[k] = (pool[k] or 0) + 1
+            red_files[tostring(f.file or ""):gsub("\\", "/")] = true
           end
         end
       end
       for _, it in ipairs(by_step[step]) do
-        local k = baseline.key(step, it)
-        if (pool[k] or 0) > 0 then
-          pool[k] = pool[k] - 1
-        else
+        if not red_whole and not red_files[it.file:gsub("\\", "/")] then
           flaky_set[it] = true
         end
       end
