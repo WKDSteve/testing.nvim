@@ -1061,6 +1061,57 @@ local function apply_stamp(ctx)
   return code
 end
 
+---What the run says before the reports: its notes, the findings of a file without a case, the soft isolation
+---totals and the held output of the red files. A run without any case ends here (exit 2).
+---@param ctx { report: table, soft: table|nil, held_output: table[], err: fun(s: string) }
+---@return integer|nil exit_code Set when the run ends here.
+local function say_run_notes(ctx)
+  local report, soft, held_output, err = ctx.report, ctx.soft, ctx.held_output, ctx.err
+  for _, note in ipairs(report.notes or {}) do
+    err("testing: note: " .. note)
+  end
+  for _, f in ipairs(report.unattached or {}) do
+    -- findings of a file that has no case to carry them (everything filtered out, ...)
+    err(safe(("testing: guard [%s %s] %s"):format(f.guard, f.severity, f.message)))
+  end
+  if soft then
+    local t = soft:totals()
+    if t.leaky_files > 0 then
+      err(
+        ("testing: note: soft isolation: %d of %d file(s) changed state (%d difference(s) restored, %d not restorable)"):format(
+          t.leaky_files,
+          t.files,
+          t.restored,
+          t.unrestored
+        )
+      )
+    end
+  end
+  local res = report.result
+  if #held_output > 0 then
+    local red = {}
+    for _, c in ipairs(res.cases) do
+      if c.status ~= "pass" and c.status ~= "skip" and c.status ~= "xfail" then
+        red[c.file or ""] = true
+      end
+    end
+    for _, h in ipairs(held_output) do
+      if red[h.rel] then
+        err(output_block(h.rel, h.text))
+      end
+    end
+  end
+  if #res.cases == 0 then
+    if (report.files_unrun_budget or 0) > 0 and report.files_run == 0 then
+      err("testing: the --time-budget ran out before the first spec file started; nothing ran")
+    else
+      err("testing: no case matched the selection; nothing ran")
+    end
+    return M.EXIT_USAGE
+  end
+  return nil
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1536,48 +1587,12 @@ function M.execute_run(plan, sv, run_opts, err, ev)
       end
     end
   end
-  for _, note in ipairs(report.notes or {}) do
-    err("testing: note: " .. note)
-  end
-  for _, f in ipairs(report.unattached or {}) do
-    -- findings of a file that has no case to carry them (everything filtered out, ...)
-    err(safe(("testing: guard [%s %s] %s"):format(f.guard, f.severity, f.message)))
-  end
-  if soft then
-    local t = soft:totals()
-    if t.leaky_files > 0 then
-      err(
-        ("testing: note: soft isolation: %d of %d file(s) changed state (%d difference(s) restored, %d not restorable)"):format(
-          t.leaky_files,
-          t.files,
-          t.restored,
-          t.unrestored
-        )
-      )
-    end
+  local notes_exit =
+    say_run_notes({ report = report, soft = soft, held_output = held_output, err = err })
+  if notes_exit then
+    return notes_exit
   end
   local res = report.result
-  if #held_output > 0 then
-    local red = {}
-    for _, c in ipairs(res.cases) do
-      if c.status ~= "pass" and c.status ~= "skip" and c.status ~= "xfail" then
-        red[c.file or ""] = true
-      end
-    end
-    for _, h in ipairs(held_output) do
-      if red[h.rel] then
-        err(output_block(h.rel, h.text))
-      end
-    end
-  end
-  if #res.cases == 0 then
-    if (report.files_unrun_budget or 0) > 0 and report.files_run == 0 then
-      err("testing: the --time-budget ran out before the first spec file started; nothing ran")
-    else
-      err("testing: no case matched the selection; nothing ran")
-    end
-    return M.EXIT_USAGE
-  end
   -- 6. reporters
   if order_info then
     -- the files ran in priority order; the IR (and every report) stays in discovery order
