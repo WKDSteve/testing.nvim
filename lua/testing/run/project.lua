@@ -895,6 +895,76 @@ local function print_sentinel(ctx)
   end
 end
 
+---What follows the report: the findings, the lists of a retry, a stop or a spent time budget, the cache summary
+---and the timing line. A machine format keeps stdout clean: its notes go to stderr.
+---@param ctx { args: table, inproc: table, prep: table, res: Testing.Result, report: table, retry_info: table|nil, primary: string, quiet: boolean, findings: table, out: fun(s: string), err: fun(s: string) }
+local function print_trailer(ctx)
+  local args, inproc, prep, res, report = ctx.args, ctx.inproc, ctx.prep, ctx.res, ctx.report
+  local retry_info, primary, quiet = ctx.retry_info, ctx.primary, ctx.quiet
+  local findings, out, err = ctx.findings, ctx.out, ctx.err
+  local cached_mod = require("testing.run.cached")
+  print_findings(findings, out)
+  if primary == "term" then
+    print_unasserted(res, out)
+    print_no_case(res, out)
+  end
+  if retry_info then
+    -- flaky is never silent: the list is part of the output (stderr when stdout belongs to a machine format)
+    for _, line in ipairs(require("testing.run.retry").lines(retry_info)) do
+      if primary == "term" then
+        out(safe(line))
+      else
+        err("testing: note: " .. safe(line))
+      end
+    end
+  end
+  local unrun_budget = report.files_unrun_budget or 0
+  if report.stopped and report.files_unrun - unrun_budget > 0 and not quiet then
+    -- the failures the stop counted: what is red now plus what a retry made green (`--allow-flaky`)
+    local stopped_at = report.failed
+      + ((retry_info and retry_info.allow_flaky) and #retry_info.flaky or 0)
+    out(
+      ("\nstopped after %d failure(s) (--maxfail %d): %d file(s) not run"):format(
+        stopped_at,
+        args.maxfail or stopped_at,
+        report.files_unrun - unrun_budget
+      )
+    )
+  end
+  if unrun_budget > 0 and not quiet then
+    out(
+      ("\nbudget: %d file(s) not run (--time-budget %s ran out)"):format(
+        unrun_budget,
+        args.time_budget_text or "?"
+      )
+    )
+  end
+  local cache_line = cached_mod.summary_line(prep)
+  if cache_line then
+    -- the reasons carry names from the project's files (environment variables, modules): plain text only
+    cache_line = safe_output_line(cache_line)
+    if primary == "term" then
+      out("\n" .. cache_line)
+    else
+      err("testing: note: " .. cache_line)
+    end
+    -- the findings of `--cache-audit` (`cache.stale_pass`): file, what differs, the first key lines
+    for _, line in ipairs(cached_mod.audit_lines(prep)) do
+      line = safe_output_line(line)
+      if primary == "term" then
+        out(line)
+      else
+        err("testing: " .. line)
+      end
+    end
+  end
+  if args.timings and not quiet then
+    -- file names come from the project under test
+    local timing = safe(inproc.timing_line(res))
+    out((cache_line and primary == "term") and timing or ("\n" .. timing))
+  end
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1540,66 +1610,19 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     out(util.defuse_command(json_text --[[@as string]], true))
   end
 
-  print_findings(findings, out)
-  if primary == "term" then
-    print_unasserted(res, out)
-    print_no_case(res, out)
-  end
-  if retry_info then
-    -- flaky is never silent: the list is part of the output (stderr when stdout belongs to a machine format)
-    for _, line in ipairs(require("testing.run.retry").lines(retry_info)) do
-      if primary == "term" then
-        out(safe(line))
-      else
-        err("testing: note: " .. safe(line))
-      end
-    end
-  end
-  local unrun_budget = report.files_unrun_budget or 0
-  if report.stopped and report.files_unrun - unrun_budget > 0 and not quiet then
-    -- the failures the stop counted: what is red now plus what a retry made green (`--allow-flaky`)
-    local stopped_at = report.failed
-      + ((retry_info and retry_info.allow_flaky) and #retry_info.flaky or 0)
-    out(
-      ("\nstopped after %d failure(s) (--maxfail %d): %d file(s) not run"):format(
-        stopped_at,
-        args.maxfail or stopped_at,
-        report.files_unrun - unrun_budget
-      )
-    )
-  end
-  if unrun_budget > 0 and not quiet then
-    out(
-      ("\nbudget: %d file(s) not run (--time-budget %s ran out)"):format(
-        unrun_budget,
-        args.time_budget_text or "?"
-      )
-    )
-  end
-  local cache_line = cached_mod.summary_line(prep)
-  if cache_line then
-    -- the reasons carry names from the project's files (environment variables, modules): plain text only
-    cache_line = safe_output_line(cache_line)
-    if primary == "term" then
-      out("\n" .. cache_line)
-    else
-      err("testing: note: " .. cache_line)
-    end
-    -- the findings of `--cache-audit` (`cache.stale_pass`): file, what differs, the first key lines
-    for _, line in ipairs(cached_mod.audit_lines(prep)) do
-      line = safe_output_line(line)
-      if primary == "term" then
-        out(line)
-      else
-        err("testing: " .. line)
-      end
-    end
-  end
-  if args.timings and not quiet then
-    -- file names come from the project under test
-    local timing = safe(inproc.timing_line(res))
-    out((cache_line and primary == "term") and timing or ("\n" .. timing))
-  end
+  print_trailer({
+    args = args,
+    inproc = inproc,
+    prep = prep,
+    res = res,
+    report = report,
+    retry_info = retry_info,
+    primary = primary,
+    quiet = quiet,
+    findings = findings,
+    out = out,
+    err = err,
+  })
 
   -- 7. history, state, run state
   record_run_state({
