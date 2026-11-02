@@ -94,6 +94,7 @@ return {
       "wsl",
       "tmux",
       "podman",
+      "node",
       "git",
       "taskkill",
       "powershell",

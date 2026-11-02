@@ -42,8 +42,22 @@
 local M = {}
 
 M.VERSION = 1
-M.ENGINES = { rpc = true, manual = true }
-M.ACTIONS = { "keys", "input", "lua", "settle", "wait", "expect", "screen" }
+M.ENGINES = { rpc = true, manual = true, browser = true }
+M.ACTIONS =
+  { "keys", "input", "lua", "settle", "wait", "expect", "screen", "open", "press", "click", "shot" }
+---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
+M.ENGINE_ACTIONS = {
+  rpc = {
+    keys = true,
+    input = true,
+    lua = true,
+    settle = true,
+    wait = true,
+    expect = true,
+    screen = true,
+  },
+  browser = { open = true, press = true, click = true, wait = true, expect = true, shot = true },
+}
 M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
 M.MAX_BYTES = 256 * 1024
@@ -67,7 +81,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field id string
 ---@field title string
 ---@field task? string
----@field engine "rpc"|"manual"
+---@field engine "rpc"|"manual"|"browser"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
 ---@field sizes { rows: integer, cols: integer }[]
 ---@field steps Testing.Sheet.Step[]
@@ -78,7 +92,8 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 
 ---@class Testing.Sheet.Result
 ---@field ok boolean
----@field status "pass"|"fail"|"manual"
+---@field status "pass"|"fail"|"manual"|"skip"
+---@field skipped? string Why a sheet was skipped (a browser sheet without node, Playwright or chromium).
 ---@field failures string[] One line per failed step (size, step number, what).
 ---@field snapshots string[] The messages of the screen steps (written, matched, updated).
 
@@ -91,6 +106,10 @@ local STEP_KEYS = {
   timeout = "number",
   expect = "string",
   screen = "string",
+  open = "string",
+  press = "string",
+  click = "string",
+  shot = "string",
   masks = "table",
   cursor = "boolean",
   mode = "boolean",
@@ -236,7 +255,7 @@ function M.validate(s)
   end
   s.engine = s.engine or "rpc"
   if not M.ENGINES[s.engine] then
-    return nil, "engine must be rpc or manual"
+    return nil, "engine must be rpc, browser or manual"
   end
   s.steps = s.steps or {}
   if not is_list(s.steps) then
@@ -248,13 +267,23 @@ function M.validate(s)
       return nil, err
     end
   end
-  if s.engine == "rpc" and #s.steps == 0 then
-    return nil, "an rpc sheet needs steps"
+  if (s.engine == "rpc" or s.engine == "browser") and #s.steps == 0 then
+    return nil, ("%s sheet needs steps"):format(s.engine == "rpc" and "an rpc" or "a browser")
+  end
+  local allowed = M.ENGINE_ACTIONS[s.engine]
+  for i, step in ipairs(s.steps) do
+    for _, a in ipairs(M.ACTIONS) do
+      if step[a] ~= nil and allowed and not allowed[a] then
+        return nil, ("steps[%d]: %s is not a step of a %s sheet"):format(i, a, s.engine)
+      end
+    end
   end
   if s.engine == "manual" and #s.steps > 0 then
     return nil, "a manual sheet has no steps (manual = { ... } instead)"
   end
-  s.sizes = s.sizes or { { rows = 24, cols = 80 } }
+  -- a browser sheet's size is the viewport in pixels (cols = width, rows = height)
+  s.sizes = s.sizes
+    or { s.engine == "browser" and { rows = 700, cols = 1000 } or { rows = 24, cols = 80 } }
   if not is_list(s.sizes) or #s.sizes == 0 then
     return nil, "sizes must be a non-empty list"
   end
@@ -461,6 +490,9 @@ function M.run(s, opts)
     result.status = "manual"
     return result
   end
+  if s.engine == "browser" then
+    return require("testing.sheet.browser").run(s, opts)
+  end
   local root =
     vim.fs.normalize(vim.fn.fnamemodify(opts.root or vim.fn.getcwd(), ":p")):gsub("/+$", "")
   local minit = s.minit or M.DEFAULT_MINIT
@@ -567,6 +599,9 @@ function M.check(target, opts)
   if not res.ok then
     error(failed_text(s, res), 2)
   end
+  if res.status == "skip" then
+    print("n/a  " .. tostring(res.skipped))
+  end
   return res
 end
 
@@ -582,6 +617,9 @@ function M.expect(ok_fn, target, opts)
     return false, res
   end
   ---@cast res Testing.Sheet.Result
+  if res.status == "skip" then
+    print("n/a  " .. tostring(res.skipped))
+  end
   local msg = res.ok and ("test sheet %s: %s"):format(s.id, res.status) or failed_text(s, res)
   ok_fn(res.ok, msg)
   return res.ok, res

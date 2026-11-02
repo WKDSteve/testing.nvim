@@ -241,3 +241,25 @@ and nothing of them is handed to an AI.
   are later engines.
 * `judge` is for a person; an AI reviewer that pre-sorts the inbox does not exist yet.
 * A step's Lua is code: review a sheet like a spec.
+
+## Browser sheets (`engine = "browser"`)
+
+A sheet with `engine = "browser"` opens a page in a real chromium (Playwright) and presses keys there. The steps are
+data like the others, but they are a different set; `wait` and `expect` are JavaScript expressions **in the page**:
+
+| Step | Does | Fails when |
+|---|---|---|
+| `open = target` | loads a URL, or a file (relative to the project root) | the page does not load |
+| `press = key` | a key by Playwright name (`Tab`, `Shift+Tab`, `Escape`, `Control+k`) | never |
+| `click = selector` | clicks the first element that matches the CSS selector | none matches in 5 s |
+| `wait = js` (`timeout` ms, default 2000) | waits until the expression is truthy | it is not truthy in time |
+| `expect = js` | evaluates the expression now | it is not truthy |
+| `shot = name` | a screenshot `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` (the input of the AI judge) | never |
+
+`sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700). A step of the other engine
+is refused when the sheet loads (`steps[2]: keys is not a step of a browser sheet`). The first failed step ends a
+size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-core`, found in
+`$TESTING_PLAYWRIGHT_DIR`, the project or `../mdview.nvim`). Without node, `playwright-core` or chromium the sheet
+is a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. There is no
+`prepare` step on purpose: a sheet is data and must not start programs; a page a sheet needs is a file the project
+produces (a fixture, a build output).
