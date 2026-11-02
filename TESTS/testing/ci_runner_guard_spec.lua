@@ -272,9 +272,16 @@ return function(H)
 
   do
     local root = tmp()
+    local nvim_path = "/x/nvim"
     local function run_check(e, private)
       local o = sink()
-      local code = guard.main({ "check" }, o.sv, { env = e, root = root, gh = fake_gh(private) })
+      local code = guard.main({ "check" }, o.sv, {
+        env = e,
+        root = root,
+        gh = fake_gh(private),
+        nvim = nvim_path,
+        script = "/x/scripts/testing.lua",
+      })
       return code, joined(o)
     end
 
@@ -283,9 +290,19 @@ return function(H)
     has(text, "JOB REFUSED", "check: ... loudly")
     has(
       text,
-      'scripts/testing.lua" ci trust WKDSteve/tasks.nvim ' .. SHA,
+      "/x/nvim -n -i NONE --headless -u NONE -l /x/scripts/testing.lua ci trust WKDSteve/tasks.nvim "
+        .. SHA,
       "check: ... with the command to release it (the real call, `testing` is not on the PATH)"
     )
+
+    nvim_path = "C:/Program Files/nvim/nvim.exe"
+    local _, quoted_text = run_check(env(), false)
+    has(
+      quoted_text,
+      '& "C:/Program Files/nvim/nvim.exe" -n',
+      "check: a program path with a blank is quoted, `&` for PowerShell"
+    )
+    nvim_path = "/x/nvim"
 
     code = run_check(env(), true)
     eq(code, 0, "check: a private repository of the maintainer runs")

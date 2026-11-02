@@ -344,19 +344,26 @@ local function check(sv, ctx)
   sv.err("runner-guard: JOB REFUSED: " .. reason)
   if
     facts.sha
-    and facts.sha ~= ""
+    and facts.sha:match("^%x+$")
     and key
     and facts.event ~= "pull_request"
     and facts.event ~= "pull_request_target"
   then
-    -- `testing` is not on the PATH: name the call that works from anywhere
+    -- `testing` is not on the PATH: name the call that works from anywhere. A path with a blank is quoted;
+    -- PowerShell then needs a leading `&` before the quoted program, said in the line.
     local nvim, script = tools(ctx)
+    local function arg(p)
+      return p:find("[%s]") and ('"%s"'):format(p) or p
+    end
+    local quoted = nvim:find("[%s]") ~= nil
     sv.err(
-      ('runner-guard: review it, then: "%s" -n -i NONE --headless -u NONE -l "%s" ci trust %s %s   (and re-run the job)'):format(
-        nvim,
-        script,
+      ("runner-guard: review it, then: %s%s -n -i NONE --headless -u NONE -l %s ci trust %s %s   (and re-run the job)%s"):format(
+        quoted and "& " or "",
+        arg(nvim),
+        arg(script),
         repo,
-        facts.sha
+        facts.sha,
+        quoted and "   [the leading & is PowerShell syntax; drop it in bash]" or ""
       )
     )
   end
