@@ -480,5 +480,51 @@ return function(H)
   )
   has(f.after, "It runs nothing itself.", "own comment: the template's wording is back")
 
+  -- a reason written above a line that differs on purpose has no place in the new render: `--write` holds the file
+  -- back (nothing disappears silently); --force-comments writes it anyway
+  local function deliberate()
+    put(
+      why_init,
+      (
+        why_text:gsub(
+          "\nlocal DEPS = [^\n]*",
+          "\n" .. why_note .. "\nlocal DEPS = { 'deliberate.nvim' }",
+          1
+        )
+      )
+    )
+  end
+  deliberate()
+  p = update.plan(why, NOFMT)
+  f = file(p, "TESTS/minimal_init.lua")
+  eq(#f.lost_comments, 1, "lost comment: the unplaced run is reported")
+  has(f.lost_comments[1], "Hard dependencies only", "lost comment: says which")
+  local no_git = function()
+    return nil
+  end
+  local wrote, _, held_lost = update.apply(p, { git = no_git })
+  eq(wrote, {}, "lost comment: nothing written")
+  eq(#held_lost, 1, "lost comment: the file is held back")
+  has(held_lost[1].why, "--force-comments", "lost comment: says how to go on")
+  has(
+    table.concat(update.lines(p, { held = held_lost }), "\n"),
+    "lost comments:",
+    "lost comment: shown in the report"
+  )
+  wrote = update.apply(p, { git = no_git, force_comments = true })
+  eq(wrote, { "TESTS/minimal_init.lua" }, "lost comment: --force-comments writes it")
+  deliberate()
+  eq(
+    run({ "init", why, "--update", "--write" }).code,
+    1,
+    "lost comment: the CLI exits 1 when it holds a file"
+  )
+  has(slurp(why_init), "deliberate.nvim", "lost comment: the held file is untouched")
+  eq(
+    run({ "init", why, "--update", "--write", "--force-comments" }).code,
+    0,
+    "lost comment: --force-comments via the CLI"
+  )
+
   vim.fn.delete(base, "rf")
 end

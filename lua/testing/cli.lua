@@ -241,7 +241,7 @@ local function run_migrate(rest, sv)
 end
 
 local INIT_USAGE =
-  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --update [--write [--force] | --check]"
+  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
 
 ---`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`), and
 ---`testing init [<root>] --update [--write [--force] | --check]`: bring `scripts/test.sh` and `TESTS/minimal_init.lua`
@@ -261,12 +261,13 @@ local function run_init(rest, sv)
       o.plugin = value
     elseif
       a == "--force"
+      or a == "--force-comments"
       or a == "--hooks"
       or a == "--update"
       or a == "--write"
       or a == "--check"
     then
-      o[a:sub(3)] = true
+      o[a:sub(3):gsub("-", "_")] = true
     elseif a == "-h" or a == "--help" then
       sv.out(INIT_USAGE)
       return 0
@@ -284,8 +285,8 @@ local function run_init(rest, sv)
   local misuse = (o.write or o.check) and not o.update and "--write and --check go with --update"
     or (o.write and o.check) and "--write and --check exclude each other"
     or (o.update and (o.hooks or o.plugin)) and "--update takes neither --hooks nor --plugin"
-    or (o.update and o.force and not o.write)
-      and "--force goes with --update only together with --write"
+    or (o.update and (o.force or o.force_comments) and not o.write) and "--force and --force-comments go with --update only together with --write"
+    or (not o.update and o.force_comments) and "--force-comments goes with --update"
   if misuse then
     sv.err(("testing: init: %s\n%s"):format(misuse, INIT_USAGE))
     return 2
@@ -299,7 +300,8 @@ local function run_init(rest, sv)
     local plan = update.plan(root)
     local written, errors, held = {}, {}, {}
     if o.write then
-      written, errors, held = update.apply(plan, { force = o.force })
+      written, errors, held =
+        update.apply(plan, { force = o.force, force_comments = o.force_comments })
     end
     local shown = { diff = not o.write and not o.check, written = written, held = held }
     for _, line in ipairs(update.lines(plan, shown)) do

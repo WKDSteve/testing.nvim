@@ -45,6 +45,7 @@ local M = {}
 ---@field changed boolean `after` differs from `before`.
 ---@field code_changed boolean Differs in more than comments, blank lines and indentation (what `--check` reports).
 ---@field dropped_comments string[] Comment lines of the old file that the new one does not have.
+---@field lost_comments string[] Comment runs of the repository's own that found no place in the new render: `apply` holds the file back.
 ---@field diff string|nil Unified diff `before` -> `after` (nil when unchanged).
 ---@field kept string[] What was kept from the old file, one line each.
 ---@field dropped string[] Code lines of the old file (no comments, no blank lines) that the new one does not have.
@@ -397,9 +398,10 @@ end
 ---@param prefix string Comment start as written in the file (`#` or `--`).
 ---@return string after
 ---@return string[] kept
+---@return string[] lost Own comment runs that found no place (the first line of each): `--write` holds the file back.
 local function keep_comments(before, after, prefix)
   if not before then
-    return after, {}
+    return after, {}, {}
   end
   local function is_comment(l)
     local t = vim.trim(l)
@@ -413,7 +415,7 @@ local function keep_comments(before, after, prefix)
     counts[l] = (counts[l] or 0) + 1
     where[l] = k
   end
-  local placements, kept = {}, {}
+  local placements, kept, lost = {}, {}, {}
   local i = 1
   while i <= #old do
     if is_comment(old[i]) then
@@ -439,6 +441,13 @@ local function keep_comments(before, after, prefix)
             vim.trim(anchor):sub(1, 40)
           )
         end
+        -- else: the template has its own comment there (an older wording), the new one replaces it
+      elseif own then
+        -- no line of the new render to hang it on (the line below it differs or is gone): the reason would vanish
+        lost[#lost + 1] = ("%d comment line(s) starting `%s`"):format(
+          #run,
+          vim.trim(run[1]):sub(1, 60)
+        )
       end
       i = j
     end
@@ -453,7 +462,7 @@ local function keep_comments(before, after, prefix)
       table.insert(out, pl.pos + n, l)
     end
   end
-  return table.concat(out, "\n"), kept
+  return table.concat(out, "\n"), kept, lost
 end
 
 ---A file that is the repository's own on purpose: `<comment> testing:keep-file <reason>` in its first lines. The
@@ -484,7 +493,7 @@ end
 ---@param before string|nil
 ---@param after string
 ---@param comment string Lua pattern of a comment start.
----@param parts { kept: string[], dropped: string[], risks: string[], exec: boolean }
+---@param parts { kept: string[], dropped: string[], risks: string[], lost_comments?: string[], exec: boolean }
 ---@return Testing.Scaffold.UpdateFile
 local function entry(rel, before, after, comment, parts)
   local changed = before ~= after
@@ -500,6 +509,7 @@ local function entry(rel, before, after, comment, parts)
     dropped = parts.dropped,
     dropped_comments = dropped_lines(before, after, comment, comment_lines),
     risks = parts.risks,
+    lost_comments = parts.lost_comments or {},
     exec = parts.exec,
   }
 end
@@ -544,7 +554,7 @@ function M.plan(root, opts)
 
     -- ------------------------------------------------------------ scripts/test.sh
     do
-      local kept, risks = {}, vim.deepcopy(deps_risks)
+      local kept, risks, lost_comments = {}, vim.deepcopy(deps_risks), {}
       if deps_from then
         kept[#kept + 1] = ("dependencies from %s: %s"):format(
           deps_from,
@@ -587,7 +597,7 @@ function M.plan(root, opts)
         vim.list_extend(kept, blocks)
         vim.list_extend(risks, block_risks)
         local own_comments
-        after, own_comments = keep_comments(old_sh, after, "#")
+        after, own_comments, lost_comments = keep_comments(old_sh, after, "#")
         vim.list_extend(kept, own_comments)
       end
       local dropped, older = {}, 0
@@ -605,13 +615,14 @@ function M.plan(root, opts)
         kept = kept,
         dropped = dropped,
         risks = risks,
+        lost_comments = lost_comments,
         exec = true,
       })
     end
 
     -- ------------------------------------------------------------ TESTS/minimal_init.lua
     do
-      local kept, risks = {}, {}
+      local kept, risks, lost_comments = {}, {}, {}
       local vars, verr = scaffold.build_vars(plugin, deps, opts.owner or scaffold.DEFAULT_OWNER)
       local after, rerr
       if vars then
@@ -662,7 +673,7 @@ function M.plan(root, opts)
         vim.list_extend(kept, blocks)
         vim.list_extend(risks, block_risks)
         local own_comments
-        after, own_comments = keep_comments(old_minit, after, "--")
+        after, own_comments, lost_comments = keep_comments(old_minit, after, "--")
         vim.list_extend(kept, own_comments)
         if #blocks > 0 and #block_risks == 0 and not loadstring(after) then
           risks[#risks + 1] =
@@ -675,6 +686,7 @@ function M.plan(root, opts)
         kept = kept,
         dropped = dropped_lines(old_minit, after, "%-%-"),
         risks = risks,
+        lost_comments = lost_comments,
         exec = false,
       })
       -- no stylua: the file is written as the template has it (not a reason to hold it back)
@@ -711,9 +723,10 @@ end
 ---@field why string
 
 ---Write the files of the plan that changed. Nothing is written when the plan has errors. A file whose plan has a risk,
----or that has uncommitted changes (they would be gone for good), is held back unless `opts.force`.
+---or that has uncommitted changes (they would be gone for good), is held back unless `opts.force`; a file that would
+---lose comments of the repository's own (`lost_comments`) also unless `opts.force_comments`.
 ---@param plan Testing.Scaffold.UpdatePlan
----@param opts? { force?: boolean, git?: fun(root: string, rel: string): string|nil } `git`: the uncommitted-check (specs).
+---@param opts? { force?: boolean, force_comments?: boolean, git?: fun(root: string, rel: string): string|nil } `git`: the uncommitted-check (specs).
 ---@return string[] written Paths below the root.
 ---@return string[] errors
 ---@return Testing.Scaffold.UpdateHeld[] held
@@ -728,6 +741,11 @@ function M.apply(plan, opts)
     local dirty = f.changed and f.before ~= nil and not opts.force and check(plan.root, f.rel)
     if f.changed and not opts.force and #f.risks > 0 then
       held[#held + 1] = { rel = f.rel, why = "it has a risk (see above); --force writes it anyway" }
+    elseif f.changed and not opts.force and not opts.force_comments and #f.lost_comments > 0 then
+      held[#held + 1] = {
+        rel = f.rel,
+        why = "comments of your own would be lost (see above); put them back by hand, or --force-comments",
+      }
     elseif dirty then
       held[#held + 1] = {
         rel = f.rel,
@@ -808,6 +826,9 @@ function M.lines(plan, o)
           end
           out[#out + 1] = "    " .. text.show(l, 160)
         end
+      end
+      for _, l in ipairs(f.lost_comments) do
+        out[#out + 1] = "  lost comments: " .. text.show(l, 200)
       end
       if f.exec and f.before == nil and written[f.rel] then
         -- NTFS has no mode bits: git records a new file as 100644, and a clone on Linux or macOS cannot run it
