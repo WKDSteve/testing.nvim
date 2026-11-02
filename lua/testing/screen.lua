@@ -1,5 +1,5 @@
 ---@module 'testing.screen'
--- @cache-env CI TESTING_UPDATE_SNAPSHOTS
+-- @cache-env CI TESTING_UPDATE_SNAPSHOTS TESTING_SNAPSHOTS_DIR
 ---@brief Screen snapshots: compare what an RPC child shows with a reviewed text file.
 ---@description
 --- `testing.rpc` drives a real editor (`input`, `feed`, `mouse`, `settle`) and reads its screen
@@ -33,8 +33,10 @@
 --- * `expect(ok_fn, name, shot, opts)` hands the verdict to the harness (`H.ok`, a collecting
 ---   `a.ok`, ...); `check(name, shot, opts)` raises instead (busted style specs).
 ---
---- Cache: the files are read by this module, not by the spec, so the cache key does not see them.
---- A spec file that uses snapshots declares them: `-- @cache-inputs TESTS/__snapshots__/`.
+--- Cache: the files are read by this module, not by the spec, but the cache key of a spec that loads this module
+--- (a literal `require`) contains the snapshot folder of that spec by itself. Files of another spec's folder, or read
+--- through a path the scanner cannot follow, are declared with `-- @cache-inputs <dir>/`.
+--- Folder: `opts.dir`, else the project's `snapshots.dir` (TESTING_SNAPSHOTS_DIR), else `TESTS/__snapshots__`.
 
 local M = {}
 
@@ -397,7 +399,11 @@ function M.path(name, opts)
   local inside = windows and head:lower() == prefix:lower() or head == prefix
   local rel = inside and spec:sub(#prefix + 1) or vim.fs.basename(spec)
   rel = rel:gsub("^TESTS/", ""):gsub("%.lua$", "")
-  local dir = (opts.dir or M.DEFAULT_DIR):gsub("\\", "/"):gsub("/+$", "")
+  -- `opts.dir`, else the project's `snapshots.dir` (the runner hands it down in TESTING_SNAPSHOTS_DIR), else the default
+  local configured = os.getenv("TESTING_SNAPSHOTS_DIR")
+  local dir = (opts.dir or (configured and configured ~= "" and configured) or M.DEFAULT_DIR)
+    :gsub("\\", "/")
+    :gsub("/+$", "")
   local rel_path = dir .. "/" .. rel .. "/" .. name .. ".snap"
   return root .. "/" .. rel_path, rel_path
 end

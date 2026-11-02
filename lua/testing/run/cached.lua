@@ -232,6 +232,7 @@ function M.key_inputs(plan, run_opts, o)
     seed = o.seed,
     spec_roots = plan.project.roots,
     spec_pattern = plan.project.spec_pattern,
+    snapshots_dir = plan.project.snapshots and plan.project.snapshots.dir or nil,
     -- `pcall(require, "optional")` is common and the run's runtime path is the one the key looks at: the
     -- absence of a module is part of the key (and the spec tree joins it, see `testing.cache`)
     unresolved = "absent",

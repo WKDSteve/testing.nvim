@@ -731,6 +731,13 @@ local function execute(argv, sv)
   if args.jobs_auto then
     args.jobs = M.auto_jobs()
   end
+  -- the project's `snapshots.dir` is the default folder of testing.screen, in this host (in-process runs) and in every
+  -- child (env allowlist); the default stays unset, and a value from an earlier run in this editor does not stay
+  do
+    local snap = loaded.config.snapshots and loaded.config.snapshots.dir
+    local default = require("testing.config.DEFAULTS").project.snapshots.dir
+    vim.env.TESTING_SNAPSHOTS_DIR = (snap and snap ~= default) and snap or nil
+  end
   ---@type Testing.Cli.RunPlan
   local plan = {
     args = args,

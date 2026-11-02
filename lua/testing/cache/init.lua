@@ -169,6 +169,7 @@ local memo = {}
 ---@field runner_version? string Replaces the runner digest (specs).
 ---@field dep_roots? string[] Directories whose `lua/` resolves modules outside the project (default: the runtime path).
 ---@field spec_pattern? string[] Lua patterns of spec files (default `_spec%.lua$`).
+---@field snapshots_dir? string `snapshots.dir` of the project: where `testing.screen` keeps its files (default `TESTS/__snapshots__`).
 ---@field spec_roots? string[] Spec roots relative to the root (default: the first path component of the spec).
 ---@field restricted? boolean A case selection (`--filter`, `--lf`, ...) is active: the file does not run completely.
 ---@field hasher? Testing.Cache.Hasher
@@ -937,6 +938,7 @@ end
 ---@class Testing.Cache.Aggregate
 ---@field io boolean Some file of the closure reads files.
 ---@field dirscan boolean Some file lists directories.
+---@field screen? boolean Some file loads `testing.screen` (reads the snapshot files of the spec).
 ---@field dynload boolean Project code loads files by ex command or runtime-path lookup.
 ---@field pathmod boolean Project code changes the module search path or the runtime path.
 ---@field outside boolean Project code names a place outside the project.
@@ -1127,6 +1129,13 @@ local function aggregate(spec_info, spec_abs, members, ctx, env_covered)
     if m.eol then
       agg.eol = true
     end
+    -- `testing.screen` reads the snapshot files of the spec itself: they are inputs of every spec that loads it
+    for _, name in ipairs(info.requires) do
+      if name == "testing.screen" then
+        agg.screen = true
+        break
+      end
+    end
     if info.directives.off then
       detail = { kind = "off", file = who }
       return who and say("has `-- @cache off`") or "`-- @cache off`"
@@ -1259,7 +1268,7 @@ local function input_lines(file_info, spec_info, ctx, hasher, agg, force_tree)
   end
   local declared = spec_info.directives.inputs
   local reads = spec_info.markers.io or agg.io
-  if not (reads or #declared > 0 or force_tree) then
+  if not (reads or #declared > 0 or force_tree or agg.screen) then
     return lines
   end
   -- a spec that lists directories may be looking at the other specs (a lint spec): they are inputs then
@@ -1321,6 +1330,15 @@ local function input_lines(file_info, spec_info, ctx, hasher, agg, force_tree)
       lines[#lines + 1] = ("input %s/=%s"):format(rel, dig)
     end
     return nil
+  end
+  if agg.screen then
+    -- `<dir>/<spec without TESTS/ and .lua>/`: where `testing.screen.compare` looks for this spec's `.snap` files
+    local spec_rel = file_info.file:gsub("^TESTS/", ""):gsub("%.lua$", "")
+    local dir = (ctx.snapshots_dir or "TESTS/__snapshots__"):gsub("\\", "/"):gsub("/+$", "")
+    local w = add(dir .. "/" .. spec_rel, true)
+    if w then
+      return nil, w
+    end
   end
   if (reads or force_tree) and spec_root then
     local w = add(spec_root, false)

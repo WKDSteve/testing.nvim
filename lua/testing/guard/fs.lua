@@ -522,6 +522,14 @@ function G:snapshot(opts)
   for _, n in ipairs(self.cfg.ignore) do
     ignore[n] = true
   end
+  -- the project's `snapshots.dir` (handed down by the runner): testing.screen's own files, like `__snapshots__`
+  local snap_dir = os.getenv("TESTING_SNAPSHOTS_DIR")
+  if snap_dir and snap_dir ~= "" then
+    local last = snap_dir:gsub("\\", "/"):gsub("/+$", ""):match("([^/]+)$")
+    if last then
+      ignore[last] = true
+    end
+  end
   local trees = {}
   for _, root in ipairs(self:watch_roots()) do
     local files, truncated =

@@ -88,6 +88,8 @@ M.ALLOW = {
   "GITHUB_ACTIONS",
   -- `--update-snapshots`: testing.screen in the child rewrites differing snapshots; not a secret
   "TESTING_UPDATE_SNAPSHOTS",
+  -- the project's `snapshots.dir`, the default folder of testing.screen in the child
+  "TESTING_SNAPSHOTS_DIR",
   -- display (a spec that opens a GUI helper)
   "DISPLAY",
   "WAYLAND_DISPLAY",

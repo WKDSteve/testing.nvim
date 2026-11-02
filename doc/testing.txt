@@ -495,8 +495,8 @@ unknown keys are warnings (the default stays); an unusable file is exit 2.
   coverage      table       bindings, commands, autocmds: 0..1 thresholds of
                             `testing surface`.
   snapshots    table        `dir` is the default of testing.screen
-                            (`TESTS/__snapshots__`); a spec passes
-                            `opts.dir` for another one.
+                            (`TESTS/__snapshots__`); the runner
+                            hands it to the specs; `opts.dir` wins.
   backends                  Validated, reserved: nothing acts on it yet.
 
 A dependency is looked up in $<NAME>_DIR, <root>/.deps/<name>, <root>/../<name>

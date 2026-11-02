@@ -159,7 +159,6 @@ The assertion half of the klicker: a screen is compared with a reviewed text fil
 screenshot, but as characters plus attribute letters (deterministic, diffable, no fonts).
 
 ```lua
--- @cache-inputs TESTS/__snapshots__/
 local screen = require("testing.screen")
 
 child.feed(":lua require('ui.kit').confirm({ question = 'Delete?' })<CR>")
@@ -208,8 +207,11 @@ placeholders in the text rows (this changes their width, not the width of the at
 
 Make screens comparable across machines with the child's options: a fixed `size` per snapshot (name it in the
 snapshot name, `confirm.80x24`), the deterministic locale and time zone (default), and a colour scheme the
-minit sets. Limits: the cache does not see the files on its own (declare them with `-- @cache-inputs`); a spec
-reads `.testing.lua` `snapshots.dir` only through `opts.dir`; there are no value snapshots (`a.snapshot`) yet.
+minit sets. The cache key of a spec that loads `testing.screen` (a literal `require`, in the spec or in a project file it
+loads) contains the snapshot folder of that spec (`<dir>/<spec>/`) by itself; `dir` is `.testing.lua`
+`snapshots.dir` (handed down in `TESTING_SNAPSHOTS_DIR`), else `opts.dir`, else the default. A snapshot that another
+spec's folder holds, or one read through a path the scanner cannot follow, still needs `-- @cache-inputs`. There are no
+value snapshots (`a.snapshot`) yet.
 
 ## Notifications, messages, prompts, guard
 
