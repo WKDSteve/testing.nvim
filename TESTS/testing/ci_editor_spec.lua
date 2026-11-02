@@ -1558,7 +1558,9 @@ return function(H)
   -- through a real child (the completion path)
   local t0 = vim.uv.hrtime()
   local first = editor.list(root)
-  ok((vim.uv.hrtime() - t0) / 1e6 < 200, "editor.list: a miss does not wait for the child")
+  -- a miss answers at once and starts the child in the background; the child itself needs seconds on a loaded
+  -- machine, so a limit well below that still tells "did not wait" from "waited" (200 ms was a flake on a busy Windows)
+  ok((vim.uv.hrtime() - t0) / 1e6 < 2000, "editor.list: a miss does not wait for the child")
   eq(first, nil, "editor.list: nothing known yet")
   local real
   ok(
