@@ -365,6 +365,11 @@ steps (a red step without findings gets a text-only entry with its reason). The 
 runs per project at a time. `<profile>` and `--step=` complete from the project: the names come from `testing ci list
 [--json]`, which runs in a child, so the editor never executes `.testing.lua` on a keypress.
 
+The part of this a machine can check is the test sheet `TESTS/sheets/ci-editor-live.sheet.lua` ([SHEETS.md](SHEETS.md); case
+`sheet:testing.ci-editor-live`): a child editor sits in a small fixture repository (a slow green step, a red one), runs
+`:Testing ci`, and the sheet checks the live buffer and its progress (with a masked screen snapshot), the verdict and
+the quickfix list. The look of the split and the statusline component are left to a person (`judge` / `manual`).
+
 `:Testing ci status` shows the last result (one line per step, the findings) and says `stale` when the tree changed
 since. `verify` and `hook` run the driver's subcommands of the same name and show their text.
 
