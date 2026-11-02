@@ -644,6 +644,27 @@ function M.lib_problem(lib)
   )
 end
 
+---The note of a run that used the warm pool; nil when no file went through it.
+---@param stats table The pool's counters (`pool.stats`).
+---@return string|nil
+local function pool_note(stats)
+  if stats.files <= 0 then
+    return nil
+  end
+  local fin = 0
+  for _, v in pairs(stats.finish_ms) do
+    fin = fin + v
+  end
+  return ("warm pool: %d file(s) in %d member(s) (%d reused a member, %d member(s) discarded; starting members %.1f s, verifying files %.1f s)"):format(
+    stats.files,
+    stats.spawned,
+    stats.reused,
+    stats.discarded,
+    stats.boot_ms / 1000,
+    fin / 1000
+  )
+end
+
 ---The slots of a run: one per file, or one per listed case for `isolated = "case"`, in merge order. A file that
 ---cannot run (missing, unknown dialect, not selected, no listing) is a finished slot with its synthetic cases.
 ---@param opts Testing.Isolated.Opts
@@ -1654,19 +1675,9 @@ function M.run(opts)
   local pool_stats
   if pool then
     pool_stats = vim.deepcopy(pool.stats)
-    if pool_stats.files > 0 then
-      local fin = 0
-      for _, v in pairs(pool_stats.finish_ms) do
-        fin = fin + v
-      end
-      notes[#notes + 1] = ("warm pool: %d file(s) in %d member(s) (%d reused a member, %d member(s) discarded; starting members %.1f s, verifying files %.1f s)"):format(
-        pool_stats.files,
-        pool_stats.spawned,
-        pool_stats.reused,
-        pool_stats.discarded,
-        pool_stats.boot_ms / 1000,
-        fin / 1000
-      )
+    local note = pool_note(pool_stats)
+    if note then
+      notes[#notes + 1] = note
     end
   end
 
