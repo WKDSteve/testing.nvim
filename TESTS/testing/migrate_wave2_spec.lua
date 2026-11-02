@@ -349,6 +349,62 @@ jobs:
     branches.reset()
   end
 
+  -- `run_async`: the questions to GitHub go out in parallel, in the background, before the plan is built; the plan is
+  -- built from the answers and asks nothing more
+  do
+    branches.reset()
+    local spawned, callbacks = {}, {}
+    vim.system = function(argv, _, on_exit)
+      spawned[#spawned + 1] = argv[5]
+      callbacks[#callbacks + 1] = on_exit
+      return {}
+    end
+    local got
+    local t0 = vim.uv.hrtime()
+    migrate.run_async(repo, { fleet_root = fleet_dir, branch_exists = branches.exists }, function(p)
+      got = p
+    end)
+    local spent_ms = (vim.uv.hrtime() - t0) / 1e6
+    eq(got, nil, "run_async: the plan is not there while the answers are out")
+    ok(
+      #spawned >= 2,
+      "run_async: every dependency is asked before any answer is in (" .. #spawned .. ")"
+    )
+    ok(spent_ms < 2000, "run_async: returns without waiting for the answers")
+    local asked_before = #spawned
+    for i, answer in ipairs(callbacks) do
+      -- the dependency without the branch answers 2 (`--exit-code`: no matching ref), the others 0
+      answer({
+        code = spawned[i]:find("color_my_ascii", 1, true) and 2 or 0,
+        stdout = "",
+        stderr = "",
+      })
+    end
+    vim.wait(3000, function()
+      return got ~= nil
+    end, 10)
+    ok(got ~= nil, "run_async: the plan arrives when the answers are in")
+    if got then
+      has(
+        notes_of(got),
+        "has no ci-verified branch: pinned to main",
+        "run_async: the plan is built from the answers"
+      )
+    end
+    eq(#spawned, asked_before, "run_async: building the plan asks nothing more")
+    vim.system = real_system
+    branches.reset()
+  end
+
+  -- a seam of the caller's own is used as it is, and the plan comes at once
+  do
+    local inline
+    migrate.run_async(repo, { fleet_root = fleet_dir, branch_exists = stub({}) }, function(p)
+      inline = p
+    end)
+    ok(inline ~= nil, "run_async with a seam of its own: the plan comes at once")
+  end
+
   -- ---------------------------------------------------------------- CI edits
 
   has(ci_text, "    name: tests (${{ matrix.os }})", "the job name no longer says plenary")

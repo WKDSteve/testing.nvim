@@ -81,6 +81,42 @@ function M.run(root, opts)
     report
 end
 
+---Like `M.run`, but the questions to GitHub (does a dependency have a `ci-verified` branch?) are asked at once, in
+---parallel and in the background, before the plan is built: the editor stays usable meanwhile and the whole costs one
+---timeout at most. `cb` gets the same two results as `M.run`; it runs at once when nothing has to be asked (a seam of
+---`opts.branch_exists` of its own, or a repository without dependencies), otherwise from the event loop.
+---@param root string
+---@param opts? Testing.Migrate.AnalyzeOpts
+---@param cb fun(plan: Testing.Migrate.Plan, report: Testing.Migrate.Report)
+function M.run_async(root, opts, cb)
+  local branches = require("testing.migrate.branches")
+  branches.begin_run()
+  local report = M.analyze(root, opts)
+  local plan_opts = {
+    owner = opts and opts.owner,
+    format = opts and opts.format,
+    branch_exists = opts and opts.branch_exists,
+  }
+  if plan_opts.branch_exists ~= branches.exists then
+    return cb(M.plan(report, plan_opts), report)
+  end
+  -- a plan with a seam that answers "unknown" and writes down what it was asked: nothing leaves the machine; then the
+  -- asking happens in parallel and the real plan reads the answers from the cache
+  local wanted = {}
+  M.plan(
+    report,
+    vim.tbl_extend("force", plan_opts, {
+      branch_exists = function(owner, name)
+        wanted[#wanted + 1] = { owner, name }
+        return nil, "not asked yet"
+      end,
+    })
+  )
+  branches.prefetch(wanted, function()
+    cb(M.plan(report, plan_opts), report)
+  end)
+end
+
 ---@class Testing.Migrate.Parsed
 ---@field mode "dry-run"|"apply"
 ---@field root? string
@@ -144,10 +180,19 @@ function M.main(argv, opts)
         .. "\nusage: testing migrate [dry-run|apply] [<path>] [--json] [--markdown] [--check] [--fleet-root=<dir>]\n"
   end
   local root = parsed.root or opts.cwd or vim.fn.getcwd()
-  local plan = M.run(root, {
+  local run_opts = {
     fleet_root = parsed.fleet_root,
     branch_exists = opts.branch_exists or require("testing.migrate.branches").exists,
-  })
+  }
+  -- the questions to GitHub go out in parallel (one timeout at most instead of one per dependency)
+  local plan
+  M.run_async(root, run_opts, function(p)
+    plan = p
+  end)
+  vim.wait(require("testing.migrate.branches").TIMEOUT_MS + 5000, function()
+    return plan ~= nil
+  end, 10)
+  plan = plan or M.run(root, run_opts)
   local code = 0
   local tail = ""
   if plan.error then

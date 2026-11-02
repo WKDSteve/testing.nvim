@@ -503,10 +503,28 @@ function M.migrate(ctx)
     mode, root = nil, mode
   end
   local dir = M.resolve_root(root)
-  local plan = migrate.run(dir, {
+  -- the questions to GitHub go out in the background and in parallel: the editor stays usable, and the plan is shown
+  -- when the answers are in (at once when nothing has to be asked, then this returns the plan and the result of
+  -- `apply` as before)
+  local out_plan, out_applied
+  migrate.run_async(dir, {
     fleet_root = ctx.flags["fleet-root"],
     branch_exists = require("testing.migrate.branches").exists,
-  })
+  }, function(plan)
+    out_plan, out_applied = M.migrate_finish(notify, migrate, mode, dir, plan)
+  end)
+  return out_plan, out_applied
+end
+
+---Show the plan of `:Testing migrate` (and write it for `apply`).
+---@param notify table
+---@param migrate table
+---@param mode string|nil
+---@param dir string
+---@param plan Testing.Migrate.Plan
+---@return Testing.Migrate.Plan plan
+---@return table|nil applied
+function M.migrate_finish(notify, migrate, mode, dir, plan)
   local applied
   local lines = vim.split(migrate.render(plan, { format = "text" }), "\n", { plain = true })
   local level = "info"
