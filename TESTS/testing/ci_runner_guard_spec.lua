@@ -584,7 +584,9 @@ return function(H)
       print("n/a  hook script run: no pwsh on this machine")
     else
       local d = tmp()
-      local textfile = d .. "/not-a-program.txt"
+      -- no extension: an associated one (`.txt`) would make Windows open the file in an editor
+      -- instead of failing to start it, and an unknown one raises the "Open with" dialog
+      local textfile = d .. "/not-a-program"
       write(textfile, "x")
       local hook_file = d .. "/hook.ps1"
       -- a program that cannot be started must refuse the job (exit 0 here would let it run)
