@@ -72,6 +72,8 @@ return function(H)
     lacks(text, "ERROR", "a healthy setup holds no error:\n" .. text)
     -- the tools of the lint checks: every lint preset, found or not
     has(text, "lint tools", "the report has the lint tools section")
+    has(text, "tier 2.5/3 tools", "the report has the tier 2.5/3 tools section")
+    has(text, "msedgedriver", "... naming the WebDriver of WebView2")
     for _, name in ipairs(require("testing.ci.presets").lint_names()) do
       has(text, name .. ": ", "the report names the lint check " .. name)
     end

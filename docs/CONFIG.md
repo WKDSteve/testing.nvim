@@ -92,7 +92,7 @@ all (syntax error, raises, does not return a table, lies outside the root) is an
 | `ci_overview.include` | list of directory names | `{ "lib.nvim" }` | `testing ci overview`, read from the `.testing.lua` of the current directory: names below `--repos-root` taken in although the detection misses them (lib.nvim has no `.testing.lua`); an included vault is taken in too. `--include` adds to it. See [CI.md](CI.md#fleet-overview-testing-ci-overview). |
 | `ci_overview.exclude` | list of directory names | `{}` | `testing ci overview`: names left out (a name containing `vault` is left out anyway). `--exclude` adds to it. |
 | `snapshots.dir` | relative path | `"TESTS/__snapshots__"` | The default directory of screen snapshots (`testing.screen`). The spec process does not read `.testing.lua`: a project with another directory passes `opts.dir`. |
-| `backends.luals`, `.pty`, `.playwright`, `.webdriver` | boolean | `false` | Reserved (optional backends). |
+| `backends.luals`, `.pty`, `.playwright`, `.webdriver` | boolean | `false` | Reserved (optional backends); the tools they need: [TIER3.md](TIER3.md). |
 
 "Reserved" keys are validated and kept, but nothing acts on them yet. A key of the tables above that is invalid
 is reported with its name and the default stays (a bad `conformance.gate` never switches a gate on).

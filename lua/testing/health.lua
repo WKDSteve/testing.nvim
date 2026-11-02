@@ -666,6 +666,42 @@ local function check_lint(health, project)
   )
 end
 
+---Tier 2.5 and 3 tools: found or deliberately missing. Nothing here is an error or a warning: one of N
+---alternatives being absent only turns the cases that need it into reported skips.
+---@param health Testing.Health.Reporter
+local function check_tier3(health)
+  health.start("testing.nvim: tier 2.5/3 tools")
+  local tier3 = require("testing.tier3")
+  for _, row in ipairs(tier3.tools()) do
+    if row.path then
+      health.ok(("%s (tier %s) found: %s via %s"):format(row.name, row.tier, row.path, row.via))
+    else
+      health.info(
+        ("%s (tier %s) not found (PATH, $%s): %s; cases that need it are reported skips"):format(
+          row.name,
+          row.tier,
+          row.env,
+          row.purpose
+        )
+      )
+    end
+  end
+  local browsers = tier3.browsers()
+  local names = vim.tbl_keys(browsers)
+  table.sort(names)
+  if #names == 0 then
+    health.info(
+      ("no Playwright browser in %s; browser cases are reported skips"):format(tier3.browsers_dir() or "(unknown cache)")
+    )
+  end
+  for _, engine in ipairs(names) do
+    health.ok(("Playwright %s revision %s"):format(engine, table.concat(browsers[engine], ", ")))
+  end
+  if browsers.chromium == nil and #names > 0 then
+    health.info("Playwright chromium is not installed: the mdview specs need it")
+  end
+end
+
 ---@return nil
 function M.check()
   ---@type Testing.Health.Reporter
@@ -690,6 +726,7 @@ function M.check()
   check_isolation(health, project)
   check_extensions(health)
   check_lint(health, project)
+  check_tier3(health)
 
   health.start("testing.nvim: hover")
   local okh, hover = pcall(require, "testing.hover")
