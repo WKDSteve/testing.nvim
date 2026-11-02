@@ -88,7 +88,12 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field judge string[]
 ---@field manual string[]
 ---@field notes? string
+---@field requires? Testing.Sheet.Requirement[] Conditions the child editor must meet, else the sheet is a reported skip.
 ---@field path? string Where it was loaded from.
+
+---@class Testing.Sheet.Requirement
+---@field lua string A Lua expression evaluated in the child before the first step; falsy = the sheet is skipped.
+---@field reason string The `n/a` text.
 
 ---@class Testing.Sheet.Result
 ---@field ok boolean
@@ -127,6 +132,7 @@ local SHEET_KEYS = {
   judge = "table",
   manual = "table",
   notes = "string",
+  requires = "table",
 }
 
 ---@param v any
@@ -176,6 +182,34 @@ local function check_strings(list, what)
   for i, s in ipairs(list) do
     if type(s) ~= "string" or s == "" then
       return ("%s[%d] must be a non-empty string"):format(what, i)
+    end
+  end
+  return nil
+end
+
+---@param list any
+---@return string|nil err
+local function check_requires(list)
+  if list == nil then
+    return nil
+  end
+  if not is_list(list) then
+    return "requires must be a list of { lua = ..., reason = ... }"
+  end
+  for i, r in ipairs(list) do
+    if type(r) ~= "table" then
+      return ("requires[%d] must be a table"):format(i)
+    end
+    for k in pairs(r) do
+      if k ~= "lua" and k ~= "reason" then
+        return ("requires[%d]: unknown field %s"):format(i, tostring(k))
+      end
+    end
+    if type(r.lua) ~= "string" or r.lua == "" then
+      return ("requires[%d].lua must be a non-empty string"):format(i)
+    end
+    if type(r.reason) ~= "string" or r.reason == "" then
+      return ("requires[%d].reason must be a non-empty string"):format(i)
     end
   end
   return nil
@@ -313,6 +347,13 @@ function M.validate(s)
   end
   if s.engine == "manual" and #s.manual == 0 then
     return nil, "a manual sheet lists its manual steps"
+  end
+  local rerr = check_requires(s.requires)
+  if rerr then
+    return nil, rerr
+  end
+  if s.requires and s.engine ~= "rpc" then
+    return nil, "requires belongs to an rpc sheet"
   end
   return s, nil
 end
@@ -507,7 +548,11 @@ function M.run(s, opts)
   if not minit:match("^%a:[/\\]") and not minit:match("^[/\\]") then
     minit = root .. "/" .. minit
   end
+  local skipped
   for _, size in ipairs(s.sizes) do
+    if skipped then
+      break
+    end
     local tag = ("%dx%d"):format(size.cols, size.rows)
     local spawn = vim.tbl_extend(
       "force",
@@ -530,6 +575,21 @@ function M.run(s, opts)
       local ok, perr = pcall(function()
         -- attach the UI first: the editor lays out windows (floats too) for the size of its UI
         child.screen()
+        for _, req in ipairs(s.requires or {}) do
+          local met, rerr = pcall(child.lua_get, req.lua)
+          if not met then
+            result.failures[#result.failures + 1] = ("%s: requires %q raised: %s"):format(
+              tag,
+              req.lua,
+              tostring(rerr)
+            )
+            return
+          end
+          if not rerr then
+            skipped = req.reason
+            return
+          end
+        end
         for i, step in ipairs(s.steps) do
           local why = run_step(child, step, ctx)
           if why then
@@ -551,6 +611,9 @@ function M.run(s, opts)
   end
   if #result.failures > 0 then
     result.ok, result.status = false, "fail"
+  elseif skipped then
+    -- a missing prerequisite is information, never a green run
+    result.status, result.skipped = "skip", skipped
   end
   return result
 end

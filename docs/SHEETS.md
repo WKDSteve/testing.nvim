@@ -46,6 +46,11 @@ note, and all failures of a sheet are one line. The first failed
 step ends that size (the steps after it depend on it). The UI is attached before the first step, so windows
 and floats are laid out for the sheet's size.
 
+`requires = { { lua = "<expr>", reason = "<n/a text>" } }` (rpc sheets) lists what the child editor must have, for example
+an optional plugin: each expression is evaluated in the child before the first step, and the first one that is not
+truthy makes the sheet a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. An
+expression that raises fails the sheet.
+
 The file is read as **data**: `load` with an empty environment, so a sheet cannot call anything while it is
 read (a sheet that touches `os` does not load). What runs is the Lua of its steps, inside the child editor.
 `load` checks the shape and names the field of a mistake (`steps[3] has two actions (keys and lua)`).

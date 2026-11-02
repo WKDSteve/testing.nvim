@@ -217,6 +217,44 @@ return function(H)
         "the second run matches, also on CI"
       )
 
+      -- requires: a prerequisite the child does not meet is a reported skip, never a green run
+      local req = vim.deepcopy(good)
+      req.sizes = { { rows = 24, cols = 80 } }
+      req.requires = { { lua = "false", reason = "plugin X is not installed" } }
+      local rr = sheet.run(req, { root = root, ci = false, update = false })
+      eq(
+        { rr.ok, rr.status, rr.skipped, #rr.snapshots },
+        { true, "skip", "plugin X is not installed", 0 },
+        "an unmet requirement skips the sheet before any step"
+      )
+      req.requires = { { lua = "true", reason = "never shown" } }
+      eq(
+        sheet.run(req, { root = root, ci = false, update = false }).status,
+        "pass",
+        "a met requirement runs the sheet"
+      )
+      req.requires = { { lua = "error('boom')", reason = "r" } }
+      has(
+        sheet.run(req, { root = root, ci = false, update = false }).failures[1],
+        "requires",
+        "a requirement that raises fails the sheet"
+      )
+      refused(
+        { id = "a", title = "T", steps = { { keys = "x" } }, requires = { { lua = "x" } } },
+        "requires[1].reason",
+        "a requirement without a reason"
+      )
+      refused(
+        {
+          id = "a",
+          title = "T",
+          steps = { { keys = "x" } },
+          requires = { { lua = "x", reason = "r", y = 1 } },
+        },
+        "requires[1]: unknown field",
+        "a requirement with an unknown field"
+      )
+
       local bad = vim.deepcopy(good)
       bad.sizes = { { rows = 24, cols = 80 } }
       bad.steps[4] = { expect = "vim.api.nvim_get_current_line() == 'two'", note = "wrong line" }
