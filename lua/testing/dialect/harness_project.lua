@@ -112,6 +112,28 @@ function M.scan_assertion_names(text)
       names[s.name] = true
     end
   end
+  -- a helper that only DELEGATES (`function H.ok(c, m) if not c then H.fail(m) end end`) says no FAIL itself. Left
+  -- unknown, it answers nil on its first call in a single-file run (nothing raised, no counter moved), and
+  -- `if not H.ok(...)` would trip on a success. A direct call of a known assertion makes it one too, to a fixed
+  -- depth (a chain of wrappers is short; a helper that merely runs a callback calls no assertion by name).
+  for _ = 1, 3 do
+    local grew = false
+    for i, s in ipairs(starts) do
+      if not names[s.name] then
+        local stop = starts[i + 1] and starts[i + 1].pos - 1 or #text
+        local body = text:sub(s.pos, stop)
+        for known in pairs(names) do
+          if body:find("[%w_]%." .. known .. "%s*%(") then
+            names[s.name], grew = true, true
+            break
+          end
+        end
+      end
+    end
+    if not grew then
+      break
+    end
+  end
   return names
 end
 

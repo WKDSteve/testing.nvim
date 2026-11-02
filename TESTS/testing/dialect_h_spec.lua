@@ -594,6 +594,16 @@ return function(H)
     { a = true },
     "a minus before error( does not hide the rest of the line"
   )
+  eq(
+    project.assertion_names(table.concat({
+      'function H.fail(m) error("FAIL " .. m) end',
+      "function H.ok(c, m) if not c then H.fail(m) end end",
+      "function H.ok2(c, m) H.ok(c, m) end",
+      "function H.capture(fn) local ok, e = pcall(fn) if not ok then error(e, 0) end end",
+    }, "\n")),
+    { fail = true, ok = true, ok2 = true },
+    "a helper that delegates to a known assertion is one too (a callback runner is not)"
+  )
 
   -- the names of a harness text are remembered per text: every caller gets a copy (the adapter adds the names it
   -- learns while it runs), the key is the whole text, nothing is cut off a long one, and the memory is bounded
