@@ -449,5 +449,36 @@ return function(H)
     "keep-file: a missing reason is said"
   )
 
+  -- the repository's own explanatory comment above a code line of the template survives a re-render; a template
+  -- comment in an older wording is not brought back next to the new one
+  local why = project("why.nvim")
+  local why_init = why .. "/TESTS/minimal_init.lua"
+  local why_text = slurp(why_init)
+  local why_note = "-- Hard dependencies only: ui.nvim is not needed, every require of it is lazy."
+  ok(
+    select(2, why_text:gsub("\nlocal DEPS = ", "\nlocal DEPS = ")) == 1,
+    "the template has one `local DEPS` line"
+  )
+  put(why_init, (why_text:gsub("\nlocal DEPS = ", "\n" .. why_note .. "\nlocal DEPS = ", 1)))
+  p = update.plan(why, NOFMT)
+  f = file(p, "TESTS/minimal_init.lua")
+  eq(f.changed, false, "own comment: a comment above a template line is not a difference")
+  eq(f.dropped_comments, {}, "own comment: nothing is listed as lost")
+  has(
+    table.concat(f.kept, "\n"),
+    "1 comment line(s) above `local DEPS",
+    "own comment: says what it kept"
+  )
+  -- the template's own comment reworded by an older version: the new wording stays, the old one is not duplicated
+  put(why_init, (why_text:gsub("%-%- It runs nothing itself%.", "-- Old wording of this line.", 1)))
+  p = update.plan(why, NOFMT)
+  f = file(p, "TESTS/minimal_init.lua")
+  lacks(
+    f.after,
+    "Old wording of this line.",
+    "own comment: a reworded template comment is not brought back"
+  )
+  has(f.after, "It runs nothing itself.", "own comment: the template's wording is back")
+
   vim.fn.delete(base, "rf")
 end

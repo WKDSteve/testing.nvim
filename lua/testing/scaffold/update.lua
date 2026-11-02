@@ -387,6 +387,75 @@ local function keep_blocks(before, after, prefix)
   return table.concat(out, "\n"), kept, risks
 end
 
+---The repository's own explanatory comments: a run of comment lines of the old file that the new render has none of
+---(not even reworded) and that stands right above a code line the new render has exactly once, with no comment of the
+---template above that line. It is put back above that line, so a reason written down for a deliberate choice (why
+---`ui.nvim` is no dependency) does not vanish in a re-render. A comment the template has in another wording stays
+---the template's: only a place without any comment in the new file takes the old one.
+---@param before string|nil The old file.
+---@param after string The new render.
+---@param prefix string Comment start as written in the file (`#` or `--`).
+---@return string after
+---@return string[] kept
+local function keep_comments(before, after, prefix)
+  if not before then
+    return after, {}
+  end
+  local function is_comment(l)
+    local t = vim.trim(l)
+    return t:sub(1, #prefix) == prefix and t:sub(1, 2) ~= "#!"
+  end
+  local old = vim.split(before, "\n", { plain = true })
+  local out = vim.split(after, "\n", { plain = true })
+  local present, counts, where = {}, {}, {}
+  for k, l in ipairs(out) do
+    present[vim.trim(l)] = true
+    counts[l] = (counts[l] or 0) + 1
+    where[l] = k
+  end
+  local placements, kept = {}, {}
+  local i = 1
+  while i <= #old do
+    if is_comment(old[i]) then
+      local j = i
+      while j < #old and is_comment(old[j + 1]) do
+        j = j + 1
+      end
+      local run = vim.list_slice(old, i, j)
+      local own = true
+      for _, l in ipairs(run) do
+        if present[vim.trim(l)] or vim.trim(l):find("testing:keep", 1, true) then
+          own = false
+          break
+        end
+      end
+      local anchor = old[j + 1]
+      if own and anchor and vim.trim(anchor) ~= "" and counts[anchor] == 1 then
+        local at = where[anchor]
+        if at == 1 or not is_comment(out[at - 1]) then
+          placements[#placements + 1] = { pos = at - 1, lines = run }
+          kept[#kept + 1] = ("%d comment line(s) above `%s`"):format(
+            #run,
+            vim.trim(anchor):sub(1, 40)
+          )
+        end
+      end
+      i = j
+    end
+    i = i + 1
+  end
+  -- from the bottom up: an insertion does not move the places above it
+  table.sort(placements, function(a, b)
+    return a.pos > b.pos
+  end)
+  for _, pl in ipairs(placements) do
+    for n, l in ipairs(pl.lines) do
+      table.insert(out, pl.pos + n, l)
+    end
+  end
+  return table.concat(out, "\n"), kept
+end
+
 ---A file that is the repository's own on purpose: `<comment> testing:keep-file <reason>` in its first lines. The
 ---update leaves it as it is and says why (a `--check` does not count it).
 ---@param before string|nil
@@ -517,6 +586,9 @@ function M.plan(root, opts)
         after, blocks, block_risks = keep_blocks(old_sh, after, "#")
         vim.list_extend(kept, blocks)
         vim.list_extend(risks, block_risks)
+        local own_comments
+        after, own_comments = keep_comments(old_sh, after, "#")
+        vim.list_extend(kept, own_comments)
       end
       local dropped, older = {}, 0
       for _, l in ipairs(dropped_lines(old_sh, after, "#")) do
@@ -589,6 +661,9 @@ function M.plan(root, opts)
         after, blocks, block_risks = keep_blocks(old_minit, after, "--")
         vim.list_extend(kept, blocks)
         vim.list_extend(risks, block_risks)
+        local own_comments
+        after, own_comments = keep_comments(old_minit, after, "--")
+        vim.list_extend(kept, own_comments)
         if #blocks > 0 and #block_risks == 0 and not loadstring(after) then
           risks[#risks + 1] =
             "the testing:keep block would not compile in the new file: copy it by hand (the diff shows it)"

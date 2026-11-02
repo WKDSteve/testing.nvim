@@ -83,6 +83,10 @@ branch of the script; the same for a `begin` without an `end`. Two blocks right 
 dogfood `scripts/test.sh` of testing.nvim) says so in its first 20 lines: `# testing:keep-file <reason>` (`--` in
 `minimal_init.lua`). It is left as it is, the reason appears in the report as "kept", and `--check` does not count it.
 
+A comment of the repository's own that explains a deliberate choice (a run of `#`/`--` lines that the template has no
+trace of, right above a code line the new render has exactly once and that has no comment of its own there) is put back
+above that line, listed under "kept". A template comment in an older wording is not: the new wording replaces it.
+
 Anything else of the repository's own is not kept: the code lines of the old file that the new one does not have
 are listed under "only in the old file" (only the exact lines an earlier template version wrote are counted
 instead), and its comment lines under "comments only in the old file" (a reason written down for a deliberate
