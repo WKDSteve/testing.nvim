@@ -140,7 +140,30 @@ export NVIM_APPNAME="@@PLUGIN@@-tests"
 # A run with `isolated = "none"` writes the plugin's state where Neovim keeps it: point state and
 # cache at a scratch directory, removed afterwards (a child editor has a sandbox of its own).
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+# A second full suite in the same checkout only warns (scripts/suite-lock.sh of testing.nvim, when that checkout has
+# it): two at once make the process specs time out. Partial runs and the other subcommands take no lock.
+full_suite=0
+case "${1:-}" in
+  surface | conformance) ;;
+  ci)
+    case "${2:-}" in
+      "" | -*) full_suite=1 ;;
+    esac
+    ;;
+  *) full_suite=1 ;;
+esac
+for a in "$@"; do
+  case "$a" in
+    --file | --file=* | --list | --changed | --help | -h) full_suite=0 ;;
+  esac
+done
+lock_lib="${TESTING_NVIM_DIR:-}/scripts/suite-lock.sh"
+if [[ "$full_suite" == 1 && -n "$real_state" && -f "$lock_lib" ]]; then
+  # shellcheck disable=SC1090
+  . "$lock_lib"
+  suite_lock_acquire "$real_state" "$ROOT"
+fi
+trap 'type suite_lock_release >/dev/null 2>&1 && suite_lock_release; rm -rf "$scratch"' EXIT
 if command -v cygpath >/dev/null 2>&1; then
   scratch="$(cygpath -m "$scratch")"
 fi
