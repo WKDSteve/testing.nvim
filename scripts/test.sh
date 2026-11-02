@@ -11,6 +11,11 @@
 #
 # Every option of `scripts/testing.lua --help` is passed through unchanged.
 #
+#   A plain run (no subcommand) defaults to `--cached --order slowest-first`: unchanged spec files come from the result
+#   cache (a folder of your real cache directory, or $TESTING_CACHE_HOME), the longest files start first, and the run is
+#   recorded in your real state directory (last.json, runs.jsonl: `testing ci verify`, the editor's explorer). Not
+#   under CI. `--no-cache` or TESTING_PLAIN=1 gives the plain uncached run.
+#
 #   scripts/test.sh --cached           reuse the results of unchanged spec files (docs/CACHE.md); the cache
 #                                      lives in $TESTING_CACHE_HOME (default: a throwaway directory, so a
 #                                      second invocation starts cold unless you point it somewhere)
@@ -44,13 +49,16 @@ if ! command -v nvim >/dev/null 2>&1; then
   exit 3
 fi
 
-# `ci`: the pipeline's document (ci.json) and the suite's stamp must outlive the scratch directory below. The
-# developer's real state directory is asked for BEFORE the isolation and handed to `testing ci --state-dir` (an
-# argument, not the environment: the specs must not inherit it).
+# `ci` and the plain run: the pipeline's document (ci.json), the suite's stamp and the run history (last.json,
+# runs.jsonl) must outlive the scratch directory below, where `testing ci verify`, the pre-push hook and the editor's
+# test explorer read them. The developer's real state directory is asked for BEFORE the isolation and handed to
+# `--state-dir` (an argument, not the environment: the specs must not inherit it).
 real_state=""
-if [ "${1:-}" = "ci" ]; then
+real_cache=""
+if [ "${1:-}" != "conformance" ]; then
   real_state="$(nvim -n -i NONE --headless -u NONE --cmd 'lua io.stdout:write(vim.fn.stdpath("state"))' --cmd 'qa!' 2>/dev/null)"
-  if [ -z "$real_state" ]; then
+  real_cache="$(nvim -n -i NONE --headless -u NONE --cmd 'lua io.stdout:write(vim.fn.stdpath("cache"))' --cmd 'qa!' 2>/dev/null)"
+  if [ -z "$real_state" ] && [ "${1:-}" = "ci" ]; then
     # without it the document and the stamp would go into the scratch directory and be deleted on exit
     printf '\033[31m%s\033[0m\n' 'error: cannot ask nvim for stdpath("state"); the ci document would be lost.' >&2
     exit 3
@@ -88,6 +96,17 @@ if [ -n "${TESTING_CACHE_HOME:-}" ]; then
   cache_args=(--cache-dir "$TESTING_CACHE_HOME")
   unset TESTING_CACHE_HOME
 fi
+# A plain run defaults to the result cache (unchanged spec files are not run again; docs/CACHE.md) in a folder of the
+# developer's real cache directory, and starts the longest files first (their durations are in the real state). A cache
+# hit is keyed on everything the file can reach, so it is the answer a run would give; `--no-cache` or
+# TESTING_PLAIN=1 turns both off (CI does not use this script's defaults: it sets CI).
+plain_defaults=()
+if [ -z "${CI:-}" ] && [ -z "${TESTING_PLAIN:-}" ] && [ "${1:-}" != "ci" ] && [ "${1:-}" != "fast" ] && [ "${1:-}" != "conformance" ]; then
+  plain_defaults=(--cached --order slowest-first)
+  if [ ${#cache_args[@]} -eq 0 ] && [ -n "$real_cache" ]; then
+    cache_args=(--cache-dir "$real_cache/testing-nvim-tests")
+  fi
+fi
 export XDG_CACHE_HOME="$scratch/cache"
 # Workspace trust (docs/CONFIG.md): this script IS code of this repository, so running it is the trust decision; and
 # the specs run the runner on fixture projects they build in the temp directory. Every root is trusted below.
@@ -101,6 +120,7 @@ if [ "${1:-}" = "conformance" ]; then
 fi
 if [ "${1:-}" = "fast" ]; then
   shift
+  [ -z "$real_state" ] || set -- --state-dir "$real_state" "$@"
   nvim -n -i NONE --headless -u NONE -l scripts/testing.lua fast . ${cache_args[@]+"${cache_args[@]}"} "$@"
   exit $?
 fi
@@ -120,5 +140,7 @@ if [ "${1:-}" = "ci" ]; then
   nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci ${state_args[@]+"${state_args[@]}"} "$@" ${suite_cache[@]+"${suite_cache[@]}"}
   exit $?
 fi
-nvim -n -i NONE --headless -u NONE -l scripts/testing.lua . ${cache_args[@]+"${cache_args[@]}"} "$@"
+# the real state directory goes first, a `--state-dir` of the caller after it wins
+[ -z "$real_state" ] || set -- --state-dir "$real_state" "$@"
+nvim -n -i NONE --headless -u NONE -l scripts/testing.lua . ${cache_args[@]+"${cache_args[@]}"} ${plain_defaults[@]+"${plain_defaults[@]}"} "$@"
 exit $?
