@@ -137,7 +137,21 @@ if [ "${1:-}" = "ci" ]; then
       suite_cache=("${cache_args[@]}")
     fi
   done
-  nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci ${state_args[@]+"${state_args[@]}"} "$@" ${suite_cache[@]+"${suite_cache[@]}"}
+  # a subcommand goes first (`ci verify`, `ci commit`, ...): `testing ci` reads it as its first argument; `list`, `hook`,
+  # `runner-guard` and `trust` take no --state-dir
+  sub=()
+  case "${1:-}" in
+    verify | commit | remote | overview)
+      sub=("$1")
+      shift
+      ;;
+    list | hook | runner-guard | trust)
+      sub=("$1")
+      shift
+      state_args=()
+      ;;
+  esac
+  nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci ${sub[@]+"${sub[@]}"} ${state_args[@]+"${state_args[@]}"} "$@" ${suite_cache[@]+"${suite_cache[@]}"}
   exit $?
 fi
 # the real state directory goes first, a `--state-dir` of the caller after it wins
