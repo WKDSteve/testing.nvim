@@ -65,6 +65,8 @@ Baseline of `2026-10-06` (median of 9 runs after one warm-up; `TESTS/bench/basel
 
 `cache_key_100` was added later (median of 5 runs, the review of the cache key). See finding 5 for the conditions of this measurement. The baseline file is the machine-readable form of this table.
 
+Re-measured 2026-11-02 (`testing budget .`, same machine, 13 s): all nine cases inside the limit (factor 0.38 to 1.26; `cache_key_100` 89 ms, `ir_encode_10k` 214 ms, `cache_hash_500` 29 ms, `child_kill` 0.67 s). The limit is baseline x 2 and 1 ms, so a slowdown of 25 % to 99 % is not red; a tighter factor would trip on runner load. The baseline stays as it is (no silent adjustment).
+
 ## The D.7 budgets
 
 | Run | Target (D.7) | Measured here | Verdict |
