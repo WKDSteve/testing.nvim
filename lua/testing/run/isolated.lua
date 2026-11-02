@@ -824,6 +824,19 @@ end
 ---@field frag_dir? string Where the members write their records. NOT the member's sandbox: that is removed the moment its process ends (a crash, a kill), and the cases a file finished before it died are in this fragment.
 ---@field budget_files table<string, true> Files `--time-budget` skipped.
 ---@field budget_out boolean The time budget is used up.
+---@field res Testing.Result.Run
+---@field a table The assertion collector of the run.
+---@field header_tags fun(rel: string): string[]
+---@field effects_measured boolean
+---@field slots Testing.Isolated.Slot[]
+---@field next_commit integer The slot the merge waits for.
+---@field maxfail? integer
+---@field bad_total integer
+---@field files_run integer
+---@field files_unrun integer
+---@field files_unselected integer
+---@field files_unrun_budget integer
+---@field failed_files table<string, true>
 
 ---@param slot Testing.Isolated.Slot
 ---@param message string
@@ -1465,6 +1478,118 @@ local function run_slot(ctx, slot)
   run_child(ctx, slot)
 end
 
+---@param ctx Testing.Isolated.Ctx
+---@param case Testing.Result.Case
+local function record(ctx, case)
+  local opts, res = ctx.opts, ctx.res
+  local effects_measured, header_tags = ctx.effects_measured, ctx.header_tags
+  local has_note = false
+  for _, n in ipairs(case.notes) do
+    if n == EFFECTS_NOTE then
+      has_note = true
+    end
+  end
+  if not has_note and not effects_measured then
+    case.notes[#case.notes + 1] = EFFECTS_NOTE
+  elseif effects_measured then
+    for _, note in ipairs(guards_mod.unmeasured_notes(opts.guard_cfg)) do
+      if not vim.tbl_contains(case.notes, note) then
+        case.notes[#case.notes + 1] = note
+      end
+    end
+  end
+  case.tags = select_mod.union(select_mod.tags_of_id(case.id), header_tags(case.file))
+  result.add_case(res, case)
+  if inproc.BAD[case.status] then
+    ctx.bad_total = ctx.bad_total + 1
+    ctx.failed_files[case.file] = true
+  end
+  if opts.on_case then
+    pcall(opts.on_case, case)
+  end
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function commit(ctx, slot)
+  local opts, state = ctx.opts, ctx.state
+  if slot.kind == "unselected" then
+    ctx.files_unselected = ctx.files_unselected + 1
+    return
+  end
+  if not slot.not_first then
+    ctx.files_run = ctx.files_run + 1
+  end
+  if slot.output and slot.output ~= "" and opts.on_output then
+    pcall(opts.on_output, slot.label or slot.entry.rel, slot.output)
+  end
+  if slot.note and slot.cases and slot.cases[1] then
+    slot.cases[1].notes[#slot.cases[1].notes + 1] = slot.note
+  end
+  local orphan_id = slot.not_first and (slot.entry.rel .. "::" .. inproc.ORPHAN_NAME) or nil
+  for _, c in ipairs(slot.cases or {}) do
+    -- every case child re-runs the file's describe bodies and books the same file-level failure: the first slot's
+    -- copy is the report, a repeat would be a duplicate id (the IR is refused) and one failure counted per case
+    if c.id ~= orphan_id then
+      record(ctx, c)
+      if ctx.maxfail and ctx.bad_total >= ctx.maxfail then
+        state.stopped = true
+        break
+      end
+    end
+  end
+end
+
+---Commit, in slot order, every slot that is done; an in-process file runs here at its turn.
+---@param ctx Testing.Isolated.Ctx
+local function commit_ready(ctx)
+  local opts, state = ctx.opts, ctx.state
+  while ctx.next_commit <= #ctx.slots do
+    local slot = ctx.slots[ctx.next_commit]
+    if not state.stopped and slot.kind == "inproc" and slot.state ~= "done" then
+      -- an in-process file runs here, at its turn: the budget is asked before it starts like for a child
+      budget_skip(ctx, slot)
+    end
+    if state.stopped then
+      -- a file with several case ctx.slots is one file, and a file that already ran is not "unrun"
+      if not slot.not_first then
+        ctx.files_unrun = ctx.files_unrun + 1
+      end
+    elseif ctx.budget_files[slot.entry.rel] then
+      if not slot.not_first then
+        ctx.files_unrun = ctx.files_unrun + 1
+        ctx.files_unrun_budget = ctx.files_unrun_budget + 1
+      end
+    else
+      if slot.kind == "inproc" and slot.state ~= "done" then
+        run_inproc(ctx, slot)
+      end
+      if slot.state ~= "done" then
+        return
+      end
+      commit(ctx, slot)
+      -- the ctx.slots of one file are consecutive: the file is done with its last slot
+      local following = ctx.slots[ctx.next_commit + 1]
+      if opts.on_file_done and not (following and following.not_first) and not state.stopped then
+        pcall(opts.on_file_done, slot.entry.rel)
+      end
+    end
+    ctx.next_commit = ctx.next_commit + 1
+  end
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@return boolean
+local function any_alive(ctx)
+  local live = ctx.live
+  for _, slot in ipairs(live) do
+    if slot.handle and not slot.handle.exited then
+      return true
+    end
+  end
+  return false
+end
+
 ---Run the planned files; same report as `inproc.run`.
 ---@param opts Testing.Isolated.Opts
 ---@return Testing.Inproc.Report
@@ -1475,12 +1600,10 @@ function M.run(opts)
   end
   local root = opts.root:gsub("\\", "/"):gsub("/+$", "")
   local o = opts.options or options_mod.of({})
-  -- a hand-built options table (a spec) may lack the keys of the warm pool and of the guards
   local child = opts.child or require("testing.child")
   local grace = opts.grace_ms or M.GRACE_MS
   local poll = opts.poll_ms or M.POLL_MS
   local timeouts = opts.timeouts or {}
-  local maxfail = opts.maxfail
   local entries = inproc.entries_of(root, opts.files, opts.dialect or "a")
 
   local a = assert_mod.new({ clock = opts.clock })
@@ -1498,43 +1621,10 @@ function M.run(opts)
   local selector = opts.selector or select_mod.new({ header_tags = header_tags })
 
   local state = { stopped = false, fatal = nil }
-  local bad_total = 0
-  local files_run, files_unrun, files_unselected = 0, 0, 0
-  -- `--time-budget`: asked before a file's first child starts, never while one runs; a file that began finishes
-  local files_unrun_budget = 0
-  local failed_files = {}
 
   -- without a guard layer nothing measures effects, and the cases say so
   local effects_measured = opts.guard_cfg ~= nil and guards_mod.available()
   local notes, unattached = {}, {}
-
-  ---@param case Testing.Result.Case
-  local function record(case)
-    local has_note = false
-    for _, n in ipairs(case.notes) do
-      if n == EFFECTS_NOTE then
-        has_note = true
-      end
-    end
-    if not has_note and not effects_measured then
-      case.notes[#case.notes + 1] = EFFECTS_NOTE
-    elseif effects_measured then
-      for _, note in ipairs(guards_mod.unmeasured_notes(opts.guard_cfg)) do
-        if not vim.tbl_contains(case.notes, note) then
-          case.notes[#case.notes + 1] = note
-        end
-      end
-    end
-    case.tags = select_mod.union(select_mod.tags_of_id(case.id), header_tags(case.file))
-    result.add_case(res, case)
-    if inproc.BAD[case.status] then
-      bad_total = bad_total + 1
-      failed_files[case.file] = true
-    end
-    if opts.on_case then
-      pcall(opts.on_case, case)
-    end
-  end
 
   local slots = classify(opts, o, root, entries, selector, timeouts)
 
@@ -1561,6 +1651,20 @@ function M.run(opts)
     state_mode = (o.guards or {}).state,
     budget_files = {},
     budget_out = false,
+    res = res,
+    a = a,
+    header_tags = header_tags,
+    effects_measured = effects_measured,
+    slots = slots,
+    next_commit = 1,
+    maxfail = opts.maxfail,
+    bad_total = 0,
+    files_run = 0,
+    files_unrun = 0,
+    files_unselected = 0,
+    -- `--time-budget`: asked before a file's first child starts, never while one runs; a file that began finishes
+    files_unrun_budget = 0,
+    failed_files = {},
   } --[[@as Testing.Isolated.Ctx]]
 
   -- one coroutine per child file; the semaphore decides how many run at once, FIFO. The order the coroutines are
@@ -1615,88 +1719,14 @@ function M.run(opts)
   end
 
   -- ---- supervisor ------------------------------------------------------------------------
-  local next_commit = 1
-  ---@param slot Testing.Isolated.Slot
-  local function commit(slot)
-    if slot.kind == "unselected" then
-      files_unselected = files_unselected + 1
-      return
-    end
-    if not slot.not_first then
-      files_run = files_run + 1
-    end
-    if slot.output and slot.output ~= "" and opts.on_output then
-      pcall(opts.on_output, slot.label or slot.entry.rel, slot.output)
-    end
-    if slot.note and slot.cases and slot.cases[1] then
-      slot.cases[1].notes[#slot.cases[1].notes + 1] = slot.note
-    end
-    local orphan_id = slot.not_first and (slot.entry.rel .. "::" .. inproc.ORPHAN_NAME) or nil
-    for _, c in ipairs(slot.cases or {}) do
-      -- every case child re-runs the file's describe bodies and books the same file-level failure: the first slot's
-      -- copy is the report, a repeat would be a duplicate id (the IR is refused) and one failure counted per case
-      if c.id ~= orphan_id then
-        record(c)
-        if maxfail and bad_total >= maxfail then
-          state.stopped = true
-          break
-        end
-      end
-    end
-  end
-
-  local function commit_ready()
-    while next_commit <= #slots do
-      local slot = slots[next_commit]
-      if not state.stopped and slot.kind == "inproc" and slot.state ~= "done" then
-        -- an in-process file runs here, at its turn: the budget is asked before it starts like for a child
-        budget_skip(ctx, slot)
-      end
-      if state.stopped then
-        -- a file with several case slots is one file, and a file that already ran is not "unrun"
-        if not slot.not_first then
-          files_unrun = files_unrun + 1
-        end
-      elseif ctx.budget_files[slot.entry.rel] then
-        if not slot.not_first then
-          files_unrun = files_unrun + 1
-          files_unrun_budget = files_unrun_budget + 1
-        end
-      else
-        if slot.kind == "inproc" and slot.state ~= "done" then
-          run_inproc(ctx, slot)
-        end
-        if slot.state ~= "done" then
-          return
-        end
-        commit(slot)
-        -- the slots of one file are consecutive: the file is done with its last slot
-        local following = slots[next_commit + 1]
-        if opts.on_file_done and not (following and following.not_first) and not state.stopped then
-          pcall(opts.on_file_done, slot.entry.rel)
-        end
-      end
-      next_commit = next_commit + 1
-    end
-  end
-
-  local function any_alive()
-    for _, slot in ipairs(live) do
-      if slot.handle and not slot.handle.exited then
-        return true
-      end
-    end
-    return false
-  end
-
   local loop_ok, loop_err = pcall(function()
-    while next_commit <= #slots do
+    while ctx.next_commit <= #slots do
       if state.fatal then
         error(state.fatal, 0)
       end
       supervise(ctx)
-      commit_ready()
-      if next_commit > #slots then
+      commit_ready(ctx)
+      if ctx.next_commit > #slots then
         break
       end
       vim.wait(poll)
@@ -1704,10 +1734,10 @@ function M.run(opts)
   end)
 
   -- children that are still alive (a stop, or an error): kill them and wait until they are gone
-  if any_alive() then
+  if any_alive(ctx) then
     state.stopped = true
     local deadline = hrtime() / 1e6 + M.REAP_MS
-    while any_alive() and hrtime() / 1e6 < deadline do
+    while any_alive(ctx) and hrtime() / 1e6 < deadline do
       supervise(ctx)
       vim.wait(poll)
     end
@@ -1740,25 +1770,27 @@ function M.run(opts)
   end
 
   local wall_ms = (hrtime() - started) / 1e6
-  inproc.attach_findings(res, a, opts.findings or {}, opts.strict, record)
+  inproc.attach_findings(res, a, opts.findings or {}, opts.strict, function(case)
+    record(ctx, case)
+  end)
   res.run.duration_ms = math.floor(wall_ms * 1000 + 0.5) / 1000
   result.finalize(res)
 
   local skipped, na = result.skip_counts(res)
   return {
     result = res,
-    failed = bad_total,
-    failed_files = vim.tbl_count(failed_files),
+    failed = ctx.bad_total,
+    failed_files = vim.tbl_count(ctx.failed_files),
     total = #res.cases,
-    files_run = files_run,
-    files_unrun = files_unrun,
-    files_unrun_budget = files_unrun_budget,
-    files_unselected = files_unselected,
+    files_run = ctx.files_run,
+    files_unrun = ctx.files_unrun,
+    files_unrun_budget = ctx.files_unrun_budget,
+    files_unselected = ctx.files_unselected,
     skipped = skipped,
     na = na,
     stopped = state.stopped,
     wall_ms = wall_ms,
-    exit_code = (bad_total > 0 or (opts.strict and skipped + na > 0)) and 1 or 0,
+    exit_code = (ctx.bad_total > 0 or (opts.strict and skipped + na > 0)) and 1 or 0,
     notes = notes,
     unattached = unattached,
     pool = pool_stats,
