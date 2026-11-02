@@ -36,3 +36,23 @@ on Windows with `wsl [-d $TESTING_WSL_DISTRO] --exec tmux`, directly on Linux) a
 
 Every call is an argument vector (`--exec` keeps WSL from re-parsing it through a shell). `pty.available()` answers
 whether tmux is usable; a spec that needs it prints `n/a  <reason>` and returns when it is not (a reported skip).
+
+## Linux checks in a container (`testing.container`)
+
+`containers/linux/Containerfile` describes the Linux environment of the container checks: Alpine 3.22 (its release
+pins every package version range) with Neovim, `gio`, `trash-cli`, `xdg-utils`, `tmux` and DejaVu fonts, run as the
+user `tester`. Build it once with `podman build -t localhost/testing-linux:1 containers/linux`.
+
+`require("testing.container")` runs one command in a fresh container (`--rm --network none`, mounts read-only):
+
+| Call | Result |
+| --- | --- |
+| `container.available()` | `true, image` or `false, reason` (engine missing, machine stopped, image not built) |
+| `container.run({ "nvim", "--headless", ... }, { mounts = { [host] = "/repos" }, env = {} })` | `{ code, stdout, stderr }` |
+| `container.argv(command, opts)` | the argument vector of that run (for specs with a fake runner) |
+
+Engine `$TESTING_CONTAINER_ENGINE` (default `podman`), image `$TESTING_CONTAINER_IMAGE`. A spec that needs it prints
+`n/a  <reason>` and returns when it is unavailable. The container shares the kernel of the podman machine (WSL2 on
+Windows): `is_wsl()` of lib.nvim reads "microsoft" from the kernel release, so container scripts stub the detection
+to `false` (the userland is plain Linux). Users: filetree.nvim (`trash_linux_container_spec`: `gio trash`, then
+`trash-put`), lib.nvim (`cross_open_default_container_spec`: `xdg-open` gets the target as one untouched argument).
