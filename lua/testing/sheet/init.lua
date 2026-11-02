@@ -228,6 +228,13 @@ local function check_step(step, i)
   if action == "screen" and not step.screen:match("^[%w][%w_%-]*$") then
     return at .. ".screen: letters, digits, '_' and '-'"
   end
+  -- `shot` is a part of a file name (`<id>.<shot>.<size>.png`): no path separators, no `..`
+  if action == "shot" and not step.shot:match("^[%w][%w_%-]*$") then
+    return at .. ".shot: letters, digits, '_' and '-'"
+  end
+  if (action == "open" or action == "press" or action == "click") and step[action] == "" then
+    return ("%s.%s must not be empty"):format(at, action)
+  end
   return nil
 end
 

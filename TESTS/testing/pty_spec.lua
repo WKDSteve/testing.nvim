@@ -25,7 +25,11 @@ return function(H)
   local available, version = pty.available(opts)
   ok(available, "available when tmux -V answers")
   eq(version, "tmux 3.7c", "... with its version")
-  eq(calls[1], vim.list_extend(vim.deepcopy(lead), { "-V" }), "the probe is `tmux -V` behind the host prefix")
+  eq(
+    calls[1],
+    vim.list_extend(vim.deepcopy(lead), { "-V" }),
+    "the probe is `tmux -V` behind the host prefix"
+  )
 
   calls = {}
   local session = assert(pty.open({ "nvim", "it's" }, opts))
@@ -39,28 +43,53 @@ return function(H)
 
   calls = {}
   session:send({ "M-n" })
-  eq(calls[1], vim.list_extend(vim.deepcopy(lead), { "send-keys", "-t", session.name, "M-n" }), "keys go through send-keys")
+  eq(
+    calls[1],
+    vim.list_extend(vim.deepcopy(lead), { "send-keys", "-t", session.name, "M-n" }),
+    "keys go through send-keys"
+  )
   session:send({ "a b" }, true)
   eq(calls[2][#lead + 4], "-l", "literal text uses -l")
 
+  -- raw() reads the recording in binary mode: a text-mode read folds CRLF into LF (on Windows)
+  local binary
+  local rec = assert(pty.open({ "x" }, {
+    run = function(_, _, bin)
+      binary = bin
+      return { code = 0, stdout = "x", stderr = "" }
+    end,
+  }))
+  rec:raw()
+  eq(binary, true, "raw() asks for a binary read")
+
   -- a failing tmux is no session
-  local broken = pty.open({ "x" }, { run = function()
-    return { code = 1, stdout = "", stderr = "no server" }
-  end })
+  local broken = pty.open({ "x" }, {
+    run = function()
+      return { code = 1, stdout = "", stderr = "no server" }
+    end,
+  })
   eq(broken, nil, "a failing new-session returns no session")
-  local bad = pty.available({ run = function()
-    return { code = 1, stdout = "", stderr = "" }
-  end })
+  local bad = pty.available({
+    run = function()
+      return { code = 1, stdout = "", stderr = "" }
+    end,
+  })
   eq(bad, false, "tmux that fails is not available")
 
   -- 2. a real session, where tmux is usable ------------------------------------------------------------------------
   local real_ok = pty.available({})
   if not real_ok then
-    print("n/a  tmux is not usable here (WSL with tmux, or tmux on Linux): the real session is skipped")
+    print(
+      "n/a  tmux is not usable here (WSL with tmux, or tmux on Linux): the real session is skipped"
+    )
     return
   end
   local bs = string.char(92)
-  local program = "printf 'hello " .. bs .. "033]1337;File=inline=1:QUJD" .. bs .. "007 world'; sleep 5"
+  local program = "printf 'hello "
+    .. bs
+    .. "033]1337;File=inline=1:QUJD"
+    .. bs
+    .. "007 world'; sleep 5"
   local s, err = pty.open({ "sh", "-c", program }, { cols = 60, rows = 10 })
   ok(s ~= nil, "a real session starts: " .. tostring(err))
   if not s then
@@ -69,9 +98,27 @@ return function(H)
   local seen = s:wait_for("hello", 8000)
   ok(seen, "the program's text reaches the screen")
   ok(s:screen():find("world", 1, true) ~= nil, "... the whole line")
-  ok(s:raw():find("\27]1337;File=inline=1:QUJD\7", 1, true) ~= nil, "the raw stream keeps the OSC-1337 sequence the screen drops")
+  ok(
+    s:raw():find("\27]1337;File=inline=1:QUJD\7", 1, true) ~= nil,
+    "the raw stream keeps the OSC-1337 sequence the screen drops"
+  )
   s:close()
-  ok(select(2, pcall(function()
-    return #s:raw()
-  end)) == 0, "close removes the recording")
+
+  -- a terminal turns the program's LF into CRLF; the raw stream must keep it byte for byte
+  local crlf = assert(
+    pty.open({ "sh", "-c", "printf 'one" .. bs .. "ntwo'; sleep 5" }, { cols = 60, rows = 10 })
+  )
+  ok(crlf:wait_for("two", 8000, "raw"), "the second line reaches the raw stream")
+  ok(
+    crlf:raw():find("one" .. string.char(13, 10) .. "two", 1, true) ~= nil,
+    "the raw stream keeps CRLF"
+  )
+  crlf:close()
+
+  ok(select(
+    2,
+    pcall(function()
+      return #s:raw()
+    end)
+  ) == 0, "close removes the recording")
 end

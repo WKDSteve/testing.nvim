@@ -14,15 +14,12 @@ return function(H)
 
   -- 1. the argument vectors, with a fake runner ---------------------------------------------------------------------
   eq(
-    container.argv(
-      { "nvim", "--headless" },
-      {
-        engine = "podman",
-        image = "img:1",
-        mounts = { ["/b"] = "/y", ["/a"] = "/x" },
-        env = { Z = "1", A = "2" },
-      }
-    ),
+    container.argv({ "nvim", "--headless" }, {
+      engine = "podman",
+      image = "img:1",
+      mounts = { ["/b"] = "/y", ["/a"] = "/x" },
+      env = { Z = "1", A = "2" },
+    }),
     {
       "podman",
       "run",
@@ -54,6 +51,13 @@ return function(H)
   local good, name = container.available({ run = fake(0), image = "img:1" })
   ok(good and name == "img:1", "available when the image exists")
   eq(calls[1], { "podman", "image", "exists", "img:1" }, "the probe asks the engine for the image")
+  calls = {}
+  container.available({ run = fake(0), image = "img:1", engine = "docker" })
+  eq(
+    calls[1],
+    { "docker", "image", "inspect", "img:1" },
+    "docker asks with `image inspect`, it has no `image exists`"
+  )
   local missing, reason = container.available({ run = fake(1), image = "img:1" })
   ok(
     not missing and reason:find("not built", 1, true) ~= nil,

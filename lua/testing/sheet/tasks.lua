@@ -215,7 +215,8 @@ end
 function M.state_word(e)
   local bucket = require("testing.sheet.report").bucket(e)
   if bucket == "red" then
-    if e.sheet and not e.case then
+    if e.sheet and (not e.case or e.case.status == "skip") then
+      -- a skipped sheet (no browser here) did not run: that is `never`, not a red one
       return "never"
     elseif e.sheet and e.stale then
       return "stale"

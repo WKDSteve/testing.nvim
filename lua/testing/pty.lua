@@ -20,7 +20,7 @@ local M = {}
 
 ---@class Testing.Pty.Opts
 ---@field distro? string WSL distribution (default: `$TESTING_WSL_DISTRO`, else the default one).
----@field run? fun(argv: string[], stdin: string|nil): Testing.Pty.Result
+---@field run? fun(argv: string[], stdin: string|nil, binary: boolean|nil): Testing.Pty.Result
 ---@field cols? integer Default 100.
 ---@field rows? integer Default 30.
 ---@field timeout_ms? integer Per tmux call (default 15000).
@@ -50,13 +50,15 @@ local function prefix(opts)
 end
 
 ---@param opts Testing.Pty.Opts
----@return fun(argv: string[], stdin: string|nil): Testing.Pty.Result
+---@return fun(argv: string[], stdin: string|nil, binary: boolean|nil): Testing.Pty.Result
 local function runner(opts)
   if opts.run then
     return opts.run
   end
-  return function(argv, stdin)
-    local done = vim.system(argv, { text = true, stdin = stdin }):wait(opts.timeout_ms or 15000)
+  return function(argv, stdin, binary)
+    -- `text` turns CRLF into LF (on Windows); the raw stream of a terminal is full of CRLF and must stay as it is
+    local done =
+      vim.system(argv, { text = not binary, stdin = stdin }):wait(opts.timeout_ms or 15000)
     return { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
   end
 end
@@ -114,9 +116,17 @@ function M.open(command, opts)
   -- Hold the program until the recorder is attached: `read` waits for the line `go` sent after pipe-pane.
   local script = ("read _; exec %s"):format(table.concat(quoted, " "))
   local res = tmux(self, {
-    "new-session", "-d", "-s", self.name,
-    "-x", tostring(opts.cols or 100), "-y", tostring(opts.rows or 30),
-    "sh", "-c", script,
+    "new-session",
+    "-d",
+    "-s",
+    self.name,
+    "-x",
+    tostring(opts.cols or 100),
+    "-y",
+    tostring(opts.rows or 30),
+    "sh",
+    "-c",
+    script,
   })
   if res.code ~= 0 then
     return nil, "tmux new-session failed: " .. res.stderr
@@ -155,7 +165,7 @@ end
 function Session:raw()
   local argv = host(self._opts)
   vim.list_extend(argv, { "cat", self.raw_path })
-  return runner(self._opts)(argv).stdout
+  return runner(self._opts)(argv, nil, true).stdout
 end
 
 ---Wait until the screen or the raw stream holds `needle` (plain text).

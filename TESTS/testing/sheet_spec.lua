@@ -657,9 +657,10 @@ return function(H)
           st({ sheet = plain, case = { status = "pass" } }),
           st({ sheet = manual }),
           st({ error = "boom" }),
+          st({ sheet = plain, case = { status = "skip" } }),
         },
-        { "red", "never", "stale", "green", "manual", "red" },
-        "the state words: failed, never ran, stale, green, manual, does not load"
+        { "red", "never", "stale", "green", "manual", "red", "never" },
+        "the state words: failed, never ran, stale, green, manual, does not load, skipped (not run)"
       )
       local unloadable = tasks.render_block({
         {

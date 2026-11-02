@@ -43,6 +43,18 @@ return function(H)
   local _, e3 = sheet.validate({ id = "x", title = "x", engine = "browser", steps = {} })
   ok(tostring(e3):find("browser sheet needs steps", 1, true) ~= nil, "a browser sheet needs steps")
 
+  for _, bad in ipairs({
+    { shot = "../../escape" },
+    { shot = "a/b" },
+    { shot = "" },
+    { open = "" },
+    { press = "" },
+    { click = "" },
+  }) do
+    local _, why = sheet.validate({ id = "x", title = "x", engine = "browser", steps = { bad } })
+    ok(why ~= nil, "a step with an unusable value is refused at load: " .. vim.inspect(bad))
+  end
+
   -- 2. skips and the runner's answer, with a fake runner -------------------------------------------------------------
   local pw_dir = browser.playwright_dir(
     vim.fs.dirname(

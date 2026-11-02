@@ -58,7 +58,10 @@ end
 ---@return boolean ok, string reason
 function M.available(opts)
   opts = opts or {}
-  local res = runner(opts)({ engine(opts), "image", "exists", image(opts) })
+  -- `image exists` is podman's; docker answers the same question with `image inspect`
+  local probe = engine(opts):match("docker[^/]*$") and { "image", "inspect" }
+    or { "image", "exists" }
+  local res = runner(opts)({ engine(opts), probe[1], probe[2], image(opts) })
   if res.code == 0 then
     return true, image(opts)
   end
