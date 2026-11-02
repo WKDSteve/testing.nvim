@@ -165,7 +165,9 @@ counted, at most 1000 are kept. `add` and `revoke` replace a store that is not J
 object of another version or shape, an unreadable file, a non-file and an oversized file as they are (it may
 hold roots of a newer testing.nvim) and fail with the reason; move it away to start a new store. The store path
 is fixed when the command starts, so `testing ci` (whose suite step runs with a throwaway `XDG_STATE_HOME`)
-sees the same store.
+sees the same store. A `--state-dir <dir>` on the command line moves the store to `<dir>/testing/trust.json`: `scripts/test.sh`
+runs in a throwaway `XDG_STATE_HOME` and hands the developer's real state directory this way, so a root trusted
+with `testing trust add` also runs there without `CI=true` (the specs themselves still see only the throwaway state).
 
 Only the entry arms the gate. A Lua caller of the library (a spec calling `testing.cli.main`, a plugin calling
 `testing.config.project.load`) chose the code it runs and is not gated. `scripts/test.sh` of other projects

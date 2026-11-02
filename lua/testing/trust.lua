@@ -83,6 +83,30 @@ function M.path()
   return vim.fs.normalize(vim.fn.stdpath("state") .. "/testing/trust.json")
 end
 
+---The store a command line names: `<--state-dir>/testing/trust.json` for the last `--state-dir` before a `--`, nil
+---when there is none. A launcher that runs the suite in a throwaway `XDG_STATE_HOME` (the fleet's `scripts/test.sh`)
+---hands the developer's real state directory as this argument, so the store the user filled with `testing trust add`
+---is the one read, while the specs keep seeing only the throwaway one (an argument, not the environment).
+---@param argv string[]
+---@return string|nil store
+function M.store_from_args(argv)
+  local dir
+  for i = 1, #argv do
+    local a = argv[i]
+    if a == "--" then
+      break
+    elseif a == "--state-dir" and type(argv[i + 1]) == "string" and argv[i + 1] ~= "" then
+      dir = argv[i + 1]
+    elseif type(a) == "string" and a:match("^%-%-state%-dir=.") then
+      dir = a:sub(#"--state-dir=" + 1)
+    end
+  end
+  if not dir then
+    return nil
+  end
+  return vim.fs.normalize(dir .. "/testing/trust.json")
+end
+
 ---The canonical key of a root: symlinks resolved (SEC-40), forward slashes, no trailing slash.
 ---@param root string
 ---@return string

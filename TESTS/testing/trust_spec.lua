@@ -305,6 +305,48 @@ return function(H)
       "entry: ci does not refuse a stored root (got " .. text_ci:sub(1, 600) .. ")"
     )
     eq(code_ci, 0, "entry: ci on a stored root is green")
+
+    -- a launcher in a throwaway XDG_STATE_HOME (scripts/test.sh) names the real state with --state-dir: that store
+    -- decides, the environment of the specs stays the throwaway one
+    local real_state = base .. "/real-state"
+    eq(
+      trust.store_from_args({ "run", ".", "--state-dir", real_state }),
+      real_state .. "/testing/trust.json",
+      "store_from_args: split form"
+    )
+    eq(
+      trust.store_from_args({ "--state-dir=" .. real_state, "run" }),
+      real_state .. "/testing/trust.json",
+      "store_from_args: = form"
+    )
+    eq(
+      trust.store_from_args({ "--state-dir", "a", "--state-dir", real_state }),
+      real_state .. "/testing/trust.json",
+      "store_from_args: last wins"
+    )
+    eq(
+      trust.store_from_args({ "run", "--", "--state-dir", real_state }),
+      nil,
+      "store_from_args: not after --"
+    )
+    eq(trust.store_from_args({ "run", "." }), nil, "store_from_args: none")
+    child_env.XDG_STATE_HOME = base .. "/test-sh-state"
+    local code_untrusted, text_untrusted = run_entry({ "run", ".", "--state-dir", real_state })
+    ok(
+      text_untrusted:find(trust.REFUSED, 1, true) ~= nil,
+      "entry: an untrusted root is still refused with --state-dir"
+    )
+    ok(code_untrusted ~= 0, "entry: the refusal is not green")
+    local added_real = trust.add(ci_proj, { env = {}, store = real_state .. "/testing/trust.json" })
+    eq(added_real, true, "entry: trust added to the real state")
+    local code_real, text_real = run_entry({ "run", ".", "--state-dir", real_state })
+    ok(
+      not text_real:find(trust.REFUSED, 1, true),
+      "entry: a root trusted in the real state runs under a throwaway XDG_STATE_HOME (got "
+        .. text_real:sub(1, 600)
+        .. ")"
+    )
+    eq(code_real, 0, "entry: run on a root trusted in the real state is green")
   end)
   trust.arm(nil)
   vim.fn.delete(base, "rf")

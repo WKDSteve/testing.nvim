@@ -65,8 +65,10 @@ for _, name in ipairs({ "CI", "TESTING_TRUST", "TESTING_TRUST_ROOTS" }) do
   trust_env[name] = os.getenv(name)
 end
 -- the store is pinned here: `testing ci` runs its suite step in a throwaway XDG_STATE_HOME, where
--- `stdpath("state")` would name an empty store and refuse a root the user trusted
-local trust_store = require("testing.trust").path()
+-- `stdpath("state")` would name an empty store and refuse a root the user trusted. A launcher that itself runs in a
+-- throwaway state (`scripts/test.sh`) names the real one with `--state-dir`; that decides the store.
+local trust_mod = require("testing.trust")
+local trust_store = trust_mod.store_from_args(arg or {}) or trust_mod.path()
 local ok_run, code = pcall(
   cli.main,
   arg or {},
