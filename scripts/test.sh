@@ -74,7 +74,29 @@ scratch="$(mktemp -d)" || {
   printf '\033[31m%s\033[0m\n' "error: cannot create a scratch directory (mktemp -d failed; is TMPDIR writable?)." >&2
   exit 3
 }
-trap 'rm -rf "$scratch"' EXIT
+# A second full suite in the same checkout only warns (scripts/suite-lock.sh): both runs end up in timeouts. A partial
+# run (--file, --list, --changed), `ci verify` and the other subcommands take no lock.
+# shellcheck source=scripts/suite-lock.sh
+. "$(dirname "$0")/suite-lock.sh"
+full_suite=0
+case "${1:-}" in
+  conformance | surface | fast) ;;
+  ci)
+    case "${2:-}" in
+      "" | -*) full_suite=1 ;;
+    esac
+    ;;
+  *) full_suite=1 ;;
+esac
+for a in "$@"; do
+  case "$a" in
+    --file | --file=* | --list | --changed | --help | -h) full_suite=0 ;;
+  esac
+done
+if [ "$full_suite" = 1 ] && [ -n "$real_state" ]; then
+  suite_lock_acquire "$real_state" "$(pwd)"
+fi
+trap 'suite_lock_release; rm -rf "$scratch"' EXIT
 if command -v cygpath >/dev/null 2>&1; then
   scratch="$(cygpath -m "$scratch")"
 fi

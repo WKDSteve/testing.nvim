@@ -201,6 +201,13 @@ as `--state-dir=<dir>`: the document and the suite's stamp go there (they would 
 directory), while the suite's own history stays isolated. A shared cache (`TESTING_CACHE_HOME`) reaches the suite
 with `scripts/test.sh ci -- --cached`.
 
+Two full suites at once in the same checkout (two chats, a terminal next to an editor run) make the process specs
+(`ci_runner_guard_spec`, `ci_editor_spec`) run into their timeouts, although each is green alone. testing.nvim's own
+`scripts/test.sh` therefore keeps `suite-lock-<checksum>` in the real state directory (`scripts/suite-lock.sh`) for a
+plain run and for `ci`, and a second full suite prints a warning naming the pid of the first. It only warns: a lock of
+a dead pid, or older than 6 hours (`SUITE_LOCK_MAX_AGE` seconds), is taken over silently, and a partial run
+(`--file`, `--list`, `--changed`), `ci verify` and the other subcommands take no lock. Work in a worktree of your own.
+
 ## A run
 
 - The profile is `--profile`, else `ci.default`. `--step=a,b` runs only those steps: a **partial** run, which never
