@@ -23,4 +23,18 @@ return {
   },
   -- Legitimate writers, spawns and network hosts, one line each with a sentence why (docs/GUARDS.md of testing.nvim).
   guard_allow = { fs = {}, spawn = {}, network = {} },
+  -- The pipeline of `testing ci` is derived from the repository (fast = stylua, luacheck; full = fast + the suite).
+  -- To add the LuaLS diagnostics as a third profile, uncomment this: a `ci` section replaces the derived pipeline, so
+  -- it names all three. luals takes about a minute, so it stays out of `full` (the pre-push hook runs that). Before
+  -- it can be held at zero: `.luarc.json` must not set `workspace.library` (it replaces the library the editor
+  -- gives LuaLS: rule LLS-01), every plugin the code requires belongs in `deps` above, and
+  -- `testing lint luals --all` reports nothing twice in a row (docs/CI.md of testing.nvim, "The luals preset").
+  -- ci = {
+  --   default = "full",
+  --   profiles = {
+  --     fast = { "stylua", "luacheck" },
+  --     full = { "fast", "suite" },
+  --     strict = { "full", "luals" },
+  --   },
+  -- },
 }

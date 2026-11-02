@@ -165,6 +165,10 @@ belong in a profile that runs before every push. testing.nvim keeps it in a prof
 `workspace.checkThirdParty`, `workspace.ignoreDir` and its own diagnostics settings), every plugin it requires as a
 dependency in `deps` of `.testing.lua`, then `testing lint luals --all` until it reports nothing (the measurement
 is noisy: two runs in a row at zero, LLS-06/07), and a profile `strict = { "full", "luals" }` that keeps it there.
+`testing init` writes that profile into the new `.testing.lua` as a comment (uncomment it: a `ci` section replaces the
+derived pipeline, so the block names `fast`, `full` and `strict`). A repository that already has a `.luarc.json` with its
+own `workspace.library` loses that key first: it replaces the library the editor gives LuaLS (LLS-01), and the measurement
+would differ from the editor's.
 The findings themselves are worked off with the rules of the LuaLS diagnostics (LLS-01 .. LLS-46 of the rules vault).
 
 The in-process presets do not start `nvim -l` inside `nvim -l`: they run through `testing.cli` in the same process

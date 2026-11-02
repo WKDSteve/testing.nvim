@@ -337,6 +337,33 @@ return function(H)
     { fs = {}, spawn = {}, network = {} },
     ".testing.lua writes an empty allowlist"
   )
+  -- the `strict` profile (LuaLS at zero) is offered as a comment: the file has no `ci` section as it is (the derived
+  -- pipeline stays), and uncommenting the block gives a section that names all three profiles
+  eq(raw.ci, nil, ".testing.lua has no ci section of its own (the pipeline is derived)")
+  do
+    local file_lines = vim.fn.readfile(root .. "/.testing.lua")
+    local NL = string.char(10)
+    local text = table.concat(file_lines, NL)
+    ok(
+      text:find('strict = { "full", "luals" }', 1, true) ~= nil,
+      ".testing.lua offers the strict profile"
+    )
+    local lines = {}
+    for _, line in ipairs(file_lines) do
+      lines[#lines + 1] = (
+        line:gsub("^  %-%- (ci = {)", "  %1"):gsub("^  %-%-   ", "    "):gsub("^  %-%- }", "  }")
+      )
+    end
+    local uncommented = assert(load(table.concat(lines, NL), "=.testing.lua"))()
+    eq(uncommented.ci, {
+      default = "full",
+      profiles = {
+        fast = { "stylua", "luacheck" },
+        full = { "fast", "suite" },
+        strict = { "full", "luals" },
+      },
+    }, "uncommented, the block is a ci section with fast, full and strict")
+  end
   if not is_windows then
     local stat = vim.uv.fs_stat(root .. "/scripts/test.sh")
     ok(bit.band(stat.mode, tonumber("100", 8)) ~= 0, "scripts/test.sh is executable")
