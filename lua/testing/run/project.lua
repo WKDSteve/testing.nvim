@@ -756,6 +756,111 @@ local function record_run_state(ctx)
   end
 end
 
+---The stdout reporter and its report files of one run: the lines of a stdout reporter are held until every
+---report file is in place (`emit`, `flush`, `render`), and `infra_failed` says that one could not be built.
+---@param ctx { args: table, sv: Testing.Run.Services, root: string, res: Testing.Result, verdict: Testing.Verdict, primary: string, reports: table, out: fun(s: string), err: fun(s: string) }
+---@return { infra_failed: boolean, emit: function, flush: fun(why?: string), render: fun(shown: Testing.Verdict) }
+local function new_printer(ctx)
+  local args, sv, root, res, verdict = ctx.args, ctx.sv, ctx.root, ctx.res, ctx.verdict
+  local primary, reports, out, err = ctx.primary, ctx.reports, ctx.out, ctx.err
+  local printer = { infra_failed = false }
+
+  ---@param outputs Testing.Report.Output[]
+  ---@param errors string[]
+  ---@param sink? fun(line: string) Where the lines of a stdout reporter go (default: stdout now).
+  local function emit(outputs, errors, sink)
+    sink = sink or out
+    for _, o in ipairs(outputs) do
+      if not o.path and not o.err then
+        for _, line in ipairs(o.lines) do
+          sink(line)
+        end
+      end
+    end
+    for _, e in ipairs(errors) do
+      err("testing: " .. e)
+      printer.infra_failed = true
+    end
+  end
+
+  -- The first line of the agent reporter says "exit 0" or "exit 1": it is printed only once every report file
+  -- (`--json`, `--junit`) is written, because a failed write turns the exit code into 3 and the line would lie.
+  local held = {}
+  ---@param why? string Why the run did not complete (set: the held lines are replaced by one INFRA line).
+  local function flush_primary(why)
+    if why and primary == "agent" then
+      -- ONE line, whatever `why` holds (an IR that failed validation names the offending ids on several lines, ids of
+      -- the code under test): the first line of the report is the verdict, the rest is on stderr (`err` above)
+      local text = tostring(why)
+      local first = text:match("^[^\r\n]*") or ""
+      why = safe(first ~= text and (first .. " ...") or first)
+      if args.format == "jsonl" then
+        out(require("lib.nvim.json").encode({
+          kind = "infra",
+          exit_code = M.EXIT_INFRA,
+          message = why,
+        }) --[[@as string]])
+      else
+        out(("INFRA | %s | exit %d"):format(why, M.EXIT_INFRA))
+      end
+    else
+      for _, line in ipairs(held) do
+        out(line)
+      end
+    end
+    held = {}
+  end
+
+  ---Render the stdout reporter (`term`, `agent`) into `held`, for the verdict it is to show. It is the verdict of the
+  ---run, except for a `testing stamp` run that exits 1 without a red case (the stamp, see below).
+  ---@param shown Testing.Verdict
+  local function render_primary(shown)
+    local reporter_opts = primary == "term" and term_options(sv, args, #res.cases)
+      or agent_options(sv, args)
+    -- the agent report names a file with everything it had to leave out, so that nobody has to run it again
+    local full_file
+    if primary == "agent" and reporter_opts.format ~= "jsonl" then
+      full_file = require("testing.history").dir(root, { state_dir = sv.state_dir })
+        .. "/last-failures.md"
+      reporter_opts.full_file = full_file
+    end
+    res.run.verdict = shown
+    -- the real IR, like `term`: paths are made relative by the reporter itself
+    local outputs, errors = reports.run_reporters(res, {
+      reporters = { primary },
+      defaults = { [primary] = reporter_opts },
+    })
+    res.run.verdict = verdict
+    held = {}
+    emit(outputs, errors, function(line)
+      held[#held + 1] = line
+    end)
+    if full_file then
+      local cut = false
+      for _, line in ipairs(held) do
+        cut = cut or line:find("^more: ") ~= nil
+      end
+      if cut then
+        res.run.verdict = shown
+        local full = vim.tbl_extend(
+          "force",
+          {},
+          reporter_opts,
+          { budget = 2 ^ 30, full_file = false }
+        )
+        local text = table.concat(require("testing.report.agent").render(res, full), "\n") .. "\n"
+        res.run.verdict = verdict
+        pcall(require("lib.nvim.fs.write.atomic"), full_file, text, { mkdirp = true })
+      end
+    end
+  end
+
+  printer.emit = emit
+  printer.flush = flush_primary
+  printer.render = render_primary
+  return printer
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1285,7 +1390,6 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   local primary, sanitized_specs = reporter_plan(args, reporter_name)
   local reports = require("testing.report")
   local code = report.exit_code
-  local infra_failed = false
   -- the verdict is part of the IR (`run.verdict`): every reporter and the `--json` file say the same thing
   local verdict = run_verdict({
     plan = plan,
@@ -1305,95 +1409,18 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   end
   local quiet = primary == "agent"
 
-  ---@param outputs Testing.Report.Output[]
-  ---@param errors string[]
-  ---@param sink? fun(line: string) Where the lines of a stdout reporter go (default: stdout now).
-  local function emit(outputs, errors, sink)
-    sink = sink or out
-    for _, o in ipairs(outputs) do
-      if not o.path and not o.err then
-        for _, line in ipairs(o.lines) do
-          sink(line)
-        end
-      end
-    end
-    for _, e in ipairs(errors) do
-      err("testing: " .. e)
-      infra_failed = true
-    end
-  end
-
-  -- The first line of the agent reporter says "exit 0" or "exit 1": it is printed only once every report file
-  -- (`--json`, `--junit`) is written, because a failed write turns the exit code into 3 and the line would lie.
-  local held = {}
-  ---@param why? string Why the run did not complete (set: the held lines are replaced by one INFRA line).
-  local function flush_primary(why)
-    if why and primary == "agent" then
-      -- ONE line, whatever `why` holds (an IR that failed validation names the offending ids on several lines, ids of
-      -- the code under test): the first line of the report is the verdict, the rest is on stderr (`err` above)
-      local text = tostring(why)
-      local first = text:match("^[^\r\n]*") or ""
-      why = safe(first ~= text and (first .. " ...") or first)
-      if args.format == "jsonl" then
-        out(require("lib.nvim.json").encode({
-          kind = "infra",
-          exit_code = M.EXIT_INFRA,
-          message = why,
-        }) --[[@as string]])
-      else
-        out(("INFRA | %s | exit %d"):format(why, M.EXIT_INFRA))
-      end
-    else
-      for _, line in ipairs(held) do
-        out(line)
-      end
-    end
-    held = {}
-  end
-
-  ---Render the stdout reporter (`term`, `agent`) into `held`, for the verdict it is to show. It is the verdict of the
-  ---run, except for a `testing stamp` run that exits 1 without a red case (the stamp, see below).
-  ---@param shown Testing.Verdict
-  local function render_primary(shown)
-    local reporter_opts = primary == "term" and term_options(sv, args, #res.cases)
-      or agent_options(sv, args)
-    -- the agent report names a file with everything it had to leave out, so that nobody has to run it again
-    local full_file
-    if primary == "agent" and reporter_opts.format ~= "jsonl" then
-      full_file = require("testing.history").dir(root, { state_dir = sv.state_dir })
-        .. "/last-failures.md"
-      reporter_opts.full_file = full_file
-    end
-    res.run.verdict = shown
-    -- the real IR, like `term`: paths are made relative by the reporter itself
-    local outputs, errors = reports.run_reporters(res, {
-      reporters = { primary },
-      defaults = { [primary] = reporter_opts },
-    })
-    res.run.verdict = verdict
-    held = {}
-    emit(outputs, errors, function(line)
-      held[#held + 1] = line
-    end)
-    if full_file then
-      local cut = false
-      for _, line in ipairs(held) do
-        cut = cut or line:find("^more: ") ~= nil
-      end
-      if cut then
-        res.run.verdict = shown
-        local full = vim.tbl_extend(
-          "force",
-          {},
-          reporter_opts,
-          { budget = 2 ^ 30, full_file = false }
-        )
-        local text = table.concat(require("testing.report.agent").render(res, full), "\n") .. "\n"
-        res.run.verdict = verdict
-        pcall(require("lib.nvim.fs.write.atomic"), full_file, text, { mkdirp = true })
-      end
-    end
-  end
+  local printer = new_printer({
+    args = args,
+    sv = sv,
+    root = root,
+    res = res,
+    verdict = verdict,
+    primary = primary,
+    reports = reports,
+    out = out,
+    err = err,
+  })
+  local emit, flush_primary, render_primary = printer.emit, printer.flush, printer.render
   if primary == "term" or primary == "agent" then
     render_primary(verdict)
   end
@@ -1447,7 +1474,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   -- where the sentinel is printed, so it has to know. The report files (`--json`, `--junit`, `--github`) are written
   -- by then and describe the cases; they say nothing about the stamp, which shows in the exit code, in the stderr
   -- line `stamp: not written` and in the verdict of the stdout reporters (`term`, `agent`), rendered again here.
-  if plan.stamp and not infra_failed then
+  if plan.stamp and not printer.infra_failed then
     local sok, stamped = pcall(require("testing.stamp.write").after_run, {
       plan = plan,
       sv = sv,
@@ -1469,7 +1496,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
       end
     end
   end
-  flush_primary(infra_failed and "a report file could not be written (see stderr)" or nil)
+  flush_primary(printer.infra_failed and "a report file could not be written (see stderr)" or nil)
   for _, line in ipairs(spec_lines) do
     out(line)
   end
@@ -1552,10 +1579,10 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     known = known,
     stat_before = stat_before,
     verdict = verdict,
-    infra_failed = infra_failed,
+    infra_failed = printer.infra_failed,
   })
 
-  if infra_failed then
+  if printer.infra_failed then
     return M.EXIT_INFRA
   end
 
