@@ -38,9 +38,16 @@ return function(H)
   )
 
   local saved = store.project_key
+  -- what the hosting run printed: when its entry is missing under load, the run itself says why it stored nothing
+  -- ("not stored: ...", a guard finding, a timeout) and that line belongs in the failure message
+  local printed = {}
   local code = cli.main({ tmp .. "/h", "--cached" }, {
-    out = function() end,
-    err = function() end,
+    out = function(text)
+      printed[#printed + 1] = tostring(text)
+    end,
+    err = function(text)
+      printed[#printed + 1] = tostring(text)
+    end,
     state_dir = tmp .. "/state",
     cache_dir = tmp .. "/cache",
     color = false,
@@ -50,7 +57,13 @@ return function(H)
   ok(code == 0, "the hosting run is green (exit " .. tostring(code) .. ")")
   local host = H.glob(tmp .. "/cache/testing/host-key-*/entries/*.json")
   local other = H.glob(tmp .. "/cache/testing/h-*/entries/*.json")
-  ok(#host == 1, "its entry is in the folder of its own key (found " .. #host .. ")")
+  ok(
+    #host == 1,
+    "its entry is in the folder of its own key (found "
+      .. #host
+      .. (#host == 1 and "" or "; the run printed: " .. table.concat(printed, " | "):sub(1, 1500))
+      .. ")"
+  )
   ok(#other == 0, "and not in a folder named after the path (found " .. #other .. ")")
 
   -- where the cache lives never decides a key: the same project stored below another cache directory has the same
