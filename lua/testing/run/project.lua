@@ -861,6 +861,40 @@ local function new_printer(ctx)
   return printer
 end
 
+---The sentinel: the last line, only for the verdict `green` (a complete run, nothing skipped, stopped or accepted as
+---flaky). Any other run says in one line why it is not one; the text of a partial run comes from the verdict itself
+---(`verdict.reasons`). The agent reporter says the same in its first line (`GREEN` only where this prints the
+---sentinel) and prints neither.
+---@param ctx { args: table, disc: table, report: table, verdict: Testing.Verdict, selector: table, lf: table|nil, files: table[], total: integer, selection_label: string|nil, out: fun(s: string) }
+local function print_sentinel(ctx)
+  local args, disc, report, verdict, out = ctx.args, ctx.disc, ctx.report, ctx.verdict, ctx.out
+  local selector, files, total, selection_label =
+    ctx.selector, ctx.files, ctx.total, ctx.selection_label
+  local lf_by_file = ctx.lf
+  local partial_files = #files < total
+  local no_case_filter = not selector.active and lf_by_file == nil
+  if verdict.kind == "green" then
+    out("\n" .. (args.sentinel or disc.runner.sentinel or "TESTING_OK"))
+  elseif selection_label and no_case_filter and partial_files then
+    out(
+      ("\npartial run: %d of %d spec files (%s; no sentinel)"):format(
+        #files,
+        total,
+        selection_label
+      )
+    )
+  elseif partial_files and no_case_filter then
+    out(("\npartial run: %d of %d spec files (no sentinel)"):format(#files, total))
+  elseif partial_files or not no_case_filter then
+    out("\npartial run: a selection (--filter, --tags, --lf, a path) applied (no sentinel)")
+  elseif report.skipped > 0 then
+    out(("\n%d case(s) skipped: a skip is never green (no sentinel)"):format(report.skipped))
+  else
+    -- a stop (`--maxfail`), an accepted flaky case: the verdict names the reasons
+    out(("\npartial run: %s (no sentinel)"):format(table.concat(verdict.reasons or {}, "; ")))
+  end
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1586,32 +1620,19 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     return M.EXIT_INFRA
   end
 
-  -- the sentinel: last line, only for the verdict `green` (a complete run, nothing skipped, stopped or accepted as
-  -- flaky). The agent reporter says the same in its first line (`GREEN` only where this prints the sentinel), and
-  -- prints neither. The text of a partial run comes from the verdict itself (`verdict.reasons`).
   if code == M.EXIT_OK and not quiet then
-    local partial_files = #files < total
-    local no_case_filter = not selector.active and lf_by_file == nil
-    if verdict.kind == "green" then
-      out("\n" .. (args.sentinel or disc.runner.sentinel or "TESTING_OK"))
-    elseif selection_label and no_case_filter and partial_files then
-      out(
-        ("\npartial run: %d of %d spec files (%s; no sentinel)"):format(
-          #files,
-          total,
-          selection_label
-        )
-      )
-    elseif partial_files and no_case_filter then
-      out(("\npartial run: %d of %d spec files (no sentinel)"):format(#files, total))
-    elseif partial_files or not no_case_filter then
-      out("\npartial run: a selection (--filter, --tags, --lf, a path) applied (no sentinel)")
-    elseif report.skipped > 0 then
-      out(("\n%d case(s) skipped: a skip is never green (no sentinel)"):format(report.skipped))
-    else
-      -- a stop (`--maxfail`), an accepted flaky case: the verdict names the reasons
-      out(("\npartial run: %s (no sentinel)"):format(table.concat(verdict.reasons or {}, "; ")))
-    end
+    print_sentinel({
+      args = args,
+      disc = disc,
+      report = report,
+      verdict = verdict,
+      selector = selector,
+      lf = lf_by_file,
+      files = files,
+      total = total,
+      selection_label = selection_label,
+      out = out,
+    })
   end
   return code
 end
