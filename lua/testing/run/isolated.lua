@@ -644,80 +644,16 @@ function M.lib_problem(lib)
   )
 end
 
----Run the planned files; same report as `inproc.run`.
+---The slots of a run: one per file, or one per listed case for `isolated = "case"`, in merge order. A file that
+---cannot run (missing, unknown dialect, not selected, no listing) is a finished slot with its synthetic cases.
 ---@param opts Testing.Isolated.Opts
----@return Testing.Inproc.Report
-function M.run(opts)
-  local problem = M.lib_problem(opts.lib_async)
-  if problem then
-    error(problem, 0)
-  end
-  local root = opts.root:gsub("\\", "/"):gsub("/+$", "")
-  local o = opts.options or options_mod.of({})
-  -- a hand-built options table (a spec) may lack the keys of the warm pool and of the guards
-  local pool_opts = o.pool or { size = 0, reuse = false }
-  local state_mode = (o.guards or {}).state
-  local child = opts.child or require("testing.child")
-  local grace = opts.grace_ms or M.GRACE_MS
-  local poll = opts.poll_ms or M.POLL_MS
-  local timeouts = opts.timeouts or {}
-  local maxfail = opts.maxfail
-  local entries = inproc.entries_of(root, opts.files, opts.dialect or "a")
-
-  local a = assert_mod.new({ clock = opts.clock })
-  local res = inproc.begin_result(root, { seed = opts.seed, argv = opts.argv, jobs = o.jobs })
-
-  local header_cache = {}
-  ---@param rel string
-  ---@return string[]
-  local function header_tags(rel)
-    if header_cache[rel] == nil then
-      header_cache[rel] = select_mod.file_header_tags(root .. "/" .. rel)
-    end
-    return header_cache[rel]
-  end
-  local selector = opts.selector or select_mod.new({ header_tags = header_tags })
-
-  local state = { stopped = false, fatal = nil }
-  local bad_total = 0
-  local files_run, files_unrun, files_unselected = 0, 0, 0
-  -- `--time-budget`: asked before a file's first child starts, never while one runs; a file that began finishes
-  local files_unrun_budget, budget_files, budget_out = 0, {}, false
-  local failed_files = {}
-
-  -- without a guard layer nothing measures effects, and the cases say so
-  local effects_measured = opts.guard_cfg ~= nil and guards_mod.available()
-  local notes, unattached = {}, {}
-
-  ---@param case Testing.Result.Case
-  local function record(case)
-    local has_note = false
-    for _, n in ipairs(case.notes) do
-      if n == EFFECTS_NOTE then
-        has_note = true
-      end
-    end
-    if not has_note and not effects_measured then
-      case.notes[#case.notes + 1] = EFFECTS_NOTE
-    elseif effects_measured then
-      for _, note in ipairs(guards_mod.unmeasured_notes(opts.guard_cfg)) do
-        if not vim.tbl_contains(case.notes, note) then
-          case.notes[#case.notes + 1] = note
-        end
-      end
-    end
-    case.tags = select_mod.union(select_mod.tags_of_id(case.id), header_tags(case.file))
-    result.add_case(res, case)
-    if inproc.BAD[case.status] then
-      bad_total = bad_total + 1
-      failed_files[case.file] = true
-    end
-    if opts.on_case then
-      pcall(opts.on_case, case)
-    end
-  end
-
-  -- ---- classify every entry --------------------------------------------------------------
+---@param o Testing.Run.Options
+---@param root string
+---@param entries Testing.Inproc.Entry[]
+---@param selector Testing.Select.Selector
+---@param timeouts Testing.Child.Timeouts
+---@return Testing.Isolated.Slot[] slots
+local function classify(opts, o, root, entries, selector, timeouts)
   ---@type Testing.Isolated.Slot[]
   local slots = {}
   -- The cases of a file for `isolated = "case"` are listed by a throwaway child (see the module header). The entries
@@ -842,6 +778,83 @@ function M.run(opts)
       slots[#slots + 1] = slot
     end
   end
+  return slots
+end
+
+---Run the planned files; same report as `inproc.run`.
+---@param opts Testing.Isolated.Opts
+---@return Testing.Inproc.Report
+function M.run(opts)
+  local problem = M.lib_problem(opts.lib_async)
+  if problem then
+    error(problem, 0)
+  end
+  local root = opts.root:gsub("\\", "/"):gsub("/+$", "")
+  local o = opts.options or options_mod.of({})
+  -- a hand-built options table (a spec) may lack the keys of the warm pool and of the guards
+  local pool_opts = o.pool or { size = 0, reuse = false }
+  local state_mode = (o.guards or {}).state
+  local child = opts.child or require("testing.child")
+  local grace = opts.grace_ms or M.GRACE_MS
+  local poll = opts.poll_ms or M.POLL_MS
+  local timeouts = opts.timeouts or {}
+  local maxfail = opts.maxfail
+  local entries = inproc.entries_of(root, opts.files, opts.dialect or "a")
+
+  local a = assert_mod.new({ clock = opts.clock })
+  local res = inproc.begin_result(root, { seed = opts.seed, argv = opts.argv, jobs = o.jobs })
+
+  local header_cache = {}
+  ---@param rel string
+  ---@return string[]
+  local function header_tags(rel)
+    if header_cache[rel] == nil then
+      header_cache[rel] = select_mod.file_header_tags(root .. "/" .. rel)
+    end
+    return header_cache[rel]
+  end
+  local selector = opts.selector or select_mod.new({ header_tags = header_tags })
+
+  local state = { stopped = false, fatal = nil }
+  local bad_total = 0
+  local files_run, files_unrun, files_unselected = 0, 0, 0
+  -- `--time-budget`: asked before a file's first child starts, never while one runs; a file that began finishes
+  local files_unrun_budget, budget_files, budget_out = 0, {}, false
+  local failed_files = {}
+
+  -- without a guard layer nothing measures effects, and the cases say so
+  local effects_measured = opts.guard_cfg ~= nil and guards_mod.available()
+  local notes, unattached = {}, {}
+
+  ---@param case Testing.Result.Case
+  local function record(case)
+    local has_note = false
+    for _, n in ipairs(case.notes) do
+      if n == EFFECTS_NOTE then
+        has_note = true
+      end
+    end
+    if not has_note and not effects_measured then
+      case.notes[#case.notes + 1] = EFFECTS_NOTE
+    elseif effects_measured then
+      for _, note in ipairs(guards_mod.unmeasured_notes(opts.guard_cfg)) do
+        if not vim.tbl_contains(case.notes, note) then
+          case.notes[#case.notes + 1] = note
+        end
+      end
+    end
+    case.tags = select_mod.union(select_mod.tags_of_id(case.id), header_tags(case.file))
+    result.add_case(res, case)
+    if inproc.BAD[case.status] then
+      bad_total = bad_total + 1
+      failed_files[case.file] = true
+    end
+    if opts.on_case then
+      pcall(opts.on_case, case)
+    end
+  end
+
+  local slots = classify(opts, o, root, entries, selector, timeouts)
 
   local hrtime = vim.uv.hrtime
   local started = hrtime()
