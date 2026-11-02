@@ -601,9 +601,10 @@ return function(H)
       print("n/a  hook script run: no pwsh on this machine")
     else
       local d = tmp()
-      -- no extension: an associated one (`.txt`) would make Windows open the file in an editor
-      -- instead of failing to start it, and an unknown one raises the "Open with" dialog
-      local textfile = d .. "/not-a-program"
+      -- Windows starts a file with a shell-associated extension (`.txt`: the editor) or none or an
+      -- unknown one (the "Open with" host) through the shell instead of failing; a `.dll` has no
+      -- shell verb and CreateProcess rejects it, which is the "exists but cannot start" case
+      local textfile = d .. "/not-a-program.dll"
       write(textfile, "x")
       local hook_file = d .. "/hook.ps1"
       -- a program that cannot be started must refuse the job (exit 0 here would let it run)
@@ -614,6 +615,10 @@ return function(H)
       ok(
         r.code ~= 0,
         "hook script: nvim that cannot start refuses (exit " .. tostring(r.code) .. ")"
+      )
+      ok(
+        (r.stderr or ""):find("the check could not run", 1, true) ~= nil,
+        "hook script: the start failure is reported by the hook's own catch"
       )
       write(hook_file, guard.hook_text(d .. "/missing.exe", textfile))
       r = vim
