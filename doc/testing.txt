@@ -249,6 +249,10 @@ Actions run of the CI workflow per repository and system (docs/CI.md, "The
 GitHub Actions status"); `ci overview` runs nothing either and writes one
 static HTML page of the fleet from `ci verify`, `ci.json` and that adapter
 (docs/CI.md, "Fleet overview").
+`ci commit {rev}` checks a commit in a git worktree of its own (another
+session's uncommitted work does not count) and sorts red into new, known and
+fixed against the parent: `clean` and `known-red` exit 0, `regression` 1
+(docs/CI.md, "Check a commit").
 
 Workspace trust ~                                             *testing-trust*
 The runner executes a project's `.testing.lua`, minimal init and specs, so it

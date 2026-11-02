@@ -38,6 +38,7 @@ M.SENTINEL = "TESTING_CI_OK"
 M.USAGE = table.concat({
   "usage: testing ci [--profile=<name>] [--step=<a,b>] [--keep-going] [--reuse] [--agent|--no-agent] [--json=<file>]",
   "       testing ci verify [--profile=<name>] [--json] [--allow-dirty] [--max-age=<7d>] [--root=<dir>]",
+  "       testing ci commit <rev>... | --range=<a>..<b> [--base=<rev>] [--force] [--keep] [--json=<file>] ...",
   "       testing ci --repos=<a,b> | --repos-root=<dir> | --repos-file=<list> [--force] [--jobs=<n>] ...",
   "       testing ci list [--json] [--root=<dir>]",
   "       testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]",
@@ -1023,6 +1024,17 @@ M.internal = {
 function M.main(argv, sv)
   if argv[1] == "verify" then
     return require("testing.ci.verify").main(vim.list_slice(argv, 2), sv)
+  end
+  -- `scripts/test.sh ci commit <rev>` puts its `--state-dir <dir>` in front of the subcommand
+  local commit_at = argv[1] == "commit" and 1
+    or (argv[1] or ""):match("^%-%-state%-dir=.") and argv[2] == "commit" and 2
+    or argv[1] == "--state-dir" and argv[3] == "commit" and 3
+  if commit_at then
+    local rest = vim.list_slice(argv, commit_at + 1)
+    if commit_at > 1 then
+      table.insert(rest, 1, table.concat(vim.list_slice(argv, 1, commit_at - 1), "="))
+    end
+    return require("testing.ci.commit").main(rest, sv)
   end
   -- before the multi-repository run: `remote --repos-root` is not `testing ci --repos-root`
   if argv[1] == "remote" then

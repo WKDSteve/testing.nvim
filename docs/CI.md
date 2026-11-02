@@ -245,6 +245,63 @@ run. `--json` prints the document `testing-ci-verify/1` (`status`, `verified`, `
 (`reused: its stamp verifies`) and runs the other steps, so the new tree is proven within seconds. `--reuse` never
 skips a suite whose stamp does not verify, and a suite with options after `--` always runs.
 
+## Check a commit: `testing ci commit`
+
+```
+testing ci commit <rev>... | --range=<a>..<b>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
+                           [--include-docs] [--json=<file>] [--agent|--no-agent] [--state-dir=<dir>] [--root=<dir>]
+                           [-- <suite options>]
+```
+
+The question of a review: does this commit break something? `testing ci commit` answers it for the commit, not for
+the working tree. Each commit is checked out into a detached `git worktree` of its own below the state directory
+(`testing/snap/`), and the pipeline runs there in a child process (`testing ci --keep-going`, a throwaway state
+directory). The working tree, the index and the branches are never touched, so another session may keep editing,
+committing and rebasing in the same checkout: its uncommitted work cannot turn the result red.
+
+A red run is not the end: the red steps (only those) run again on the snapshot of the base (`--base`, default the
+first parent), and every finding is sorted:
+
+- **new**: red at the commit, not at the base: the commit broke it;
+- **known**: red at both: it was red before, the commit did not cause it;
+- **fixed**: red at the base, not at the commit (only within the steps red at the commit).
+
+A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
+in the text counts as any position); equal findings count as often as they occur. A red step without findings (an
+exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
+`inexact`: a false alarm rather than a false green.
+
+| Verdict | Meaning | Exit |
+| --- | --- | --- |
+| `clean` | the pipeline is green at the commit | `0` |
+| `known-red` | red, and nothing of it is new | `0` |
+| `docs-only` / `empty` | the commit changes only documentation (`*.md`, `doc/`, `docs/`, `LICENSE*`, `CHANGELOG*`) or nothing; not run (`--include-docs` runs it) | `0` |
+| `regression` | at least one finding is new | `1` |
+| `unclassified` | red, and there is no base (a root commit) or the base did not run | `1` |
+| `error` / `infra` | a usage or pipeline error / git, the snapshot or a tool failed | `2` / `3` |
+
+Several commits (`<a> <b>`, `--range=<a>..<b>`, oldest first, at most 50): one report each, a tally line first, the
+exit code is the worst. A result is kept per commit, profile, base and suite options (`<state>/testing/<project>/
+ci-commit/`) and comes back at once (`(kept result)`); `--force` runs it again (after a change of a tool or a
+dependency). `--keep` leaves the worktrees in place and names them; every call removes snapshots older than 12 h that
+a crashed run left.
+
+**The report is written for an agent first.** Its first line is the verdict
+(`ci commit abc1234 REGRESSION 2 new, 1 known, 0 fixed (luacheck 2) exit 1`), then only the new findings
+(`  new   luacheck lua/a.lua:3:5 unused variable x`), one count per known and fixed step, and `rerun` with the command
+that reproduces it. The terminal report (`--no-agent`) lists every finding. `--json=<file>` writes the document
+`testing-ci-commit/1` (`schemas/testing-ci-commit/1/`, with a `.d.ts`): per commit `sha`, `base`, `verdict`, `exit`,
+`changed_files`, `new`/`known`/`fixed`, `problems`, `rerun` and both `testing-ci/1` documents.
+
+From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD` (the script's `--state-dir`
+before the subcommand is understood).
+
+Limits: the dependencies are not frozen (both sides see the same ones: `$<NAME>_DIR`, the repository's `.deps/` or its
+siblings, handed to the child as `$<NAME>_DIR`), so red that comes from a half-done dependency is known at both. A
+load-sensitive spec may be red on one side only. Submodules are not checked out. The snapshot of a trusted repository
+is trusted (`TESTING_TRUST=1` for the child, after the repository itself passed the trust gate). Refused on the
+workstation like every run.
+
 ## The pre-push hook
 
 ```

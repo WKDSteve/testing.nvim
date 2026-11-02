@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-ci-commit/1/testing-ci-commit.schema.json",
+  "title": "testing-ci-commit/1",
+  "description": "The result of `testing ci commit`: each commit checked in a git worktree of its own, red sorted into new, known and fixed against its base. A reader ignores unknown fields and refuses a higher schema.",
+  "type": "object",
+  "required": ["schema", "repo", "exit", "tally", "time", "commits"],
+  "properties": {
+    "schema": { "const": "testing-ci-commit/1" },
+    "repo": { "type": "string", "minLength": 1 },
+    "exit": { "enum": [0, 1, 2, 3] },
+    "tally": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/verdict" },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "time": { "type": "string" },
+    "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } }
+  },
+  "$defs": {
+    "verdict": {
+      "enum": ["clean", "known-red", "regression", "unclassified", "docs-only", "empty", "error", "infra"]
+    },
+    "item": {
+      "type": "object",
+      "required": ["step", "file", "line", "col", "text", "whole"],
+      "properties": {
+        "step": { "type": "string" },
+        "file": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"] },
+        "col": { "type": ["integer", "null"] },
+        "text": { "type": "string" },
+        "whole": { "type": "boolean" }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "state"],
+        "properties": { "name": { "type": "string" }, "state": { "type": "string" } }
+      }
+    },
+    "commit": {
+      "type": "object",
+      "required": ["sha", "verdict", "exit", "exact", "new", "known", "fixed", "problems", "rerun"],
+      "properties": {
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "base": { "type": ["string", "null"] },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "exit": { "enum": [0, 1, 2, 3] },
+        "profile": { "type": ["string", "null"] },
+        "suite_args": { "type": "array", "items": { "type": "string" } },
+        "reused": { "type": "boolean" },
+        "exact": { "type": "boolean" },
+        "changed_files": { "type": "array", "items": { "type": "string" } },
+        "docs_only": { "type": "boolean" },
+        "new": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "known": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "fixed": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "problems": { "type": "array", "items": { "type": "string" } },
+        "snapshots": { "type": "array", "items": { "type": "string" } },
+        "rerun": { "type": "string" },
+        "steps_head": { "$ref": "#/$defs/steps" },
+        "steps_base": { "$ref": "#/$defs/steps" },
+        "head": { "type": ["object", "null"] },
+        "base_run": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

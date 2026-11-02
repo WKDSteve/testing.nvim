@@ -13,6 +13,10 @@ on the hosted runner. This page is the use case; [CI.md](CI.md) is the reference
   pre-push hook, `:MyPlugins ci` and a person in a terminal all run this one script.
 - **A proof of the tested state**: a green run writes `ci-<profile>.json` and the suite's stamp. `testing ci verify`
   answers in a tenth of a second whether the current tree is already proven, so nothing is run twice.
+- **A commit, not the working tree**: `testing ci commit <sha>` checks a commit in a git worktree of its own and
+  sorts red into new, known and fixed against its parent. A review uses it, never "the suite is red, skipped": another
+  session's uncommitted work cannot make it red, and red that was there before is `known-red`, not the commit's fault
+  ([CI.md](CI.md#check-a-commit-testing-ci-commit)).
 
 ## A repository, set up
 
