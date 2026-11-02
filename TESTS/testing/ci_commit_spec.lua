@@ -203,4 +203,44 @@ return function(H)
       "report: docs-only"
     )
   end
+
+  -- a base that did not run: unclassified, and not kept (the next call asks again)
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-keep"
+    vim.fn.mkdir(tmp, "p")
+    local saved = { create = snapshot.create, remove = snapshot.remove, run_ci = commit.run_ci }
+    local saved_parent, saved_changed = snapshot.parent, snapshot.changed_files
+    snapshot.parent = function()
+      return ("b"):rep(40)
+    end
+    snapshot.changed_files = function()
+      return { "lua/x.lua" }
+    end
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = tmp .. "/" .. sha:sub(1, 1), state = tmp }
+    end
+    snapshot.remove = function()
+      return true
+    end
+    local runs = 0
+    commit.run_ci = function(snap)
+      runs = runs + 1
+      if snap.sha:sub(1, 1) == "a" then
+        return 1,
+          { profile = "full", steps = { { name = "gate", state = "red", findings = {} } } },
+          ""
+      end
+      return 3, nil, "the base hung"
+    end
+    local args = commit.parse({ ("a"):rep(40), "--state-dir=" .. tmp })
+    args.state_dir = tmp
+    local r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq(r.verdict, "unclassified", "base did not run: unclassified")
+    has(r.problems[1] or "", "the base did not run (exit 3)", "base did not run: ... and why")
+    r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.reused, runs }, { false, 4 }, "base did not run: not kept, asked again")
+    snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
+    snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
+    vim.fn.delete(tmp, "rf")
+  end
 end

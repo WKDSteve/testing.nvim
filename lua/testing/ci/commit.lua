@@ -550,7 +550,8 @@ function M.check(root, sha, args, say)
   end
   cleanup()
   r.exit = exit_of(r.verdict)
-  if KEPT[r.verdict] then
+  -- unclassified is kept only for a root commit: a base that did not run is asked again next time
+  if KEPT[r.verdict] and not (r.verdict == "unclassified" and base) then
     local canonical = require("lib.nvim.json.canonical")
     local kept = vim.deepcopy(r)
     kept.snapshots = {}
