@@ -752,8 +752,8 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   end
 
   -- history: --lf / --ff
-  local files_, lf_by_file, remembered = apply_history(args, sv, root, files, err)
-  files = files_
+  local lf_by_file, remembered
+  files, lf_by_file, remembered = apply_history(args, sv, root, files, err)
 
   -- order: priority (orders, never filters: the set of files is the one selected above)
   local order_info

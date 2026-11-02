@@ -291,15 +291,19 @@ end
 
 ---A file name stem that is safe on every platform: only `[%w_-]`, at most 80 bytes, never empty, and
 ---never a reserved Windows device name (`CON`, `NUL`, `COM1`, ...). Names come from tests and cases
----(SEC-42/43), so a hostile name can neither leave the trace directory nor name a device.
+---(SEC-42/43), so a hostile name can neither leave the trace directory nor name a device. A long name
+---keeps its start and its end (the end of a path is the file name), joined by `__`.
 ---@param name any
 ---@return string
 function M.safe_stem(name)
-  local stem = tostring(name or ""):gsub("[^%w_%-]", "_"):sub(1, 80)
+  local stem = tostring(name or ""):gsub("[^%w_%-]", "_")
+  if #stem > 80 then
+    stem = stem:sub(1, 30) .. "__" .. stem:sub(-48)
+  end
   if stem == "" then
     return "trace"
   end
-  local base = (stem:match("^([^_%-]*)") or stem):lower()
+  local base = stem:lower()
   if
     ({ con = 1, prn = 1, aux = 1, nul = 1 })[base]
     or base:match("^com%d$")
