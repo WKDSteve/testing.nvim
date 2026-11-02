@@ -802,6 +802,268 @@ local function classify(opts, o, root, entries, selector, timeouts)
   return slots
 end
 
+---The state one `M.run` shares with the phases cut out of it. Tables are shared by reference (`notes`, `live`,
+---`state`); a scalar that changes lives in a table.
+---@class Testing.Isolated.Ctx
+---@field opts Testing.Isolated.Opts
+---@field o Testing.Run.Options
+---@field root string
+---@field child table The child module (`testing.child`, or the one a spec hands in).
+---@field grace integer
+---@field poll integer
+---@field timeouts Testing.Child.Timeouts
+---@field notes string[]
+---@field unattached table[]
+---@field live Testing.Isolated.Slot[] Slots whose child is running.
+---@field state { stopped: boolean, fatal: any }
+
+---@param slot Testing.Isolated.Slot
+---@param message string
+local function fail_slot(slot, message)
+  local case = synthetic(slot.entry.rel, vim.fs.basename(slot.entry.rel), "error", message)
+  if slot.case_id then
+    case.id = slot.case_id
+  end
+  slot.cases = { case }
+  slot.state = "done"
+end
+
+---The guard configuration a child gets in its job (nil: no guard layer wanted).
+---@param ctx Testing.Isolated.Ctx
+---@param throwaway? boolean The child runs ONE case (a file of a one-case dialect, or `isolated = "case"`) and ends with it: nothing it leaves behind can reach another case.
+---@return table|nil
+local function guard_for_child(ctx, throwaway)
+  local opts, o, root = ctx.opts, ctx.o, ctx.root
+  return opts.guard_cfg
+      and options_mod.guard_config(
+        o,
+        { root = root, seed = opts.seed, in_child = true, throwaway = throwaway }
+      )
+    or nil
+end
+
+---Everything the parent needs to turn a finished (or dead) child into the cases of its file.
+---@class Testing.Isolated.Ended
+---@field h Testing.Child.Handle
+---@field exit { code?: integer, signal?: integer }
+---@field fragment string
+---@field out string
+---@field stdout string
+---@field err string
+---@field describe string
+---@field trace? fun(reason: string): { kind: string, path: string }|nil Writes the trace of the process (pool member: its RPC calls too).
+
+---Classify what a child left behind, add the trace artifact of a dead one and store the cases.
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+---@param kind "cases"|"script"
+---@param ended Testing.Isolated.Ended
+local function conclude(ctx, slot, kind, ended)
+  local opts, o, root, timeouts, grace = ctx.opts, ctx.o, ctx.root, ctx.timeouts, ctx.grace
+  local notes, unattached = ctx.notes, ctx.unattached
+  local rel = slot.entry.rel
+  local h = ended.h
+  local frag = fragment_mod.read(ended.fragment)
+  slot.output = ended.out
+  ---@type Testing.Result.Case[]
+  local cases = M.classify({
+    rel = rel,
+    kind = kind,
+    frag = frag,
+    code = ended.exit.code,
+    signal = ended.exit.signal,
+    reason = h.reason,
+    out = ended.out,
+    stdout = ended.stdout,
+    err = ended.err,
+    assertions = o.assertions,
+    wall_ms = (vim.uv.hrtime() / 1e6) - h.started_ms,
+    file_ms = timeouts.file_ms,
+    case_ms = timeouts.case_ms,
+    grace_ms = grace,
+    describe_exit = ended.describe,
+    abandoned = h.abandoned,
+    case_id = slot.case_id,
+    guard_cfg = guard_for_child(ctx, true),
+  })
+  if slot.case_id then
+    -- CASE mode: the child must have reported the case it was started for
+    local found = false
+    for _, c in ipairs(cases) do
+      found = found or c.id == slot.case_id
+    end
+    if not found then
+      local missing = synthetic(
+        rel,
+        vim.fs.basename(rel),
+        "error",
+        ("%s: the case was listed but its child did not report it (the describe blocks of the file differ between runs?): %s"):format(
+          rel,
+          slot.case_id:sub(#rel + 3)
+        )
+      )
+      missing.id = slot.case_id
+      cases[#cases + 1] = missing
+    end
+  end
+  -- the child's output explains a red file: one note on its first red case
+  if ended.out ~= "" then
+    for _, c in ipairs(cases) do
+      if inproc.BAD[c.status] then
+        c.notes[#c.notes + 1] = "output of the child (tail): " .. tail(ended.out, M.TAIL_CHARS)
+        break
+      end
+    end
+  end
+  -- what the guard layer of the child said that no case carries (`done` record of the fragment)
+  local done = frag.done
+  if type(done) == "table" then
+    for _, n in ipairs(type(done.notes) == "table" and done.notes or {}) do
+      if type(n) == "string" and not vim.tbl_contains(notes, n) then
+        notes[#notes + 1] = n
+      end
+    end
+    for _, f in ipairs(type(done.unattached) == "table" and done.unattached or {}) do
+      if type(f) == "table" then
+        unattached[#unattached + 1] = f
+      end
+    end
+  end
+  -- a child that timed out or died leaves a trace of what it did
+  if o.trace then
+    local why
+    for _, c in ipairs(cases) do
+      if c.status == "timeout" or c.status == "crash" then
+        why = c
+      end
+    end
+    if why then
+      local artifact
+      local aok, aerr = pcall(function()
+        if ended.trace then
+          artifact = ended.trace(why.status)
+        else
+          artifact = M.write_trace({
+            dir = opts.trace_dir,
+            root = root,
+            rel = rel,
+            reason = why.status,
+            h = h,
+            frag = frag,
+            describe = ended.describe,
+            err = ended.err,
+          })
+        end
+      end)
+      if artifact then
+        why.artifacts[#why.artifacts + 1] = artifact
+      elseif not aok then
+        why.notes[#why.notes + 1] = "trace: " .. tostring(aerr)
+      end
+    end
+  end
+  slot.cases = cases
+  slot.state = "done"
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function unlive(ctx, slot)
+  local live = ctx.live
+  for i, s in ipairs(live) do
+    if s == slot then
+      table.remove(live, i)
+      break
+    end
+  end
+  slot.handle = nil
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function run_child(ctx, slot)
+  local opts, o, root, child, timeouts, grace =
+    ctx.opts, ctx.o, ctx.root, ctx.child, ctx.timeouts, ctx.grace
+  local state, live = ctx.state, ctx.live
+  if state.stopped then
+    slot.state = "done"
+    return
+  end
+  local entry = slot.entry
+  local rel = entry.rel
+  local kind = entry.dialect == "script" and "script" or "cases"
+  local plan = child.build({
+    entry = serializable(entry),
+    root = root,
+    kind = kind,
+    minit = opts.minit,
+    assertions = o.assertions,
+    host = options_mod.host_of(o, entry),
+    rtp_prepend = opts.rtp_prepend,
+    rtp = opts.rtp,
+    filetype = o.filetype,
+    disable_first_run = o.disable_first_run,
+    selector = opts.selector_spec,
+    lf_ids = slot.lf_ids,
+    timeouts = timeouts,
+    seed = opts.seed,
+    env_allow = o.env_allow,
+    extra_env = opts.child_env,
+    nvim = opts.nvim,
+    base = opts.sandbox_base,
+    -- what the child boot reads from the job (`testing.child.runner`): the guard layer's configuration
+    -- (`options.guard_config`), fixed LANG/TZ, the trace artifact. A one-case child is thrown away
+    -- with its case: the state guard would only name what dies with the process.
+    guard = guard_for_child(ctx, entry.dialect ~= "busted" or o.isolated == "case"),
+    deterministic = o.determinism,
+    isolate_home = o.isolate_home,
+    trace = o.trace,
+  })
+  slot.plan = plan
+  slot.fragment = plan.fragment
+  local pok, perr = child.prepare(plan)
+  if not pok then
+    fail_slot(slot, ("%s: %s"):format(rel, tostring(perr)))
+    child.cleanup(plan)
+    return
+  end
+  local is_busted = entry.dialect == "busted"
+  ---@type Testing.Child.Handle|nil
+  local handle
+  local serr
+  local exited = async.await(function(resume)
+    handle, serr = child.spawn(plan, resume)
+    if handle then
+      handle.reason = nil
+      handle.deadline = timeouts.file_ms and (handle.started_ms + timeouts.file_ms + grace) or nil
+      handle.stall_limit = (is_busted and timeouts.case_ms) and (timeouts.case_ms + grace) or nil
+      handle.progress_ms = handle.started_ms
+      handle.frag_size, handle.frag_scanned = 0, 0
+      slot.handle = handle
+      slot.state = "running"
+      live[#live + 1] = slot
+    else
+      resume(nil)
+    end
+  end)
+  if not exited then
+    fail_slot(slot, ("%s: %s"):format(rel, tostring(serr)))
+    child.cleanup(plan)
+    return
+  end
+  local h = exited --[[@as Testing.Child.Handle]]
+  conclude(ctx, slot, kind, {
+    h = h,
+    exit = h.exit or {},
+    fragment = plan.fragment,
+    out = child.text(h.out),
+    stdout = child.text(h.stdout),
+    err = child.text(h.err),
+    describe = child.describe_exit(h.exit or {}),
+  })
+  child.cleanup(plan)
+end
+
 ---Run the planned files; same report as `inproc.run`.
 ---@param opts Testing.Isolated.Opts
 ---@return Testing.Inproc.Report
@@ -883,241 +1145,19 @@ function M.run(opts)
   ---@type Testing.Isolated.Slot[]
   local live = {}
 
-  ---@param slot Testing.Isolated.Slot
-  ---@param message string
-  local function fail_slot(slot, message)
-    local case = synthetic(slot.entry.rel, vim.fs.basename(slot.entry.rel), "error", message)
-    if slot.case_id then
-      case.id = slot.case_id
-    end
-    slot.cases = { case }
-    slot.state = "done"
-  end
-
-  ---The guard configuration a child gets in its job (nil: no guard layer wanted).
-  ---@param throwaway? boolean The child runs ONE case (a file of a one-case dialect, or `isolated = "case"`) and ends with it: nothing it leaves behind can reach another case.
-  ---@return table|nil
-  local function guard_for_child(throwaway)
-    return opts.guard_cfg
-        and options_mod.guard_config(
-          o,
-          { root = root, seed = opts.seed, in_child = true, throwaway = throwaway }
-        )
-      or nil
-  end
-
-  ---Everything the parent needs to turn a finished (or dead) child into the cases of its file.
-  ---@class Testing.Isolated.Ended
-  ---@field h Testing.Child.Handle
-  ---@field exit { code?: integer, signal?: integer }
-  ---@field fragment string
-  ---@field out string
-  ---@field stdout string
-  ---@field err string
-  ---@field describe string
-  ---@field trace? fun(reason: string): { kind: string, path: string }|nil Writes the trace of the process (pool member: its RPC calls too).
-
-  ---Classify what a child left behind, add the trace artifact of a dead one and store the cases.
-  ---@param slot Testing.Isolated.Slot
-  ---@param kind "cases"|"script"
-  ---@param ended Testing.Isolated.Ended
-  local function conclude(slot, kind, ended)
-    local rel = slot.entry.rel
-    local h = ended.h
-    local frag = fragment_mod.read(ended.fragment)
-    slot.output = ended.out
-    ---@type Testing.Result.Case[]
-    local cases = M.classify({
-      rel = rel,
-      kind = kind,
-      frag = frag,
-      code = ended.exit.code,
-      signal = ended.exit.signal,
-      reason = h.reason,
-      out = ended.out,
-      stdout = ended.stdout,
-      err = ended.err,
-      assertions = o.assertions,
-      wall_ms = (vim.uv.hrtime() / 1e6) - h.started_ms,
-      file_ms = timeouts.file_ms,
-      case_ms = timeouts.case_ms,
-      grace_ms = grace,
-      describe_exit = ended.describe,
-      abandoned = h.abandoned,
-      case_id = slot.case_id,
-      guard_cfg = guard_for_child(true),
-    })
-    if slot.case_id then
-      -- CASE mode: the child must have reported the case it was started for
-      local found = false
-      for _, c in ipairs(cases) do
-        found = found or c.id == slot.case_id
-      end
-      if not found then
-        local missing = synthetic(
-          rel,
-          vim.fs.basename(rel),
-          "error",
-          ("%s: the case was listed but its child did not report it (the describe blocks of the file differ between runs?): %s"):format(
-            rel,
-            slot.case_id:sub(#rel + 3)
-          )
-        )
-        missing.id = slot.case_id
-        cases[#cases + 1] = missing
-      end
-    end
-    -- the child's output explains a red file: one note on its first red case
-    if ended.out ~= "" then
-      for _, c in ipairs(cases) do
-        if inproc.BAD[c.status] then
-          c.notes[#c.notes + 1] = "output of the child (tail): " .. tail(ended.out, M.TAIL_CHARS)
-          break
-        end
-      end
-    end
-    -- what the guard layer of the child said that no case carries (`done` record of the fragment)
-    local done = frag.done
-    if type(done) == "table" then
-      for _, n in ipairs(type(done.notes) == "table" and done.notes or {}) do
-        if type(n) == "string" and not vim.tbl_contains(notes, n) then
-          notes[#notes + 1] = n
-        end
-      end
-      for _, f in ipairs(type(done.unattached) == "table" and done.unattached or {}) do
-        if type(f) == "table" then
-          unattached[#unattached + 1] = f
-        end
-      end
-    end
-    -- a child that timed out or died leaves a trace of what it did
-    if o.trace then
-      local why
-      for _, c in ipairs(cases) do
-        if c.status == "timeout" or c.status == "crash" then
-          why = c
-        end
-      end
-      if why then
-        local artifact
-        local aok, aerr = pcall(function()
-          if ended.trace then
-            artifact = ended.trace(why.status)
-          else
-            artifact = M.write_trace({
-              dir = opts.trace_dir,
-              root = root,
-              rel = rel,
-              reason = why.status,
-              h = h,
-              frag = frag,
-              describe = ended.describe,
-              err = ended.err,
-            })
-          end
-        end)
-        if artifact then
-          why.artifacts[#why.artifacts + 1] = artifact
-        elseif not aok then
-          why.notes[#why.notes + 1] = "trace: " .. tostring(aerr)
-        end
-      end
-    end
-    slot.cases = cases
-    slot.state = "done"
-  end
-
-  ---@param slot Testing.Isolated.Slot
-  local function unlive(slot)
-    for i, s in ipairs(live) do
-      if s == slot then
-        table.remove(live, i)
-        break
-      end
-    end
-    slot.handle = nil
-  end
-
-  ---@param slot Testing.Isolated.Slot
-  local function run_child(slot)
-    if state.stopped then
-      slot.state = "done"
-      return
-    end
-    local entry = slot.entry
-    local rel = entry.rel
-    local kind = entry.dialect == "script" and "script" or "cases"
-    local plan = child.build({
-      entry = serializable(entry),
-      root = root,
-      kind = kind,
-      minit = opts.minit,
-      assertions = o.assertions,
-      host = options_mod.host_of(o, entry),
-      rtp_prepend = opts.rtp_prepend,
-      rtp = opts.rtp,
-      filetype = o.filetype,
-      disable_first_run = o.disable_first_run,
-      selector = opts.selector_spec,
-      lf_ids = slot.lf_ids,
-      timeouts = timeouts,
-      seed = opts.seed,
-      env_allow = o.env_allow,
-      extra_env = opts.child_env,
-      nvim = opts.nvim,
-      base = opts.sandbox_base,
-      -- what the child boot reads from the job (`testing.child.runner`): the guard layer's configuration
-      -- (`options.guard_config`), fixed LANG/TZ, the trace artifact. A one-case child is thrown away
-      -- with its case: the state guard would only name what dies with the process.
-      guard = guard_for_child(entry.dialect ~= "busted" or o.isolated == "case"),
-      deterministic = o.determinism,
-      isolate_home = o.isolate_home,
-      trace = o.trace,
-    })
-    slot.plan = plan
-    slot.fragment = plan.fragment
-    local pok, perr = child.prepare(plan)
-    if not pok then
-      fail_slot(slot, ("%s: %s"):format(rel, tostring(perr)))
-      child.cleanup(plan)
-      return
-    end
-    local is_busted = entry.dialect == "busted"
-    ---@type Testing.Child.Handle|nil
-    local handle
-    local serr
-    local exited = async.await(function(resume)
-      handle, serr = child.spawn(plan, resume)
-      if handle then
-        handle.reason = nil
-        handle.deadline = timeouts.file_ms and (handle.started_ms + timeouts.file_ms + grace) or nil
-        handle.stall_limit = (is_busted and timeouts.case_ms) and (timeouts.case_ms + grace) or nil
-        handle.progress_ms = handle.started_ms
-        handle.frag_size, handle.frag_scanned = 0, 0
-        slot.handle = handle
-        slot.state = "running"
-        live[#live + 1] = slot
-      else
-        resume(nil)
-      end
-    end)
-    if not exited then
-      fail_slot(slot, ("%s: %s"):format(rel, tostring(serr)))
-      child.cleanup(plan)
-      return
-    end
-    local h = exited --[[@as Testing.Child.Handle]]
-    conclude(slot, kind, {
-      h = h,
-      exit = h.exit or {},
-      fragment = plan.fragment,
-      out = child.text(h.out),
-      stdout = child.text(h.stdout),
-      err = child.text(h.err),
-      describe = child.describe_exit(h.exit or {}),
-    })
-    child.cleanup(plan)
-  end
+  local ctx = {
+    opts = opts,
+    o = o,
+    root = root,
+    child = child,
+    grace = grace,
+    poll = poll,
+    timeouts = timeouts,
+    notes = notes,
+    unattached = unattached,
+    live = live,
+    state = state,
+  } --[[@as Testing.Isolated.Ctx]]
 
   -- ---- the warm pool (`isolated=file` + `pool.reuse`) -------------------------------------
   ---@type Testing.Pool|nil
@@ -1252,7 +1292,7 @@ function M.run(opts)
       lf_ids = slot.lf_ids,
       timeouts = timeouts,
       seed = opts.seed,
-      guard = guard_for_child(),
+      guard = guard_for_child(ctx),
       trace = o.trace,
     }, frag_path, nil)
 
@@ -1298,7 +1338,7 @@ function M.run(opts)
         got = got2
       end
     end
-    unlive(slot)
+    unlive(ctx, slot)
 
     local dead = h.ended or h.exited
     local exit, out, err = { code = 0 }, "", ""
@@ -1339,7 +1379,7 @@ function M.run(opts)
       end
     end
 
-    conclude(slot, "cases", {
+    conclude(ctx, slot, "cases", {
       h = h,
       exit = exit,
       fragment = frag_path,
@@ -1402,7 +1442,7 @@ function M.run(opts)
       return
     end
     announce(slot)
-    run_child(slot)
+    run_child(ctx, slot)
   end
 
   -- one coroutine per child file; the semaphore decides how many run at once, FIFO. The order the coroutines are
