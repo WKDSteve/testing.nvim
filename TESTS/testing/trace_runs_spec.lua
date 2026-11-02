@@ -98,5 +98,13 @@ return function(H)
     0,
     "another base is scanned on its first trace"
   )
+  -- SEC-42/43: names that come from tests never leave the trace directory and never name a device
+  local safe = require("testing.rpc.trace").safe_stem
+  eq(safe("../../etc/passwd"), "______etc_passwd", "separators and dots are replaced")
+  eq(safe("a\\b\0c\n"), "a_b_c_", "backslash, NUL and control characters are replaced")
+  eq(safe("NUL"):lower(), "_nul", "a reserved device name gets a prefix")
+  eq(safe("com1"), "_com1", "a reserved device name gets a prefix (lower case)")
+  eq(safe(""), "trace", "an empty name gets a stem")
+  eq(#safe(("x"):rep(500)), 80, "the length is capped")
   S.cleanup()
 end

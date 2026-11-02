@@ -289,6 +289,27 @@ function M.write(snap, opts)
   return { kind = "trace", path = M.artifact_path(opts.path, opts.run_dir) }, nil
 end
 
+---A file name stem that is safe on every platform: only `[%w_-]`, at most 80 bytes, never empty, and
+---never a reserved Windows device name (`CON`, `NUL`, `COM1`, ...). Names come from tests and cases
+---(SEC-42/43), so a hostile name can neither leave the trace directory nor name a device.
+---@param name any
+---@return string
+function M.safe_stem(name)
+  local stem = tostring(name or ""):gsub("[^%w_%-]", "_"):sub(1, 80)
+  if stem == "" then
+    return "trace"
+  end
+  local base = (stem:match("^([^_%-]*)") or stem):lower()
+  if
+    ({ con = 1, prn = 1, aux = 1, nul = 1 })[base]
+    or base:match("^com%d$")
+    or base:match("^lpt%d$")
+  then
+    return "_" .. stem
+  end
+  return stem
+end
+
 ---The path a trace gets in `case.artifacts`: `<RUN>/<name>` below the run directory, otherwise the
 ---normalized absolute path.
 ---@param path string

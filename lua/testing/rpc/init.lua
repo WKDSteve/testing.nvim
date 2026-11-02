@@ -197,7 +197,7 @@ local function write_trace(S, reason)
   local pid = S.proc and S.proc.pid or 0
   local path = ("%s/%s-%d-%d.trace.json"):format(
     dir,
-    S.opts.trace_name or "child",
+    trace_mod.safe_stem(S.opts.trace_name or "child"),
     pid,
     S.generation
   )

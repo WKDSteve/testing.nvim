@@ -520,7 +520,7 @@ function M.write_trace(input)
   if input.base and (not input.dir or input.dir == "") then
     dir = input.base .. "/" .. M.run_id()
   end
-  local stem = input.rel:gsub("[^%w_%-]", "_")
+  local stem = trace_mod.safe_stem(input.rel)
   local h = input.h
   local snap = tr:snapshot({
     reason = input.reason,
