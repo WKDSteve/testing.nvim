@@ -266,6 +266,10 @@ first parent), and every finding is sorted:
 - **known**: red at both: it was red before, the commit did not cause it;
 - **fixed**: red at the base, not at the commit (only within the steps red at the commit).
 
+A new finding of the suite is confirmed before it counts: its spec files run once more at the commit
+(`--step=<suite> -- --file <file>`). A finding that is not red again is `flaky` (a spec that is red only under load),
+not the commit's fault; a step that takes no file selection keeps its new findings as they are.
+
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position); equal findings count as often as they occur. A red step without findings (an
 exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
@@ -275,14 +279,16 @@ exit code) is compared as a whole. When a list of findings was cut, the rest cou
 | --- | --- | --- |
 | `clean` | the pipeline is green at the commit | `0` |
 | `known-red` | red, and nothing of it is new | `0` |
+| `flaky` | what was new is green when its spec files run once more at the commit (red under load only) | `0` |
 | `docs-only` / `empty` | the commit changes only documentation (`*.md`, `doc/`, `docs/`, `LICENSE*`, `CHANGELOG*`) or nothing; not run (`--include-docs` runs it) | `0` |
 | `regression` | at least one finding is new | `1` |
 | `unclassified` | red, and there is no base (a root commit) or the base did not run | `1` |
 | `error` / `infra` | a usage or pipeline error / git, the snapshot or a tool failed | `2` / `3` |
 
 Several commits (`<a> <b>`, `--range=<a>..<b>`, oldest first, at most 50): one report each, a tally line first, the
-exit code is the worst. A result is kept per commit, profile, base and suite options (`<state>/testing/<project>/
-ci-commit/`) and comes back at once (`(kept result)`); `--force` runs it again (after a change of a tool or a
+exit code is the worst. A result is kept per commit, profile, base, suite options and runner (the trees of testing.nvim and
+lib.nvim, with their uncommitted changes) (`<state>/testing/<project>/ci-commit/`) and comes back at once
+(`(kept result)`); a new runner checks again, `--force` runs it again anyway (after a change of a tool or another
 dependency). `--keep` leaves the worktrees in place and names them; every call removes snapshots older than 12 h that
 a crashed run left.
 

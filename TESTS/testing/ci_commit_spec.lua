@@ -261,4 +261,82 @@ return function(H)
     snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
     vim.fn.delete(tmp, "rf")
   end
+
+  -- a new suite finding is run once more at the commit: green again is flaky, red again a regression;
+  -- a kept result belongs to one runner
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-flaky"
+    vim.fn.mkdir(tmp, "p")
+    local saved = {
+      create = snapshot.create,
+      remove = snapshot.remove,
+      parent = snapshot.parent,
+      changed = snapshot.changed_files,
+      run_ci = commit.run_ci,
+      runner_key = commit.runner_key,
+    }
+    snapshot.parent = function()
+      return ("b"):rep(40)
+    end
+    snapshot.changed_files = function()
+      return { "lua/x.lua" }
+    end
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = tmp .. "/" .. sha:sub(1, 1), state = tmp }
+    end
+    snapshot.remove = function()
+      return true
+    end
+    local red_again = false
+    local confirm_args
+    local function suite(state, findings)
+      return { profile = "full", steps = { { name = "suite", state = state, findings = findings } } }
+    end
+    local BOOM = { { file = "TESTS/x_spec.lua", line = 3, text = "x_spec.lua:3: slow" } }
+    commit.run_ci = function(snap, _, extra, suite_args)
+      if snap.sha:sub(1, 1) == "b" then
+        return 0, suite("green", {}), ""
+      end
+      if vim.tbl_contains(suite_args, "--file") then
+        confirm_args = { extra = extra, suite = suite_args }
+        if red_again then
+          return 1, suite("red", BOOM), ""
+        end
+        return 0, suite("green", {}), ""
+      end
+      return 1, suite("red", BOOM), ""
+    end
+    commit.runner_key = function()
+      return "runner-1"
+    end
+    local args = commit.parse({ ("a"):rep(40), "--force" })
+    args.state_dir = tmp
+    local r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.verdict, #r.new, #r.flaky }, { "flaky", 0, 1 }, "flaky: green when run again")
+    eq(confirm_args.extra, { "--profile=full", "--step=suite" }, "flaky: only the step ...")
+    eq(confirm_args.suite, { "--file", "TESTS/x_spec.lua" }, "flaky: ... and the spec file")
+    r.exit = 0
+    has(commit.headline(r), "FLAKY 0 new, 0 known, 0 fixed, 1 flaky", "flaky: the verdict line")
+    has(
+      table.concat(commit.lines(r, true), "\n"),
+      "  flaky suite TESTS/x_spec.lua:3",
+      "flaky: listed"
+    )
+    red_again = true
+    r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.verdict, #r.new, #r.flaky }, { "regression", 1, 0 }, "red again: a regression")
+
+    local mem = commit.internal.memory_path
+    local p1 = mem(tmp, ("a"):rep(40), args, ("b"):rep(40))
+    commit.runner_key = function()
+      return "runner-2"
+    end
+    ok(mem(tmp, ("a"):rep(40), args, ("b"):rep(40)) ~= p1, "kept: another runner, another key")
+    eq(type(saved.runner_key()), "string", "runner_key: a string for this checkout")
+
+    snapshot.create, snapshot.remove = saved.create, saved.remove
+    snapshot.parent, snapshot.changed_files = saved.parent, saved.changed
+    commit.run_ci, commit.runner_key = saved.run_ci, saved.runner_key
+    vim.fn.delete(tmp, "rf")
+  end
 end

@@ -13,10 +13,12 @@
 --- known or fixed. A commit that changes only documentation is not run (`docs-only`, `--include-docs` runs it).
 ---
 --- Verdicts and exit codes (several commits: the worst code): `clean` 0 (green at the commit), `known-red` 0 (red, and
---- all of it red at the base too), `regression` 1 (something new is red), `unclassified` 1 (red, and there is no base
+--- all of it red at the base too), `flaky` 0 (what was new is green when its spec files run once more at the commit),
+--- `regression` 1 (something new is red, also when run again), `unclassified` 1 (red, and there is no base
 --- or the base did not run), `docs-only` / `empty` 0 (not run), `error` 2 (usage, pipeline), `infra` 3 (git, the
---- snapshot, a tool). A result is kept per commit, profile, base and suite options in the project's state directory
---- (`ci-commit/`) and returned again without a run (`reused`) until `--force`.
+--- snapshot, a tool). A result is kept per commit, profile, base, suite options and runner (the trees of testing.nvim
+--- and lib.nvim) in the project's state directory (`ci-commit/`) and returned again without a run (`reused`) until
+--- `--force`.
 ---
 --- The report: the agent report's first line is the verdict (`ci commit abc1234 REGRESSION 2 new, 1 known (luacheck 2)
 --- exit 1`), then only the new findings, then one line per known group; the terminal report lists all three groups.
@@ -56,7 +58,7 @@ M.USAGE = table.concat({
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'))",
   "  --root=<dir>      the repository (default: the current directory)",
   "  -- <options>      passed on to the suite step of both runs",
-  "verdicts: clean 0, known-red 0, docs-only 0, empty 0, regression 1, unclassified 1, error 2, infra 3",
+  "verdicts: clean 0, known-red 0, flaky 0, docs-only 0, empty 0, regression 1, unclassified 1, error 2, infra 3",
 }, "\n")
 
 ---@class Testing.Ci.Commit.Args
@@ -294,7 +296,33 @@ local function memory_dir(root, state_dir)
   return require("testing.state").dir(root, { state_dir = state_dir }) .. "/ci-commit"
 end
 
----The file of a kept result: per commit, profile, base and suite options.
+local runner_key_cache
+
+---The state of the runner itself: the tree of testing.nvim and of lib.nvim, with a hash of their uncommitted changes.
+---A kept result is about the checks of one runner; another runner checks again. Replaced by a spec.
+---@return string
+function M.runner_key()
+  if runner_key_cache then
+    return runner_key_cache
+  end
+  local deps = require("testing.deps")
+  local dirs = { deps.self_dir() }
+  local lib = deps.resolve("lib.nvim", dirs[1])
+  if lib and lib.dir then
+    dirs[2] = lib.dir
+  end
+  local parts = {}
+  for _, d in ipairs(dirs) do
+    local code, tree = git({ "rev-parse", "HEAD^{tree}" }, d)
+    local dcode, diff = git({ "diff", "HEAD" }, d)
+    parts[#parts + 1] = (code == 0 and vim.trim(tree) or "nogit")
+      .. ((dcode == 0 and diff ~= "") and ("~" .. vim.fn.sha256(diff):sub(1, 12)) or "")
+  end
+  runner_key_cache = table.concat(parts, "+")
+  return runner_key_cache
+end
+
+---The file of a kept result: per commit, profile, base, suite options and runner (`M.runner_key`).
 ---@param root string
 ---@param sha string
 ---@param args Testing.Ci.Commit.Args
@@ -306,6 +334,7 @@ local function memory_path(root, sha, args, base)
     args.profile or "-",
     args.include_docs and "docs" or "-",
     table.concat(args.suite_args, "\0"),
+    M.runner_key(),
   }, "\n"))
   return ("%s/%s-%s.json"):format(memory_dir(root, args.state_dir), sha, key:sub(1, 12))
 end
@@ -313,6 +342,7 @@ end
 ---Verdicts that are kept (an error or an infrastructure failure is asked again next time).
 local KEPT = {
   clean = true,
+  flaky = true,
   ["known-red"] = true,
   regression = true,
   unclassified = true,
@@ -365,6 +395,69 @@ local function step_states(doc)
     out[#out + 1] = { name = s.name, state = s.state }
   end
   return out
+end
+
+---Run the spec files of new findings once more at the commit: a finding that is not red again is flaky (red under
+---load, green alone), not a regression. A step that takes no file selection (not the suite) keeps its findings new.
+---@param snap Testing.Ci.Snapshot The commit's snapshot.
+---@param root string
+---@param profile any The profile the commit ran.
+---@param new_items Testing.Ci.Baseline.Item[]
+---@param suite_args string[]
+---@return Testing.Ci.Baseline.Item[] still_new
+---@return Testing.Ci.Baseline.Item[] flaky
+function M.confirm(snap, root, profile, new_items, suite_args)
+  local by_step, order = {}, {}
+  for _, it in ipairs(new_items) do
+    if it.file and not it.whole then
+      if not by_step[it.step] then
+        by_step[it.step], order[#order + 1] = {}, it.step
+      end
+      table.insert(by_step[it.step], it)
+    end
+  end
+  local flaky_set = {}
+  for _, step in ipairs(order) do
+    local extra = type(profile) == "string" and { "--profile=" .. profile } or {}
+    extra[#extra + 1] = "--step=" .. step
+    local sel, seen = vim.deepcopy(suite_args), {}
+    for _, it in ipairs(by_step[step]) do
+      if not seen[it.file] then
+        seen[it.file] = true
+        vim.list_extend(sel, { "--file", it.file })
+      end
+    end
+    local code, doc = M.run_ci(snap, root, extra, sel)
+    -- 2: the step takes no file selection (not the suite) or another usage problem: nothing is confirmed
+    if (code == M.EXIT_OK or code == M.EXIT_FAILED) and doc then
+      local pool = {}
+      for _, s in ipairs(doc.steps or {}) do
+        if s.name == step and baseline.is_red(s) then
+          for _, f in ipairs(s.findings or {}) do
+            local k = baseline.key(step, f)
+            pool[k] = (pool[k] or 0) + 1
+          end
+        end
+      end
+      for _, it in ipairs(by_step[step]) do
+        local k = baseline.key(step, it)
+        if (pool[k] or 0) > 0 then
+          pool[k] = pool[k] - 1
+        else
+          flaky_set[it] = true
+        end
+      end
+    end
+  end
+  local still, flaky = {}, {}
+  for _, it in ipairs(new_items) do
+    if flaky_set[it] then
+      flaky[#flaky + 1] = it
+    else
+      still[#still + 1] = it
+    end
+  end
+  return still, flaky
 end
 
 ---The `unknown step <name>` problems of a run (a step the base does not have yet).
@@ -540,12 +633,17 @@ local function check(root, sha, args, say, snaps)
     r.base_run = base_doc or vim.NIL
     r.steps_base = step_states(base_doc)
     local cls = baseline.classify(head_doc, base_doc)
-    r.new, r.known, r.fixed, r.exact =
-      items_doc(cls.new), items_doc(cls.known), items_doc(cls.fixed), cls.exact
+    local still, flaky = cls.new, {}
+    if base_doc and #cls.new > 0 then
+      say(("ci commit %s: the new findings once more at the commit"):format(sha:sub(1, 7)))
+      still, flaky = M.confirm(head_snap, root, r.profile, cls.new, args.suite_args)
+    end
+    r.new, r.known, r.fixed, r.flaky, r.exact =
+      items_doc(still), items_doc(cls.known), items_doc(cls.fixed), items_doc(flaky), cls.exact
     if not base_doc then
       r.verdict = "unclassified"
     else
-      r.verdict = #cls.new > 0 and "regression" or "known-red"
+      r.verdict = #still > 0 and "regression" or #flaky > 0 and "flaky" or "known-red"
     end
   end
   cleanup()
@@ -630,17 +728,24 @@ function M.headline(r)
   local short = r.sha:sub(1, 7)
   local v = r.verdict:upper()
   local tail = ("exit %d"):format(r.exit)
-  if r.verdict == "regression" or r.verdict == "known-red" or r.verdict == "unclassified" then
+  if
+    r.verdict == "regression"
+    or r.verdict == "known-red"
+    or r.verdict == "unclassified"
+    or r.verdict == "flaky"
+  then
     local by = {}
     for _, g in ipairs(baseline.by_step(r.new)) do
       by[#by + 1] = ("%s %d"):format(g.step, g.n)
     end
-    return ("ci commit %s %s %d new, %d known, %d fixed%s%s %s"):format(
+    local flaky = #(r.flaky or {}) > 0 and (", %d flaky"):format(#r.flaky) or ""
+    return ("ci commit %s %s %d new, %d known, %d fixed%s%s%s %s"):format(
       short,
       v,
       #r.new,
       #r.known,
       #r.fixed,
+      flaky,
       #by > 0 and (" (" .. table.concat(by, ", ") .. ")") or "",
       r.exact and "" or " (inexact: a list was cut)",
       tail
@@ -676,6 +781,9 @@ function M.lines(r, agent)
   end
   for _, it in ipairs(r.new or {}) do
     out[#out + 1] = "  new   " .. where(it)
+  end
+  for _, it in ipairs(r.flaky or {}) do
+    out[#out + 1] = "  flaky " .. where(it) .. " (green when run again)"
   end
   if agent then
     for _, g in ipairs(baseline.by_step(r.known or {})) do
@@ -787,7 +895,7 @@ function M.main(argv, sv)
       r = { sha = sha, verdict = "infra", problems = { "internal error: " .. tostring(r) } }
     end
     r.exit = exit_of(r.verdict)
-    r.new, r.known, r.fixed = r.new or {}, r.known or {}, r.fixed or {}
+    r.new, r.known, r.fixed, r.flaky = r.new or {}, r.known or {}, r.fixed or {}, r.flaky or {}
     r.problems = r.problems or {}
     r.rerun = r.rerun or ("testing ci commit %s --force --keep"):format(sha:sub(1, 12))
     if r.exact == nil then
@@ -808,6 +916,7 @@ function M.main(argv, sv)
       "unclassified",
       "error",
       "infra",
+      "flaky",
       "known-red",
       "clean",
       "docs-only",

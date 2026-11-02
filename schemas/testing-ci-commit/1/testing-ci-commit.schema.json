@@ -19,7 +19,7 @@
   },
   "$defs": {
     "verdict": {
-      "enum": ["clean", "known-red", "regression", "unclassified", "docs-only", "empty", "error", "infra"]
+      "enum": ["clean", "known-red", "flaky", "regression", "unclassified", "docs-only", "empty", "error", "infra"]
     },
     "item": {
       "type": "object",
@@ -58,6 +58,7 @@
         "new": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "known": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "fixed": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "flaky": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "problems": { "type": "array", "items": { "type": "string" } },
         "snapshots": { "type": "array", "items": { "type": "string" } },
         "rerun": { "type": "string" },

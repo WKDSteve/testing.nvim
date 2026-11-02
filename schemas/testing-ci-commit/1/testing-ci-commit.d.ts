@@ -15,6 +15,7 @@ export interface TestingCiCommit {
 export type Verdict =
   | "clean"
   | "known-red"
+  | "flaky"
   | "regression"
   | "unclassified"
   | "docs-only"
@@ -28,7 +29,7 @@ export interface CommitResult {
   /** What red is compared with: `--base` or the first parent; null for a root commit. */
   base?: string | null;
   verdict: Verdict;
-  /** clean, known-red, docs-only, empty 0; regression, unclassified 1; error 2; infra 3. */
+  /** clean, known-red, flaky, docs-only, empty 0; regression, unclassified 1; error 2; infra 3. */
   exit: 0 | 1 | 2 | 3;
   profile?: string | null;
   suite_args?: string[];
@@ -44,6 +45,8 @@ export interface CommitResult {
   known: Item[];
   /** Red at the base, not at the commit (only in the steps red at the commit). */
   fixed: Item[];
+  /** New at first, green when their spec files ran once more at the commit (red under load only). */
+  flaky?: Item[];
   problems: string[];
   /** The worktrees left in place by `--keep`. */
   snapshots?: string[];
