@@ -625,6 +625,28 @@ local function apply_priority_order(args, sv, root, cfg, ordered, files, err)
   return files, order_info
 end
 
+---`--isolated=case` degrades to a child per file for every dialect but busted: say so once.
+---@param run_opts Testing.Run.Options
+---@param files table[]
+---@param err fun(s: string)
+local function note_degraded_isolation(run_opts, files, err)
+  local options_mod = require("testing.run.options")
+  local degraded = 0
+  for _, f in ipairs(files) do
+    local _, note = options_mod.isolation_of(run_opts, f)
+    if note then
+      degraded = degraded + 1
+    end
+  end
+  if degraded > 0 then
+    err(
+      ("testing: note: --isolated=case: %d spec file(s) are not busted (one case per file) and run as one child per file"):format(
+        degraded
+      )
+    )
+  end
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -882,23 +904,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     })
     common.soft = soft
   end
-  do
-    -- `--isolated=case` degrades to a child per file for every dialect but busted: say so once
-    local degraded = 0
-    for _, f in ipairs(files) do
-      local _, note = options_mod.isolation_of(run_opts, f)
-      if note then
-        degraded = degraded + 1
-      end
-    end
-    if degraded > 0 then
-      err(
-        ("testing: note: --isolated=case: %d spec file(s) are not busted (one case per file) and run as one child per file"):format(
-          degraded
-        )
-      )
-    end
-  end
+  note_degraded_isolation(run_opts, files, err)
   -- `testing stamp`: the stamp is about the inputs the specs were given, so they are taken now, before any spec
   -- runs (what a spec or an editor changes during the run is then seen after it, and the stamp is refused)
   local stamp_pre
