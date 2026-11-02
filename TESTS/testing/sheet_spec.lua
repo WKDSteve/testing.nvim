@@ -1345,6 +1345,26 @@ return function(H)
       has(table.concat(outs6, "\n"), "sheet a: pass", "it says what ran")
       has(table.concat(outs6, "\n"), "testing sheets: task x/live changed", "and what it wrote")
 
+      -- a skipped sheet (no browser) is no green result: not "inbox", and no red run either
+      ran, written = {}, nil
+      local skipped6 = {
+        ok = true,
+        status = "skip",
+        skipped = "chromium is not installed",
+        failures = {},
+        snapshots = {},
+      }
+      eq(
+        run.main({ "--task", "x/live", "--root", p6, "--tasks", root }, sv6, deps6(skipped6)),
+        0,
+        "a skipped sheet does not make the run red"
+      )
+      has(table.concat(outs6, "\n"), "sheet a: skip", "the run says it was skipped")
+      ok(
+        written == nil or not written:find("a=inbox", 1, true),
+        "a skipped sheet is not written as waiting for a judgement"
+      )
+
       local red = {
         ok = false,
         status = "fail",

@@ -229,12 +229,16 @@ function M.main(argv, sv, deps)
       local started = vim.uv.hrtime()
       local res = run(e.sheet, { root = e.root, ci = true })
       e.result = res
-      local status = res.status == "fail" and "fail" or "pass"
+      -- a skip (a browser sheet without node, Playwright or chromium) is no green result: the report lists it
+      -- under "not run" with its reason, and it does not make the run red
+      local status = res.status == "fail" and "fail" or res.status == "skip" and "skip" or "pass"
       e.case = {
         name = sheet.spec_name(e.sheet),
         status = status,
         file = "TESTS/sheets_spec.lua",
-        message = status == "fail" and M.first_failure(res) or nil,
+        message = status == "fail" and M.first_failure(res) or status == "skip" and tostring(
+          res.skipped
+        ) or nil,
         duration_ms = math.floor((vim.uv.hrtime() - started) / 1e6),
       }
       red = red or status == "fail"
