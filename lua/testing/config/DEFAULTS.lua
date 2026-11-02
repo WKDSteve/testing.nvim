@@ -115,6 +115,7 @@ local DEFAULTS = {
       waivers = {},
       keymaps_off = { keymaps = false },
       timeout_ms = 20000,
+      health_env = {},
       rules_bridge = { families = { "NEW", "REL" } },
     },
     -- `testing surface`: track = true makes the runner count which handlers the specs exercised;

@@ -341,6 +341,40 @@ return function(H)
     local k6_msg = k6_here.findings[1] and k6_here.findings[1].message or ""
     ok(k6_msg:find("not installed here", 1, true) ~= nil, "and says why: " .. k6_msg)
     ok(S.check(k6_run({}), "K6").status == "fail", "without a missing dependency it is an error")
+    -- ... and an error the project names in `conformance.health_env` is the environment's, with the reason
+    local function k6_env(health_env)
+      local probe_env = function(name)
+        if name == "main" then
+          return {
+            load = { ok = true },
+            health = {
+              ok = true,
+              lines = { "- ERROR: podman does not answer -- is its daemon running?" },
+            },
+          }
+        end
+        return { results = {} }
+      end
+      return S.check(
+        conformance.run(
+          S.new_repo(),
+          { only = { "K6" }, settings = { health_env = health_env }, probe = probe_env }
+        ),
+        "K6"
+      )
+    end
+    local k6_named = k6_env({ "PODMAN" })
+    ok(
+      k6_named.status == "warn",
+      "a health error named in health_env is a warning: " .. k6_named.status
+    )
+    ok(
+      (k6_named.findings[1] and k6_named.findings[1].message or ""):find("health_env", 1, true)
+        ~= nil,
+      "and says why"
+    )
+    ok(k6_env({ "picker" }).status == "fail", "an entry that does not match keeps the error")
+    ok(k6_env({}).status == "fail", "without the key the error stays an error")
 
     -- ===================================================================
     -- 2f. K3: a switch that the plugin never had is not the plugin's REL-20 violation

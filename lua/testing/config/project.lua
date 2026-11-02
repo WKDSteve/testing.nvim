@@ -558,6 +558,10 @@ local SCHEMA = {
       end,
       expect = "a table (what `setup()` is called with on top of `setup` to switch the keymaps off)",
     },
+    health_env = {
+      check = list_of(is_allow_entry, 0),
+      expect = 'a list of texts, e.g. { "podman", "picker" } (an ERROR line of `:checkhealth` containing one is the environment, not a defect)',
+    },
     timeout_ms = {
       check = function(v)
         return type(v) == "number" and v == math.floor(v) and v >= 1000 and v <= 600000

@@ -32,6 +32,22 @@ function M.classify(line)
   return nil
 end
 
+---The entry of `conformance.health_env` that an ERROR line contains (plain, case-insensitive), if any: the line
+---reports the environment of the child editor (a daemon that does not answer, no picker installed), not a
+---defect of the plugin. An explicit list, no guessing from the wording.
+---@param line string
+---@param health_env? string[]
+---@return string|nil
+function M.environment_text(line, health_env)
+  local lowered = line:lower()
+  for _, text in ipairs(health_env or {}) do
+    if lowered:find(text:lower(), 1, true) then
+      return text
+    end
+  end
+  return nil
+end
+
 ---@param ctx Testing.Conformance.Ctx
 ---@return Testing.Conformance.Outcome
 function M.run(ctx)
@@ -71,13 +87,17 @@ function M.run(ctx)
     local kind = M.classify(line)
     if kind == "error" then
       errors = errors + 1
+      local env_text = M.environment_text(line, ctx.settings and ctx.settings.health_env)
       findings[#findings + 1] = util.finding(
         "K6",
         "REL-16",
-        level,
+        env_text and "warn" or level,
         "health: "
           .. util.relativize((vim.trim(line):gsub("^%-%s+%S+%s+", "")), ctx.root)
-          .. why_level
+          .. (
+            env_text and (" (environment, conformance.health_env: %s)"):format(env_text)
+            or why_level
+          )
       )
     elseif kind == "warn" then
       warnings = warnings + 1

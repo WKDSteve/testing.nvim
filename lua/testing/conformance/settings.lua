@@ -22,6 +22,8 @@
 ---     },
 ---     keymaps_off = { keymaps = false },           -- what K3 passes to setup() on top of `setup`
 ---     timeout_ms = 20000,                          -- timeout of one call into the child editor
+---     health_env = { "podman", "picker" },         -- K6: an ERROR line of :checkhealth containing one of these (plain,
+---                                                  -- case-insensitive) is the environment's: a warning with that reason
 ---     rules_bridge = { rulesets = { "<path>" }, families = { "NEW", "REL" } },
 ---   }
 
@@ -36,6 +38,7 @@ M.DEFAULTS = {
   load_budget_ms = 40,
   keymaps_off = { keymaps = false },
   timeout_ms = 20000,
+  health_env = {},
   rules_bridge = { families = { "NEW", "REL" } },
 }
 
@@ -78,6 +81,7 @@ local OWN = {
   waivers = true,
   keymaps_off = true,
   timeout_ms = true,
+  health_env = true,
   rules_bridge = true,
 }
 
@@ -198,6 +202,15 @@ function M.parse(raw, ids, budget)
       s.keymaps_off = vim.deepcopy(raw.keymaps_off)
     else
       problems[#problems + 1] = "conformance.keymaps_off must be a table; using { keymaps = false }"
+    end
+  end
+
+  if raw.health_env ~= nil then
+    if is_string_list(raw.health_env) then
+      s.health_env = vim.deepcopy(raw.health_env)
+    else
+      problems[#problems + 1] =
+        "conformance.health_env must be a list of non-empty strings; using none"
     end
   end
 

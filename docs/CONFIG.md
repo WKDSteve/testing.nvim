@@ -75,6 +75,7 @@ all (syntax error, raises, does not return a table, lies outside the root) is an
 | `conformance.waivers` | list of tables | `{}` | Accepted findings: `{ check = "K4", reason = "...", rule?, file?, text? }`. A waiver **needs a reason** of at least 8 characters; one without is ignored and named. |
 | `conformance.keymaps_off` | table | `{ keymaps = false }` | What K3 passes to `setup()` on top of `setup` to switch the keymaps off. |
 | `conformance.timeout_ms` | integer 1000..600000 | `20000` | Timeout of one call into the conformance child editor. |
+| `conformance.health_env` | list of texts | `{}` | K6: an `ERROR` line of `:checkhealth` containing one of these (plain, case-insensitive) is the environment of the child editor (a daemon that does not answer, no picker), reported as a warning with that reason. |
 | `conformance.rules_bridge.rulesets`, `.families` | list of paths, non-empty list of prefixes | none, `{ "NEW", "REL" }` | `testing conformance --bridge`: the rule files and rule families of rules.nvim to run on top. |
 | `surface.track` | boolean | `false` | `true`: the runner counts which keymaps, commands and autocmds the cases exercise and writes `surface = { hit = { ids... } }` into every case of the IR (in a child editor per file and in this editor; not with the warm pool, which says so). `testing surface --from ir.json` reads it ([SURFACE.md](SURFACE.md)). |
 | `surface.threshold` | number 0..1 | `0` | Gate on the overall ratio of `testing surface`; `0` = only report. |

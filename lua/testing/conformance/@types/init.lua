@@ -66,6 +66,7 @@
 ---@field load_budget_ms number
 ---@field keymaps_off table Options K3 calls `setup()` with, on top of `setup` (default `{ keymaps = false }`).
 ---@field timeout_ms integer Timeout of one child call.
+---@field health_env string[] K6: texts (plain, case-insensitive) that mark an ERROR line of `:checkhealth` as the environment's.
 ---@field rules_bridge { rulesets?: string[], families: string[] }
 
 ---@class Testing.Conformance.Waiver
