@@ -139,7 +139,10 @@ function M.browsers(opts)
     return found
   end
   for _, name in ipairs(o.list_dir(dir)) do
-    local engine, rev = name:match("^(%a+)%-(%d+)$")
+    local engine, rev = name:match("^([%a_]+)%-(%d+)$")
+    if engine == "chromium_headless_shell" then
+      engine = "chromium"
+    end
     if engine == "chromium" or engine == "firefox" or engine == "webkit" then
       found[engine] = found[engine] or {}
       table.insert(found[engine], rev)
