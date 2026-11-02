@@ -256,6 +256,8 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `expect = js` | evaluates the expression now | it is not truthy |
 | `shot = name` | a screenshot `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` (the input of the AI judge) | never |
 
+A `shot` name is part of a file name: letters, digits, `_` and `-` only; `open`, `press` and `click` must not be empty (both are refused when the sheet loads).
+
 `sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700). A step of the other engine
 is refused when the sheet loads (`steps[2]: keys is not a step of a browser sheet`). The first failed step ends a
 size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-core`, found in
