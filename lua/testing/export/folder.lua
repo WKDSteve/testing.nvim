@@ -569,13 +569,15 @@ function M.write(out, opts)
     }
   )
   if not locked then
+    -- "cannot lock <file>: <error>" is a state directory that cannot be written, not a second writer
+    local why = tostring(res)
+    if why:find("^cannot lock ") then
+      return nil, { code = M.EXIT_INFRA, message = ("%s: nothing was written"):format(why) }
+    end
     return nil,
       {
         code = M.EXIT_USAGE,
-        message = ("another export is writing %s (%s): nothing was written"):format(
-          out,
-          tostring(res)
-        ),
+        message = ("another export is writing %s (%s): nothing was written"):format(out, why),
       }
   end
   return res, err

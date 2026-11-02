@@ -62,5 +62,14 @@ return function(H)
   end)
   ok(blocked ~= nil, "a lock on one folder does not block another")
 
+  -- a state directory that cannot be written is no second writer: its own message, exit 3
+  local blocker = fx.root .. "/../not-a-dir"
+  fixture.write(blocker, "x\n")
+  local r3, e3 = write(fx.root .. "/../export-nolock", { state_dir = blocker .. "/state" })
+  eq(r3, nil, "no lock, no write")
+  eq(e3 and e3.code, 3, "exit 3, not 2")
+  has(e3 and e3.message, "cannot lock", "and the message names the lock, not another writer")
+  eq(vim.uv.fs_stat(fx.root .. "/../export-nolock"), nil, "nothing was written")
+
   vim.fn.delete(base, "rf")
 end
