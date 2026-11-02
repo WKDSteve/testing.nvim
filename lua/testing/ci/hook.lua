@@ -3,6 +3,7 @@
 ---@description
 --- ```
 --- testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
+--- testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]
 --- testing ci hook remove [--root=<dir>]
 --- ```
 ---
@@ -17,6 +18,12 @@
 --- It finds testing.nvim without any Neovim configuration: `$TESTING_NVIM_DIR`, `<repo>/.deps/testing.nvim`,
 --- `<repo>/../testing.nvim`, then the checkout the install ran from. A hook that is not ours is never overwritten
 --- or removed; the hook of `:MyPlugins ci hook` (mark `# MyPlugins ci pre-push hook`) is recognised and replaced.
+---
+--- `install --all --repos-root=<dir>` (repeatable) does that for every repository below the root whose `.testing.lua`
+--- has a `ci` section (the repositories `testing ci --repos` finds) and prints one line per repository: `installed`,
+--- `unchanged` (it was there with the same text), `replaced` (the hook of `:MyPlugins ci`) or `skipped` (a hook that
+--- is not ours, a profile the repository does not have). Exit 0 when nothing was skipped, 1 otherwise. The hook is only
+--- a file in the hooks folder: no step runs, and the first push is the hand test.
 
 local M = {}
 
@@ -31,12 +38,14 @@ M.DEFAULT_RUN = "fast"
 
 M.USAGE = table.concat({
   "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
+  "       testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]",
   "       testing ci hook remove [--root=<dir>]",
   "  --run=<profile>     the profile the hook runs when the state is not proven (default: fast)",
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
   "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
   "                      were made here (no merge, none from a remote): testing ci trust --pushed",
   "  --root=<dir>        the repository (default: the current directory)",
+  "  --all               install: every repository below --repos-root=<dir> (repeatable) with a ci section",
   "  `git push --no-verify` skips the hook. A pre-push hook that is not ours is never touched.",
 }, "\n")
 
@@ -161,6 +170,8 @@ end
 ---@field verify? string
 ---@field auto_trust boolean
 ---@field root string
+---@field all boolean
+---@field repos_roots string[]
 ---@field help boolean
 
 ---@param argv string[] The arguments after `hook`.
@@ -168,7 +179,14 @@ end
 ---@return string|nil problem
 function M.parse(argv)
   ---@type Testing.Ci.Hook.Args
-  local args = { run = M.DEFAULT_RUN, root = ".", help = false, auto_trust = false }
+  local args = {
+    run = M.DEFAULT_RUN,
+    root = ".",
+    help = false,
+    auto_trust = false,
+    all = false,
+    repos_roots = {},
+  }
   for i, a in ipairs(argv) do
     local key, value = a:match("^%-%-([%w%-]+)=(.*)$")
     if a == "-h" or a == "--help" then
@@ -177,6 +195,13 @@ function M.parse(argv)
       args.action = a
     elseif a == "--auto-trust" then
       args.auto_trust = true
+    elseif a == "--all" then
+      args.all = true
+    elseif key == "repos-root" then
+      if value == "" then
+        return nil, "--repos-root needs a value"
+      end
+      table.insert(args.repos_roots, value)
     elseif key == "run" or key == "verify" or key == "root" then
       if value == "" then
         return nil, ("--%s needs a value"):format(key)
@@ -192,7 +217,121 @@ function M.parse(argv)
   if not args.action and not args.help then
     return nil, "say install or remove"
   end
+  if args.all and args.action ~= "install" then
+    return nil, "--all goes with install"
+  end
+  if args.all and #args.repos_roots == 0 then
+    return nil, "--all needs --repos-root=<dir>"
+  end
+  if #args.repos_roots > 0 and not args.all then
+    return nil, "--repos-root goes with --all"
+  end
   return args
+end
+
+---Write the hook of one checkout. `existing` is the text of a hook already there.
+---@param root string
+---@param hooks string The hooks folder of the checkout.
+---@param args Testing.Ci.Hook.Args
+---@param existing string|nil
+---@return integer code
+---@return string message
+---@return string|nil state `installed`, `unchanged` or `replaced` (when the code is 0).
+function M.install(root, hooks, args, existing)
+  local path = hooks .. "/pre-push"
+  local ours = M.marked(existing, M.MARK)
+  local legacy = M.marked(existing, M.LEGACY_MARK)
+  if existing and not (ours or legacy) then
+    return M.EXIT_REFUSED, "testing ci hook: a pre-push hook that is not ours exists, left alone"
+  end
+  -- the profiles must exist, or the first push would fail with a usage error
+  local pipeline, problems = require("testing.ci.schema").load(root)
+  if not pipeline then
+    return M.EXIT_USAGE, "testing ci hook: " .. table.concat(problems or {}, "; ")
+  end
+  for _, name in ipairs({ args.run, args.verify or pipeline.default }) do
+    if not pipeline.profiles[name] then
+      return M.EXIT_USAGE, ("testing ci hook: unknown profile %s"):format(name)
+    end
+  end
+  local driver_dir = plugin_root()
+  if not safe_word(driver_dir) then
+    return M.EXIT_USAGE,
+      ("testing ci hook: the path %s has characters a hook script cannot take"):format(driver_dir)
+  end
+  local text = M.text({
+    run = args.run,
+    verify = args.verify,
+    driver_dir = driver_dir,
+    auto_trust = args.auto_trust,
+  })
+  if ours and existing == text then
+    return M.EXIT_OK,
+      "testing ci hook: pre-push hook already installed (git push --no-verify skips it)",
+      "unchanged"
+  end
+  local atomic = require("lib.nvim.fs.write.atomic")
+  local ok, err = atomic(path, text, { mkdirp = true })
+  if not ok then
+    return M.EXIT_INFRA, ("testing ci hook: cannot write %s: %s"):format(path, tostring(err))
+  end
+  local chmod_ok, chmod_err = vim.uv.fs_chmod(path, tonumber("755", 8))
+  if not chmod_ok then
+    return M.EXIT_INFRA,
+      ("testing ci hook: cannot make %s executable: %s"):format(path, tostring(chmod_err))
+  end
+  return M.EXIT_OK,
+    ("testing ci hook: pre-push hook installed%s (git push --no-verify skips it)"):format(
+      legacy and ", replacing the one of :MyPlugins ci" or ""
+    ),
+    legacy and "replaced" or "installed"
+end
+
+---`install --all`: every repository below the roots that has a `ci` section, one line each.
+---@param args Testing.Ci.Hook.Args
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@return integer
+local function install_all(args, sv)
+  local repos = require("testing.ci.repos")
+  local dirs = {}
+  for _, r in ipairs(args.repos_roots) do
+    local root = vim.fs.normalize(vim.fn.fnamemodify(r, ":p")):gsub("/$", "")
+    if vim.fn.isdirectory(root) ~= 1 then
+      sv.err(("testing ci hook: --repos-root %s is not a directory"):format(root))
+      return M.EXIT_USAGE
+    end
+    vim.list_extend(dirs, repos.scan(root))
+  end
+  if #dirs == 0 then
+    sv.err("testing ci hook: no repository with a ci section below the roots")
+    return M.EXIT_USAGE
+  end
+  local skipped, worst = 0, M.EXIT_OK
+  for _, dir in ipairs(dirs) do
+    local name = vim.fs.basename(dir)
+    local hooks = M.hooks_dir(dir)
+    if not hooks then
+      skipped, worst = skipped + 1, math.max(worst, M.EXIT_REFUSED)
+      sv.out(("%-28s skipped: not a git checkout"):format(name))
+    else
+      local code, msg, state = M.install(dir, hooks, args, read(hooks .. "/pre-push"))
+      if code == M.EXIT_OK then
+        sv.out(("%-28s %s"):format(name, state))
+      else
+        skipped = skipped + 1
+        worst = math.max(worst, code == M.EXIT_INFRA and code or M.EXIT_REFUSED)
+        sv.out(("%-28s skipped: %s"):format(name, (msg:gsub("^testing ci hook: ", ""))))
+      end
+    end
+  end
+  sv.out(
+    ("testing ci hook: %d repositor%s, %d skipped"):format(
+      #dirs,
+      #dirs == 1 and "y" or "ies",
+      skipped
+    )
+  )
+  return worst
 end
 
 ---@param argv string[] The arguments after `hook`.
@@ -208,6 +347,9 @@ function M.main(argv, sv)
   if args.help then
     sv.out(M.USAGE)
     return M.EXIT_OK
+  end
+  if args.all then
+    return install_all(args, sv)
   end
   local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
   local hooks = vim.fn.isdirectory(root) == 1 and M.hooks_dir(root) or nil
@@ -237,54 +379,12 @@ function M.main(argv, sv)
     return M.EXIT_OK
   end
 
-  if existing and not (ours or legacy) then
-    sv.err("testing ci hook: a pre-push hook that is not ours exists, left alone")
-    return M.EXIT_REFUSED
+  local code, msg = M.install(root, hooks, args, existing)
+  if code ~= M.EXIT_OK then
+    sv.err(msg)
+    return code
   end
-  -- the profiles must exist, or the first push would fail with a usage error
-  local pipeline, problems = require("testing.ci.schema").load(root)
-  if not pipeline then
-    sv.err("testing ci hook: " .. table.concat(problems or {}, "; "))
-    return M.EXIT_USAGE
-  end
-  for _, name in ipairs({ args.run, args.verify or pipeline.default }) do
-    if not pipeline.profiles[name] then
-      sv.err(("testing ci hook: unknown profile %s"):format(name))
-      return M.EXIT_USAGE
-    end
-  end
-  local driver_dir = plugin_root()
-  if not safe_word(driver_dir) then
-    sv.err(
-      ("testing ci hook: the path %s has characters a hook script cannot take"):format(driver_dir)
-    )
-    return M.EXIT_USAGE
-  end
-  local atomic = require("lib.nvim.fs.write.atomic")
-  local ok, err = atomic(
-    path,
-    M.text({
-      run = args.run,
-      verify = args.verify,
-      driver_dir = driver_dir,
-      auto_trust = args.auto_trust,
-    }),
-    { mkdirp = true }
-  )
-  if not ok then
-    sv.err(("testing ci hook: cannot write %s: %s"):format(path, tostring(err)))
-    return M.EXIT_INFRA
-  end
-  local chmod_ok, chmod_err = vim.uv.fs_chmod(path, tonumber("755", 8))
-  if not chmod_ok then
-    sv.err(("testing ci hook: cannot make %s executable: %s"):format(path, tostring(chmod_err)))
-    return M.EXIT_INFRA
-  end
-  sv.out(
-    ("testing ci hook: pre-push hook installed%s (git push --no-verify skips it)"):format(
-      legacy and ", replacing the one of :MyPlugins ci" or ""
-    )
-  )
+  sv.out(msg)
   return M.EXIT_OK
 end
 

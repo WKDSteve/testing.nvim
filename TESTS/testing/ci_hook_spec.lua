@@ -271,6 +271,46 @@ return function(H)
     has(res.out, "push blocked", "real: ... and says so")
   end
 
+  -- install --all: one line per repository of a root, a foreign hook is skipped (exit 1), a second run changes nothing
+  do
+    local a = project("fleet/a", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    local b = project("fleet/b", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    local c = project("fleet/c", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    write(b .. "/.git/hooks/pre-push", "#!/bin/sh\n# somebody else's hook\nexit 0\n")
+    write(c .. "/.git/hooks/pre-push", "#!/bin/sh\n" .. hook.LEGACY_MARK .. "\nexit 0\n")
+    write(tmp .. "/fleet/not-a-repo/readme.txt", "no .testing.lua here\n")
+    local fleet = tmp .. "/fleet"
+    local res = run("install", "--all", "--repos-root=" .. fleet)
+    eq(res.code, 1, "all: a skipped repository makes exit 1 (" .. res.out .. res.err .. ")")
+    has(res.out, "a                            installed", "all: a is installed")
+    has(
+      res.out,
+      "b                            skipped: a pre-push hook that is not ours",
+      "all: b is skipped"
+    )
+    has(res.out, "c                            replaced", "all: the legacy hook of c is replaced")
+    has(res.out, "3 repositories, 1 skipped", "all: the summary")
+    lacks(res.out, "not-a-repo", "all: a directory without a ci section is not a repository")
+    has(read(a .. "/.git/hooks/pre-push"), hook.MARK, "all: the hook of a is ours")
+    has(
+      read(b .. "/.git/hooks/pre-push"),
+      "somebody else's hook",
+      "all: the foreign hook is untouched"
+    )
+    res = run("install", "--all", "--repos-root=" .. fleet)
+    has(res.out, "a                            unchanged", "all again: a is unchanged")
+    has(res.out, "c                            unchanged", "all again: c is unchanged")
+    -- usage
+    eq(run("install", "--all").code, 2, "all: needs a root")
+    eq(run("remove", "--all", "--repos-root=" .. fleet).code, 2, "all: not with remove")
+    eq(run("install", "--repos-root=" .. fleet).code, 2, "all: --repos-root needs --all")
+    eq(
+      run("install", "--all", "--repos-root=" .. tmp .. "/nope").code,
+      2,
+      "all: a root that is no directory"
+    )
+  end
+
   vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = saved_git_env[1], saved_git_env[2]
   vim.fn.delete(empty_config)
   vim.fn.delete(tmp, "rf")

@@ -1044,14 +1044,15 @@ function M.main(argv, sv)
   if argv[1] == "overview" then
     return require("testing.ci.overview").main(vim.list_slice(argv, 2), sv)
   end
+  -- `hook install --all --repos-root=<dir>` is the hook verb, not the multi-repository run
+  if argv[1] == "hook" then
+    return require("testing.ci.hook").main(vim.list_slice(argv, 2), sv)
+  end
   if require("testing.ci.repos").wanted(argv) then
     return require("testing.ci.repos").main(argv, sv)
   end
   if argv[1] == "list" then
     return require("testing.ci.list").main(vim.list_slice(argv, 2), sv)
-  end
-  if argv[1] == "hook" then
-    return require("testing.ci.hook").main(vim.list_slice(argv, 2), sv)
   end
   -- the protection of the local self-hosted runner from foreign code (docs/RUNNER-GUARD.md)
   if argv[1] == "runner-guard" then

@@ -327,8 +327,15 @@ workstation like every run.
 
 ```
 testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
+testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]
 testing ci hook remove [--root=<dir>]
 ```
+
+`install --all --repos-root=<dir>` (repeatable) installs the hook in every repository below the root whose `.testing.lua` has a `ci`
+section (the ones `testing ci --repos` finds) and prints one line per repository: `installed`, `unchanged` (the same hook was
+there), `replaced` (the hook of `:MyPlugins ci`) or `skipped: <why>` (a hook that is not ours is never touched, a profile the
+repository does not have). Exit `0` when nothing was skipped, `1` otherwise. It only writes a file into the hooks folder, so it
+runs no step; the first push of a repository is the hand test, and `git push --no-verify` skips the hook as before.
 
 `install` writes `pre-push` into the hooks folder git uses for the repository (a worktree, `core.hooksPath`), `remove`
 deletes it. The hook computes no verdict of its own:
