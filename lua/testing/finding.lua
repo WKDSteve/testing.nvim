@@ -44,6 +44,7 @@ M.REFUSED = "refused"
 ---@field dir string The repository.
 ---@field state_dir? string
 ---@field classes? table The options of `lib.nvim.data_classes.load` (specs name their own file).
+---@field classified? { class: string, area: string|nil } Filled by the first `M.build` of this context.
 
 ---The fingerprint: stable over commits and moved lines.
 ---@param kind string
@@ -68,6 +69,19 @@ end
 ---@return string class
 ---@return string|nil area
 local function classify(ctx)
+  -- once per context: a repository with many findings reads `areas.json` once, not once per finding
+  if ctx.classified then
+    return ctx.classified.class, ctx.classified.area
+  end
+  local class, area = M.classify_uncached(ctx)
+  ctx.classified = { class = class, area = area }
+  return class, area
+end
+
+---@param ctx Testing.Finding.Ctx
+---@return string class
+---@return string|nil area
+function M.classify_uncached(ctx)
   local okl, dc = pcall(require, "lib.nvim.data_classes")
   if not okl then
     return "unclassified", nil

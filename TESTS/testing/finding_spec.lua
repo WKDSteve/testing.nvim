@@ -38,6 +38,22 @@ return function(H)
   ok(a.fp ~= c.fp, "another case: another fp")
   local d = finding.build({ kind = "flaky", identity = "TESTS/x::a", title = "t" }, ctx)
   ok(a.fp ~= d.fp, "the kind is part of the identity")
+
+  -- the data classes are read once per context, not once per finding
+  do
+    local dc = require("lib.nvim.data_classes")
+    local real_load, loads = dc.load, 0
+    dc.load = function(...)
+      loads = loads + 1
+      return real_load(...)
+    end
+    local once = { dir = fx.beta, state_dir = fx.state, classes = { path = fx.areas } }
+    for i = 1, 5 do
+      assert(finding.build({ kind = "case", identity = "x" .. i, title = "t" }, once))
+    end
+    dc.load = real_load
+    eq(loads, 1, "five findings of one context read areas.json once")
+  end
   ok(a.fp:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil, "16 hex")
 
   -- ── redaction and the bound ──
