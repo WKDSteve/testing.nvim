@@ -399,9 +399,11 @@ local leave_hooked = false
 
 ---Kill the process trees of all children that are still running.
 function M.kill_all()
+  local all = {}
   for _, h in pairs(live) do
-    M.kill_tree(h)
+    all[#all + 1] = h
   end
+  M.kill_trees(all)
 end
 
 local function hook_leave()
@@ -620,25 +622,62 @@ end
 ---@field ppid integer
 ---@field created integer Creation time (milliseconds since the epoch); 0 when the table does not say (POSIX).
 
----The process table: pid -> parent and creation time. nil when it cannot be read.
----@return table<integer, Testing.Child.Proc>|nil
-local function process_table()
+---@alias Testing.Child.Exec fun(argv: string[], ms: integer, cb: fun(res: table|nil))
+
+---Run `fn` outside a guard that is installed (the processes started here are the driver's, not the spec's).
+---@param fn fun(): any
+---@return any
+local function unguarded(fn)
+  local guard = package.loaded["testing.guard"]
+  if type(guard) == "table" and guard.suspended then
+    return guard.suspended(fn)
+  end
+  return fn()
+end
+
+---Synchronous execution: waits for the answer (`nil` when the command could not run or did not answer in time).
+---@type Testing.Child.Exec
+local function exec_sync(argv, ms, cb)
   local ok, res = pcall(function()
-    return vim
-      .system(process_table_argv(), { text = true })
-      :wait(M.platform.windows and 8000 or 3000)
+    return vim.system(argv, { text = true }):wait(ms)
   end)
-  if not ok or type(res) ~= "table" or res.code ~= 0 or type(res.stdout) ~= "string" then
-    return nil
+  cb(ok and type(res) == "table" and res or nil)
+end
+
+---Asynchronous execution: returns at once, `cb` runs on the main loop (scheduled) with the answer.
+---@type Testing.Child.Exec
+local function exec_async(argv, ms, cb)
+  local started = pcall(unguarded, function()
+    return vim.system(argv, { text = true, timeout = ms }, function(res)
+      vim.schedule(function()
+        cb(res)
+      end)
+    end)
+  end)
+  if not started then
+    vim.schedule(function()
+      cb(nil)
+    end)
   end
-  local procs = {}
-  for line in res.stdout:gmatch("[^\r\n]+") do
-    local p, pp, created = line:match("^%s*(%d+)%s+(%d+)%s*(%d*)%s*$")
-    if p and pp then
-      procs[tonumber(p)] = { ppid = tonumber(pp) or 0, created = tonumber(created) or 0 }
+end
+
+---The process table: pid -> parent and creation time, through `exec`. `cb(nil)` when it cannot be read.
+---@param exec Testing.Child.Exec
+---@param cb fun(procs: table<integer, Testing.Child.Proc>|nil)
+local function read_table(exec, cb)
+  exec(process_table_argv(), M.platform.windows and 8000 or 3000, function(res)
+    if type(res) ~= "table" or res.code ~= 0 or type(res.stdout) ~= "string" then
+      return cb(nil)
     end
-  end
-  return procs
+    local procs = {}
+    for line in res.stdout:gmatch("[^\r\n]+") do
+      local p, pp, created = line:match("^%s*(%d+)%s+(%d+)%s*(%d*)%s*$")
+      if p and pp then
+        procs[tonumber(p)] = { ppid = tonumber(pp) or 0, created = tonumber(created) or 0 }
+      end
+    end
+    cb(procs)
+  end)
 end
 
 ---Everything below `pid` in a process table (children, grandchildren, ...) whatever the process group.
@@ -673,116 +712,217 @@ local function below_of(procs, pid)
   return out
 end
 
----The pids of everything below `pid` (children, grandchildren, ...) whatever their process group,
----read from the process table. POSIX: `jobstart` puts every job in a session of its own (measured on
----Linux: its PGID and SID are its own pid), so a spec's `jobstart`ed helper is NOT in the child's
----group and the group kill misses it. Windows: the tree is read BEFORE anything is killed, so the
----descendants that `taskkill /T` cannot find can still be ended afterwards. An empty list when
----the table cannot be read (then only the group / `taskkill /T` acts, as before).
----@param pid integer
----@return integer[]
-local function descendants(pid)
-  local procs = process_table()
-  local out = {}
-  ---@type { pid: integer, created: integer }[]
-  local below = procs and below_of(procs, pid) or {}
-  for _, d in ipairs(below) do
-    out[#out + 1] = d.pid
+---@param h Testing.Child.Handle
+local function root_kill(h)
+  if h.uv_handle and not h.uv_handle:is_closing() then
+    pcall(vim.uv.process_kill, h.uv_handle, 9)
   end
-  return out
 end
 
+---The kill of the trees of `hs` (handles whose tree is to be taken now), ONE process table for all of them.
+---`exec` and `pause` decide whether it waits (the sync path: the editor is quitting, or the caller needs the result)
+---or goes on in callbacks (the supervisor of a run must not stand still for the seconds a Windows snapshot takes).
+---  POSIX: every root is frozen (SIGSTOP) so it cannot start anything while the table is read, then each tree gets
+---  SIGKILL (the group, and every descendant that is in a group of its own).
+---  Windows: the table is read first (a descendant whose parent dies with the root would be invisible to `/T`), ONE
+---  `taskkill /T` takes the trees. What `/T` could not reach is still there: a process that has ended is not looked
+---  at again, a number is handed out again soon after its process ended, so a survivor is ended only when a fresh
+---  table names the same process (same creation time), and all of them in ONE call.
+---@param hs Testing.Child.Handle[]
+---@param exec Testing.Child.Exec
+---@param pause fun(ms: integer, cb: fun())
+---@param done fun()
+local function kill_trees(hs, exec, pause, done)
+  if M.platform.windows then
+    read_table(exec, function(procs)
+      local below = {}
+      for _, h in ipairs(hs) do
+        below[h] = procs and below_of(procs, h.pid) or {}
+      end
+      local argv = { "taskkill" }
+      for _, h in ipairs(hs) do
+        argv[#argv + 1] = "/PID"
+        argv[#argv + 1] = tostring(h.pid)
+      end
+      argv[#argv + 1] = "/T"
+      argv[#argv + 1] = "/F"
+      exec(argv, 5000, function(res)
+        if type(res) ~= "table" or res.code ~= 0 then
+          -- access denied, no such process, a timeout: do not wait for a later call
+          for _, h in ipairs(hs) do
+            root_kill(h)
+          end
+        end
+        local left = {}
+        for _, h in ipairs(hs) do
+          for _, d in ipairs(below[h]) do
+            if M.alive(d.pid) then
+              left[#left + 1] = d
+            end
+          end
+        end
+        if #left == 0 then
+          return done()
+        end
+        -- (a process that /T ended can read as alive for a few milliseconds more)
+        pause(50, function()
+          left = vim.tbl_filter(function(d)
+            return M.alive(d.pid)
+          end, left)
+          if #left == 0 then
+            return done()
+          end
+          read_table(exec, function(now)
+            local kill_argv = { "taskkill", "/F" }
+            for _, d in ipairs(left) do
+              local cur = now and now[d.pid]
+              if cur and cur.created == d.created then
+                kill_argv[#kill_argv + 1] = "/PID"
+                kill_argv[#kill_argv + 1] = tostring(d.pid)
+              end
+            end
+            if #kill_argv > 2 then
+              return exec(kill_argv, 5000, function()
+                done()
+              end)
+            end
+            done()
+          end)
+        end)
+      end)
+    end)
+    return
+  end
+  for _, h in ipairs(hs) do
+    pcall(vim.uv.kill, h.pid, "sigstop")
+  end
+  read_table(exec, function(procs)
+    for _, h in ipairs(hs) do
+      local below = procs and below_of(procs, h.pid) or {}
+      if not pcall(vim.uv.kill, -h.pid, "sigkill") then
+        root_kill(h)
+      end
+      for _, d in ipairs(below) do
+        pcall(vim.uv.kill, d.pid, "sigkill")
+      end
+      root_kill(h)
+    end
+    done()
+  end)
+end
+
+---Book the kill request of a handle. Returns whether the tree has to be taken now: false when the handle has ended
+---(an abandoned one is not: it can still be killed when the editor quits) or, on Windows, when this is not the first
+---request (the tree is gone; only the root is killed again).
 ---@param h Testing.Child.Handle
-local function kill_tree(h)
+---@return boolean full
+local function book(h)
   if h.ended then
-    return -- the process is gone (an abandoned one is not: it can still be killed when the editor quits)
+    return false
   end
   local first = h.kill_requested_ms == nil
   h.kill_requested_ms = h.kill_requested_ms or (vim.uv.hrtime() / 1e6)
-  local function root_kill()
-    if h.uv_handle and not h.uv_handle:is_closing() then
-      pcall(vim.uv.process_kill, h.uv_handle, 9)
-    end
+  if M.platform.windows and not first then
+    root_kill(h)
+    return false
   end
-  if M.platform.windows then
-    if first then
-      -- the tree is read first (a descendant whose parent dies with the root would be invisible to
-      -- `/T`), then `taskkill /T` takes the tree
-      local procs = process_table()
-      ---@type { pid: integer, created: integer }[]
-      local below = procs and below_of(procs, h.pid) or {}
-      local ok, res = pcall(function()
-        return vim
-          .system({ "taskkill", "/PID", tostring(h.pid), "/T", "/F" }, { text = true })
-          :wait(5000)
-      end)
-      if not ok or type(res) ~= "table" or res.code ~= 0 then
-        -- access denied, no such process, a timeout: do not wait for a later call
-        root_kill()
+  return true
+end
+
+---Kill the process trees of `hs` and wait: ONE process table for all of them. For the paths that cannot go on
+---without the result (the editor quitting, a pool shut down). Idempotent; never raises. The processes this starts
+---(`powershell` for the process table, `taskkill`) are the driver's, not the spec's: when a guard is installed (a
+---spec that drives an RPC child inside a guarded case) they run outside it.
+---@param hs Testing.Child.Handle[]
+function M.kill_trees(hs)
+  unguarded(function()
+    local full = {}
+    for _, h in ipairs(hs) do
+      if book(h) then
+        full[#full + 1] = h
       end
-      -- What `/T` could not reach is still there. A process that has ended is not looked at again (a
-      -- `taskkill` start per descendant took a second each, one after the other, with the editor waiting). A
-      -- number is handed out again soon after its process ended, so a survivor is ended only when a fresh table
-      -- names the same process (same creation time), and all of them in ONE call.
-      local left = {}
-      for _, d in ipairs(below) do
-        if M.alive(d.pid) then
-          left[#left + 1] = d
-        end
-      end
-      if #left > 0 then
-        -- (a process that /T ended can read as alive for a few milliseconds more)
-        vim.wait(50)
-        left = vim.tbl_filter(function(d)
-          return M.alive(d.pid)
-        end, left)
-      end
-      if #left > 0 then
-        local now = process_table()
-        local argv = { "taskkill", "/F" }
-        for _, d in ipairs(left) do
-          local cur = now and now[d.pid]
-          if cur and cur.created == d.created then
-            argv[#argv + 1] = "/PID"
-            argv[#argv + 1] = tostring(d.pid)
-          end
-        end
-        if #argv > 2 then
-          pcall(function()
-            vim.system(argv, { text = true }):wait(5000)
-          end)
-        end
-      end
+    end
+    if #full == 0 then
       return
     end
-    root_kill()
-  else
-    -- freeze the root so it cannot start anything while the tree is read, then kill the tree (the
-    -- group, and every descendant that is in a group of its own)
-    pcall(vim.uv.kill, h.pid, "sigstop")
-    local below = descendants(h.pid)
-    if not pcall(vim.uv.kill, -h.pid, "sigkill") then
-      root_kill()
+    kill_trees(full, exec_sync, function(ms, cb)
+      vim.wait(ms)
+      cb()
+    end, function() end)
+  end)
+end
+
+---Kill the process tree of a child and wait (see the module header). Idempotent; never raises.
+---@param h Testing.Child.Handle
+function M.kill_tree(h)
+  M.kill_trees({ h })
+end
+
+---@type Testing.Child.Handle[]
+local queued = {}
+local flushing = false
+
+local function flush()
+  local batch = queued
+  queued = {}
+  local finished = false
+  local function finish()
+    if finished then
+      return
     end
-    for _, pid in ipairs(below) do
-      pcall(vim.uv.kill, pid, "sigkill")
+    finished = true
+    if #queued > 0 then
+      return flush()
     end
-    root_kill()
+    flushing = false
+  end
+  -- an error in any step must neither leave the queue stuck (no later kill would ever run) nor leave a frozen root
+  -- (POSIX: SIGSTOP was sent): the roots are killed directly and the queue goes on
+  local function fail()
+    for _, h in ipairs(batch) do
+      root_kill(h)
+    end
+    finish()
+  end
+  ---@param cb function
+  ---@return function
+  local function guarded(cb)
+    return function(...)
+      local ok = pcall(cb, ...)
+      if not ok then
+        fail()
+      end
+    end
+  end
+  local ok = pcall(kill_trees, batch, function(argv, ms, cb)
+    exec_async(argv, ms, guarded(cb))
+  end, function(ms, cb)
+    vim.defer_fn(guarded(cb), ms)
+  end, finish)
+  if not ok then
+    fail()
   end
 end
 
----Kill the process tree of a child (see the module header). Idempotent; never raises. The processes
----this starts (`powershell` for the process table, `taskkill`) are the driver's, not the spec's: when a
----guard is installed (a spec that drives an RPC child inside a guarded case) they run outside it.
+---Kill the process tree of a child WITHOUT waiting: the request is booked at once (`kill_requested_ms`), the table
+---and the kills go on in callbacks, and every request of the same tick (or made while a kill is going on) shares ONE
+---process table. For the supervisor of a run, which must keep watching the other children meanwhile. Idempotent;
+---never raises. The editor quitting needs `kill_tree` / `kill_trees`: callbacks do not run then.
 ---@param h Testing.Child.Handle
-function M.kill_tree(h)
-  local guard = package.loaded["testing.guard"]
-  if type(guard) == "table" and guard.suspended then
-    return guard.suspended(function()
-      kill_tree(h)
-    end)
+function M.kill_tree_async(h)
+  if not book(h) then
+    return
   end
-  kill_tree(h)
+  for _, q in ipairs(queued) do
+    if q == h then
+      return
+    end
+  end
+  queued[#queued + 1] = h
+  if not flushing then
+    flushing = true
+    vim.schedule(flush)
+  end
 end
 
 ---Does a process exist? (`kill(pid, 0)`: no signal is sent.)

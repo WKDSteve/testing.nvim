@@ -13,7 +13,7 @@ Two kinds of child editor live here:
 
 | Module | Purpose |
 |--------|---------|
-| [`testing.child`](init.lua) | `build` (argv, environment, sandbox, job; pure), `environment` (sandbox + env, shared with `testing.rpc`), `prepare`, `spawn` (also the RPC mode: `on_stdout`), `kill_tree`, `cleanup`, `describe_exit` |
+| [`testing.child`](init.lua) | `build` (argv, environment, sandbox, job; pure), `environment` (sandbox + env, shared with `testing.rpc`), `prepare`, `spawn` (also the RPC mode: `on_stdout`), `kill_tree` (`kill_trees`, `kill_tree_async`), `cleanup`, `describe_exit` |
 | [`testing.child.env`](env.lua) | The environment allowlist, the determinism variables and the sandbox variables (pure) |
 | [`testing.child.clipboard`](clipboard.lua) | An in-memory `+`/`*` provider for a throwaway editor, installed before the project's minit by `boot`, `rpc_init` and the headless in-process host: a spec never writes the user's system clipboard |
 | [`testing.child.fragment`](fragment.lua) | The result file a child writes (NDJSON) and the validation of it |
@@ -141,6 +141,15 @@ Windows a grandchild that broke away from its parent's job and whose parent is a
 found by `/T`, and a helper left behind by a child that ended normally is not killed at all (POSIX: the
 process group is killed once the child is gone). It cannot hold the run any more, but it can keep
 the child's sandbox directory from being deleted.
+
+**Blocking, batching.** `kill_tree(h)` waits until the kills are done (the table read alone takes a second or
+more on Windows). Where the caller cannot go on without it (the editor quitting, a pool shut down) it is
+`kill_trees(handles)`: ONE process table and, on Windows, ONE `taskkill /T` for all of them (`kill_all` and the pool
+use it). The supervisor of a run uses `kill_tree_async(h)` instead: the request is booked at once
+(`kill_requested_ms`, so the retry and abandon timers run), the table and the kills go on in callbacks, and the
+requests of one tick (or made while a kill is going on) share one table, so one stuck child cannot stop the
+supervision of the others for seconds. `VimLeavePre` needs the waiting form: callbacks do not run once the editor
+is leaving.
 
 **Windows, in detail.** There is no job object from Lua (the editor's LuaJIT has `ffi`, but a job with
 `KILL_ON_JOB_CLOSE` would also forbid the `CREATE_BREAKAWAY_FROM_JOB` that `detached` spawns of a spec

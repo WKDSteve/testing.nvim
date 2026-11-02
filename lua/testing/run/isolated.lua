@@ -1403,7 +1403,7 @@ function M.run(opts)
           local ok, err = sem:with(run_slot, slot)
           if not ok then
             if slot.handle and not slot.handle.exited then
-              child.kill_tree(slot.handle)
+              child.kill_tree_async(slot.handle)
             end
             fail_slot(slot, ("%s: internal error: %s"):format(slot.entry.rel, vim.inspect(err)))
             if slot.plan then
@@ -1436,12 +1436,12 @@ function M.run(opts)
             -- the kill did not end the process: stop waiting for it (an absolute upper bound)
             child.abandon(h)
           elseif t - h.kill_requested_ms > M.KILL_RETRY_MS then
-            child.kill_tree(h)
+            child.kill_tree_async(h)
             h.kill_requested_ms = t
           end
         elseif state.stopped then
           h.reason = "cancel"
-          child.kill_tree(h)
+          child.kill_tree_async(h)
         else
           if h.stall_limit then
             local st = vim.uv.fs_stat(slot.fragment or slot.plan.fragment)
@@ -1460,14 +1460,14 @@ function M.run(opts)
           end
           if h.deadline and t >= h.deadline then
             h.reason = "file"
-            child.kill_tree(h)
+            child.kill_tree_async(h)
           elseif
             h.stall_limit
             and h.frag_size > 0 -- before the first record only the file deadline counts (loading the file)
             and t - h.progress_ms > h.stall_limit
           then
             h.reason = "stall"
-            child.kill_tree(h)
+            child.kill_tree_async(h)
           end
         end
       end
@@ -1794,7 +1794,7 @@ function M.finish_listing(_opts, job)
   if not vim.wait(remaining, function()
     return job.done
   end, 10) then
-    child.kill_tree(handle)
+    child.kill_tree_async(handle)
     -- the process tree is going down; a stubborn process must not keep the run waiting
     if not vim.wait(M.GRACE_MS, function()
       return job.done

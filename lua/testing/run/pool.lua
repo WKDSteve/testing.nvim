@@ -216,12 +216,15 @@ function Pool:shutdown()
   end
   self.idle, self.busy = {}, {}
   local child_mod = require("testing.child")
+  -- one process table for all of them
+  local procs = {}
   for _, m in ipairs(all) do
     local ok, proc = pcall(m.child.proc)
     if ok and proc and not proc.ended then
-      pcall(child_mod.kill_tree, proc)
+      procs[#procs + 1] = proc
     end
   end
+  pcall(child_mod.kill_trees, procs)
   for _, m in ipairs(all) do
     pcall(m.child.kill)
   end
