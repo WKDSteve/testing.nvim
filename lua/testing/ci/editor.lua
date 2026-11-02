@@ -703,6 +703,21 @@ function M.repos_args(ci_cfg, flags)
   return args
 end
 
+---The repositories a multi-repository run (`testing ci --repos-root=...`) would work on, for the trust question
+---before it starts; empty when they cannot be worked out (the child reports that itself).
+---@param args string[] The arguments `M.repos_args` gave.
+---@return string[]
+function M.repos_dirs(args)
+  local repos = require("testing.ci.repos")
+  local ok, parsed = pcall(repos.parse, args)
+  if not ok or type(parsed) ~= "table" then
+    return {}
+  end
+  local okr, dirs =
+    pcall(repos.resolve, parsed, vim.fn.stdpath("state") .. "/testing-ci-repos.json")
+  return okr and type(dirs) == "table" and dirs or {}
+end
+
 ---A state line of the multi-repository run (`ci repos: [<finished>/<total>] #<index> <event> <name>`), or nil.
 ---@param line string
 ---@return { finished: integer, total: integer, index: integer, event: string, name: string }|nil

@@ -1,4 +1,5 @@
 ---@module 'testing.bindings.trust_prompt'
+-- @cache-env CI TESTING_TRUST TESTING_TRUST_ROOTS
 ---@brief Asks once whether to trust a project root a run from the editor was refused for.
 ---@description
 --- The workspace trust gate (`testing.trust`) ends a run in an untrusted root with exit 2 and a message that
@@ -59,6 +60,75 @@ function M.ask(root, on_answer)
       return
     end
     on_answer(true)
+  end)
+end
+
+M.YES_ALL = "Trust them and run"
+
+---The environment that decides the trust gate in a child (`scripts/testing.lua` reads the same three names).
+---@return table<string, string|nil>
+local function trust_env()
+  local env = {}
+  for _, name in ipairs({ "CI", "TESTING_TRUST", "TESTING_TRUST_ROOTS" }) do
+    env[name] = vim.uv.os_getenv(name)
+  end
+  return env
+end
+
+---The roots of `dirs` the gate would refuse a run in. Never raises: a root that cannot be decided is left out (the
+---child says what it says).
+---@param dirs string[]
+---@return string[]
+function M.untrusted(dirs)
+  local trust = require("testing.trust")
+  local ctx = vim.tbl_extend("force", { env = trust_env() }, M.ctx or {})
+  local out = {}
+  for _, dir in ipairs(dirs) do
+    local ok, d = pcall(trust.decide, dir, ctx)
+    if ok and type(d) == "table" and not d.trusted then
+      out[#out + 1] = dir
+    end
+  end
+  return out
+end
+
+---Ask once for all the roots of a multi-repository run that are not trusted, then `on_done()`. Yes stores them all
+---(`trust.add`), no (or no UI, or an escape) leaves them as they are: the run starts anyway, and the child reports an
+---untrusted repository as an `error` row, as it does from the command line.
+---@param dirs string[] The repositories of the run.
+---@param on_done fun(trusted?: string[]) Called once, after the answer.
+function M.ask_many(dirs, on_done)
+  local pending = M.interactive() and M.untrusted(dirs) or {}
+  if #pending == 0 then
+    on_done()
+    return
+  end
+  local names = vim.tbl_map(function(d)
+    return vim.fs.basename(d)
+  end, pending)
+  vim.ui.select({ M.YES_ALL, M.NO }, {
+    prompt = ("testing: %d of the repositories are not trusted (%s); running them executes their .testing.lua, TESTS/minimal_init.lua and specs. Trust them?"):format(
+      #pending,
+      #names > 5 and (table.concat(vim.list_slice(names, 1, 5), ", ") .. ", ...")
+        or table.concat(names, ", ")
+    ),
+  }, function(choice)
+    if choice ~= M.YES_ALL then
+      on_done()
+      return
+    end
+    local stored = {}
+    for _, dir in ipairs(pending) do
+      local ok, err = require("testing.trust").add(dir, M.ctx)
+      if ok then
+        stored[#stored + 1] = dir
+      else
+        require("testing.notify")
+          .get()
+          .error("testing: cannot trust " .. dir .. ": " .. tostring(err))
+      end
+    end
+    on_done(stored)
   end)
 end
 

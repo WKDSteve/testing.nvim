@@ -392,12 +392,16 @@ function M.ci_repos(ctx)
     }
   end
   local function launch(flags)
-    local started, err = editor.run_repos({ args = editor.repos_args(cfg, flags), cwd = cwd })
-    if not started then
-      require("testing.notify").get().error("testing ci repos: " .. tostring(err))
-      return
-    end
-    require("testing.notify").get().info("testing ci repos: started")
+    local args = editor.repos_args(cfg, flags)
+    -- one question for all the repositories that are not trusted, before the child is started
+    require("testing.bindings.trust_prompt").ask_many(editor.repos_dirs(args), function()
+      local started, err = editor.run_repos({ args = args, cwd = cwd })
+      if not started then
+        require("testing.notify").get().error("testing ci repos: " .. tostring(err))
+        return
+      end
+      require("testing.notify").get().info("testing ci repos: started")
+    end)
   end
   if not ctx.flags.export or mode ~= "ask" then
     return launch(ctx.flags)

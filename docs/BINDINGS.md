@@ -94,8 +94,9 @@ A run in a root that is not trusted ([CONFIG.md](CONFIG.md#workspace-trust)) end
 the project runs. `:Testing <cmd>` and `:Testing ci` then ask once (`vim.ui.select`): *Trust it and run again*
 stores the root like `testing trust add <root>` and starts the same run again; *Do not trust it* (or closing the
 question) leaves the refusal as the verdict. A second refusal of the run that follows is not asked about again,
-and a headless nvim (no UI) is never asked. `:Testing ci repos` does not ask: an untrusted repository is an
-`error` row of its table, trust it with `testing trust add <dir>` or list the parent in `TESTING_TRUST_ROOTS`.
+and a headless nvim (no UI) is never asked. `:Testing ci repos` asks once for all of them before it starts (*Trust them and run*
+stores every untrusted repository of the run; *Do not trust it* starts the run anyway, and an untrusted repository is then an
+`error` row of its table, as on the command line: `testing trust add <dir>`, or list the parent in `TESTING_TRUST_ROOTS`).
 
 No subcommand takes a range or a count: there is no text to act on and nothing
 to repeat. `:Testing last` is the repeat.
