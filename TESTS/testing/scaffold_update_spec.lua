@@ -526,5 +526,20 @@ return function(H)
     "lost comment: --force-comments via the CLI"
   )
 
+  -- this repository's own bootstrap files are the dogfood ones: marked testing:keep-file, so `--update --write` on
+  -- the checkout can never replace them with the generated template
+  local self_root =
+    vim.fs.normalize(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h"))
+  local self_plan = update.plan(self_root, NOFMT)
+  for _, rel in ipairs({ "scripts/test.sh", "TESTS/minimal_init.lua" }) do
+    local sf = file(self_plan, rel)
+    eq(sf and sf.changed, false, "dogfood: " .. rel .. " is kept as it is")
+    has(
+      table.concat(sf and sf.kept or {}, "\n"),
+      "testing:keep-file",
+      "dogfood: " .. rel .. " says why"
+    )
+  end
+
   vim.fn.delete(base, "rf")
 end

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# testing:keep-file the dogfood script: it runs this checkout through its own scripts/testing.lua, no generated bootstrap
 #
 # Runs this repository's specs through its own runner (dogfood):
 #

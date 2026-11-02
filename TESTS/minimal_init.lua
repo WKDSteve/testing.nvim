@@ -1,3 +1,4 @@
+-- testing:keep-file the dogfood init: it resolves lib.nvim and the checkout itself, no generated bootstrap
 -- TESTS/minimal_init.lua -- puts testing.nvim and lib.nvim on the runtimepath for a headless child.
 --
 -- Named by `minit` in .testing.lua; isolated child runs load it (`nvim -u TESTS/minimal_init.lua`),
