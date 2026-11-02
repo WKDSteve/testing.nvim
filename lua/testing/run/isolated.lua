@@ -817,6 +817,13 @@ end
 ---@field unattached table[]
 ---@field live Testing.Isolated.Slot[] Slots whose child is running.
 ---@field state { stopped: boolean, fatal: any }
+---@field pool_opts { size: integer, reuse: boolean } A hand-built options table (a spec) may lack the keys of the warm pool.
+---@field state_mode? string The state guard's mode (`error`, `warn`, ...).
+---@field pool? Testing.Pool The warm pool, made on first use.
+---@field pool_fallback_note? string Set when no member could be started: every file then runs in a child of its own.
+---@field frag_dir? string Where the members write their records. NOT the member's sandbox: that is removed the moment its process ends (a crash, a kill), and the cases a file finished before it died are in this fragment.
+---@field budget_files table<string, true> Files `--time-budget` skipped.
+---@field budget_out boolean The time budget is used up.
 
 ---@param slot Testing.Isolated.Slot
 ---@param message string
@@ -1170,6 +1177,294 @@ local function run_inproc(ctx, slot)
   slot.state = "done"
 end
 
+---@param ctx Testing.Isolated.Ctx
+---@return Testing.Pool
+local function get_pool(ctx)
+  local opts, o, root, pool_opts, state_mode =
+    ctx.opts, ctx.o, ctx.root, ctx.pool_opts, ctx.state_mode
+  if ctx.pool then
+    return ctx.pool
+  end
+  local size = pool_opts.size > 0 and pool_opts.size or math.min(o.jobs, 4)
+  size = math.max(1, math.min(size, o.jobs))
+  local mode = state_mode
+  ctx.pool = require("testing.run.pool").new({
+    size = size,
+    rpc = opts.rpc,
+    spawn_opts = {
+      root = root,
+      minit = opts.minit,
+      rtp_prepend = opts.rtp_prepend,
+      rtp = opts.rtp,
+      env_allow = o.env_allow,
+      extra_env = opts.child_env,
+      nvim = opts.nvim,
+      base = opts.sandbox_base,
+      deterministic = o.determinism,
+      isolate_home = o.isolate_home,
+      disable_first_run = o.disable_first_run,
+      -- the guard layer is installed per file by `testing.child.runner`, not once by the member boot
+      guard = false,
+      track_schedule = false,
+      defer_plugins = true,
+      trace_dir = M.trace_dir(opts.trace_dir),
+      trace_name = "pool",
+    },
+    init_opts = {
+      filetype = o.filetype,
+      keep = o.soft_keep or {},
+      severity = (mode == "warn" or mode == "error") and mode or nil,
+    },
+  })
+  return ctx.pool
+end
+
+---Does this slot run in a pool member? `script` files (self-running, they end the process) and
+---`isolated=case` (a fresh child per case is the point) never do.
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+---@return boolean
+local function pooled(ctx, slot)
+  local pool_opts = ctx.pool_opts
+  return pool_opts.reuse
+    and not slot.case_id
+    and slot.entry.dialect ~= "script"
+    and ctx.pool_fallback_note == nil
+end
+
+---`--time-budget`: is the file of this slot out of budget? Asked before the first slot of a file starts (a file that
+---began finishes, its other case slots too). A skipped file stays unrun and nothing of it is committed.
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+---@return boolean skipped
+local function budget_skip(ctx, slot)
+  local opts, state = ctx.opts, ctx.state
+  local rel = slot.entry.rel
+  if not slot.not_first and not ctx.budget_out and opts.out_of_budget and opts.out_of_budget() then
+    ctx.budget_out = true
+  end
+  if ctx.budget_files[rel] or (ctx.budget_out and not slot.not_first and not state.stopped) then
+    ctx.budget_files[rel] = true
+    slot.state = "done"
+    return true
+  end
+  return false
+end
+
+---Tell the caller the file begins (once per file), when it really does: after the budget and the warm pool let it.
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function announce(ctx, slot)
+  local opts, state = ctx.opts, ctx.state
+  if slot.announced or slot.not_first or state.stopped or not opts.on_file_start then
+    return
+  end
+  slot.announced = true
+  pcall(opts.on_file_start, slot.entry.rel)
+end
+
+---Run the file of `slot` in a pool member. Returns false when no member could be started (the
+---caller then runs a child of its own, and says so once).
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+---@return boolean handled
+local function run_pooled(ctx, slot)
+  local opts, o, root, child, timeouts, grace =
+    ctx.opts, ctx.o, ctx.root, ctx.child, ctx.timeouts, ctx.grace
+  local state, live, state_mode = ctx.state, ctx.live, ctx.state_mode
+  local hrtime = vim.uv.hrtime
+  local entry = slot.entry
+  local rel = entry.rel
+  local pl = get_pool(ctx)
+  local acquired = async.await(function(resume)
+    pl:acquire(function(m, e)
+      resume({ member = m, err = e })
+    end)
+  end)
+  local member = acquired.member
+  if not member then
+    ctx.pool_fallback_note = ("the warm pool could not start a member (%s): every file runs in a child of its own"):format(
+      tostring(acquired.err)
+    )
+    return false
+  end
+  if state.stopped then
+    pl:release(member)
+    slot.state = "done"
+    return true
+  end
+  -- the member may have been waited for past the budget (a pool smaller than --jobs): ask again
+  if budget_skip(ctx, slot) then
+    pl:release(member)
+    return true
+  end
+  announce(ctx, slot)
+  local mchild = member.child
+  local h = mchild.proc()
+  if not ctx.frag_dir then
+    ctx.frag_dir = vim.fs.normalize(vim.fn.tempname()) .. "-testing-pool"
+    vim.fn.mkdir(ctx.frag_dir, "p")
+  end
+  local frag_path = ("%s/m%d-%d.ndjson"):format(ctx.frag_dir, member.id, member.files + 1)
+  local job = (child.job or require("testing.child").job)({
+    entry = serializable(entry),
+    root = root,
+    kind = "cases",
+    assertions = o.assertions,
+    selector = opts.selector_spec,
+    lf_ids = slot.lf_ids,
+    timeouts = timeouts,
+    seed = opts.seed,
+    guard = guard_for_child(ctx),
+    trace = o.trace,
+  }, frag_path, nil)
+
+  -- the supervisor watches this member like any child
+  local is_busted = entry.dialect == "busted"
+  h.reason, h.kill_requested_ms, h.first_kill_ms = nil, nil, nil
+  h.started_ms = hrtime() / 1e6
+  h.deadline = timeouts.file_ms and (h.started_ms + timeouts.file_ms + grace) or nil
+  h.stall_limit = (is_busted and timeouts.case_ms) and (timeouts.case_ms + grace) or nil
+  h.progress_ms = h.started_ms
+  h.frag_size, h.frag_scanned = 0, 0
+  slot.handle, slot.fragment, slot.state = h, frag_path, "running"
+  live[#live + 1] = slot
+
+  local got = async.await(function(resume)
+    mchild.exec_async(
+      "return require('testing.child.pool_boot').run(...)",
+      { job },
+      function(ok, ret)
+        resume({ ok = ok, ret = ret })
+      end
+    )
+  end)
+  local answer = got.ok and type(got.ret) == "table" and got.ret or nil
+  -- phase 2, a request of its own (the editor went back to its main loop in between): restore,
+  -- reset and prove the member clean; still supervised like the file itself
+  local fin
+  if answer and answer.ok and not (h.ended or h.exited) then
+    local got2 = async.await(function(resume)
+      mchild.exec_async("return require('testing.child.pool_boot').finish()", {}, function(ok, ret)
+        resume({ ok = ok, ret = ret })
+      end)
+    end)
+    fin = got2.ok and type(got2.ret) == "table" and got2.ret or nil
+    if fin then
+      pl:account(fin.ms)
+    end
+    if not fin and not got2.ok then
+      got = got2
+    end
+  end
+  unlive(ctx, slot)
+
+  local dead = h.ended or h.exited
+  local exit, out, err = { code = 0 }, "", ""
+  local reuse_blocker
+  if dead then
+    exit = h.exit or {}
+    err = child.text(h.err)
+    local why = mchild.death_text()
+    if why ~= "" then
+      err = err ~= "" and (err .. "\n" .. why) or why
+    end
+    reuse_blocker = "the member " .. (h.reason and "was killed" or "died")
+  elseif answer and answer.ok and fin then
+    out = tostring(answer.output or "")
+  else
+    -- the member is alive but the driver failed (or the answer is garbage): unknown state, drop it
+    exit = { code = 3 }
+    err = tostring(
+      (answer and answer.err)
+        or (answer and answer.ok and "the member did not answer its verification (finish)")
+        or got.ret
+    )
+    reuse_blocker = "the driver failed in the member"
+  end
+  local leak_lines = {}
+  if fin and not dead then
+    for _, l in ipairs(type(fin.unrestored) == "table" and fin.unrestored or {}) do
+      leak_lines[#leak_lines + 1] = "not restored: " .. tostring(l)
+    end
+    for _, l in ipairs(type(fin.leaks) == "table" and fin.leaks or {}) do
+      leak_lines[#leak_lines + 1] = tostring(l)
+    end
+    for _, l in ipairs(type(fin.sandbox) == "table" and fin.sandbox or {}) do
+      leak_lines[#leak_lines + 1] = "sandbox: " .. tostring(l)
+    end
+    if #leak_lines > 0 then
+      reuse_blocker = M.LEAK_REASON
+    end
+  end
+
+  conclude(ctx, slot, "cases", {
+    h = h,
+    exit = exit,
+    fragment = frag_path,
+    out = out,
+    stdout = out,
+    err = err,
+    describe = child.describe_exit(exit),
+    trace = function(reason)
+      return mchild.write_trace(reason)
+    end,
+  })
+  os.remove(frag_path)
+
+  -- a red case in a member that ran files before: the pool cannot see every kind of leftover, so the
+  -- case says where it ran and how to tell a leak of an earlier file from a bug of its own
+  member.history = member.history or {}
+  if #member.history > 0 then
+    local from = math.max(1, #member.history - 2)
+    local previous = table.concat(vim.list_slice(member.history, from, #member.history), ", ")
+    for _, c in ipairs(slot.cases or {}) do
+      if inproc.BAD[c.status] then
+        c.notes[#c.notes + 1] = ("ran in a reused warm-pool member after %s; if it passes with --no-pool-reuse, an earlier file left state behind that the pool could not see"):format(
+          previous
+        )
+      end
+    end
+  end
+  member.history[#member.history + 1] = rel
+
+  -- a member that cannot prove it is clean is thrown away, and a finding says why
+  if reuse_blocker == M.LEAK_REASON and slot.cases and #slot.cases > 0 then
+    local mode = state_mode
+    result.add_guard_finding(slot.cases[#slot.cases], {
+      guard = "pool",
+      id = "pool.discarded",
+      severity = mode == "error" and "error" or (mode == "warn" and "warn" or "info"),
+      message = ("%s leaves state the warm pool could not reset (the member was discarded, the next file gets a fresh one): %s"):format(
+        rel,
+        table.concat(vim.list_slice(leak_lines, 1, 8), "; ")
+          .. (#leak_lines > 8 and ("; ... and %d more"):format(#leak_lines - 8) or "")
+      ),
+    })
+  end
+  pl:release(member, reuse_blocker)
+  return true
+end
+
+---@param ctx Testing.Isolated.Ctx
+---@param slot Testing.Isolated.Slot
+local function run_slot(ctx, slot)
+  if budget_skip(ctx, slot) then
+    return
+  end
+  if not pooled(ctx, slot) then
+    announce(ctx, slot)
+  end
+  if pooled(ctx, slot) and run_pooled(ctx, slot) then
+    return
+  end
+  if slot.state == "done" then
+    return
+  end
+  announce(ctx, slot)
+  run_child(ctx, slot)
+end
+
 ---Run the planned files; same report as `inproc.run`.
 ---@param opts Testing.Isolated.Opts
 ---@return Testing.Inproc.Report
@@ -1181,8 +1476,6 @@ function M.run(opts)
   local root = opts.root:gsub("\\", "/"):gsub("/+$", "")
   local o = opts.options or options_mod.of({})
   -- a hand-built options table (a spec) may lack the keys of the warm pool and of the guards
-  local pool_opts = o.pool or { size = 0, reuse = false }
-  local state_mode = (o.guards or {}).state
   local child = opts.child or require("testing.child")
   local grace = opts.grace_ms or M.GRACE_MS
   local poll = opts.poll_ms or M.POLL_MS
@@ -1208,7 +1501,7 @@ function M.run(opts)
   local bad_total = 0
   local files_run, files_unrun, files_unselected = 0, 0, 0
   -- `--time-budget`: asked before a file's first child starts, never while one runs; a file that began finishes
-  local files_unrun_budget, budget_files, budget_out = 0, {}, false
+  local files_unrun_budget = 0
   local failed_files = {}
 
   -- without a guard layer nothing measures effects, and the cases say so
@@ -1264,293 +1557,11 @@ function M.run(opts)
     unattached = unattached,
     live = live,
     state = state,
+    pool_opts = o.pool or { size = 0, reuse = false },
+    state_mode = (o.guards or {}).state,
+    budget_files = {},
+    budget_out = false,
   } --[[@as Testing.Isolated.Ctx]]
-
-  -- ---- the warm pool (`isolated=file` + `pool.reuse`) -------------------------------------
-  ---@type Testing.Pool|nil
-  local pool
-  local pool_fallback_note
-  -- Where the members write their records. NOT the member's sandbox: that is removed the moment its
-  -- process ends (a crash, a kill), and the cases a file finished before it died are in this fragment.
-  ---@type string|nil
-  local frag_dir
-
-  ---@return Testing.Pool
-  local function get_pool()
-    if pool then
-      return pool
-    end
-    local size = pool_opts.size > 0 and pool_opts.size or math.min(o.jobs, 4)
-    size = math.max(1, math.min(size, o.jobs))
-    local mode = state_mode
-    pool = require("testing.run.pool").new({
-      size = size,
-      rpc = opts.rpc,
-      spawn_opts = {
-        root = root,
-        minit = opts.minit,
-        rtp_prepend = opts.rtp_prepend,
-        rtp = opts.rtp,
-        env_allow = o.env_allow,
-        extra_env = opts.child_env,
-        nvim = opts.nvim,
-        base = opts.sandbox_base,
-        deterministic = o.determinism,
-        isolate_home = o.isolate_home,
-        disable_first_run = o.disable_first_run,
-        -- the guard layer is installed per file by `testing.child.runner`, not once by the member boot
-        guard = false,
-        track_schedule = false,
-        defer_plugins = true,
-        trace_dir = M.trace_dir(opts.trace_dir),
-        trace_name = "pool",
-      },
-      init_opts = {
-        filetype = o.filetype,
-        keep = o.soft_keep or {},
-        severity = (mode == "warn" or mode == "error") and mode or nil,
-      },
-    })
-    return pool
-  end
-
-  ---Does this slot run in a pool member? `script` files (self-running, they end the process) and
-  ---`isolated=case` (a fresh child per case is the point) never do.
-  ---@param slot Testing.Isolated.Slot
-  ---@return boolean
-  local function pooled(slot)
-    return pool_opts.reuse
-      and not slot.case_id
-      and slot.entry.dialect ~= "script"
-      and pool_fallback_note == nil
-  end
-
-  ---`--time-budget`: is the file of this slot out of budget? Asked before the first slot of a file starts (a file that
-  ---began finishes, its other case slots too). A skipped file stays unrun and nothing of it is committed.
-  ---@param slot Testing.Isolated.Slot
-  ---@return boolean skipped
-  local function budget_skip(slot)
-    local rel = slot.entry.rel
-    if not slot.not_first and not budget_out and opts.out_of_budget and opts.out_of_budget() then
-      budget_out = true
-    end
-    if budget_files[rel] or (budget_out and not slot.not_first and not state.stopped) then
-      budget_files[rel] = true
-      slot.state = "done"
-      return true
-    end
-    return false
-  end
-
-  ---Tell the caller the file begins (once per file), when it really does: after the budget and the warm pool let it.
-  ---@param slot Testing.Isolated.Slot
-  local function announce(slot)
-    if slot.announced or slot.not_first or state.stopped or not opts.on_file_start then
-      return
-    end
-    slot.announced = true
-    pcall(opts.on_file_start, slot.entry.rel)
-  end
-
-  ---Run the file of `slot` in a pool member. Returns false when no member could be started (the
-  ---caller then runs a child of its own, and says so once).
-  ---@param slot Testing.Isolated.Slot
-  ---@return boolean handled
-  local function run_pooled(slot)
-    local entry = slot.entry
-    local rel = entry.rel
-    local pl = get_pool()
-    local acquired = async.await(function(resume)
-      pl:acquire(function(m, e)
-        resume({ member = m, err = e })
-      end)
-    end)
-    local member = acquired.member
-    if not member then
-      pool_fallback_note = ("the warm pool could not start a member (%s): every file runs in a child of its own"):format(
-        tostring(acquired.err)
-      )
-      return false
-    end
-    if state.stopped then
-      pl:release(member)
-      slot.state = "done"
-      return true
-    end
-    -- the member may have been waited for past the budget (a pool smaller than --jobs): ask again
-    if budget_skip(slot) then
-      pl:release(member)
-      return true
-    end
-    announce(slot)
-    local mchild = member.child
-    local h = mchild.proc()
-    if not frag_dir then
-      frag_dir = vim.fs.normalize(vim.fn.tempname()) .. "-testing-pool"
-      vim.fn.mkdir(frag_dir, "p")
-    end
-    local frag_path = ("%s/m%d-%d.ndjson"):format(frag_dir, member.id, member.files + 1)
-    local job = (child.job or require("testing.child").job)({
-      entry = serializable(entry),
-      root = root,
-      kind = "cases",
-      assertions = o.assertions,
-      selector = opts.selector_spec,
-      lf_ids = slot.lf_ids,
-      timeouts = timeouts,
-      seed = opts.seed,
-      guard = guard_for_child(ctx),
-      trace = o.trace,
-    }, frag_path, nil)
-
-    -- the supervisor watches this member like any child
-    local is_busted = entry.dialect == "busted"
-    h.reason, h.kill_requested_ms, h.first_kill_ms = nil, nil, nil
-    h.started_ms = hrtime() / 1e6
-    h.deadline = timeouts.file_ms and (h.started_ms + timeouts.file_ms + grace) or nil
-    h.stall_limit = (is_busted and timeouts.case_ms) and (timeouts.case_ms + grace) or nil
-    h.progress_ms = h.started_ms
-    h.frag_size, h.frag_scanned = 0, 0
-    slot.handle, slot.fragment, slot.state = h, frag_path, "running"
-    live[#live + 1] = slot
-
-    local got = async.await(function(resume)
-      mchild.exec_async(
-        "return require('testing.child.pool_boot').run(...)",
-        { job },
-        function(ok, ret)
-          resume({ ok = ok, ret = ret })
-        end
-      )
-    end)
-    local answer = got.ok and type(got.ret) == "table" and got.ret or nil
-    -- phase 2, a request of its own (the editor went back to its main loop in between): restore,
-    -- reset and prove the member clean; still supervised like the file itself
-    local fin
-    if answer and answer.ok and not (h.ended or h.exited) then
-      local got2 = async.await(function(resume)
-        mchild.exec_async(
-          "return require('testing.child.pool_boot').finish()",
-          {},
-          function(ok, ret)
-            resume({ ok = ok, ret = ret })
-          end
-        )
-      end)
-      fin = got2.ok and type(got2.ret) == "table" and got2.ret or nil
-      if fin then
-        pl:account(fin.ms)
-      end
-      if not fin and not got2.ok then
-        got = got2
-      end
-    end
-    unlive(ctx, slot)
-
-    local dead = h.ended or h.exited
-    local exit, out, err = { code = 0 }, "", ""
-    local reuse_blocker
-    if dead then
-      exit = h.exit or {}
-      err = child.text(h.err)
-      local why = mchild.death_text()
-      if why ~= "" then
-        err = err ~= "" and (err .. "\n" .. why) or why
-      end
-      reuse_blocker = "the member " .. (h.reason and "was killed" or "died")
-    elseif answer and answer.ok and fin then
-      out = tostring(answer.output or "")
-    else
-      -- the member is alive but the driver failed (or the answer is garbage): unknown state, drop it
-      exit = { code = 3 }
-      err = tostring(
-        (answer and answer.err)
-          or (answer and answer.ok and "the member did not answer its verification (finish)")
-          or got.ret
-      )
-      reuse_blocker = "the driver failed in the member"
-    end
-    local leak_lines = {}
-    if fin and not dead then
-      for _, l in ipairs(type(fin.unrestored) == "table" and fin.unrestored or {}) do
-        leak_lines[#leak_lines + 1] = "not restored: " .. tostring(l)
-      end
-      for _, l in ipairs(type(fin.leaks) == "table" and fin.leaks or {}) do
-        leak_lines[#leak_lines + 1] = tostring(l)
-      end
-      for _, l in ipairs(type(fin.sandbox) == "table" and fin.sandbox or {}) do
-        leak_lines[#leak_lines + 1] = "sandbox: " .. tostring(l)
-      end
-      if #leak_lines > 0 then
-        reuse_blocker = M.LEAK_REASON
-      end
-    end
-
-    conclude(ctx, slot, "cases", {
-      h = h,
-      exit = exit,
-      fragment = frag_path,
-      out = out,
-      stdout = out,
-      err = err,
-      describe = child.describe_exit(exit),
-      trace = function(reason)
-        return mchild.write_trace(reason)
-      end,
-    })
-    os.remove(frag_path)
-
-    -- a red case in a member that ran files before: the pool cannot see every kind of leftover, so the
-    -- case says where it ran and how to tell a leak of an earlier file from a bug of its own
-    member.history = member.history or {}
-    if #member.history > 0 then
-      local from = math.max(1, #member.history - 2)
-      local previous = table.concat(vim.list_slice(member.history, from, #member.history), ", ")
-      for _, c in ipairs(slot.cases or {}) do
-        if inproc.BAD[c.status] then
-          c.notes[#c.notes + 1] = ("ran in a reused warm-pool member after %s; if it passes with --no-pool-reuse, an earlier file left state behind that the pool could not see"):format(
-            previous
-          )
-        end
-      end
-    end
-    member.history[#member.history + 1] = rel
-
-    -- a member that cannot prove it is clean is thrown away, and a finding says why
-    if reuse_blocker == M.LEAK_REASON and slot.cases and #slot.cases > 0 then
-      local mode = state_mode
-      result.add_guard_finding(slot.cases[#slot.cases], {
-        guard = "pool",
-        id = "pool.discarded",
-        severity = mode == "error" and "error" or (mode == "warn" and "warn" or "info"),
-        message = ("%s leaves state the warm pool could not reset (the member was discarded, the next file gets a fresh one): %s"):format(
-          rel,
-          table.concat(vim.list_slice(leak_lines, 1, 8), "; ")
-            .. (#leak_lines > 8 and ("; ... and %d more"):format(#leak_lines - 8) or "")
-        ),
-      })
-    end
-    pl:release(member, reuse_blocker)
-    return true
-  end
-
-  ---@param slot Testing.Isolated.Slot
-  local function run_slot(slot)
-    if budget_skip(slot) then
-      return
-    end
-    if not pooled(slot) then
-      announce(slot)
-    end
-    if pooled(slot) and run_pooled(slot) then
-      return
-    end
-    if slot.state == "done" then
-      return
-    end
-    announce(slot)
-    run_child(ctx, slot)
-  end
 
   -- one coroutine per child file; the semaphore decides how many run at once, FIFO. The order the coroutines are
   -- made in is the order the children start (`--order slowest-first`: the heaviest first); the merge below stays
@@ -1581,7 +1592,7 @@ function M.run(opts)
     if slot.kind == "child" then
       async.run(
         function()
-          local ok, err = sem:with(run_slot, slot)
+          local ok, err = sem:with(run_slot, ctx, slot)
           if not ok then
             if slot.handle and not slot.handle.exited then
               child.kill_tree_async(slot.handle)
@@ -1639,14 +1650,14 @@ function M.run(opts)
       local slot = slots[next_commit]
       if not state.stopped and slot.kind == "inproc" and slot.state ~= "done" then
         -- an in-process file runs here, at its turn: the budget is asked before it starts like for a child
-        budget_skip(slot)
+        budget_skip(ctx, slot)
       end
       if state.stopped then
         -- a file with several case slots is one file, and a file that already ran is not "unrun"
         if not slot.not_first then
           files_unrun = files_unrun + 1
         end
-      elseif budget_files[slot.entry.rel] then
+      elseif ctx.budget_files[slot.entry.rel] then
         if not slot.not_first then
           files_unrun = files_unrun + 1
           files_unrun_budget = files_unrun_budget + 1
@@ -1701,11 +1712,11 @@ function M.run(opts)
       vim.wait(poll)
     end
   end
-  if pool then
-    pool:shutdown()
+  if ctx.pool then
+    ctx.pool:shutdown()
   end
-  if frag_dir then
-    pcall(vim.fn.delete, frag_dir, "rf")
+  if ctx.frag_dir then
+    pcall(vim.fn.delete, ctx.frag_dir, "rf")
   end
   for _, slot in ipairs(slots) do
     if slot.plan then
@@ -1716,12 +1727,12 @@ function M.run(opts)
     error(loop_err, 0)
   end
 
-  if pool_fallback_note then
-    notes[#notes + 1] = pool_fallback_note
+  if ctx.pool_fallback_note then
+    notes[#notes + 1] = ctx.pool_fallback_note
   end
   local pool_stats
-  if pool then
-    pool_stats = vim.deepcopy(pool.stats)
+  if ctx.pool then
+    pool_stats = vim.deepcopy(ctx.pool.stats)
     local note = pool_note(pool_stats)
     if note then
       notes[#notes + 1] = note
