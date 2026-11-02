@@ -391,6 +391,27 @@ return function(H)
   f = file(p, "scripts/test.sh")
   eq(#f.risks, 1, "keep: a block whose anchor line is gone is a risk")
   has(f.risks[1], "copy it by hand", "keep: and says what to do")
+  -- a block below a line the template repeats (`fi`): it comes back below THAT `fi`, not the first one
+  do
+    local lines = vim.split(keep_text, "\n", { plain = true })
+    local fis = {}
+    for n, l in ipairs(lines) do
+      if l == "fi" then
+        fis[#fis + 1] = n
+      end
+    end
+    ok(#fis >= 2, "the template has a `fi` more than once")
+    local second = fis[2]
+    local spliced = vim.list_slice(lines, 1, second)
+    vim.list_extend(spliced, vim.split(keep_block, "\n", { plain = true }))
+    vim.list_extend(spliced, vim.list_slice(lines, second + 1, #lines))
+    put(keep_sh, table.concat(spliced, "\n"))
+    p = update.plan(keep, NOFMT)
+    f = file(p, "scripts/test.sh")
+    eq(f.changed, false, "keep: a block below the second `fi` is back below the second `fi`")
+    eq(f.risks, {}, "keep: and nothing is held back")
+  end
+
   -- a block without its end marker
   put(keep_sh, (keep_text:gsub("(\nset %-euo pipefail\n)", "%1# testing:keep begin\nX=1\n", 1)))
   p = update.plan(keep, NOFMT)

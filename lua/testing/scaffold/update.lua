@@ -305,9 +305,11 @@ local function gate_extra(before)
 end
 
 ---A repository's own lines that `--update` keeps: everything from a `<comment> testing:keep begin` line to the
----matching `<comment> testing:keep end` line (markers included). The block is put back after the line that stood
----above it in the old file (the nearest line before it that is neither blank nor a marker), found as a whole line in
----the new render; no such line: the block cannot be placed, and the file is held back (a risk) instead of losing it.
+---matching `<comment> testing:keep end` line (markers included). The block is put back after the nearest line above
+---it that the new render has exactly once (`fi`, `end` and blank lines say nothing about where a block stood), behind
+---the lines that stood between that line and the block, which must be the same in the new render. If no such line
+---exists or the lines in between differ, the block cannot be placed: the file is held back (a risk) instead of
+---losing it or moving it into another branch of the script.
 ---@param before string|nil The old file.
 ---@param after string The new render.
 ---@param prefix string Comment start as written in the file (`#` or `--`).
@@ -320,19 +322,17 @@ local function keep_blocks(before, after, prefix)
   end
   local begin_tag, end_tag = prefix .. " testing:keep begin", prefix .. " testing:keep end"
   local old = vim.split(before, "\n", { plain = true })
-  local blocks, kept, risks = {}, {}, {}
+  local out = vim.split(after, "\n", { plain = true })
+  local counts, where = {}, {}
+  for k, l in ipairs(out) do
+    counts[l] = (counts[l] or 0) + 1
+    where[l] = k
+  end
+  local placements, kept, risks = {}, {}, {}
   local i = 1
   while i <= #old do
     local line = vim.trim(old[i])
     if line == begin_tag or line:sub(1, #begin_tag + 1) == begin_tag .. " " then
-      local anchor
-      for j = i - 1, 1, -1 do
-        local above = vim.trim(old[j])
-        if above ~= "" then
-          anchor = old[j]
-          break
-        end
-      end
       local last
       for j = i + 1, #old do
         if vim.trim(old[j]) == end_tag then
@@ -347,33 +347,41 @@ local function keep_blocks(before, after, prefix)
         )
         break
       end
-      blocks[#blocks + 1] = { anchor = anchor, lines = vim.list_slice(old, i, last) }
+      local block = vim.list_slice(old, i, last)
+      local anchor, gap
+      for j = i - 1, 1, -1 do
+        if vim.trim(old[j]) ~= "" and counts[old[j]] == 1 then
+          anchor, gap = old[j], vim.list_slice(old, j + 1, i - 1)
+          break
+        end
+      end
+      local at = anchor and where[anchor]
+      local fits = at ~= nil
+      for n, g in ipairs(gap or {}) do
+        if out[at + n] ~= g then
+          fits = false
+          break
+        end
+      end
+      if fits then
+        placements[#placements + 1] = { pos = at + #gap, lines = block }
+        kept[#kept + 1] = ("%d line(s) between the testing:keep markers"):format(#block)
+      else
+        risks[#risks + 1] = ("the block '%s ...' cannot be placed: the new file has no unique line above its place that is followed by the same lines as before: copy it by hand"):format(
+          begin_tag
+        )
+      end
       i = last
     end
     i = i + 1
   end
-  if #blocks == 0 then
-    return after, kept, risks
-  end
-  local out = vim.split(after, "\n", { plain = true })
-  for _, b in ipairs(blocks) do
-    local at
-    for k, l in ipairs(out) do
-      if b.anchor and l == b.anchor then
-        at = k
-        break
-      end
-    end
-    if not at then
-      risks[#risks + 1] = ("the block '%s ...' stood below %s, which the new file does not have: copy it by hand"):format(
-        begin_tag,
-        b.anchor and ("`" .. vim.trim(b.anchor) .. "`") or "the top of the file"
-      )
-    else
-      for n, l in ipairs(b.lines) do
-        table.insert(out, at + n, l)
-      end
-      kept[#kept + 1] = ("%d line(s) between the testing:keep markers"):format(#b.lines)
+  -- from the bottom up: an insertion does not move the places above it
+  table.sort(placements, function(a, b)
+    return a.pos > b.pos
+  end)
+  for _, p in ipairs(placements) do
+    for n, l in ipairs(p.lines) do
+      table.insert(out, p.pos + n, l)
     end
   end
   return table.concat(out, "\n"), kept, risks

@@ -74,10 +74,11 @@ REPOS_DIR="$ROOT"
 # testing:keep end
 ```
 
-(in `TESTS/minimal_init.lua` the same with `--` instead of `#`). The block is put back after the line that stood above it
-(the nearest line that is neither blank nor a marker), found as a whole line in the new render. If the template no
-longer has that line, the block cannot be placed: the file gets a risk ("copy it by hand") and `--write` holds it back,
-nothing is lost silently; the same for a `begin` without an `end`. A file that is the repository's own on purpose (the
+(in `TESTS/minimal_init.lua` the same with `--` instead of `#`). The block is put back after the nearest line above it that the new render has exactly once (a `fi` or `end`
+says nothing about where a block stood), behind the lines that stood between that line and the block, which must be the
+same in the new render. If there is no such line, or the lines in between differ, the block cannot be placed: the file
+gets a risk ("copy it by hand") and `--write` holds it back, nothing is lost silently and nothing moves into another
+branch of the script; the same for a `begin` without an `end`. A file that is the repository's own on purpose (the
 dogfood `scripts/test.sh` of testing.nvim) says so in its first 20 lines: `# testing:keep-file <reason>` (`--` in
 `minimal_init.lua`). It is left as it is, the reason appears in the report as "kept", and `--check` does not count it.
 
