@@ -285,6 +285,42 @@ B.case("red_noise_lookalikes", {
   end,
 })
 
+-- what the first load of `vim.lsp` leaves behind and the environment lib.nvim exports are the runtime's: GREEN;
+-- the same shapes under another name are RED
+B.case("green_lsp_and_lib_runtime", {
+  cfg = only_state({ categories = { autocmds = "error", vars = "error", env = "error" } }),
+  body = function()
+    vim.api.nvim_create_autocmd(
+      "VimLeavePre",
+      { desc = "vim.lsp: exit handler", callback = function() end }
+    )
+    vim.g._lsp_enabled_semantic_tokens = 1
+    vim.env.NVIM_CONFIG_DIR = "C:/cfg"
+    vim.env.LIB_NVIM_ROOTS_EXPORTED = "1"
+  end,
+  after = function()
+    vim.api.nvim_clear_autocmds({ event = "VimLeavePre", desc = "vim.lsp: exit handler" })
+    vim.env.NVIM_CONFIG_DIR = nil
+    vim.env.LIB_NVIM_ROOTS_EXPORTED = nil
+  end,
+})
+
+B.case("red_lsp_lookalikes", {
+  cfg = only_state({ categories = { autocmds = "error", vars = "error", env = "error" } }),
+  body = function()
+    vim.api.nvim_create_autocmd(
+      "VimLeavePre",
+      { desc = "my plugin: exit", callback = function() end }
+    )
+    vim.g._lsp_mine = 1
+    vim.env.LIB_NVIM_OTHER = "1"
+  end,
+  after = function()
+    vim.api.nvim_clear_autocmds({ event = "VimLeavePre", desc = "my plugin: exit" })
+    vim.env.LIB_NVIM_OTHER = nil
+  end,
+})
+
 -- the clipboard provider's job (started by the runtime on the first register access) is not the spec's
 local saved_chans
 B.case("green_clipboard_provider_job", {

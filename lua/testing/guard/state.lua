@@ -71,10 +71,23 @@ local DEFAULT_RESTORE = {
 ---  * `_G.re` (the runtime sets it the first time `vim.re` or `vim.lsp` is touched);
 ---  * highlight groups that are defined with `default = true` (`:highlight default link ...`, which is
 ---    what every `$VIMRUNTIME/syntax/*.vim` does; a default never replaces a definition);
+---  * `vim.g._lsp_enabled_*` and the groupless `VimLeavePre` autocmd `vim.lsp: exit handler` (set on the first
+---    load of `vim.lsp`);
 ---  * the jobs of the clipboard provider (`win32yank`, `xclip`, `pbcopy`, ...), started by the runtime
 ---    on the first register access.
-M.RUNTIME_VAR_PREFIXES =
-  { "markdown_", "java_", "typescript_", "pandoc#", "lua_version", "lua_subversion", "did_load_" }
+M.RUNTIME_VAR_PREFIXES = {
+  "markdown_",
+  "java_",
+  "typescript_",
+  "pandoc#",
+  "lua_version",
+  "lua_subversion",
+  "did_load_",
+  "_lsp_enabled_",
+}
+---The groupless autocmd the runtime registers the first time `vim.lsp` is loaded (`desc` is how the runtime names
+---it): matched by event AND desc, so an autocmd of a spec on `VimLeavePre` is still a finding.
+M.RUNTIME_AUTOCMDS = { VimLeavePre = { ["vim.lsp: exit handler"] = true } }
 M.RUNTIME_OPTIONS = { syntax = true }
 M.RUNTIME_GLOBALS = { re = true }
 M.CLIPBOARD_PROVIDERS = {
@@ -165,7 +178,11 @@ function CAPTURE.autocmds(_self)
   for _, a in ipairs(list) do
     -- a groupless `once` autocmd on `SafeState` is the editor's own idle hook (the runtime's matchparen
     -- registers one at every cursor move); it removes itself at the next idle moment
-    if not (a.once == true and not a.group_name and a.event == "SafeState") then
+    local runtime_descs = not a.group_name and M.RUNTIME_AUTOCMDS[a.event] or nil
+    if
+      not (a.once == true and not a.group_name and a.event == "SafeState")
+      and not (runtime_descs and runtime_descs[a.desc or ""])
+    then
       local key = a.id and tostring(a.id)
         or table.concat(
           { a.event, a.group_name or "", a.pattern or "", a.command or "", a.desc or "" },
@@ -893,7 +910,8 @@ function RESTORE.buffers(_self, _snap, items)
   local n = 0
   for _, it in ipairs(items) do
     if
-      vim.api.nvim_buf_is_valid(it.key) and pcall(vim.api.nvim_buf_delete, it.key, { force = true })
+      vim.api.nvim_buf_is_valid(it.key)
+      and pcall(vim.api.nvim_buf_delete, it.key, { force = true })
     then
       n = n + 1
     end

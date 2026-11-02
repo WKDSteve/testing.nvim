@@ -44,6 +44,22 @@ return function(H)
       )
     end
     eq(
+      r.green_lsp_and_lib_runtime.findings,
+      {},
+      "the vim.lsp exit handler, vim.g._lsp_enabled_* and lib.nvim's env exports: no finding"
+    )
+    local lsp_look = r.red_lsp_lookalikes
+    for _, want in ipairs({
+      { "state.autocmd", "VimLeavePre" },
+      { "state.var", "vim.g._lsp_mine" },
+      { "state.env", "LIB_NVIM_OTHER" },
+    }) do
+      ok(
+        S.find(lsp_look, want[1], { want[2] }) ~= nil,
+        "the look-alike " .. want[2] .. " is still a finding: " .. vim.inspect(lsp_look.findings)
+      )
+    end
+    eq(
       r.green_clipboard_provider_job.findings,
       {},
       "the clipboard provider's job (win32yank) is not a leak"
