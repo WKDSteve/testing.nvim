@@ -29,6 +29,14 @@ return function(H)
   local hook = require("testing.ci.hook")
   local cli = require("testing.cli")
 
+  -- the temporary repositories must not see this machine's git configuration (a global `core.hooksPath` would be a
+  -- "pre-push hook that is not ours" in every one of them)
+  local empty_config = vim.fn.tempname() .. "-gitconfig"
+  vim.fn.writefile({}, empty_config)
+  local saved_git_env = { vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM }
+  vim.env.GIT_CONFIG_GLOBAL = empty_config
+  vim.env.GIT_CONFIG_NOSYSTEM = "1"
+
   do
     local a = hook.parse({ "install", "--run=quick", "--verify=full" })
     eq({ a.action, a.run, a.verify }, { "install", "quick", "full" }, "args: install with profiles")
@@ -263,5 +271,7 @@ return function(H)
     has(res.out, "push blocked", "real: ... and says so")
   end
 
+  vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = saved_git_env[1], saved_git_env[2]
+  vim.fn.delete(empty_config)
   vim.fn.delete(tmp, "rf")
 end
