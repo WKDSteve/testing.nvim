@@ -244,9 +244,10 @@ local INIT_USAGE =
   "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
 
 ---`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`), and
----`testing init [<root>] --update [--write [--force] | --check]`: bring `scripts/test.sh` and `TESTS/minimal_init.lua`
+---`testing init [<root>] --update [--write [--force | --force-comments] | --check]`: bring `scripts/test.sh` and `TESTS/minimal_init.lua`
 ---to the current templates (`testing.scaffold.update`; a preview with the diff unless `--write`; `--write` holds back a
----file with a risk or uncommitted changes unless `--force`). Nothing of the project runs here, so the trust gate does
+---file with a risk, uncommitted changes or comments of your own that would be lost unless `--force`; `--force-comments`
+---covers the comments only). Nothing of the project runs here, so the trust gate does
 ---not apply (`--trust` is accepted and does nothing). Exit codes: 0 done (or up to date), 1 `--check` found code that
 ---is out of date or `--write` held a file back, 2 bad usage, 3 nothing to update or a file could not be rendered or
 ---written.
