@@ -301,7 +301,9 @@ end
   eq(#pids, 2, "the fixture recorded the child's and the grandchild's pid")
   local child_pid, grand_pid = tonumber(pids[1]), tonumber(pids[2])
   ok(child_pid ~= nil and grand_pid ~= nil, "both pids are numbers")
-  vim.wait(3000, function()
+  -- the tree kill is asynchronous and slow on a loaded Windows machine (other editors, a virus scanner): the wait ends as
+  -- soon as both are gone, so a long limit costs nothing when it is quick
+  vim.wait(20000, function()
     return not S.alive(child_pid) and not S.alive(grand_pid)
   end, 50)
   eq(S.alive(child_pid), false, "the child process is gone")
