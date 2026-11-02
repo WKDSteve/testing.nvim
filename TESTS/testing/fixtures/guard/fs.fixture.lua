@@ -174,6 +174,32 @@ B.case("red_snapshot", {
   end,
 })
 
+-- the folder the project configures as `snapshots.dir` (the runner hands it down in TESTING_SNAPSHOTS_DIR) holds
+-- testing.screen's own files, like `__snapshots__`: a file saved there is not a change of the spec. The same write into
+-- a folder of another name is. (Set here for the whole fixture: only these two folder names are looked at.)
+vim.env.TESTING_SNAPSHOTS_DIR = "TESTS/configured_snaps"
+B.case("green_snapshot_configured_dir", {
+  cfg = only_fs({ snapshot = true, watch = { sb.outside .. "/watched_snaps" } }),
+  heavy = true,
+  setup = function()
+    raw_mkdir(sb.outside .. "/watched_snaps/configured_snaps/spec", "p")
+  end,
+  body = function()
+    raw_write(sb.outside .. "/watched_snaps/configured_snaps/spec/a.snap", "screen")
+  end,
+})
+
+B.case("red_snapshot_other_dir", {
+  cfg = only_fs({ snapshot = true, watch = { sb.outside .. "/watched_other" } }),
+  heavy = true,
+  setup = function()
+    raw_mkdir(sb.outside .. "/watched_other/other_snaps/spec", "p")
+  end,
+  body = function()
+    raw_write(sb.outside .. "/watched_other/other_snaps/spec/a.snap", "screen")
+  end,
+})
+
 ---Like `only_fs`, with the process guard recording what the spec starts (it never fails the case here).
 local function fs_and_processes(extra)
   local cfg = only_fs(extra)

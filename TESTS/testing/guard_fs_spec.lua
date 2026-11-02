@@ -144,6 +144,19 @@ return function(H)
     "snapshot: a path the wrappers already named is not reported twice"
   )
 
+  -- the project's `snapshots.dir` is ignored like `__snapshots__`; a folder of another name is not
+  eq(
+    #S.of(r.green_snapshot_configured_dir, "fs.changed_outside"),
+    0,
+    "a file in the configured snapshots.dir is no change of the spec: "
+      .. vim.inspect(r.green_snapshot_configured_dir.findings)
+  )
+  ok(
+    S.find(r.red_snapshot_other_dir, "fs.changed_outside", { "created", "a.snap" }) ~= nil,
+    "the same write below a folder of another name is: "
+      .. vim.inspect(r.red_snapshot_other_dir.findings)
+  )
+
   -- a change in a spec that started no process is not the spec's: a warning that says "from outside", never red
   c = r.warn_snapshot_from_outside
   local outside = S.find(c, "fs.changed_during_run", { "modified", "old.txt", "from outside" })
