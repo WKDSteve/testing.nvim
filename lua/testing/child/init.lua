@@ -326,6 +326,7 @@ end
 ---@field finish? fun() Internal: completes the handle once.
 ---@field exit? { code?: integer, signal?: integer } Set when the process ended (`{}` when abandoned).
 ---@field kill_requested_ms? number
+---@field kill_pending? boolean `kill_tree_async` booked the kill and has not carried it out yet (a waiting kill then still takes the whole tree).
 ---@field first_kill_ms? number Monotonic ms of the FIRST kill request (the pool's upper bound counts from it).
 ---@field reason? "file"|"stall"|"cancel" Why the pool killed it (set by the supervisor).
 ---@field deadline? number Monotonic ms of the hard file deadline.
@@ -820,7 +821,9 @@ local function book(h)
   if h.ended then
     return false
   end
-  local first = h.kill_requested_ms == nil
+  -- a request that `kill_tree_async` booked but has not carried out yet (`kill_pending`) is still the first one: if the
+  -- editor quits now, its callbacks never run, and the waiting kill has to take the tree
+  local first = h.kill_requested_ms == nil or h.kill_pending == true
   h.kill_requested_ms = h.kill_requested_ms or (vim.uv.hrtime() / 1e6)
   if M.platform.windows and not first then
     root_kill(h)
@@ -871,6 +874,9 @@ local function flush()
       return
     end
     finished = true
+    for _, h in ipairs(batch) do
+      h.kill_pending = nil
+    end
     if #queued > 0 then
       return flush()
     end
@@ -910,9 +916,17 @@ end
 ---never raises. The editor quitting needs `kill_tree` / `kill_trees`: callbacks do not run then.
 ---@param h Testing.Child.Handle
 function M.kill_tree_async(h)
+  if h.kill_pending then
+    -- the tree is being taken: the root once more is all a repeated request adds
+    if not h.ended then
+      root_kill(h)
+    end
+    return
+  end
   if not book(h) then
     return
   end
+  h.kill_pending = true
   for _, q in ipairs(queued) do
     if q == h then
       return

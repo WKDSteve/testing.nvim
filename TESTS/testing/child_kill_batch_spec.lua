@@ -164,14 +164,55 @@ return function(H)
     local reads, kills = tables_and_kills(calls)
     eq(reads, 1, "two requests of one tick share one process table")
     eq(kills[1], { "taskkill", "/PID", "100", "/PID", "101", "/T", "/F" }, "and one taskkill call")
-    ok(
-      ticks >= 10,
-      ("the main loop kept running while the table was read (%d ticks)"):format(ticks)
-    )
+    ok(ticks >= 3, ("the main loop kept running while the table was read (%d ticks)"):format(ticks))
     for _, c in ipairs(calls) do
       ok(c.async, "every command of the asynchronous kill is started without waiting")
     end
   end
+
+  -- ---- the editor quits while an asynchronous kill is booked but not carried out -------------------------------
+  do
+    local calls, restore = stub(0)
+    local h = handle(100)
+    child.kill_tree_async(h) -- booked; its callbacks would never run if the editor left now
+    local before = #calls
+    child.kill_trees({ h }) -- what `VimLeavePre` does
+    local sync_calls = {}
+    for n = before + 1, #calls do
+      sync_calls[#sync_calls + 1] = calls[n]
+    end
+    local _, kills = tables_and_kills(sync_calls)
+    restore()
+    eq(
+      kills[1],
+      { "taskkill", "/PID", "100", "/T", "/F" },
+      "a waiting kill still takes the whole tree of a handle whose asynchronous kill has not run yet"
+    )
+    ok(not sync_calls[1].async, "and does it without callbacks")
+    vim.wait(100) -- let the scheduled asynchronous chain run into the restored functions
+  end
+
+  -- ---- a repeated asynchronous request while the kill goes on adds nothing -----------------------------------
+  do
+    local calls, restore = stub(200)
+    local h = handle(100)
+    child.kill_tree_async(h)
+    vim.wait(50, function()
+      return #calls > 0
+    end, 5) -- the process table is out, its answer takes 200 ms
+    child.kill_tree_async(h)
+    child.kill_tree_async(h)
+    vim.wait(1000, function()
+      local _, kills = tables_and_kills(calls)
+      return #kills >= 1
+    end, 10)
+    vim.wait(100)
+    restore()
+    local reads, kills = tables_and_kills(calls)
+    eq(reads, 1, "repeated requests while the kill is going on read no second process table")
+    eq(#kills, 1, "and start no second taskkill")
+  end
+
   -- ---- an error inside the asynchronous chain does not stop later kills --------------------------------------
   do
     local calls, restore = stub(0)

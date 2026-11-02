@@ -78,7 +78,7 @@ REPOS_DIR="$ROOT"
 says nothing about where a block stood), behind the lines that stood between that line and the block, which must be the
 same in the new render. If there is no such line, or the lines in between differ, the block cannot be placed: the file
 gets a risk ("copy it by hand") and `--write` holds it back, nothing is lost silently and nothing moves into another
-branch of the script; the same for a `begin` without an `end`. A file that is the repository's own on purpose (the
+branch of the script; the same for a `begin` without an `end`. Two blocks right behind each other are one block for this purpose: put them between one pair of markers. A file that is the repository's own on purpose (the
 dogfood `scripts/test.sh` of testing.nvim) says so in its first 20 lines: `# testing:keep-file <reason>` (`--` in
 `minimal_init.lua`). It is left as it is, the reason appears in the report as "kept", and `--check` does not count it.
 
