@@ -20,3 +20,19 @@ A missing tool is information, never an error: the cases that need it are **repo
 Install on a private machine only (never on the workstation): `cargo install tauri-driver --locked`; download
 `msedgedriver` for the exact WebView2 version from `msedgedriver.microsoft.com`, verify its Authenticode signature
 and keep it outside the repositories; `npx playwright install chromium` with a pinned Playwright version.
+
+## Tier 2.5: a command in a real terminal (`testing.pty`)
+
+`require("testing.pty").open({ "nvim", "file" }, { cols = 100, rows = 30 })` starts a detached tmux session (in WSL
+on Windows with `wsl [-d $TESTING_WSL_DISTRO] --exec tmux`, directly on Linux) and returns a session with
+
+| Call | Result |
+| --- | --- |
+| `s:send({ "M-n" })`, `s:send({ "text" }, true)` | keys by tmux name, or literal text |
+| `s:screen()` | the grid with its escape sequences (`capture-pane -p -e`) |
+| `s:raw()` | every byte the program wrote (recorded with `pipe-pane` from the first byte): OSC-1337 images, kitty graphics, titles |
+| `s:wait_for(text, ms, "screen"\|"raw")` | polls until the text appears |
+| `s:close()` | kills the session and removes the recording |
+
+Every call is an argument vector (`--exec` keeps WSL from re-parsing it through a shell). `pty.available()` answers
+whether tmux is usable; a spec that needs it prints `n/a  <reason>` and returns when it is not (a reported skip).
