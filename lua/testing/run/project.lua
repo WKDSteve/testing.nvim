@@ -647,6 +647,40 @@ local function note_degraded_isolation(run_opts, files, err)
   end
 end
 
+---`--list`: print the cases that would run, without running them.
+---@param ctx { inproc: table, root: string, files: table[], selector: table, lf: table|nil, timeouts: table, order_info: table|nil, findings: table, total: integer, out: fun(s: string), err: fun(s: string) }
+---@return integer exit_code
+local function list_cases(ctx)
+  local out, err, root, files, findings = ctx.out, ctx.err, ctx.root, ctx.files, ctx.findings
+  local order_info, total = ctx.order_info, ctx.total
+  local items = ctx.inproc.list({
+    root = root,
+    files = files,
+    selector = ctx.selector,
+    lf = ctx.lf,
+    timeouts = ctx.timeouts,
+  })
+  if #items == 0 then
+    err("testing: no case matches the selection")
+    return M.EXIT_USAGE
+  end
+  local nfiles, seen = 0, {}
+  for _, it in ipairs(items) do
+    if not seen[it.file] then
+      seen[it.file] = true
+      nfiles = nfiles + 1
+      local oi = order_info and order_info[it.file]
+      if oi then
+        out(safe(("order %d  %s  (%s)"):format(oi.rank, it.file, oi.reason)))
+      end
+    end
+    out(safe(("%s%s"):format(it.id, it.note and ("  (" .. it.note .. ")") or "")))
+  end
+  print_findings(findings, out)
+  out(("%d case(s) in %d of %d spec file(s) would run"):format(#items, nfiles, total))
+  return M.EXIT_OK
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -812,32 +846,19 @@ function M.execute_run(plan, sv, run_opts, err, ev)
 
   -- 4. list
   if args.list then
-    local items = inproc.list({
+    return list_cases({
+      inproc = inproc,
       root = root,
       files = files,
       selector = selector,
       lf = lf_by_file,
       timeouts = timeouts,
+      order_info = order_info,
+      findings = findings,
+      total = total,
+      out = out,
+      err = err,
     })
-    if #items == 0 then
-      err("testing: no case matches the selection")
-      return M.EXIT_USAGE
-    end
-    local nfiles, seen = 0, {}
-    for _, it in ipairs(items) do
-      if not seen[it.file] then
-        seen[it.file] = true
-        nfiles = nfiles + 1
-        local oi = order_info and order_info[it.file]
-        if oi then
-          out(safe(("order %d  %s  (%s)"):format(oi.rank, it.file, oi.reason)))
-        end
-      end
-      out(safe(("%s%s"):format(it.id, it.note and ("  (" .. it.note .. ")") or "")))
-    end
-    print_findings(findings, out)
-    out(("%d case(s) in %d of %d spec file(s) would run"):format(#items, nfiles, total))
-    return M.EXIT_OK
   end
 
   if args.skip_uncacheable and require("testing.run.fast").in_ci(sv.env and sv.env.CI) then
