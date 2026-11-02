@@ -810,7 +810,6 @@ end
 ---@field root string
 ---@field child table The child module (`testing.child`, or the one a spec hands in).
 ---@field grace integer
----@field poll integer
 ---@field timeouts Testing.Child.Timeouts
 ---@field selector Testing.Select.Selector
 ---@field notes string[]
@@ -825,7 +824,6 @@ end
 ---@field budget_files table<string, true> Files `--time-budget` skipped.
 ---@field budget_out boolean The time budget is used up.
 ---@field res Testing.Result.Run
----@field a table The assertion collector of the run.
 ---@field header_tags fun(rel: string): string[]
 ---@field effects_measured boolean
 ---@field slots Testing.Isolated.Slot[]
@@ -1640,7 +1638,6 @@ function M.run(opts)
     root = root,
     child = child,
     grace = grace,
-    poll = poll,
     timeouts = timeouts,
     selector = selector,
     notes = notes,
@@ -1652,7 +1649,6 @@ function M.run(opts)
     budget_files = {},
     budget_out = false,
     res = res,
-    a = a,
     header_tags = header_tags,
     effects_measured = effects_measured,
     slots = slots,
