@@ -681,6 +681,81 @@ local function list_cases(ctx)
   return M.EXIT_OK
 end
 
+---Step 7: what the run leaves for the next one: the history, the last result per case, the run state and
+---the last green run. A convenience: a failure to write is a note, never the verdict.
+---@param ctx { root: string, sv: Testing.Run.Services, err: fun(s: string), res: Testing.Result, report: table, selector: table, lf: table|nil, known: table, stat_before: table, verdict: table, infra_failed: boolean }
+local function record_run_state(ctx)
+  local root, sv, err, res, report = ctx.root, ctx.sv, ctx.err, ctx.res, ctx.report
+  local selector, known, stat_before, verdict =
+    ctx.selector, ctx.known, ctx.stat_before, ctx.verdict
+  local lf_by_file, infra_failed = ctx.lf, ctx.infra_failed
+  local full = not selector.active and lf_by_file == nil and not report.stopped
+  local ran_files = {}
+  if full then
+    for _, c in ipairs(res.cases) do
+      ran_files[c.file] = true
+    end
+  end
+  local hok, herr = pcall(function()
+    local rok, rerr, rnote = require("testing.history").record(
+      root,
+      res,
+      { ran_files = ran_files, known_files = known },
+      { state_dir = sv.state_dir }
+    )
+    if not rok then
+      err("testing: note: history not updated: " .. tostring(rerr))
+    elseif rnote then
+      err("testing: note: " .. rnote)
+    end
+  end)
+  if not hok then
+    err("testing: note: history not updated: " .. tostring(herr))
+  end
+  -- the last result per case, for what shows it (explorer, hover, ...): merged over partial runs, never the verdict
+  local sok, serr = pcall(function()
+    local rok, rerr = require("testing.state").record(root, res, {
+      ran_files = ran_files,
+      known_files = known,
+      partial = not full,
+      stat = function(_, file)
+        return stat_before[file]
+      end,
+    }, { state_dir = sv.state_dir })
+    if not rok then
+      err("testing: note: result not stored: " .. tostring(rerr))
+    end
+  end)
+  if not sok then
+    err("testing: note: result not stored: " .. tostring(serr))
+  end
+  -- what `--order priority` and a red verdict need next time: when each file ran, how long it took, the last full green run
+  if not infra_failed then
+    local state_ok, state_err = pcall(function()
+      local rok, rerr = require("testing.run.order").record_state(root, res, {
+        state_dir = sv.state_dir,
+        partial = selector.active or lf_by_file ~= nil,
+        known_files = known,
+      })
+      if not rok then
+        err("testing: note: " .. tostring(rerr))
+      end
+      if verdict.kind == "green" then
+        local gok, gerr = require("testing.run.green").record(root, res, {
+          state_dir = sv.state_dir,
+          run = sv.affected and sv.affected.run or nil,
+        })
+        if not gok then
+          err("testing: note: " .. tostring(gerr))
+        end
+      end
+    end)
+    if not state_ok then
+      err("testing: note: run state not updated: " .. tostring(state_err))
+    end
+  end
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -1465,72 +1540,20 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     out((cache_line and primary == "term") and timing or ("\n" .. timing))
   end
 
-  -- 7. history (a convenience: a failure to write is a note, never the verdict)
-  local full = not selector.active and lf_by_file == nil and not report.stopped
-  local ran_files = {}
-  if full then
-    for _, c in ipairs(res.cases) do
-      ran_files[c.file] = true
-    end
-  end
-  local hok, herr = pcall(function()
-    local rok, rerr, rnote = require("testing.history").record(
-      root,
-      res,
-      { ran_files = ran_files, known_files = known },
-      { state_dir = sv.state_dir }
-    )
-    if not rok then
-      err("testing: note: history not updated: " .. tostring(rerr))
-    elseif rnote then
-      err("testing: note: " .. rnote)
-    end
-  end)
-  if not hok then
-    err("testing: note: history not updated: " .. tostring(herr))
-  end
-  -- the last result per case, for what shows it (explorer, hover, ...): merged over partial runs, never the verdict
-  local sok, serr = pcall(function()
-    local rok, rerr = require("testing.state").record(root, res, {
-      ran_files = ran_files,
-      known_files = known,
-      partial = not full,
-      stat = function(_, file)
-        return stat_before[file]
-      end,
-    }, { state_dir = sv.state_dir })
-    if not rok then
-      err("testing: note: result not stored: " .. tostring(rerr))
-    end
-  end)
-  if not sok then
-    err("testing: note: result not stored: " .. tostring(serr))
-  end
-  -- what `--order priority` and a red verdict need next time: when each file ran, how long it took, the last full green run
-  if not infra_failed then
-    local state_ok, state_err = pcall(function()
-      local rok, rerr = require("testing.run.order").record_state(root, res, {
-        state_dir = sv.state_dir,
-        partial = selector.active or lf_by_file ~= nil,
-        known_files = known,
-      })
-      if not rok then
-        err("testing: note: " .. tostring(rerr))
-      end
-      if verdict.kind == "green" then
-        local gok, gerr = require("testing.run.green").record(root, res, {
-          state_dir = sv.state_dir,
-          run = sv.affected and sv.affected.run or nil,
-        })
-        if not gok then
-          err("testing: note: " .. tostring(gerr))
-        end
-      end
-    end)
-    if not state_ok then
-      err("testing: note: run state not updated: " .. tostring(state_err))
-    end
-  end
+  -- 7. history, state, run state
+  record_run_state({
+    root = root,
+    sv = sv,
+    err = err,
+    res = res,
+    report = report,
+    selector = selector,
+    lf = lf_by_file,
+    known = known,
+    stat_before = stat_before,
+    verdict = verdict,
+    infra_failed = infra_failed,
+  })
 
   if infra_failed then
     return M.EXIT_INFRA
