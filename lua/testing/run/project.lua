@@ -993,6 +993,8 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     end
     phase:begin()
   end
+  ---@type { rel: string, text: string }[]
+  local held_output = {}
   local ok, report
   if #prep.run_files == 0 then
     ok, report = true, cached_mod.empty_report(plan, seed)
@@ -1004,8 +1006,15 @@ function M.execute_run(plan, sv, run_opts, err, ev)
       { filter = args.filter, tags = args.tags, exclude_tags = args.exclude_tags }
     common.rtp_prepend, common.rtp = prepend, append
     common.minit = minit_path(root, cfg)
+    -- what a spec prints is set aside; the report below shows it for the files that are red (TESTING_SHOW_OUTPUT=1
+    -- shows it for every file, as it arrives)
+    local show_all = (sv.env and sv.env.TESTING_SHOW_OUTPUT or vim.env.TESTING_SHOW_OUTPUT) == "1"
     common.on_output = function(rel, text)
-      err(output_block(rel, text))
+      if show_all then
+        err(output_block(rel, text))
+      else
+        held_output[#held_output + 1] = { rel = rel, text = text }
+      end
     end
     if args.order == "slowest-first" and (run_opts.jobs or 1) > 1 then
       -- the children start in this order; the IR stays in file order (`testing.run.slowest`)
@@ -1109,6 +1118,19 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     end
   end
   local res = report.result
+  if #held_output > 0 then
+    local red = {}
+    for _, c in ipairs(res.cases) do
+      if c.status ~= "pass" and c.status ~= "skip" and c.status ~= "xfail" then
+        red[c.file or ""] = true
+      end
+    end
+    for _, h in ipairs(held_output) do
+      if red[h.rel] then
+        err(output_block(h.rel, h.text))
+      end
+    end
+  end
   if #res.cases == 0 then
     if (report.files_unrun_budget or 0) > 0 and report.files_run == 0 then
       err("testing: the --time-budget ran out before the first spec file started; nothing ran")

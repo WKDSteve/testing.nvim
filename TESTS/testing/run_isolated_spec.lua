@@ -450,7 +450,10 @@ return function(H)
     ["TESTS/1_spec.lua"] = 'return function(H)\n  print("hello from child one")\n  H.eq(1, 1, "x")\nend\n',
     ["TESTS/2_spec.lua"] = 'return function(H)\n  print("hello from child two")\n  H.eq(1, 1, "x")\nend\n',
   })
-  local talked = go({ talk, "--isolated", "file", "--jobs", "2" })
+  local talked = go(
+    { talk, "--isolated", "file", "--jobs", "2" },
+    { env = { TESTING_SHOW_OUTPUT = "1" } }
+  )
   local p1, p2 =
     talked.err:find("hello from child one", 1, true),
     talked.err:find("hello from child two", 1, true)
@@ -459,6 +462,22 @@ return function(H)
     "the output of each child is printed, in file order: " .. talked.err
   )
 
+  -- by default what a green file prints is set aside; a red file's output is shown after the run
+  local quiet = go({ talk, "--isolated", "file", "--jobs", "2" })
+  ok(
+    not quiet.err:find("hello from child", 1, true),
+    "green files: their output is not printed: " .. quiet.err
+  )
+  local mixed = project({
+    ["TESTS/1_spec.lua"] = 'return function(H)\n  print("quiet green")\n  H.eq(1, 1, "x")\nend\n',
+    ["TESTS/2_spec.lua"] = 'return function(H)\n  print("loud red")\n  H.eq(1, 2, "x")\nend\n',
+  })
+  local mixed_run = go({ mixed, "--isolated", "file", "--jobs", "2" })
+  ok(
+    mixed_run.err:find("loud red", 1, true) ~= nil,
+    "a red file's output is printed: " .. mixed_run.err
+  )
+  ok(not mixed_run.err:find("quiet green", 1, true), "and the green one's is not")
   S.cleanup()
   child.kill_all()
 end

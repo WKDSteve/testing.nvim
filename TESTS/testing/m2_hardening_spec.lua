@@ -170,6 +170,7 @@ return function(H)
       state_dir = state_dir,
       color = false,
       isolated = spy,
+      env = { TESTING_SHOW_OUTPUT = "1" },
     })
     local text = table.concat(err, "\n")
     eq(code, 0, "the run is green: " .. text)

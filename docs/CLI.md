@@ -600,6 +600,7 @@ no output or document.
 | Variable | Effect |
 | --- | --- |
 | `$LIB_NVIM_DIR` | Explicit location of lib.nvim; if set but invalid the run fails (exit `3`). Every dependency has a `$<NAME>_DIR` ([CONFIG.md](CONFIG.md#dependencies)). |
+| `TESTING_SHOW_OUTPUT=1` | Show what spec files print (child editors) as it arrives, for every file. Without it the output of green files is set aside and the output of red files is printed after the run. |
 | `TESTING_DEBUG=1` | Tracebacks for internal errors. |
 | `CI` | Set and not `false`/`0`: every root is trusted (workspace trust, [CONFIG.md](CONFIG.md#workspace-trust)). |
 | `TESTING_TRUST=1` | Every root is trusted: for a launcher that is the project's own code (this repository's `scripts/test.sh` sets it). |
