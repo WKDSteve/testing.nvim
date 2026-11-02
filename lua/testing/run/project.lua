@@ -529,6 +529,102 @@ function M.execute(plan, sv)
   return code
 end
 
+---`--lf` / `--ff`: keep only the remembered failures, or run them first.
+---@param args table
+---@param sv Testing.Run.Services
+---@param root string
+---@param files table[]
+---@param err fun(s: string)
+---@return table[] files
+---@return table|nil lf_by_file Remembered failures by file, set when `--lf` narrowed the set.
+---@return table remembered Remembered failures by file (empty without `--lf`/`--ff`).
+local function apply_history(args, sv, root, files, err)
+  local select_mod = require("testing.run.select")
+  local lf_by_file
+  local remembered = {}
+  if args.lf or args.ff then
+    local history = require("testing.history")
+    local hist = history.load(root, { state_dir = sv.state_dir })
+    for _, note in ipairs(hist.notes) do
+      err("testing: note: " .. note)
+    end
+    local by_file = select_mod.group_failed(hist.failed)
+    remembered = by_file
+    if args.lf then
+      local only = {}
+      for _, f in ipairs(files) do
+        if by_file[f.rel] then
+          only[#only + 1] = f
+        end
+      end
+      if #only == 0 then
+        err("testing: note: --lf: no remembered failure for the selected files, running them all")
+      else
+        files = only
+        lf_by_file = by_file
+      end
+    end
+    if args.ff then
+      files = select_mod.failed_first(files, function(f)
+        return f.rel
+      end, by_file)
+    end
+  end
+  return files, lf_by_file, remembered
+end
+
+---`--order priority`: orders the selected files, never filters them.
+---@param args table
+---@param sv Testing.Run.Services
+---@param root string
+---@param cfg table
+---@param ordered table[] Every discovered file (the history of the order covers all of them).
+---@param files table[] The selected files.
+---@param err fun(s: string)
+---@return table[] files
+---@return table|nil order_info
+local function apply_priority_order(args, sv, root, cfg, ordered, files, err)
+  local order_info
+  if args.order == "priority" then
+    local order_mod = require("testing.run.order")
+    local specs, rels = {}, {}
+    for _, f in ipairs(ordered) do
+      specs[#specs + 1] = f.rel
+    end
+    for _, f in ipairs(files) do
+      rels[#rels + 1] = f.rel
+    end
+    local history, changed, graph, onotes = order_mod.facts({
+      root = root,
+      specs = specs,
+      roots = cfg.roots,
+      state_dir = sv.state_dir,
+      affected = sv.affected and sv.affected.affected or nil,
+      select_over = sv.affected,
+      no_cache = args.no_cache == true,
+    })
+    for _, note in ipairs(onotes) do
+      err("testing: note: order: " .. note)
+    end
+    local by_rel = {}
+    for _, f in ipairs(files) do
+      by_rel[f.rel] = f
+    end
+    local list, info, signal = order_mod.priority(rels, history, changed, graph)
+    if not signal then
+      err(
+        "testing: note: order: nothing tells the files apart (no remembered failure, no change, no run state): discovery order kept"
+      )
+    end
+    files = {}
+    for _, rel in ipairs(list) do
+      files[#files + 1] = by_rel[rel]
+    end
+    order_info = info
+  end
+  return files, order_info
+end
+
 ---The body of `M.execute`, split off so the editor's globals are restored on every exit path.
 ---@param plan Testing.Cli.RunPlan
 ---@param sv Testing.Run.Services
@@ -656,76 +752,12 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   end
 
   -- history: --lf / --ff
-  local lf_by_file
-  local remembered = {}
-  if args.lf or args.ff then
-    local history = require("testing.history")
-    local hist = history.load(root, { state_dir = sv.state_dir })
-    for _, note in ipairs(hist.notes) do
-      err("testing: note: " .. note)
-    end
-    local by_file = select_mod.group_failed(hist.failed)
-    remembered = by_file
-    if args.lf then
-      local only = {}
-      for _, f in ipairs(files) do
-        if by_file[f.rel] then
-          only[#only + 1] = f
-        end
-      end
-      if #only == 0 then
-        err("testing: note: --lf: no remembered failure for the selected files, running them all")
-      else
-        files = only
-        lf_by_file = by_file
-      end
-    end
-    if args.ff then
-      files = select_mod.failed_first(files, function(f)
-        return f.rel
-      end, by_file)
-    end
-  end
+  local files_, lf_by_file, remembered = apply_history(args, sv, root, files, err)
+  files = files_
 
   -- order: priority (orders, never filters: the set of files is the one selected above)
   local order_info
-  if args.order == "priority" then
-    local order_mod = require("testing.run.order")
-    local specs, rels = {}, {}
-    for _, f in ipairs(ordered) do
-      specs[#specs + 1] = f.rel
-    end
-    for _, f in ipairs(files) do
-      rels[#rels + 1] = f.rel
-    end
-    local history, changed, graph, onotes = order_mod.facts({
-      root = root,
-      specs = specs,
-      roots = cfg.roots,
-      state_dir = sv.state_dir,
-      affected = sv.affected and sv.affected.affected or nil,
-      select_over = sv.affected,
-      no_cache = args.no_cache == true,
-    })
-    for _, note in ipairs(onotes) do
-      err("testing: note: order: " .. note)
-    end
-    local by_rel = {}
-    for _, f in ipairs(files) do
-      by_rel[f.rel] = f
-    end
-    local list, info, signal = order_mod.priority(rels, history, changed, graph)
-    if not signal then
-      err(
-        "testing: note: order: nothing tells the files apart (no remembered failure, no change, no run state): discovery order kept"
-      )
-    end
-    files = {}
-    for _, rel in ipairs(list) do
-      files[#files + 1] = by_rel[rel]
-    end
-    order_info = info
-  end
+  files, order_info = apply_priority_order(args, sv, root, cfg, ordered, files, err)
 
   -- order: shuffle
   local seed
