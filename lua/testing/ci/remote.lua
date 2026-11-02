@@ -808,6 +808,35 @@ function M.resolve(args, left_out)
   return out
 end
 
+---The URL of `origin` from the repository's own `.git/config`, without a process; nil when the file cannot be read
+---that way (`.git` is a file, a worktree) or git would rewrite the URL (`insteadOf`).
+---@param dir string
+---@return string|nil
+local function config_origin_url(dir)
+  local f = io.open(dir .. "/.git/config", "rb")
+  if not f then
+    return nil
+  end
+  local body = f:read("*a")
+  f:close()
+  if type(body) ~= "string" or body:find("insteadOf", 1, true) then
+    return nil
+  end
+  local in_origin = false
+  for line in body:gmatch("[^\r\n]+") do
+    local section = line:match("^%s*%[(.-)%]%s*$")
+    if section then
+      in_origin = section:gsub("%s+", " ") == 'remote "origin"'
+    elseif in_origin then
+      local url = line:match("^%s*url%s*=%s*(.-)%s*$")
+      if url and url ~= "" then
+        return url
+      end
+    end
+  end
+  return nil
+end
+
 ---Two checkouts of the same GitHub repository (`owner/repo` of `origin`) are one repository: the CI is asked once.
 ---The checkout whose `origin/<branch>` commit is newer wins (a stale second clone shows an old state); on a tie one
 ---that was named on the command line (not found below a `--repos-root`), then the first directory in byte order.
@@ -820,43 +849,64 @@ function M.dedupe_clones(repos)
   if #repos < 2 then
     return repos, {}
   end
-  local groups, order = {}, {}
-  -- two processes per repository, started together in slices (as `M.collect` does) and waited for together
-  local SLICE = 16
-  for first = 1, #repos, SLICE do
-    local started = {}
-    for i = first, math.min(first + SLICE - 1, #repos) do
-      local dir = repos[i].dir
-      started[i] = {
-        url = M.deps.git(dir, { "remote", "get-url", "origin" }),
-        time = M.deps.git(dir, {
-          "log",
-          "-1",
-          "--no-show-signature",
-          "--format=%ct",
-          "origin/" .. repo_config(dir).branch,
-          "--",
-        }),
-      }
+  -- 1. the origin of every checkout: read from `.git/config` (no process); a checkout whose config cannot be read that
+  -- way (a worktree, `insteadOf` rewriting) is asked of git, all of them together
+  local urls, ask = {}, {}
+  for i, r in ipairs(repos) do
+    urls[i] = config_origin_url(r.dir)
+    if not urls[i] then
+      ask[#ask + 1] = i
     end
-    for i = first, math.min(first + SLICE - 1, #repos) do
-      local r = repos[i]
-      local url = started[i].url:wait()
-      local commit_time = started[i].time:wait()
-      local owner, repo
-      if url.code == 0 then
-        owner, repo = M.parse_origin(url.stdout or "")
-      end
-      local key = owner and (owner .. "/" .. repo):lower() or ("dir:" .. r.dir)
-      if not groups[key] then
-        groups[key] = {}
-        order[#order + 1] = key
-      end
-      local g = groups[key]
-      g[#g + 1] = {
-        r = r,
-        ts = tonumber(vim.trim(commit_time.code == 0 and commit_time.stdout or "")) or 0,
-      }
+  end
+  local SLICE = 16
+  for first = 1, #ask, SLICE do
+    local started = {}
+    for k = first, math.min(first + SLICE - 1, #ask) do
+      started[k] = M.deps.git(repos[ask[k]].dir, { "remote", "get-url", "origin" })
+    end
+    for k = first, math.min(first + SLICE - 1, #ask) do
+      local res = started[k]:wait()
+      urls[ask[k]] = res.code == 0 and (res.stdout or "") or false
+    end
+  end
+  local groups, order = {}, {}
+  for i, r in ipairs(repos) do
+    local owner, repo
+    if urls[i] then
+      owner, repo = M.parse_origin(urls[i])
+    end
+    local key = owner and (owner .. "/" .. repo):lower() or ("dir:" .. r.dir)
+    if not groups[key] then
+      groups[key] = {}
+      order[#order + 1] = key
+    end
+    local g = groups[key]
+    g[#g + 1] = { r = r, ts = 0, i = i }
+  end
+  -- 2. the commit time of `origin/<branch>` only where two checkouts share a repository: the others have nothing to
+  -- be compared with
+  local contested = {}
+  for _, key in ipairs(order) do
+    if #groups[key] > 1 then
+      vim.list_extend(contested, groups[key])
+    end
+  end
+  for first = 1, #contested, SLICE do
+    local started = {}
+    for k = first, math.min(first + SLICE - 1, #contested) do
+      local dir = contested[k].r.dir
+      started[k] = M.deps.git(dir, {
+        "log",
+        "-1",
+        "--no-show-signature",
+        "--format=%ct",
+        "origin/" .. repo_config(dir).branch,
+        "--",
+      })
+    end
+    for k = first, math.min(first + SLICE - 1, #contested) do
+      local res = started[k]:wait()
+      contested[k].ts = tonumber(vim.trim(res.code == 0 and res.stdout or "")) or 0
     end
   end
   local kept, clones = {}, {}

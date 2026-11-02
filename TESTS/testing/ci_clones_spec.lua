@@ -67,5 +67,23 @@ return function(H)
   local dirs2 = export.resolve({ roots = { lone, other } })
   eq(#dirs2, 2, "a checkout without origin is kept")
 
+  -- an origin that git rewrites (`insteadOf`) cannot be read from the config file: git is asked, and it is the same repository
+  local rewritten = repo("alpha-rewritten", "gh:acme/alpha.git", "2026-02-01T00:00:00Z")
+  git(rewritten, { "config", "url.https://github.com/.insteadOf", "gh:" })
+  local rows3 = overview.collect(
+    { old, new, rewritten, other },
+    { no_remote = true, now = os.time() },
+    {}
+  )
+  local names3 = vim.tbl_map(function(r)
+    return r.repo
+  end, rows3)
+  table.sort(names3)
+  eq(
+    names3,
+    { "alpha-new", "beta" },
+    "an insteadOf origin is the same repository, found through git"
+  )
+
   vim.fn.delete(tmp, "rf")
 end
