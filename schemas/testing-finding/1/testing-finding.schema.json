@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-finding/1/testing-finding.schema.json",
+  "title": "testing-finding/1",
+  "description": "One finding of testing.nvim (a red case, a flake, a guard, a red CI run, a lint finding, a sheet) in a redacted, stable form. The engine writes it, never an app. fp is stable over commits and moved lines; excerpt is redacted and at most 4 KiB; there is no absolute path and no root. A reader ignores unknown fields and refuses a higher schema.",
+  "type": "object",
+  "required": ["schema", "fp", "kind", "repo", "area", "sha", "class", "where", "run", "title", "excerpt", "repro", "rule"],
+  "properties": {
+    "schema": { "const": "testing-finding/1" },
+    "fp": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "kind": { "enum": ["case", "flaky", "guard", "ci-run", "lint", "sheet"] },
+    "repo": { "type": "string", "minLength": 1 },
+    "area": { "type": ["string", "null"] },
+    "sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "class": { "enum": ["public", "internal"] },
+    "where": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["file", "line"],
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": ["integer", "null"], "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "run": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["source", "id", "os", "url"],
+          "properties": {
+            "source": { "enum": ["local", "ci"] },
+            "id": { "type": ["string", "null"] },
+            "os": { "type": ["string", "null"] },
+            "url": { "type": ["string", "null"], "pattern": "^https://github[.]com/" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "excerpt": { "type": "string", "maxLength": 4096 },
+    "repro": { "type": ["string", "null"] },
+    "rule": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

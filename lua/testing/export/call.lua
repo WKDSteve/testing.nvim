@@ -26,14 +26,17 @@ local M = {}
 
 M.EXIT_OK, M.EXIT_USAGE, M.EXIT_INFRA = 0, 2, 3
 
-M.METHODS = { fleet = true, repo = true }
+M.METHODS = { fleet = true, repo = true, finding = true }
 
 M.USAGE = table.concat({
   "usage: testing call fleet [<repo>...] [--repos-root=<dir>] [--include=<names>] [--exclude=<names>]",
   "                          [--export] [--remote] [--state-dir=<dir>]",
   "       testing call repo [<dir>] [--export] [--remote] [--state-dir=<dir>]",
+  "       testing call finding [<dir>] [--fp=<16 hex>] [--state-dir=<dir>]",
   "  fleet               one row per repository (document testing-export/1, kind fleet)",
   "  repo                one repository with its red cases (kind repo; <dir> defaults to the current directory)",
+  "  finding             the findings of the last run of a repository (documents testing-finding/1), one line each;",
+  "                      with --fp only that one (exit 2 when there is none, or the data classes do not release it)",
   "  --repos-root=<dir>  the repositories below <dir> (workflows or a .testing.lua; no vault; repeatable)",
   "  --include=<names>   also these directory names below --repos-root (besides lib.nvim)",
   "  --exclude=<names>   leave these directory names out",
@@ -54,9 +57,16 @@ M.USAGE = table.concat({
 ---@field export boolean
 ---@field remote boolean
 ---@field state_dir? string
+---@field fp? string
 ---@field help boolean
 
-local VALUED = { ["repos-root"] = true, include = true, exclude = true, ["state-dir"] = true }
+local VALUED = {
+  ["repos-root"] = true,
+  include = true,
+  exclude = true,
+  ["state-dir"] = true,
+  fp = true,
+}
 local FLEET_ONLY = { ["repos-root"] = true, include = true, exclude = true }
 
 ---@param argv string[] The arguments after `call`.
@@ -93,6 +103,9 @@ function M.parse(argv)
     elseif (key == "export" or key == "remote") and value == nil then
       args[key] = true
     elseif key and VALUED[key] then
+      if key == "fp" and args.method ~= "finding" then
+        return nil, "--fp is an option of finding"
+      end
       if FLEET_ONLY[key] and args.method ~= "fleet" then
         return nil, ("--%s is an option of fleet, not of %s"):format(key, args.method)
       end
@@ -110,6 +123,11 @@ function M.parse(argv)
         args.repos_roots[#args.repos_roots + 1] = value
       elseif key == "state-dir" then
         args.state_dir = value
+      elseif key == "fp" then
+        if not value:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x$") then
+          return nil, "--fp needs 16 hex characters"
+        end
+        args.fp = value:lower()
       else
         -- the one VALUED key left: include or exclude
         local list = key == "include" and args.include or args.exclude
@@ -127,10 +145,52 @@ function M.parse(argv)
     end
     i = i + 1
   end
-  if args.method == "repo" and #args.roots > 1 then
-    return nil, "repo takes one directory"
+  if (args.method == "repo" or args.method == "finding") and #args.roots > 1 then
+    return nil, args.method .. " takes one directory"
   end
   return args
+end
+
+---`testing call finding [<dir>] [--fp=<fp>]`: the findings of a repository as documents of `testing-finding/1`.
+---@param args Testing.Export.Call.Args
+---@param state_dir? string
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@return integer exit_code
+function M.finding(args, state_dir, sv)
+  local dir = args.roots[1] or "."
+  if vim.fn.isdirectory(dir) ~= 1 then
+    sv.err(("testing call: %s is not a directory"):format(dir))
+    return M.EXIT_USAGE
+  end
+  dir = vim.fs.normalize(vim.fn.fnamemodify(dir, ":p")):gsub("([^:/])/+$", "%1")
+  local finding = require("testing.finding")
+  local docs, err, kind
+  require("testing.export").with_secrets(function()
+    docs, err, kind = finding.collect({ dir = dir, state_dir = state_dir })
+  end)
+  if not docs then
+    sv.err("testing call: " .. tostring(err))
+    return kind == finding.REFUSED and M.EXIT_USAGE or M.EXIT_INFRA
+  end
+  local shown = {}
+  for _, d in ipairs(docs) do
+    if not args.fp or d.fp == args.fp then
+      shown[#shown + 1] = d
+    end
+  end
+  if args.fp and #shown == 0 then
+    sv.err(("testing call: no finding %s in the last run of this repository"):format(args.fp))
+    return M.EXIT_USAGE
+  end
+  for _, d in ipairs(shown) do
+    local text, eerr = require("testing.export").encode(d)
+    if not text then
+      sv.err("testing call: " .. tostring(eerr))
+      return M.EXIT_INFRA
+    end
+    sv.out(text)
+  end
+  return M.EXIT_OK
 end
 
 ---`testing call ...`.
@@ -152,6 +212,9 @@ function M.main(argv, sv)
   local state_dir = args.state_dir
       and vim.fs.normalize(vim.fn.fnamemodify(args.state_dir, ":p")):gsub("([^:/])/+$", "%1")
     or sv.state_dir
+  if args.method == "finding" then
+    return M.finding(args, state_dir, sv)
+  end
   ---@type Testing.Export.Opts
   local opts = {
     roots = args.roots,

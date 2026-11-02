@@ -1291,6 +1291,18 @@ local function protect(fn)
   return res, err, kind
 end
 
+---Run `fn` with the secrets of the environment read once (the redaction of a document built by another module).
+---@param fn fun()
+function M.with_secrets(fn)
+  local _, err = protect(function()
+    fn()
+    return true
+  end)
+  if err then
+    error(err, 0)
+  end
+end
+
 ---The kind of error of `M.repo` in the export form when the data classes of this device do not release the
 ---repository: a refusal (exit 2 of `testing call`), not a failure to build.
 M.REFUSED = "refused"

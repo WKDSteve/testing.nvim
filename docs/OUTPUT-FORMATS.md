@@ -558,3 +558,23 @@ The TypeScript types for a client (testing-desktop, testing-web) are generated f
 compares the generated text with the committed file byte for byte. A schema change is therefore: the schema, the
 golden files if the engine writes something else, `npm run generate`, and the regenerated `.d.ts` in the same commit.
 `contract/node_modules/` is never committed.
+
+## The finding (`testing-finding/1`)
+
+One finding of a repository (a red case, a flaky case, a guard, a red CI run, a lint finding, a sheet) in a redacted form
+for the three actions (a task, a rule, the AI). Schema: `schemas/testing-finding/1/` (`.schema.json`, `.d.ts`); module:
+`testing.finding`.
+
+| Field | Meaning |
+| --- | --- |
+| `fp` | 16 hex of `sha256(kind, repo, identity)`; the identity is the case id, the check id or workflow+job, never the commit or a line number: the same failure after a commit that only moves lines has the same `fp`. |
+| `kind` | `case`, `flaky`, `guard`, `ci-run`, `lint`, `sheet`. |
+| `repo`, `area`, `sha`, `class` | The directory name; the area of this device's `areas.json` (`null` when no entry names the repository); the 40-hex commit or `null`; `public` or `internal`. A `private` or `unclassified` repository gives no finding (`testing call finding`: exit `2` with the reason). |
+| `where` | `{ file, line }` repository-relative, or `null`. |
+| `run` | `{ source: local\|ci, id, os, url }` or `null`; `url` only `https://github.com/...`. |
+| `title`, `excerpt`, `repro`, `rule` | At most 120 characters; the redacted text, at most 4 KiB cut at a UTF-8 boundary (no absolute path, no home directory, no secret); a command or `null`; a rule id or `null`. |
+
+`testing call finding [<dir>] [--fp=<16 hex>] [--state-dir=<dir>]` prints the findings of the last run of a repository, one
+line of canonical JSON each (sorted by `fp`), or only the one with `--fp` (exit `2` when there is none). It reads the state
+(`last.json`, `ci.json`) and runs nothing. The findings of guards, lint and sheets are built by `testing.finding.build`
+from the records those parts already hold.
