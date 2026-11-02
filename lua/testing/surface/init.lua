@@ -467,6 +467,128 @@ local function unit(s)
   return nil
 end
 
+---Options of `testing surface`: what each one does to the result (`testing.optspec`).
+---@type Testing.OptSpecs
+local OPTIONS = {
+  ["-h"] = {
+    flag = function(a)
+      a.help = true
+    end,
+  },
+  ["--help"] = {
+    flag = function(a)
+      a.help = true
+    end,
+  },
+  ["--json"] = {
+    flag = function(a)
+      a.format = "json"
+    end,
+  },
+  ["--markdown"] = {
+    flag = function(a)
+      a.format = "markdown"
+    end,
+  },
+  ["--csv"] = {
+    flag = function(a)
+      a.format = "csv"
+    end,
+  },
+  ["--matrix"] = {
+    flag = function(a)
+      a.matrix = true
+    end,
+  },
+  ["--no-tags"] = {
+    flag = function(a)
+      a.no_tags = true
+    end,
+  },
+  ["--fail-on-new"] = {
+    flag = function(a)
+      a.fail_on_new = true
+    end,
+  },
+  ["--fail-on-removed"] = {
+    flag = function(a)
+      a.fail_on_removed = true
+    end,
+  },
+  ["--require-signed-baseline"] = {
+    flag = function(a)
+      a.require_signed_baseline = true
+    end,
+  },
+  ["--write-ir"] = {
+    value = function(a, v)
+      a.write_ir = v
+    end,
+  },
+  ["--from"] = {
+    value = function(a, v)
+      a.from[#a.from + 1] = v
+    end,
+  },
+  ["--hits"] = {
+    value = function(a, v)
+      a.sinks[#a.sinks + 1] = v
+    end,
+  },
+  ["--kind"] = {
+    value = function(a, v)
+      a.kinds = a.kinds or {}
+      for k in v:gmatch("[^,]+") do
+        if not vim.tbl_contains(ids.KINDS, k) then
+          return ("--kind: unknown kind %q (%s)"):format(k, table.concat(ids.KINDS, ", "))
+        end
+        a.kinds[#a.kinds + 1] = k
+      end
+    end,
+  },
+  ["--ignore"] = {
+    value = function(a, v)
+      a.ignore[#a.ignore + 1] = v
+    end,
+  },
+  ["--threshold"] = {
+    value = function(a, v)
+      local kind, num = v:match("^(%a+)=(.+)$")
+      if kind then
+        if not vim.tbl_contains(ids.KINDS, kind) then
+          return ("--threshold: unknown kind %q"):format(kind)
+        end
+        local n = unit(num)
+        if not n then
+          return ("--threshold %s: %q is not a number between 0 and 1"):format(kind, num)
+        end
+        a.thresholds.kinds[kind] = n
+      else
+        local n = unit(v)
+        if not n then
+          return ("--threshold: %q is not a number between 0 and 1"):format(v)
+        end
+        a.thresholds.overall = n
+      end
+    end,
+  },
+  ["--baseline"] = {
+    value = function(a, v)
+      a.baseline = v
+    end,
+  },
+  ["--write-baseline"] = {
+    value = function(a, v)
+      a.write_baseline = v
+    end,
+  },
+  ["--out"] = {
+    value = function(a, v)
+      a.out = v
+    end,
+  },
+}
+
 ---Parse the arguments after `surface`.
 ---@param argv string[]
 ---@return Testing.Surface.Args|nil
@@ -486,132 +608,19 @@ function M.parse_args(argv)
     format = "text",
     help = false,
   }
-  local i = 1
-  ---@param name string
-  ---@return string|nil value
-  ---@return string|nil err
-  local function value(name, inline)
-    if inline then
-      return inline
-    end
-    i = i + 1
-    if argv[i] == nil then
-      return nil, name .. " needs a value"
-    end
-    return argv[i]
-  end
-  while i <= #argv do
-    local arg = argv[i]
-    local name, inline = arg:match("^(%-%-[%w%-]+)=(.*)$")
-    name = name or arg
-    local v, err
-    if name == "-h" or name == "--help" then
-      a.help = true
-    elseif name == "--json" then
-      a.format = "json"
-    elseif name == "--markdown" then
-      a.format = "markdown"
-    elseif name == "--csv" then
-      a.format = "csv"
-    elseif name == "--matrix" then
-      a.matrix = true
-    elseif name == "--no-tags" then
-      a.no_tags = true
-    elseif name == "--write-ir" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.write_ir = v
-    elseif name == "--fail-on-new" then
-      a.fail_on_new = true
-    elseif name == "--fail-on-removed" then
-      a.fail_on_removed = true
-    elseif name == "--require-signed-baseline" then
-      a.require_signed_baseline = true
-    elseif name == "--from" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.from[#a.from + 1] = v
-    elseif name == "--hits" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.sinks[#a.sinks + 1] = v
-    elseif name == "--kind" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.kinds = a.kinds or {}
-      for k in v:gmatch("[^,]+") do
-        if not vim.tbl_contains(ids.KINDS, k) then
-          return nil, ("--kind: unknown kind %q (%s)"):format(k, table.concat(ids.KINDS, ", "))
-        end
-        a.kinds[#a.kinds + 1] = k
-      end
-    elseif name == "--ignore" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.ignore[#a.ignore + 1] = v
-    elseif name == "--threshold" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      local kind, num = v:match("^(%a+)=(.+)$")
-      if kind then
-        if not vim.tbl_contains(ids.KINDS, kind) then
-          return nil, ("--threshold: unknown kind %q"):format(kind)
-        end
-        local n = unit(num)
-        if not n then
-          return nil, ("--threshold %s: %q is not a number between 0 and 1"):format(kind, num)
-        end
-        a.thresholds.kinds[kind] = n
-      else
-        local n = unit(v)
-        if not n then
-          return nil, ("--threshold: %q is not a number between 0 and 1"):format(v)
-        end
-        a.thresholds.overall = n
-      end
-    elseif name == "--baseline" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.baseline = v
-    elseif name == "--write-baseline" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.write_baseline = v
-    elseif name == "--out" then
-      v, err = value(name, inline)
-      if not v then
-        return nil, err
-      end
-      a.out = v
-    elseif name == "list" and a.root == nil and i == 1 then
+  local optspec = require("testing.optspec")
+  return optspec.parse(argv, a, OPTIONS, function(args, arg, i)
+    if arg == "list" and args.root == nil and i == 1 then
       -- `testing surface list`: the one view there is
-      a.root = nil
+      args.root = nil
     elseif arg:sub(1, 1) == "-" and #arg > 1 then
-      return nil, ("unknown option %s"):format((arg:sub(1, 60):gsub("%c", "?")))
-    elseif a.root == nil then
-      a.root = arg
+      return ("unknown option %s"):format(optspec.show(arg))
+    elseif args.root == nil then
+      args.root = arg
     else
-      return nil, "only one path is accepted"
+      return "only one path is accepted"
     end
-    i = i + 1
-  end
-  return a
+  end)
 end
 
 ---@class Testing.Surface.Services
