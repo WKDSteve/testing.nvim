@@ -440,6 +440,35 @@ return function(H)
     end
   end
 
+  -- ---------------------------------------------------------------- roots first, then the redaction
+  -- (on Windows the temp and state directory and often the checkout lie below the profile folder: the redaction of
+  -- `Users/<name>` must not hide the placeholders of the roots below it)
+  do
+    local ir = {
+      cases = {
+        {
+          id = "a_spec.lua::x",
+          assertions = {
+            {
+              msg = "C:/Users/alice/work/proj/a.lua C:/Users/alice/AppData/Local/Temp/x C:/Users/alice/other.lua alice@example.com",
+            },
+          },
+        },
+      },
+    }
+    local encoded, err = result.encode(ir, {
+      redact = { env_names = {}, words = {} },
+      roots = { repo = "C:/Users/alice/work/proj", tmp = "C:/Users/alice/AppData/Local/Temp" },
+    })
+    local msg = encoded and assert(json.decode(encoded)).cases[1].assertions[1].msg or tostring(err)
+    ok(
+      msg:find("<REPO>/a.lua", 1, true) ~= nil,
+      "a root below the profile folder stays a placeholder: " .. msg
+    )
+    ok(msg:find("<TMP>/x", 1, true) ~= nil, "so does the temp directory: " .. msg)
+    ok(not msg:find("alice", 1, true), "and the user name is gone from the rest: " .. msg)
+  end
+
   -- ---------------------------------------------------------------- normalizer: matchers once
   local here = vim.fs.normalize(vim.uv.cwd() or ".")
   local tmp = vim.fs.normalize(vim.uv.os_tmpdir() or here)
