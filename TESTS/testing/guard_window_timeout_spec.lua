@@ -15,6 +15,12 @@ return function(H)
   local inproc = require("testing.run.inproc")
   local guards = require("testing.run.guards")
 
+  -- The case window is wide and the slow snapshot is three windows long: a case body takes about a millisecond, so a
+  -- stall of the machine (a loaded macOS runner) has to eat most of a window before it can tell a charged snapshot
+  -- from a lucky one, and a charged snapshot (3 windows) fails by a wide margin.
+  local CASE_MS = 400
+  local SLOW_MS = 3 * CASE_MS
+
   ---A guard layer whose snapshot (`begin_case`) is slow from the second case on.
   local begun = 0
   local mod = {
@@ -23,7 +29,7 @@ return function(H)
       function h:begin_case()
         begun = begun + 1
         if begun >= 2 then
-          local until_ = vim.uv.hrtime() + 250 * 1e6
+          local until_ = vim.uv.hrtime() + SLOW_MS * 1e6
           while vim.uv.hrtime() < until_ do
             -- busy: the count hook of the timeout guard gets its chances
           end
@@ -52,7 +58,7 @@ return function(H)
     root = root,
     files = { file },
     guard_session = session,
-    timeouts = { case_ms = 100 },
+    timeouts = { case_ms = CASE_MS },
   })
   session:uninstall()
   eq(session.error, nil, "the slow snapshot was not cut off by the case deadline")
