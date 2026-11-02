@@ -279,13 +279,23 @@ return function(H)
       slow.steps = { { wait = "false", timeout = 100 } }
       -- two sizes, two failures: they must still be one line
       slow.sizes = { { rows = 24, cols = 80 }, { rows = 12, cols = 40 } }
+      -- the same sizes with a wait that holds at once: what the children cost to start on this machine
+      -- (under load each takes seconds), so only the time the wait itself adds is bounded
+      local met = vim.deepcopy(slow)
+      met.steps = { { wait = "true", timeout = 100 } }
+      local m0 = vim.uv.hrtime()
+      sheet.run(met, { root = root })
+      local base_ms = (vim.uv.hrtime() - m0) / 1e6
       local t0 = vim.uv.hrtime()
       local raised, err = pcall(sheet.check, slow, { root = root })
       local took_ms = (vim.uv.hrtime() - t0) / 1e6
       -- (a poll inside vim.wait's condition once kept the 100 ms wait going for 40 s)
       ok(
-        took_ms < 10000,
-        ("a 100 ms wait keeps its deadline (took %d ms with the child)"):format(took_ms)
+        took_ms - base_ms < 10000,
+        ("a 100 ms wait keeps its deadline (took %d ms, %d ms without the wait)"):format(
+          took_ms,
+          base_ms
+        )
       )
       ok(
         not raised and tostring(err):find("test sheet demo failed", 1, true) ~= nil,
