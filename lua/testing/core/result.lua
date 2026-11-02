@@ -822,12 +822,16 @@ function M.encode(result, opts)
   opts = opts or {}
   local matchers = opts.roots and build_matchers(opts.roots, opts.case_insensitive == true) or {}
   local ci = opts.case_insensitive == true
-  if opts.redact then
-    result = redact_result(result, opts.redact, ci)
-  end
+  -- The roots come first: the redaction turns `Users/<name>` into `<HOME>`, and on Windows the temp and the
+  -- state directory (often the checkout, too) lie below it, so redacting first would hide `<TMP>`, `<STATE>`
+  -- and `<REPO>` behind `<HOME>`.
+  -- What the roots leave is redacted.
   local value = map_strings(result, function(s)
     return fix_utf8(scrub_paths(s, matchers, ci))
   end, 0)
+  if opts.redact then
+    value = redact_result(value, opts.redact, ci)
+  end
   local json = require("lib.nvim.json")
   local encoded, err = json.encode(value, { indent = opts.indent })
   if not encoded then
