@@ -343,5 +343,90 @@ return function(H)
   has(r.out, "created: .testing.lua", "cli init: creates the setup")
   has(run({ "init", made }).out, "skipped: .testing.lua", "cli init again: keeps what exists")
 
+  -- ---------------------------------------------------------------- testing:keep blocks and testing:keep-file
+  local keep = project("keep.nvim")
+  local keep_sh = keep .. "/scripts/test.sh"
+  local keep_text = slurp(keep_sh)
+  -- the repository's own lines, below a line the template has (the first `set -euo pipefail`)
+  local keep_block = table.concat({
+    "# testing:keep begin REPOS_DIR for the ci verb",
+    'REPOS_DIR="$ROOT"',
+    "# testing:keep end",
+  }, "\n")
+  local with_block =
+    keep_text:gsub("(\nset %-euo pipefail\n)", "%1" .. keep_block:gsub("%%", "%%%%") .. "\n", 1)
+  put(keep_sh, with_block)
+  p = update.plan(keep, NOFMT)
+  f = file(p, "scripts/test.sh")
+  eq(f.changed, false, "keep: a block between the markers is not a difference")
+  eq(f.code_changed, false, "keep: --check does not count it")
+  eq(f.dropped, {}, "keep: nothing is listed as lost")
+  has(
+    table.concat(f.kept, "\n"),
+    "3 line(s) between the testing:keep markers",
+    "keep: says what it kept"
+  )
+  -- an older template: the block survives the re-render
+  put(
+    keep_sh,
+    (with_block:gsub("export NVIM_APPNAME=[^\n]*", 'export NVIM_APPNAME="old-tests"', 1))
+  )
+  p = update.plan(keep, NOFMT)
+  f = file(p, "scripts/test.sh")
+  eq(f.changed, true, "keep: an out of date file is still updated")
+  has(f.after, keep_block, "keep: the block is put back unchanged")
+  eq(f.risks, {}, "keep: and nothing is held back")
+  -- the anchor line is gone from the template: the block is not lost silently, the file is held back
+  put(
+    keep_sh,
+    (
+      keep_text:gsub(
+        "\nset %-euo pipefail\n",
+        "\nset -eu\n" .. keep_block:gsub("%%", "%%%%") .. "\n",
+        1
+      )
+    )
+  )
+  p = update.plan(keep, NOFMT)
+  f = file(p, "scripts/test.sh")
+  eq(#f.risks, 1, "keep: a block whose anchor line is gone is a risk")
+  has(f.risks[1], "copy it by hand", "keep: and says what to do")
+  -- a block without its end marker
+  put(keep_sh, (keep_text:gsub("(\nset %-euo pipefail\n)", "%1# testing:keep begin\nX=1\n", 1)))
+  p = update.plan(keep, NOFMT)
+  has(
+    table.concat(file(p, "scripts/test.sh").risks, "\n"),
+    "has no '# testing:keep end'",
+    "keep: an open block is a risk"
+  )
+
+  -- a file that is the repository's own
+  put(
+    keep_sh,
+    "#!/usr/bin/env bash\n# testing:keep-file the dogfood script runs the checkout itself\necho own\n"
+  )
+  p = update.plan(keep, NOFMT)
+  f = file(p, "scripts/test.sh")
+  eq(f.changed, false, "keep-file: the file is left as it is")
+  eq(f.code_changed, false, "keep-file: --check does not count it")
+  has(
+    table.concat(f.kept, "\n"),
+    "the dogfood script runs the checkout itself",
+    "keep-file: the reason is in the report"
+  )
+  local keep_init = keep .. "/TESTS/minimal_init.lua"
+  put(keep_init, "-- testing:keep-file a hand-written init\nvim.opt.rtp:append('.')\n")
+  p = update.plan(keep, NOFMT)
+  f = file(p, "TESTS/minimal_init.lua")
+  eq(f.changed, false, "keep-file: minimal_init too")
+  has(table.concat(f.kept, "\n"), "a hand-written init", "keep-file: its reason is in the report")
+  local no_reason = project("noreason.nvim")
+  put(no_reason .. "/scripts/test.sh", "#!/usr/bin/env bash\n# testing:keep-file\necho own\n")
+  has(
+    table.concat(file(update.plan(no_reason, NOFMT), "scripts/test.sh").kept, "\n"),
+    "no reason given",
+    "keep-file: a missing reason is said"
+  )
+
   vim.fn.delete(base, "rf")
 end

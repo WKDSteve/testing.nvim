@@ -304,6 +304,104 @@ local function gate_extra(before)
   return extra ~= "" and extra or nil
 end
 
+---A repository's own lines that `--update` keeps: everything from a `<comment> testing:keep begin` line to the
+---matching `<comment> testing:keep end` line (markers included). The block is put back after the line that stood
+---above it in the old file (the nearest line before it that is neither blank nor a marker), found as a whole line in
+---the new render; no such line: the block cannot be placed, and the file is held back (a risk) instead of losing it.
+---@param before string|nil The old file.
+---@param after string The new render.
+---@param prefix string Comment start as written in the file (`#` or `--`).
+---@return string after
+---@return string[] kept
+---@return string[] risks
+local function keep_blocks(before, after, prefix)
+  if not before then
+    return after, {}, {}
+  end
+  local begin_tag, end_tag = prefix .. " testing:keep begin", prefix .. " testing:keep end"
+  local old = vim.split(before, "\n", { plain = true })
+  local blocks, kept, risks = {}, {}, {}
+  local i = 1
+  while i <= #old do
+    local line = vim.trim(old[i])
+    if line == begin_tag or line:sub(1, #begin_tag + 1) == begin_tag .. " " then
+      local anchor
+      for j = i - 1, 1, -1 do
+        local above = vim.trim(old[j])
+        if above ~= "" then
+          anchor = old[j]
+          break
+        end
+      end
+      local last
+      for j = i + 1, #old do
+        if vim.trim(old[j]) == end_tag then
+          last = j
+          break
+        end
+      end
+      if not last then
+        risks[#risks + 1] = ("a '%s' block has no '%s' line: it is not kept, copy it by hand"):format(
+          begin_tag,
+          end_tag
+        )
+        break
+      end
+      blocks[#blocks + 1] = { anchor = anchor, lines = vim.list_slice(old, i, last) }
+      i = last
+    end
+    i = i + 1
+  end
+  if #blocks == 0 then
+    return after, kept, risks
+  end
+  local out = vim.split(after, "\n", { plain = true })
+  for _, b in ipairs(blocks) do
+    local at
+    for k, l in ipairs(out) do
+      if b.anchor and l == b.anchor then
+        at = k
+        break
+      end
+    end
+    if not at then
+      risks[#risks + 1] = ("the block '%s ...' stood below %s, which the new file does not have: copy it by hand"):format(
+        begin_tag,
+        b.anchor and ("`" .. vim.trim(b.anchor) .. "`") or "the top of the file"
+      )
+    else
+      for n, l in ipairs(b.lines) do
+        table.insert(out, at + n, l)
+      end
+      kept[#kept + 1] = ("%d line(s) between the testing:keep markers"):format(#b.lines)
+    end
+  end
+  return table.concat(out, "\n"), kept, risks
+end
+
+---A file that is the repository's own on purpose: `<comment> testing:keep-file <reason>` in its first lines. The
+---update leaves it as it is and says why (a `--check` does not count it).
+---@param before string|nil
+---@param prefix string
+---@return string|nil reason
+local function keep_file(before, prefix)
+  if not before then
+    return nil
+  end
+  local tag = prefix .. " testing:keep-file"
+  for n, line in ipairs(vim.split(before, "\n", { plain = true })) do
+    if n > 20 then
+      break
+    end
+    local t = vim.trim(line)
+    if t == tag or t:sub(1, #tag + 1) == tag .. " " then
+      local reason = vim.trim(t:sub(#tag + 1))
+      return reason ~= "" and reason or "no reason given"
+    end
+  end
+  return nil
+end
+
 ---One file of the plan.
 ---@param rel string
 ---@param before string|nil
@@ -400,6 +498,18 @@ function M.plan(root, opts)
             "no NVIM_APPNAME export (the file did not set one), with its own comment"
         end
       end
+      local own = keep_file(old_sh, "#")
+      if own then
+        -- the repository's own file (the dogfood script of testing.nvim): nothing of the template reaches it
+        after = old_sh --[[@as string]]
+        kept = { ("the file is the repository's own (testing:keep-file): %s"):format(own) }
+        risks = {}
+      else
+        local blocks, block_risks
+        after, blocks, block_risks = keep_blocks(old_sh, after, "#")
+        vim.list_extend(kept, blocks)
+        vim.list_extend(risks, block_risks)
+      end
       local dropped, older = {}, 0
       for _, l in ipairs(dropped_lines(old_sh, after, "#")) do
         if superseded(l) then
@@ -460,9 +570,24 @@ function M.plan(root, opts)
           carried
         )
       end
-      local formatted, hint =
-        require("testing.migrate.format").lua(after, "TESTS/minimal_init.lua", abs, opts.format)
-      after = formatted
+      local own = keep_file(old_minit, "--")
+      local hint
+      if own then
+        after = old_minit --[[@as string]]
+        kept = { ("the file is the repository's own (testing:keep-file): %s"):format(own) }
+        risks = {}
+      else
+        local blocks, block_risks
+        after, blocks, block_risks = keep_blocks(old_minit, after, "--")
+        vim.list_extend(kept, blocks)
+        vim.list_extend(risks, block_risks)
+        if #blocks > 0 and #block_risks == 0 and not loadstring(after) then
+          risks[#risks + 1] =
+            "the testing:keep block would not compile in the new file: copy it by hand (the diff shows it)"
+        end
+        after, hint =
+          require("testing.migrate.format").lua(after, "TESTS/minimal_init.lua", abs, opts.format)
+      end
       local f = entry("TESTS/minimal_init.lua", old_minit, after, "%-%-", {
         kept = kept,
         dropped = dropped_lines(old_minit, after, "%-%-"),

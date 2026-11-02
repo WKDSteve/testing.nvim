@@ -65,6 +65,22 @@ is not the gate yet (no lookup in the four places) is replaced by it, carrying o
 runtimepath, as `testing migrate` does. The new `TESTS/minimal_init.lua` is formatted with the repository's
 `stylua.toml`.
 
+**Your own lines, kept for good.** Put them between two marker lines and `--update` carries the block over unchanged
+and `--check` does not count it: in `scripts/test.sh`
+
+```bash
+# testing:keep begin REPOS_DIR for the ci verb
+REPOS_DIR="$ROOT"
+# testing:keep end
+```
+
+(in `TESTS/minimal_init.lua` the same with `--` instead of `#`). The block is put back after the line that stood above it
+(the nearest line that is neither blank nor a marker), found as a whole line in the new render. If the template no
+longer has that line, the block cannot be placed: the file gets a risk ("copy it by hand") and `--write` holds it back,
+nothing is lost silently; the same for a `begin` without an `end`. A file that is the repository's own on purpose (the
+dogfood `scripts/test.sh` of testing.nvim) says so in its first 20 lines: `# testing:keep-file <reason>` (`--` in
+`minimal_init.lua`). It is left as it is, the reason appears in the report as "kept", and `--check` does not count it.
+
 Anything else of the repository's own is not kept: the code lines of the old file that the new one does not have
 are listed under "only in the old file" (only the exact lines an earlier template version wrote are counted
 instead), and its comment lines under "comments only in the old file" (a reason written down for a deliberate
