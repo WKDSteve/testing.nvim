@@ -142,6 +142,22 @@ function M.parse(argv)
   return args
 end
 
+---The `.testing.lua` of a commit, byte for byte; nil when the commit has none.
+---@param root string
+---@param sha string
+---@return string|nil
+local function commit_testing_lua(root, sha)
+  local ok, res = pcall(function()
+    return snapshot
+      .system({ "git", "cat-file", "blob", sha .. ":.testing.lua" }, { cwd = root, text = false })
+      :wait(120000)
+  end)
+  if not ok or not res or res.code ~= 0 then
+    return nil
+  end
+  return res.stdout
+end
+
 ---@param argv string[]
 ---@param cwd string
 ---@return integer code
@@ -960,6 +976,14 @@ function M.main(argv, sv)
   end
   if #shas > M.MAX_COMMITS then
     return fail(M.EXIT_USAGE, ("%d commits, at most %d per call"):format(#shas, M.MAX_COMMITS))
+  end
+
+  -- trusted through the store, the root is trusted for one `.testing.lua`: the one a commit carries is what runs
+  for _, sha in ipairs(shas) do
+    local refusal = require("testing.trust").check_commit_file(root, commit_testing_lua(root, sha))
+    if refusal then
+      return fail(M.EXIT_USAGE, ("%s: %s"):format(sha:sub(1, 12), refusal))
+    end
   end
 
   pcall(snapshot.sweep, root, { state_dir = args.state_dir })

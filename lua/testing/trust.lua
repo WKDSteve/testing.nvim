@@ -527,6 +527,36 @@ function M.check(root)
   return M.refusal(root, d)
 end
 
+---The gate for the `.testing.lua` a commit carries (`testing ci commit` runs the snapshot of a commit, so that file, not the
+---one of the working tree, is what executes). A root trusted through the store is trusted for the `.testing.lua` it was
+---trusted with: a commit whose file differs is refused. The other ways (CI, `TESTING_TRUST=1`, `TESTING_TRUST_ROOTS`) trust
+---the root whatever the file says. Never raises; nil when the gate is not armed.
+---@param root string
+---@param text string|nil The commit's `.testing.lua`, nil when the commit has none.
+---@return string|nil refusal
+function M.check_commit_file(root, text)
+  local ctx = armed
+  if not ctx then
+    return nil
+  end
+  local ok, d = pcall(M.decide, root, ctx)
+  if not ok then
+    return ("%s %s: the trust check failed: %s"):format(root, M.REFUSED, tostring(d))
+  end
+  if not d.trusted or d.how ~= "store" then
+    return nil
+  end
+  local hash = text and vim.fn.sha256(text) or "none"
+  if d.entry and d.entry.hash == hash then
+    return nil
+  end
+  return (
+    "%s %s for this commit: its .testing.lua differs from the one that was trusted; running it would execute that file. "
+    .. "Trust it with `testing trust add <root>` after checking out the commit, or list your own directories in "
+    .. "TESTING_TRUST_ROOTS"
+  ):format(root, M.REFUSED)
+end
+
 M.USAGE = table.concat({
   "usage: testing trust list | check [<root>] | add [<root>] | revoke [<root>]",
   "  list           the trusted roots of the store, TESTING_TRUST_ROOTS and the environment",

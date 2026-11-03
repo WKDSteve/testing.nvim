@@ -73,6 +73,7 @@ function M.new(H, label)
   local CFG = ("return { plugin = 'proj', minit = false, guards = { fs = 'off' }, ci = { profiles = { full = { 'suite', 'gate' } }, steps = { gate = { run = { %q, '--headless', '-u', 'NONE', '-i', 'NONE', '-l', 'gate.lua', '${root}' } } } } }\n"):format(
     nvim
   )
+  S.CFG = CFG
   S.PASS = "return function(H)\n  H.ok(true, 'fine')\nend\n"
   S.BOOM = "return function(H)\n  H.ok(false, 'boom')\nend\n"
 

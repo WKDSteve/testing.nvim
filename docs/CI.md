@@ -322,8 +322,10 @@ before the subcommand is understood).
 Limits: the dependencies are not frozen (both sides see the same ones: `$<NAME>_DIR`, the repository's `.deps/` or its
 siblings, handed to the child as `$<NAME>_DIR`), so red that comes from a half-done dependency is known at both. A
 load-sensitive spec may be red on one side only. Submodules are not checked out. The snapshot of a trusted repository
-is trusted (`TESTING_TRUST=1` for the child, after the repository itself passed the trust gate). Refused on the
-workstation like every run.
+is trusted (`TESTING_TRUST=1` for the child, after the repository itself passed the trust gate). A root trusted through
+the trust store is trusted for the `.testing.lua` it was trusted with: a commit that carries a different one is refused
+(exit 2), because that file is what runs in the snapshot; `TESTING_TRUST_ROOTS`, `CI` and `TESTING_TRUST=1` trust the
+root whatever the file says. Refused on the workstation like every run.
 
 ## The pre-push hook
 

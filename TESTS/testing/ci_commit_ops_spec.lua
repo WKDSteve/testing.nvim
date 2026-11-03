@@ -93,5 +93,30 @@ return function(H)
     eq(r.code, 2, "not a repository: exit 2")
   end
 
+  do
+    -- a root trusted through the store is trusted for the .testing.lua it was trusted with: a commit that carries
+    -- another one is refused, although the working tree still has the trusted file
+    local trust = require("testing.trust")
+    local tctx = { env = {}, store = tmp .. "/trust.json" }
+    local troot, t1 = S.project("trusted", { ["gate.txt"] = "green\n" })
+    ok(trust.add(troot, tctx), "trust: the root is stored")
+    local prev = trust.arm(tctx)
+    local r = call(troot, t1, "--agent")
+    eq(r.code, 0, "trust: a commit with the trusted .testing.lua runs: " .. r.err)
+    local t2 =
+      S.commit(troot, { [".testing.lua"] = S.CFG .. "-- changed\n" }, "another .testing.lua")
+    git_out(troot, "checkout", "-q", t1, "--", ".testing.lua")
+    git_out(troot, "reset", "-q")
+    r = call(troot, t2, "--agent")
+    eq(r.code, 2, "trust: a commit with another .testing.lua is refused")
+    has(r.err, "is not trusted", "trust: ... said")
+    has(r.err, t2:sub(1, 12), "trust: ... naming the commit")
+    -- the root trust of the environment does not look at the file
+    trust.arm({ env = { TESTING_TRUST_ROOTS = tmp }, store = tctx.store })
+    r = call(troot, t2, "--agent")
+    ok(r.code ~= 2, "trust: a root below TESTING_TRUST_ROOTS runs the commit: " .. r.err)
+    trust.arm(prev)
+  end
+
   S.cleanup()
 end
