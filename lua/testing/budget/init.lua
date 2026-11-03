@@ -247,6 +247,85 @@ function M.write_baseline(path, results, opts)
   return true, nil
 end
 
+---Median of a list of numbers (the mean of the two middle ones for an even count).
+---@param values number[]
+---@return number
+local function median(values)
+  table.sort(values)
+  local n = #values
+  if n % 2 == 1 then
+    return values[(n + 1) / 2]
+  end
+  return (values[n / 2] + values[n / 2 + 1]) / 2
+end
+
+---The baseline of a nightly job: per case the median of the medians of several earlier baselines (the last green
+---runs of the same runner type), so one slow night does not become the reference and a slow drift does not move it
+---at once. A case counts when it is in at least one of them.
+---@param baselines { cases: table<string, { median_ms: number }>, machine?: table }[]
+---@return { cases: table<string, { median_ms: number, runs: integer }>, machine?: table }|nil merged nil for an empty list
+function M.median_baseline(baselines)
+  if #baselines == 0 then
+    return nil
+  end
+  local per_case = {}
+  for _, b in ipairs(baselines) do
+    for name, entry in pairs(b.cases) do
+      per_case[name] = per_case[name] or {}
+      table.insert(per_case[name], entry.median_ms)
+    end
+  end
+  local cases = {}
+  for name, values in pairs(per_case) do
+    local m = median(values)
+    cases[name] = { median_ms = math.floor(m * 1000 + 0.5) / 1000, runs = #values }
+  end
+  return { cases = cases, machine = baselines[#baselines].machine }
+end
+
+---Read baseline files, merge them with `median_baseline` and write the result as a baseline. A file that cannot be
+---read is skipped and named; with none left nothing is written.
+---@param out_path string
+---@param in_paths string[]
+---@return boolean ok
+---@return string|nil err
+---@return string[] skipped One line per skipped file.
+function M.write_median(out_path, in_paths)
+  local good, skipped = {}, {}
+  for _, path in ipairs(in_paths) do
+    local b, why = M.read_baseline(path)
+    if b then
+      good[#good + 1] = b
+    else
+      skipped[#skipped + 1] = tostring(why)
+    end
+  end
+  local merged = M.median_baseline(good)
+  if not merged then
+    return false, "no readable baseline to merge", skipped
+  end
+  local cases = {}
+  for name, entry in pairs(merged.cases) do
+    cases[name] = { median_ms = entry.median_ms, runs = entry.runs }
+  end
+  local doc = {
+    version = M.VERSION,
+    date = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    machine = merged.machine,
+    method = { median_of = #good },
+    cases = cases,
+  }
+  local text, err = require("lib.nvim.json").encode(doc, { indent = 2 })
+  if not text then
+    return false, "cannot encode the baseline: " .. tostring(err), skipped
+  end
+  local wrote, werr = require("lib.nvim.fs.write.atomic")(out_path, text .. "\n", { mkdirp = true })
+  if not wrote then
+    return false, ("cannot write %s: %s"):format(out_path, tostring(werr)), skipped
+  end
+  return true, nil, skipped
+end
+
 ---@class Testing.Budget.RunOpts
 ---@field cases? Testing.Budget.Case[] Default: `testing.budget.cases.ALL`.
 ---@field filter? string[] Keep the cases whose name contains one of these (plain substring).

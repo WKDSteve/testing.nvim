@@ -28,6 +28,14 @@ $T budget . --filter child   # only the child editor cases
 
 (`scripts/test.sh` cannot run it: it puts the root first, and a subcommand has to be the first argument.)
 
+**Nightly job** (`.github/workflows/bench.yml`, also `workflow_dispatch`, never a merge check). The committed baseline
+is the author's machine, so the job does not use it: it measures, takes the **median of the medians of the baselines
+of the last 5 green runs** of the same runner type as the reference (`scripts/bench-median.lua`,
+`testing.budget.median_baseline`) and checks against that. One slow night does not become the reference and a slow
+drift does not move it at once. A regression turns the job red and shows the table in the step summary; no issue is
+opened. Only a green run uploads its baseline (`bench-baseline-<os>`, 30 days), so a red night never lowers the bar.
+The first run has no reference and only records one.
+
 ## The cases
 
 | Case | What is timed |

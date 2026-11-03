@@ -1,0 +1,91 @@
+name: Bench
+
+# The performance budgets of docs/PERFORMANCE.md as a nightly regression check, never a merge gate (runner load
+# makes timings noisy). The reference is NOT the committed baseline (that one belongs to the author's machine): it
+# is the median of the medians of the baselines of the last 5 green runs of this job on the same runner type, so
+# one slow night does not become the reference and a slow drift does not move it at once. A regression turns the
+# job red and shows the table in the step summary; no issue is opened (decision of 2026-11-02, task
+# performance-budgets-d7). The first run has no reference and only records one.
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+# Least privilege: read the repository and the artifacts of earlier runs.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bench:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARTIFACT: bench-baseline-${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/lib.nvim
+          path: .deps/lib.nvim
+          ref: ci-verified
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: v0.12.2
+      - name: Measure
+        run: |
+          nvim -n -i NONE --headless -u NONE -l scripts/testing.lua budget . --update \
+            --baseline "$RUNNER_TEMP/measured/baseline.json"
+      - name: Reference from the last 5 green runs
+        id: reference
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/prev"
+          ids=$(gh run list --workflow bench.yml --status success --limit 5 \
+            --json databaseId --jq '.[].databaseId')
+          for id in $ids; do
+            gh run download "$id" --name "$ARTIFACT" --dir "$RUNNER_TEMP/prev/$id" || true
+          done
+          files=$(ls "$RUNNER_TEMP"/prev/*/baseline.json 2>/dev/null || true)
+          if [ -z "$files" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No earlier green run has a baseline: this run only records one." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            # shellcheck disable=SC2086
+            nvim -n -i NONE --headless -u NONE -l scripts/bench-median.lua "$RUNNER_TEMP/reference.json" $files
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check against the reference
+        if: steps.reference.outputs.found == 'true'
+        run: |
+          set +e
+          nvim -n -i NONE --headless -u NONE -l scripts/testing.lua budget . \
+            --baseline "$RUNNER_TEMP/reference.json" > "$RUNNER_TEMP/budget.txt" 2> "$RUNNER_TEMP/budget.err"
+          code=$?
+          cat "$RUNNER_TEMP/budget.txt"
+          {
+            echo '### Budget against the median of the last green runs'
+            echo '```'
+            cat "$RUNNER_TEMP/budget.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+      # Only a green run leaves a baseline for the next ones.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ runner.temp }}/measured/baseline.json
+          retention-days: 30

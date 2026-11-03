@@ -442,5 +442,63 @@ return function(H)
     eq(#after_dirs, #before_dirs, "the scratch directories are removed")
   end
 
+  -- the reference of the nightly job: the median of the medians of earlier baselines
+  do
+    local function bl(a, b)
+      return {
+        cases = { fast = { median_ms = a }, slow = { median_ms = b } },
+        machine = { cpu = "x" },
+      }
+    end
+    local merged = assert(budget.median_baseline({ bl(10, 100), bl(30, 100), bl(20, 400) }))
+    eq(merged.cases.fast.median_ms, 20, "odd count: the middle one, a slow night does not move it")
+    eq(merged.cases.slow.median_ms, 100, "a single slow night (400) is not the reference")
+    eq(merged.cases.fast.runs, 3, "how many baselines the case is in")
+    eq(
+      assert(budget.median_baseline({ bl(10, 1), bl(20, 1) })).cases.fast.median_ms,
+      15,
+      "even count: the mean of the two middle ones"
+    )
+    eq(budget.median_baseline({}), nil, "an empty list has no reference")
+    -- a case that only some baselines know still counts
+    local some =
+      assert(budget.median_baseline({ bl(10, 1), { cases = { fast = { median_ms = 30 } } } }))
+    eq(
+      { some.cases.fast.median_ms, some.cases.slow.runs },
+      { 20, 1 },
+      "a case in only one baseline"
+    )
+
+    local dir = root .. "/median"
+    vim.fn.mkdir(dir, "p")
+    local function write(name, doc)
+      local fh = assert(io.open(dir .. "/" .. name, "wb"))
+      fh:write(vim.json.encode(doc))
+      fh:close()
+      return dir .. "/" .. name
+    end
+    local function doc(ms)
+      return { version = budget.VERSION, cases = { fast = { median_ms = ms } } }
+    end
+    local out_path = dir .. "/out.json"
+    local wrote, werr, skipped = budget.write_median(out_path, {
+      write("a.json", doc(10)),
+      write("b.json", doc(30)),
+      write("c.json", doc(20)),
+      dir .. "/missing.json",
+    })
+    ok(wrote, "the merged baseline is written: " .. tostring(werr))
+    eq(#skipped, 1, "an unreadable file is skipped and named")
+    local back = assert(budget.read_baseline(out_path))
+    eq(back.cases.fast.median_ms, 20, "and it reads back as a normal baseline")
+    eq(back.method.median_of, 3, "with the number of baselines it was made of")
+    local none, nerr = budget.write_median(dir .. "/none.json", { dir .. "/missing.json" })
+    ok(
+      none == false and tostring(nerr):find("no readable", 1, true) ~= nil,
+      "nothing readable writes nothing"
+    )
+    eq(vim.uv.fs_stat(dir .. "/none.json"), nil, "no file in that case")
+  end
+
   vim.fn.delete(root, "rf")
 end
