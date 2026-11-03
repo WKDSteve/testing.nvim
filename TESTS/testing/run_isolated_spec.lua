@@ -409,6 +409,66 @@ return function(H)
   end
   eq(oks, 2, "both files reported ok")
 
+  -- the note of a run that used the warm pool: the wording and the number formats are pinned
+  eq(
+    isolated.pool_note({
+      files = 3,
+      spawned = 2,
+      reused = 1,
+      discarded = 0,
+      boot_ms = 1500,
+      finish_ms = { settle = 400, reset = 600 },
+    }),
+    "warm pool: 3 file(s) in 2 member(s) (1 reused a member, 0 member(s) discarded; starting members 1.5 s, verifying files 1.0 s)",
+    "pool note: the wording"
+  )
+  eq(
+    isolated.pool_note({
+      files = 0,
+      spawned = 0,
+      reused = 0,
+      discarded = 0,
+      boot_ms = 0,
+      finish_ms = {},
+    }),
+    nil,
+    "pool note: none when no file went through the pool"
+  )
+
+  -- `--time-budget` with `--isolated=file`: the file that began is finished and reported, the files after the budget ran
+  -- out stay unrun (no cases, no ok line); the clock is out from the third reading on (start, first file, second file)
+  local budget_root = project({
+    ["TESTS/1_ok_spec.lua"] = PASS,
+    ["TESTS/2_ok_spec.lua"] = PASS,
+    ["TESTS/3_ok_spec.lua"] = PASS,
+  })
+  local reads = 0
+  local budget_run = go(
+    { budget_root, "--no-cache", "--isolated", "file", "--jobs", "1", "--time-budget", "60s" },
+    {
+      budget_clock = function()
+        reads = reads + 1
+        return reads <= 2 and 0 or 100
+      end,
+    }
+  )
+  eq(budget_run.code, 0, "budget, isolated: exit 0: " .. budget_run.out .. budget_run.err)
+  local ran = {}
+  for _, n in ipairs({ 1, 2, 3 }) do
+    ran[n] = ("\n" .. budget_run.out):find("\nok%s+TESTS/" .. n .. "_ok_spec.lua") ~= nil
+  end
+  eq(
+    ran,
+    { true, false, false },
+    "budget, isolated: only the file that began ran: " .. budget_run.out
+  )
+  has(
+    budget_run.out,
+    "2 spec file(s) not run (budget)",
+    "budget, isolated: the two files stay unrun"
+  )
+  ok(not budget_run.out:find("TESTING_OK", 1, true), "budget, isolated: never the sentinel")
+
   -- the minit runs in the child (as plenary's -u minimal_init would have)
   local minit_root = project({
     ["TESTS/minimal_init.lua"] = 'vim.g.minit_ran_in = (vim.v.argv[8] == "-c") and "child" or "parent"\n',

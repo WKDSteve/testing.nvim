@@ -665,6 +665,8 @@ local function pool_note(stats)
   )
 end
 
+M.pool_note = pool_note
+
 ---The slots of a run: one per file, or one per listed case for `isolated = "case"`, in merge order. A file that
 ---cannot run (missing, unknown dialect, not selected, no listing) is a finished slot with its synthetic cases.
 ---@param opts Testing.Isolated.Opts
