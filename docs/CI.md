@@ -514,7 +514,8 @@ the push run after a merge, would run foreign code there. `testing ci runner-gua
 on the machine of the runner (outside every work folder, so a pull request cannot edit it): it refuses pull requests,
 actors other than the maintainer, and commits of a public repository that you have not released. `testing ci trust
 <owner/repo> [<sha>]` releases a commit after you reviewed it (`--show` lists what changed and which files deserve a
-close look), then re-run the refused job. Details, the way back and the limits: [RUNNER-GUARD.md](RUNNER-GUARD.md).
+close look), then re-run the refused job. Commits SSH-signed by a key of your device registry (`allowed_signers`) are
+released without a review. Details, the way back and the limits: [RUNNER-GUARD.md](RUNNER-GUARD.md).
 
 ## The GitHub Actions status: `testing ci remote`
 

@@ -25,7 +25,8 @@ only calls `testing ci runner-guard check`, which decides from the `GITHUB_*` va
 | 2b | any event other than `push`, `workflow_dispatch`, `workflow_run`, `schedule`, `release` (an allowlist: `pull_request_review` and the like run the merge ref of a pull request) | **refuse** |
 | 3 | actor, or the actor who triggered a re-run, is not the owner of the repository (the maintainer) | **refuse** |
 | 4 | the repository is private and the mode is not `always` | run |
-| 5 | the commit (`GITHUB_SHA`) is on the list of reviewed commits | run, else **refuse** |
+| 5 | the commit (`GITHUB_SHA`) is on the list of reviewed commits | run |
+| 6 | every commit since a reviewed ancestor is SSH-signed by a key of the device registry ([below](#your-own-devices-signed-commits)) | run (and the commit goes on the list), else **refuse** |
 
 Anything that cannot be decided refuses: no `GITHUB_*` variables, no `gh` (the repository then counts as public), a
 hook script whose `nvim` or `testing.lua` is missing. A list file that is not ours (another version, garbage, too
@@ -34,7 +35,7 @@ large) is an empty list: nothing is trusted from it, never an error that lets a 
 Review is **per commit id, never per author**: the author of a commit is free text and proves nothing. A reviewed id
 covers the tree that runs; its ancestors are not executed.
 
-Rule 5 only applies to public repositories (rule 4), so the private repositories are unaffected and keep their
+Rules 5 and 6 only apply to public repositories (rule 4), so the private repositories are unaffected and keep their
 no-friction CI; use `--mode=always` to guard one anyway.
 
 ## Setting up
@@ -77,6 +78,44 @@ Other commands: `testing ci trust --list`; `--revoke [<repo>] [<sha>]` (one comm
 `--mode=auto|always|off <repo>`; `--note=<text>`. The list is `<runners>/reviewed.json`, at most 50 commits per
 repository.
 
+## Your own devices: signed commits
+
+A maintainer who works alone does not read every commit of every machine. Rule 6 releases by origin instead: each of
+your devices signs its commits with an SSH key of its own (`git config gpg.format ssh`, `user.signingkey`,
+`commit.gpgsign true`), and the public keys are listed in the **device registry**, an `allowed_signers` file of
+ssh-keygen:
+
+```
+you@example.com,STEVESPC namespaces="git" ssh-ed25519 AAAA... STEVESPC
+you@example.com,WORKSTATION namespaces="git" ssh-ed25519 AAAA... WORKSTATION
+```
+
+The registry is `$TESTING_ALLOWED_SIGNERS`, else `<runners>/allowed_signers`. `runner-guard install` writes the
+path of the variable into the hook script (a runner started before the variable was set does not see it), and
+`status` shows which registry is used. A new device: add its line, and run `install` again when the path changed.
+
+For a commit that is not on the list, the hook asks GitHub for the commits between the newest of the last three
+reviewed commits that is an ancestor and `GITHUB_SHA` (`compare`), and checks each one with `ssh-keygen -Y
+find-principals` and `-Y verify` (namespace `git`) against the registry, over the payload and signature GitHub keeps
+for it. It does not use GitHub's "Verified": GitHub signs its own web merges (also of a foreign pull request), and
+that signature is verified too. The job runs only when every commit of the range is signed by a registered key; the
+commit then goes on the list (note `signed: <principal>`), so the next job of the run and the next push start from it.
+It refuses when:
+
+- a commit is unsigned, GPG-signed (GitHub's web merges) or signed by a key that is not in the registry;
+- a signature does not match its payload;
+- none of the last three reviewed commits is an ancestor (history rewritten), there is no reviewed commit at all, or
+  the range holds more than 250 commits;
+- there is no `ssh-keygen` (`PATH`, Windows' OpenSSH, Git for Windows).
+
+A refused job names `testing ci trust` as before. Rules 2 and 3 come first: a pull request or a foreign actor is
+refused, signed or not.
+
+What it rests on: a key on a device of yours signs whatever is committed there, by you or by a tool you run there.
+Code that was committed on your machine has normally run there already (tests before the push); the guard keeps out
+what did not come from your devices. A foreign commit that you rebase or cherry-pick is signed anew by your key and
+counts as yours, as with `--pushed`.
+
 ## Going back
 
 ```sh
@@ -110,8 +149,8 @@ request path stays closed in any case (rule 2).
 
 - It stops foreign code that you did not release. It does not stop code you released after a careless review, and not
   someone who can already write to your runner folder or your user account.
-- A push of your own to a public repository needs a `trust` call before its run goes through, unless the pre-push
-  hook releases it (next section).
+- A push of your own to a public repository needs a `trust` call before its run goes through, unless its commits
+  are signed by a registered device or the pre-push hook releases it (sections above).
 - Running jobs in a sandbox (own Windows account, Windows Sandbox, container) would limit the damage of a
   missed review too; it is not part of this guard.
 - `testing.nvim`'s own workspace trust (`docs/CLI.md`, `testing trust`) does not help here: `CI=true` makes every

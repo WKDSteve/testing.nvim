@@ -631,6 +631,202 @@ return function(H)
     end
   end
 
+  -- ------------------------------------------------------------------ rule 6: signed by a registered device
+
+  do
+    local kg = vim.fn.exepath("ssh-keygen")
+    if kg == "" then
+      print("n/a  signed release: no ssh-keygen on this machine")
+    else
+      local keys = tmp()
+      local function key(name)
+        local r = vim
+          .system({ kg, "-q", "-t", "ed25519", "-N", "", "-C", name, "-f", keys .. "/" .. name })
+          :wait()
+        ok(r.code == 0, "ssh-keygen: a key " .. name)
+        return (slurp(keys .. "/" .. name .. ".pub") or ""):match("^(%S+ %S+)")
+      end
+      local function sign(name, payload)
+        local p = keys .. "/payload"
+        write(p, payload)
+        os.remove(p .. ".sig")
+        vim.system({ kg, "-Y", "sign", "-f", keys .. "/" .. name, "-n", "git", p }):wait()
+        return slurp(p .. ".sig")
+      end
+      local mine, theirs = key("mine"), key("theirs")
+      local SHA3 = ("c"):rep(40)
+      local SHA4 = ("d"):rep(40)
+      local function commit(sha, payload, signature)
+        return {
+          sha = sha,
+          commit = { verification = { payload = payload, signature = signature } },
+        }
+      end
+      local p3, p4 = "tree 1\n\nfirst\n", "tree 2\n\nsecond\n"
+      local signed3, signed4 = sign("mine", p3), sign("mine", p4)
+
+      local root
+      local compare
+      local function reset(shas)
+        root = tmp()
+        write(root .. "/allowed_signers", 'me@x,DEV1 namespaces="git" ' .. mine .. " DEV1\n")
+        write(
+          guard.store_path(root),
+          vim.json.encode({
+            v = 1,
+            repos = {
+              ["wkdsteve/tasks.nvim"] = { mode = "auto", shas = shas or { { sha = SHA, at = 1 } } },
+            },
+          })
+        )
+      end
+      local compared
+      local function check(e, private)
+        compared = {}
+        local o = sink()
+        local code = guard.main({ "check" }, o.sv, {
+          env = e or env({ GITHUB_SHA = SHA4 }),
+          root = root,
+          now = 5,
+          nvim = "/x/nvim",
+          script = "/x/scripts/testing.lua",
+          gh = function(args)
+            if args[4] == ".private" then
+              return tostring(private == true) .. "\n"
+            end
+            local base, head = (args[2] or ""):match(
+              "^repos/WKDSteve/tasks%.nvim/compare/(%x+)%.%.%.(%x+)$"
+            )
+            if base then
+              compared[#compared + 1] = base
+              local doc = compare(base, head)
+              return doc and vim.json.encode(doc) or nil, doc and nil or "HTTP 404"
+            end
+            return nil, "unexpected " .. table.concat(args, " ")
+          end,
+        })
+        return code, joined(o)
+      end
+      local function ahead(list)
+        return function(base)
+          if base ~= SHA then
+            return nil
+          end
+          return { status = "ahead", total_commits = #list, commits = list }
+        end
+      end
+
+      reset()
+      compare = ahead({ commit(SHA3, p3, signed3), commit(SHA4, p4, signed4) })
+      local code, text = check()
+      eq(code, 0, "signed: every new commit signed by a registered key runs")
+      has(text, "signed by a registered device (me@x)", "signed: ... and names the signer")
+      local stored = guard.read(guard.store_path(root))["wkdsteve/tasks.nvim"].shas
+      eq(stored[#stored].sha, SHA4, "signed: the commit goes on the list")
+      eq(stored[#stored].note, "signed: me@x", "signed: ... with a note")
+      code = check()
+      eq(code, 0, "signed: the next job of the run finds it on the list")
+      eq(#compared, 0, "signed: ... without asking GitHub again")
+
+      reset()
+      compare = ahead({ commit(SHA3, p3, nil), commit(SHA4, p4, signed4) })
+      code, text = check()
+      eq(code, 1, "signed: one unsigned commit in the range refuses")
+      has(text, "commit " .. SHA3:sub(1, 12) .. " has no SSH signature", "signed: ... and names it")
+      has(text, "ci trust WKDSteve/tasks.nvim", "signed: ... and still offers the manual release")
+      eq(
+        #guard.read(guard.store_path(root))["wkdsteve/tasks.nvim"].shas,
+        1,
+        "signed: nothing recorded"
+      )
+
+      reset()
+      compare = ahead({ commit(SHA4, p4, sign("theirs", p4)) })
+      code, text = check()
+      eq(code, 1, "signed: a key that is not in the registry refuses")
+      has(text, "not signed by a key of the device registry", "signed: ... and says why")
+      ok(theirs ~= mine, "signed: two different keys")
+
+      reset()
+      compare = ahead({ commit(SHA4, "tree 2\n\nsomething else\n", signed4) })
+      eq(check(), 1, "signed: a signature over another payload refuses")
+
+      reset()
+      compare = ahead({
+        commit(SHA4, p4, "-----BEGIN PGP SIGNATURE-----\nx\n-----END PGP SIGNATURE-----\n"),
+      })
+      code, text = check()
+      eq(code, 1, "signed: a GPG signature (GitHub's web merges) is no device signature")
+      has(text, "has no SSH signature", "signed: ... said so")
+
+      reset()
+      compare = function()
+        return { status = "diverged", total_commits = 1, commits = { commit(SHA4, p4, signed4) } }
+      end
+      code, text = check()
+      eq(code, 1, "signed: a range that does not start at a reviewed ancestor refuses")
+      has(text, "is an ancestor", "signed: ... said so")
+
+      reset({
+        { sha = SHA, at = 1 },
+        { sha = SHA2, at = 2 },
+        { sha = SHA3, at = 3 },
+        { sha = SHA2, at = 4 },
+      })
+      compare = ahead({ commit(SHA4, p4, signed4) })
+      code = check()
+      eq(code, 1, "signed: at most the last three reviewed commits are tried as the base")
+      eq(#compared, 3, "signed: ... three compare calls")
+      reset({ { sha = SHA, at = 1 }, { sha = SHA2, at = 2 } })
+      eq(check(), 0, "signed: an older reviewed commit is a base too")
+
+      reset({})
+      compare = ahead({ commit(SHA4, p4, signed4) })
+      code, text = check()
+      eq(code, 1, "signed: without any reviewed commit there is no base")
+      has(text, "no reviewed commit to start from", "signed: ... said so")
+
+      reset()
+      compare = function()
+        return { status = "ahead", total_commits = 300, commits = { commit(SHA4, p4, signed4) } }
+      end
+      code, text = check()
+      eq(code, 1, "signed: a range the API lists only in part refuses")
+      has(text, "more than can be checked", "signed: ... said so")
+
+      reset()
+      compare = ahead({ commit(SHA4, p4, signed4) })
+      code, text = check(env({ GITHUB_SHA = SHA4, TESTING_ALLOWED_SIGNERS = root .. "/nope" }))
+      eq(code, 1, "signed: a named registry that is missing refuses")
+      has(text, "device registry: " .. root .. "/nope does not exist", "signed: ... with a note")
+
+      reset()
+      os.remove(root .. "/allowed_signers")
+      code, text = check()
+      eq(code, 1, "signed: without a registry the old rule stands")
+      lacks(text, "not released by signature", "signed: ... and nothing is said of signatures")
+      eq(#compared, 0, "signed: ... and GitHub is not asked")
+
+      reset()
+      code = check(env({ GITHUB_SHA = SHA4, GITHUB_EVENT_NAME = "pull_request" }))
+      eq(code, 1, "signed: a pull request is refused, signed or not")
+      code = check(env({ GITHUB_SHA = SHA4, GITHUB_ACTOR = "mallory" }))
+      eq(code, 1, "signed: so is a foreign actor")
+      eq(#compared, 0, "signed: ... before any signature is looked at")
+
+      -- the hook script carries the registry: a runner started before the variable was set does not see it
+      local hook = guard.hook_text("/x/nvim", "/x/testing.lua", "E:/it's/allowed_signers")
+      local lines = vim.split(hook, "\r\n", { plain = true })
+      eq(
+        lines[4],
+        "$env:TESTING_ALLOWED_SIGNERS = 'E:/it''s/allowed_signers'",
+        "hook: the registry"
+      )
+      eq(lines[3], "$script = '/x/testing.lua'", "hook: ... after the script")
+      lacks(guard.hook_text("/x/nvim", "/x/testing.lua"), "ALLOWED_SIGNERS", "hook: none, no line")
+    end
+  end
+
   -- ------------------------------------------------------------------ `trust --pushed`: own commits only
 
   do

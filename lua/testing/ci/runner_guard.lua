@@ -20,7 +20,10 @@
 ---   2. event `pull_request` / `pull_request_target`: refuse (their code is never trusted)
 ---   3. actor or triggering actor is not the owner of the repository (the maintainer): refuse
 ---   4. repository private (and mode not `always`): run
----   5. the commit (`GITHUB_SHA`) is on the list of reviewed commits: run; else refuse and name `testing ci trust`
+---   5. the commit (`GITHUB_SHA`) is on the list of reviewed commits: run
+---   6. every commit since a reviewed ancestor carries an SSH signature by a key of the device registry
+---      (`$TESTING_ALLOWED_SIGNERS`, else `<runners>/allowed_signers`): run, and the commit goes on the list;
+---      else refuse and name `testing ci trust`
 ---
 --- Review is per commit id, never per author (the author field is free text). The list is
 --- `<runners>/reviewed.json`, read as untrusted data: a file that is not ours is an empty list (nothing is trusted
@@ -38,6 +41,10 @@ M.MAX_SHAS = 50
 M.MAX_REPOS = 200
 M.HOOK_VAR = "ACTIONS_RUNNER_HOOK_JOB_STARTED"
 M.ENV_ROOT = "TESTING_RUNNER_ROOT"
+M.ENV_SIGNERS = "TESTING_ALLOWED_SIGNERS"
+M.MAX_SIGNERS_BYTES = 64 * 1024
+M.MAX_SIGNED = 250 -- the compare API lists at most 250 commits without paging
+M.MAX_BASES = 3
 M.MODES = { auto = true, always = true, off = true }
 M.EVENTS =
   { push = true, workflow_dispatch = true, workflow_run = true, schedule = true, release = true }
@@ -60,6 +67,7 @@ local uv = vim.uv or vim.loop
 ---@field root? string
 ---@field nvim? string
 ---@field script? string
+---@field ssh_keygen? string
 
 ---The variables this module reads, by literal names (a computed name makes a spec that loads the module
 ---unkeyable for the result cache).
@@ -73,6 +81,7 @@ local function real_env()
     GITHUB_REPOSITORY_OWNER = os.getenv("GITHUB_REPOSITORY_OWNER"),
     GITHUB_SHA = os.getenv("GITHUB_SHA"),
     TESTING_RUNNER_ROOT = os.getenv("TESTING_RUNNER_ROOT"),
+    TESTING_ALLOWED_SIGNERS = os.getenv("TESTING_ALLOWED_SIGNERS"),
     USERPROFILE = os.getenv("USERPROFILE"),
     HOME = os.getenv("HOME"),
   }
@@ -286,7 +295,8 @@ function M.decide(f)
     ("commit %s of %s is not reviewed (unreviewed commits since the last release)"):format(
       f.sha:sub(1, 12),
       f.repo
-    )
+    ),
+    "unreviewed"
 end
 
 ---@param ctx? Testing.RunnerGuard.Ctx
@@ -307,6 +317,160 @@ local function gh(ctx, args)
     return nil, ((r.stderr or ""):gsub("%s+$", ""):sub(1, 300))
   end
   return r.stdout or ""
+end
+
+-- --------------------------------------------------------------------------------------------------- signed commits
+
+---The device registry (an `allowed_signers` file of ssh-keygen), or nil when there is none.
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param root string
+---@return string|nil path
+---@return string|nil note why a registry that is named cannot be used
+function M.signers_path(ctx, root)
+  local given = read_var(ctx, M.ENV_SIGNERS)
+  local path = (given and given ~= "") and vim.fs.normalize(given) or (root .. "/allowed_signers")
+  local st = uv.fs_stat(path)
+  if not st then
+    return nil, (given and given ~= "") and (path .. " does not exist") or nil
+  end
+  if st.type ~= "file" or st.size == 0 or st.size > M.MAX_SIGNERS_BYTES then
+    return nil, ("%s is not a regular file of 1 to %d bytes"):format(path, M.MAX_SIGNERS_BYTES)
+  end
+  return path
+end
+
+---@param ctx? Testing.RunnerGuard.Ctx
+---@return string|nil
+local function keygen(ctx)
+  if ctx and ctx.ssh_keygen then
+    return ctx.ssh_keygen
+  end
+  local p = vim.fn.exepath("ssh-keygen")
+  if p ~= "" then
+    return p
+  end
+  for _, c in ipairs({
+    "C:/Windows/System32/OpenSSH/ssh-keygen.exe",
+    "C:/Program Files/Git/usr/bin/ssh-keygen.exe",
+  }) do
+    if uv.fs_stat(c) then
+      return c
+    end
+  end
+  return nil
+end
+
+---@param cmd string[]
+---@param stdin? string
+---@return integer code
+---@return string stdout
+local function exec(cmd, stdin)
+  local ok, proc = pcall(vim.system, cmd, { text = true, stdin = stdin })
+  if not ok then
+    return -1, ""
+  end
+  ---@cast proc vim.SystemObj
+  local r = proc:wait(15000)
+  return r.code, r.stdout or ""
+end
+
+---Check one SSH signature of git (namespace `git`) against the registry.
+---@param kg string ssh-keygen
+---@param signers string the registry
+---@param payload string the signed text (the commit object without its signature)
+---@param signature string the armored SSH signature
+---@return string|nil principal the first principal of the registry line whose key signed, nil: not valid
+function M.verify_signature(kg, signers, payload, signature)
+  local sig = vim.fn.tempname()
+  local f = io.open(sig, "wb")
+  if not f then
+    return nil
+  end
+  f:write(signature)
+  f:close()
+  local principal
+  local code, out = exec({ kg, "-Y", "find-principals", "-s", sig, "-f", signers })
+  local first = code == 0 and out:match("^%s*([^\r\n]+)") or nil
+  if first then
+    -- find-principals only matches the key; verify checks the signature over the payload
+    local vcode =
+      exec({ kg, "-Y", "verify", "-f", signers, "-I", first, "-n", "git", "-s", sig }, payload)
+    principal = vcode == 0 and first or nil
+  end
+  pcall(uv.fs_unlink, sig)
+  return principal
+end
+
+local SSH_ARMOR = "-----BEGIN SSH SIGNATURE-----"
+
+---Rule 6: may `sha` run because every commit it adds to a reviewed ancestor is signed by a registered device?
+---@param repo string `owner/name`
+---@param sha string
+---@param entry Testing.RunnerGuard.Entry|nil
+---@param signers string the registry
+---@param ctx? Testing.RunnerGuard.Ctx
+---@return boolean ok
+---@return string why the signers when ok, else the reason
+function M.signed_release(repo, sha, entry, signers, ctx)
+  local kg = keygen(ctx)
+  if not kg then
+    return false, "no ssh-keygen to check signatures"
+  end
+  local shas = entry and entry.shas or {}
+  if #shas == 0 then
+    return false, "no reviewed commit to start from (release one with testing ci trust)"
+  end
+  local doc, tried = nil, 0
+  for i = #shas, 1, -1 do
+    if tried >= M.MAX_BASES then
+      break
+    end
+    tried = tried + 1
+    local text = gh(ctx, { "api", ("repos/%s/compare/%s...%s"):format(repo, shas[i].sha, sha) })
+    local ok, d = pcall(vim.json.decode, text or "")
+    if ok and type(d) == "table" and d.status == "ahead" then
+      doc = d
+      break
+    end
+  end
+  if not doc then
+    return false,
+      ("none of the last %d reviewed commits is an ancestor of %s"):format(tried, sha:sub(1, 12))
+  end
+  local commits = type(doc.commits) == "table" and doc.commits or {}
+  if #commits == 0 or #commits > M.MAX_SIGNED or doc.total_commits ~= #commits then
+    return false,
+      ("%s commit(s) since the last reviewed one: more than can be checked (%d)"):format(
+        tostring(doc.total_commits),
+        M.MAX_SIGNED
+      )
+  end
+  local seen, names = {}, {}
+  for _, c in ipairs(commits) do
+    local id = type(c) == "table" and type(c.sha) == "string" and c.sha:sub(1, 12) or "?"
+    local v = type(c) == "table" and type(c.commit) == "table" and c.commit.verification or nil
+    local sig = type(v) == "table" and v.signature or nil
+    local payload = type(v) == "table" and v.payload or nil
+    if
+      type(sig) ~= "string"
+      or type(payload) ~= "string"
+      or sig:sub(1, #SSH_ARMOR) ~= SSH_ARMOR
+    then
+      return false, ("commit %s has no SSH signature"):format(id)
+    end
+    if #payload > M.MAX_BYTES or #sig > 16 * 1024 then
+      return false, ("commit %s: signature or payload too large"):format(id)
+    end
+    local who = M.verify_signature(kg, signers, payload, sig)
+    if not who then
+      return false, ("commit %s is not signed by a key of the device registry"):format(id)
+    end
+    if not seen[who] then
+      seen[who] = true
+      names[#names + 1] = who
+    end
+  end
+  return true, table.concat(names, ", "):gsub("%c", " "):sub(1, 120)
 end
 
 ---@type fun(ctx?: Testing.RunnerGuard.Ctx): string, string
@@ -337,10 +501,40 @@ local function check(sv, ctx)
     local v = out and out:gsub("%s+", "")
     facts.is_private = v == "true" and true or (v == "false" and false or nil)
   end
-  local run, reason = M.decide(facts)
-  if run then
+  local allowed, reason, why = M.decide(facts)
+  if allowed then
     sv.out("runner-guard: allowed: " .. reason)
     return 0
+  end
+  if why == "unreviewed" and key then
+    local root = M.root(ctx)
+    local signers, snote = M.signers_path(ctx, root)
+    if snote then
+      sv.err("runner-guard: note: device registry: " .. snote)
+    end
+    if signers then
+      local sha = facts.sha:lower()
+      local good, who = M.signed_release(repo, sha, facts.entry, signers, ctx)
+      if good then
+        local done, err = update(M.store_path(root), function(rs)
+          local e = rs[key] or { mode = "auto", shas = {} }
+          rs[key] = e
+          e.shas[#e.shas + 1] =
+            { sha = sha, at = ctx and ctx.now or os.time(), note = "signed: " .. who }
+          while #e.shas > M.MAX_SHAS do
+            table.remove(e.shas, 1)
+          end
+        end)
+        if not done then
+          sv.err("runner-guard: note: not recorded: " .. tostring(err))
+        end
+        sv.out(
+          "runner-guard: allowed: every new commit is signed by a registered device (" .. who .. ")"
+        )
+        return 0
+      end
+      reason = reason .. "; not released by signature: " .. who
+    end
   end
   sv.err("runner-guard: JOB REFUSED: " .. reason)
   if
@@ -793,8 +987,9 @@ end
 ---The hook script. It decides nothing; no nvim or script: the job is refused.
 ---@param nvim string
 ---@param script string
+---@param signers? string the device registry: a runner started before the variable was set does not see it
 ---@return string
-function M.hook_text(nvim, script)
+function M.hook_text(nvim, script, signers)
   local lines = {
     "# generated by `testing ci runner-guard install`; do not edit (install rewrites it, remove deletes it)",
     "$nvim = " .. psq(nvim),
@@ -815,6 +1010,9 @@ function M.hook_text(nvim, script)
     "exit $code",
     "",
   }
+  if signers then
+    table.insert(lines, 4, "$env:" .. M.ENV_SIGNERS .. " = " .. psq(signers))
+  end
   return table.concat(lines, "\r\n")
 end
 
@@ -929,10 +1127,11 @@ local function manage(action, argv, sv, ctx)
     return vim.fs.normalize(v):lower() == vim.fs.normalize(hook):lower()
   end
   local code = 0
+  local signers, snote = M.signers_path(ctx, root)
   if action == "install" then
     local ok, err = require("lib.nvim.fs.write.atomic")(
       root .. "/_guard/job-started.ps1",
-      M.hook_text(nvim, script),
+      M.hook_text(nvim, script, signers),
       { mkdirp = true }
     )
     if not ok then
@@ -990,6 +1189,15 @@ local function manage(action, argv, sv, ctx)
         vim.tbl_count(repos),
         vim.tbl_count(repos) == 1 and "y" or "ies",
         note and (" (" .. note .. ")") or ""
+      )
+    )
+  end
+  if action ~= "remove" then
+    sv.out(
+      ("device registry: %s"):format(
+        signers
+          or (snote and ("unusable: " .. snote))
+          or ("none ($" .. M.ENV_SIGNERS .. " or " .. root .. "/allowed_signers)")
       )
     )
   end
