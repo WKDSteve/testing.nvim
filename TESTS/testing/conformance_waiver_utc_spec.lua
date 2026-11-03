@@ -2,6 +2,10 @@
 -- time zone of the machine: the same instant gives the same answer under every `TZ`. The time zone is read by
 -- the C runtime when the process starts, so each zone is checked in a fresh `nvim -l` process.
 
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   local settings = require("testing.conformance.settings")

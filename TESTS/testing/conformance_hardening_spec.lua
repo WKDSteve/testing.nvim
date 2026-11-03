@@ -3,6 +3,11 @@
 -- it read outside the repository (SEC-42), and memory is bounded as a whole.
 
 ---@diagnostic disable: need-check-nil
+
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   local dir = vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))

@@ -3,6 +3,10 @@
 -- deadline is one-shot and re-armed, the file deadline is persistent, guards nest. The clock is
 -- injected where the test must not depend on real time.
 
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   -- dialect A's `eq` is strict `==`; these specs compare tables deeply (their original harness did)

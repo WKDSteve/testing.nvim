@@ -4,6 +4,10 @@
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   local function eq(actual, expected, msg)

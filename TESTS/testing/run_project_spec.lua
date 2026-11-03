@@ -3,6 +3,10 @@
 -- reporters + history + the sentinel rules. Real discovery, real driver, real reporters; only the
 -- state directory is redirected into a temp dir.
 
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   -- dialect A's `eq` is strict `==`; these specs compare tables deeply (their original harness did)

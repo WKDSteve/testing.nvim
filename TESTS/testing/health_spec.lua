@@ -2,6 +2,10 @@
 -- levels agree with its text for every failure it can detect.
 ---@diagnostic disable: duplicate-set-field
 
+-- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
+-- assertion depends on the time of day (reviewed 2026-11-03).
+-- @cache-allow time
+
 return function(H)
   local ok = H.ok
   -- dialect A has no `has`: a plain substring check on top of H.ok (a tail call keeps the call site)
