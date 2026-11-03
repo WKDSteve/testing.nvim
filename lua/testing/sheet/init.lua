@@ -76,6 +76,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field cursor? boolean
 ---@field mode? boolean
 ---@field note? string
+---@field ignore_errmsg? boolean
 
 ---@class Testing.Sheet
 ---@field id string

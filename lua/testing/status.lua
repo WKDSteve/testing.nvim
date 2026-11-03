@@ -123,6 +123,7 @@ function M.main(argv, sv)
     sv.err("testing status: " .. (dirs and "no repository found" or tostring(info)))
     return M.EXIT_USAGE
   end
+  ---@cast info { excluded: string[], missing: string[] }
   local state_dir = args.state_dir
       and vim.fs.normalize(vim.fn.fnamemodify(args.state_dir, ":p")):gsub("/$", "")
     or sv.state_dir

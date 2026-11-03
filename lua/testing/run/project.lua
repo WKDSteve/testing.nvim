@@ -227,7 +227,7 @@ end
 ---The reporters to run on the real IR and on the sanitized one.
 ---@param args Testing.Args
 ---@param effective? string The reporter `resolve_reporter` chose (option, `TESTING_REPORTER`, agent environment).
----@return string|nil stdout_reporter `term` (default), `github`, `junit`, `json` or `agent`
+---@return string stdout_reporter `term` (default), `github`, `junit`, `json` or `agent`
 ---@return Testing.Report.Spec[] sanitized_specs
 local function reporter_plan(args, effective)
   local primary = effective or args.reporter or "term"

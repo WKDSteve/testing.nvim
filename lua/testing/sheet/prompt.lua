@@ -253,6 +253,7 @@ function M.explain(argv, sv, deps)
     sv.err("testing sheets: " .. perr .. "\n" .. M.USAGE)
     return 2
   end
+  ---@cast roots string[]
   local refusal = confidential(o.vault, roots)
   if refusal then
     sv.err("testing sheets: refused: " .. refusal)

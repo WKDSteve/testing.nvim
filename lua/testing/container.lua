@@ -48,6 +48,7 @@ local function runner(opts)
     if not ok then
       return { code = 127, stdout = "", stderr = tostring(proc) }
     end
+    ---@cast proc vim.SystemObj
     local done = proc:wait(opts.timeout_ms or 120000)
     return { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
   end

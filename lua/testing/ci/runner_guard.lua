@@ -301,6 +301,7 @@ local function gh(ctx, args)
   if not ok then
     return nil, "gh cannot be started: " .. tostring(proc)
   end
+  ---@cast proc vim.SystemObj
   local r = proc:wait(30000)
   if r.code ~= 0 then
     return nil, ((r.stderr or ""):gsub("%s+$", ""):sub(1, 300))
@@ -415,7 +416,7 @@ end
 ---@return table|nil args
 ---@return string|nil problem
 function M.parse_trust(argv)
-  ---@type table
+  ---@type table<string, any>
   local a = { positional = {} }
   for _, x in ipairs(argv) do
     if x == "--show" or x == "--list" or x == "--revoke" or x == "--pushed" then
@@ -458,6 +459,7 @@ local function repo_of_cwd(ctx, cwd)
   if not ok then
     return nil
   end
+  ---@cast proc vim.SystemObj
   local r = proc:wait(10000)
   if r.code ~= 0 then
     return nil
@@ -541,6 +543,7 @@ local function git_lines(cwd, args)
   if not ok then
     return nil
   end
+  ---@cast proc vim.SystemObj
   local r = proc:wait(30000)
   if r.code ~= 0 then
     return nil
@@ -748,6 +751,7 @@ function M.trust_main(argv, sv, ctx)
     sv.err(("testing ci trust: %s has no commit %s: %s"):format(repo, ref, tostring(ferr)))
     return 3
   end
+  ---@cast full string
   local repos = M.read(path)
   local entry = repos[key]
   local prev = entry and entry.shas[#entry.shas] and entry.shas[#entry.shas].sha or nil

@@ -1044,6 +1044,7 @@ function M.resolve(sel)
     end
   end
   if type(info) == "table" then
+    ---@cast info { excluded: string[], missing: string[], merged?: string[] }
     info.merged = merged
   end
   return out, info

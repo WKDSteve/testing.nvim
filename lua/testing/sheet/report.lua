@@ -149,7 +149,7 @@ function M.collect(roots, opts)
       local e =
         { root = root, rel = rel, sheet = s, error = err, snapshots = snapshot_files(root, rel) }
       if s then
-        e.case = by_name[sheet_mod.spec_name(s)]
+        e.case = (by_name or {})[sheet_mod.spec_name(s)]
         if e.case and st then
           local stale, why = state.is_stale(st, e.case.file)
           e.stale = stale and (why or "stale")

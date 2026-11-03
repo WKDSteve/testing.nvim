@@ -307,7 +307,6 @@ end
 ---The findings of a repository's state plus extra sources (guard findings of a run, a lint document, sheets).
 ---@param ctx Testing.Finding.Ctx
 ---@param extra? Testing.Finding.Source[]
-
 ---Sorted by `fp`; a repository the data classes do not release gives none.
 ---@return table[]|nil docs
 ---@return string|nil err

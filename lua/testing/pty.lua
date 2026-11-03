@@ -67,7 +67,7 @@ end
 ---@class Testing.Pty.Session
 ---@field name string
 ---@field raw_path string File of the recording, on the host of tmux.
----@field private _opts Testing.Pty.Opts
+---@field _opts Testing.Pty.Opts
 local Session = {}
 Session.__index = Session
 

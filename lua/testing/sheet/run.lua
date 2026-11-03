@@ -73,7 +73,9 @@ end
 function M.main(argv, sv, deps)
   deps = deps or {}
   local getenv = deps.getenv or vim.uv.os_getenv
-  local o, roots = { dry_run = false }, {}
+  ---@type table<string, any>
+  local o = { dry_run = false }
+  local roots = {}
   local i = 1
   while i <= #argv do
     local a = argv[i]
@@ -172,6 +174,7 @@ function M.main(argv, sv, deps)
     for _, r in ipairs(roots) do
       have[vim.fs.basename(r)] = true
     end
+    ---@cast call -?
     local doc = call("bodies", { ids = { o.id } })
     local item = type(doc) == "table" and type(doc.items) == "table" and doc.items[1] or nil
     local block = item
@@ -258,6 +261,7 @@ function M.main(argv, sv, deps)
   if not o.vault or deps.no_write then
     return red and 1 or 0
   end
+  ---@cast call -?
   local results, serr = tasks.sync(mine, { call = call, dry_run = o.dry_run })
   if not results then
     sv.err("testing sheets: " .. tostring(serr))

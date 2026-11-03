@@ -108,6 +108,7 @@ M.deps = {
     end
     return {
       wait = function()
+        ---@cast proc vim.SystemObj
         return proc:wait(30000)
       end,
     }
@@ -716,7 +717,7 @@ local function fetch(rec, ctx, done)
                 run_updated_at = run.updated_at,
                 -- the stored ETag only for the stored list: a 200 without an ETag must not pair the old one with
                 -- the new list (a later 304 on it would bring the old list back)
-                etag = res2.not_modified and (res2.etag or jc.etag) or res2.etag,
+                etag = res2.not_modified and (res2.etag or (jc and jc.etag)) or res2.etag,
                 list = jobs,
               }
               M.classify(rec, run, vim.deepcopy(jobs), ctx.non_gating[rec], ctx.now)
@@ -746,7 +747,7 @@ end
 local function repo_config(dir)
   local defaults = require("testing.config.DEFAULTS").project.ci_remote
   if not vim.uv.fs_stat(dir .. "/.testing.lua") then
-    return vim.deepcopy(defaults)
+    return (vim.deepcopy(defaults))
   end
   local ok, loaded = pcall(require("testing.config.project").load, dir)
   if not ok then
@@ -1088,7 +1089,7 @@ end
 ---The document `testing-ci-remote/1`.
 ---@param records table[]
 ---@param info table
----@param opts { workflow?: string }
+---@param opts { workflow?: string, state_dir?: string }
 ---@return table
 function M.document(records, info, opts)
   return {

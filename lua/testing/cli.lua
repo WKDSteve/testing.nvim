@@ -583,7 +583,8 @@ local function execute(argv, sv)
   local usage = args_mod.usage()
 
   -- the workstation runs nothing (docs/CLI.md, Workstation): only the reading commands go on
-  local refusal = require("testing.machine").refusal(argv, sv.getenv)
+  local refusal =
+    require("testing.machine").refusal(argv, (sv --[[@as Testing.Cli.Services]]).getenv)
   if refusal then
     err(refusal)
     return M.EXIT_USAGE

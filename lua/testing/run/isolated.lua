@@ -819,13 +819,13 @@ end
 ---@field live Testing.Isolated.Slot[] Slots whose child is running.
 ---@field state { stopped: boolean, fatal: any }
 ---@field pool_opts { size: integer, reuse: boolean } A hand-built options table (a spec) may lack the keys of the warm pool.
----@field state_mode? string The state guard's mode (`error`, `warn`, ...).
+---@field state_mode? string|true The state guard's mode (`error`, `warn`, ...).
 ---@field pool? Testing.Pool The warm pool, made on first use.
 ---@field pool_fallback_note? string Set when no member could be started: every file then runs in a child of its own.
 ---@field frag_dir? string Where the members write their records. NOT the member's sandbox: that is removed the moment its process ends (a crash, a kill), and the cases a file finished before it died are in this fragment.
 ---@field budget_files table<string, true> Files `--time-budget` skipped.
 ---@field budget_out boolean The time budget is used up.
----@field res Testing.Result.Run
+---@field res Testing.Result
 ---@field header_tags fun(rel: string): string[]
 ---@field effects_measured boolean
 ---@field slots Testing.Isolated.Slot[]

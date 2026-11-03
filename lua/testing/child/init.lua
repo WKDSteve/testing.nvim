@@ -799,6 +799,7 @@ local function kill_trees(hs, exec, pause, done)
   end
   read_table(exec, function(procs)
     for _, h in ipairs(hs) do
+      ---@type { pid: integer, created: integer }[]
       local below = procs and below_of(procs, h.pid) or {}
       if not pcall(vim.uv.kill, -h.pid, "sigkill") then
         root_kill(h)

@@ -113,7 +113,7 @@ function M.ask_verify(dir, state_dir, sv)
   end
   local okd, doc = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not okd or type(doc) ~= "table" then
-    return nil, (errs[1] or "no answer"):gsub("^testing ci verify: ", "")
+    return nil, ((errs[1] or "no answer"):gsub("^testing ci verify: ", ""))
   end
   return doc
 end
@@ -215,7 +215,7 @@ end
 function M.config(cwd)
   local defaults = require("testing.config.DEFAULTS").project.ci_overview
   if not vim.uv.fs_stat(cwd .. "/.testing.lua") then
-    return vim.deepcopy(defaults)
+    return (vim.deepcopy(defaults))
   end
   local ok, loaded = pcall(require("testing.config.project").load, cwd)
   if not ok then
@@ -262,7 +262,10 @@ function M.resolve(args, cfg)
     end
     parent = norm(parent)
     local vaults = {}
-    local listed = remote.resolve({ roots = {}, repos_roots = { parent } }, vaults) or {}
+    local listed = remote.resolve(
+      { roots = {}, repos_roots = { parent }, json = false, help = false },
+      vaults
+    ) or {}
     for _, r in ipairs(listed) do
       add(r.dir)
     end
@@ -602,7 +605,7 @@ function M.collect(dirs, opts, sv)
       c = ci_state(
         nil,
         dir,
-        M.clean("the CI record could not be read: " .. tostring(c), dir, opts.state_dir)
+        M.clean("the CI record could not be read: " .. tostring(c), dir, opts.state_dir) or ""
       )
     end
     out[#out + 1] = { repo = vim.fs.basename(dir), ["local"] = l, ci = c }
