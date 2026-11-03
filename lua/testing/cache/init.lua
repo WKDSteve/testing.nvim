@@ -1316,7 +1316,10 @@ local function input_lines(file_info, spec_info, ctx, hasher, agg, force_tree)
       end
       return nil
     end
-    if st.type == "file" then
+    if st.type == "file" and vim.fs.basename(abs) == ".git" then
+      -- the link file of a linked worktree (`gitdir: <path>`): the path is the checkout's, not the commit's
+      lines[#lines + 1] = ("input %s=<worktree link>"):format(rel)
+    elseif st.type == "file" then
       local sha, why = sha_of(ctx, hasher, abs, true)
       if not sha then
         return ("input %s: %s"):format(rel, tostring(why))

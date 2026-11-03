@@ -327,7 +327,11 @@ function M.list_files(dir, ignore_dirs)
   local links, all_links = {}, {}
   local function ignore(path, is_dir)
     if not is_dir then
-      return false
+      -- the `.git` FILE of a linked worktree names the worktree's directory under the main repository: it differs
+      -- from checkout to checkout of the same commit and is no input of any spec
+      return ignore_dirs ~= nil
+        and ignore_dirs[".git"] == true
+        and (path:match("([^/]+)$") or "") == ".git"
     end
     if ignore_dirs and ignore_dirs[path:match("([^/]+)$") or ""] == true then
       return true
