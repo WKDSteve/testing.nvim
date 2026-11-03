@@ -498,7 +498,7 @@ local function check(sv, ctx)
     sv.out("runner-guard: allowed: " .. reason)
     return 0
   end
-  if why == "unreviewed" and key then
+  if why == "unreviewed" and key and is_sha(facts.sha:lower()) then
     local root = M.root(ctx)
     local signers, snote = M.signers_path(ctx, root)
     if snote then
@@ -511,6 +511,10 @@ local function check(sv, ctx)
         local done, err = update(M.store_path(root), function(rs)
           local e = rs[key] or { mode = "auto", shas = {} }
           rs[key] = e
+          -- two jobs of one push (one per system) both release it: one entry
+          e.shas = vim.tbl_filter(function(x)
+            return x.sha ~= sha
+          end, e.shas)
           e.shas[#e.shas + 1] =
             { sha = sha, at = ctx and ctx.now or os.time(), note = "signed: " .. who }
           while #e.shas > M.MAX_SHAS do

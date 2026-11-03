@@ -681,6 +681,7 @@ return function(H)
         )
       end
       local compared
+      local during
       local function check(e, private)
         compared = {}
         local o = sink()
@@ -699,6 +700,9 @@ return function(H)
             )
             if base then
               compared[#compared + 1] = base
+              if during then
+                during()
+              end
               local doc = compare(base)
               return doc and vim.json.encode(doc) or nil, doc and nil or "HTTP 404"
             end
@@ -727,6 +731,30 @@ return function(H)
       code = check()
       eq(code, 0, "signed: the next job of the run finds it on the list")
       eq(#compared, 0, "signed: ... without asking GitHub again")
+
+      -- two jobs of one push (one per system) both get past the list before either wrote it: one entry
+      reset()
+      compare = ahead({ commit(SHA4, p4, signed4) })
+      during = function()
+        local rs = guard.read(guard.store_path(root))
+        table.insert(rs["wkdsteve/tasks.nvim"].shas, { sha = SHA4, at = 4, note = "other job" })
+        write(guard.store_path(root), vim.json.encode({ v = 1, repos = rs }))
+      end
+      eq(check(), 0, "signed: the second job releases it too")
+      during = nil
+      local twice = 0
+      for _, s in ipairs(guard.read(guard.store_path(root))["wkdsteve/tasks.nvim"].shas) do
+        twice = twice + (s.sha == SHA4 and 1 or 0)
+      end
+      eq(twice, 1, "signed: ... and the commit is on the list once")
+
+      reset()
+      eq(
+        check(env({ GITHUB_SHA = "../../../users/x" })),
+        1,
+        "signed: a GITHUB_SHA that is no id refuses"
+      )
+      eq(#compared, 0, "signed: ... and is never put into an API path")
 
       reset()
       compare = ahead({ commit(SHA3, p3, nil), commit(SHA4, p4, signed4) })
