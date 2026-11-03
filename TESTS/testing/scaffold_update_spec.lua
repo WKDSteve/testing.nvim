@@ -76,6 +76,8 @@ return function(H)
     sh:gsub("\nexport NVIM_APPNAME=[^\n]*", '\nexport NVIM_APPNAME="${NVIM_APPNAME:-old-tests}"', 1)
   sh = sh:gsub(' run %. "%$@"', " run . --sentinel 'OLD_TESTS_OK' \"$@\"", 1)
   sh = sh:gsub("\nset %-euo pipefail\n", "\nset -euo pipefail\nOPTIONAL_DEPS=('snacks.nvim')\n", 1)
+  -- the trap line of the template before the suite-lock warning
+  sh = sh:gsub("\ntrap '[^\n]*' EXIT", "\ntrap 'rm -rf \"$scratch\"' EXIT", 1)
   put(sh_path, sh)
   p = update.plan(old, NOFMT)
   local f = file(p, "scripts/test.sh")
@@ -98,8 +100,8 @@ return function(H)
   )
   has(
     table.concat(f.kept, "\n"),
-    "1 line(s) of an older template version replaced",
-    "old: the old export is counted"
+    "2 line(s) of an older template version replaced",
+    "old: the old export and the old trap are counted"
   )
   has(f.diff, "-OPTIONAL_DEPS=('snacks.nvim')", "old: and the diff shows it")
   has(

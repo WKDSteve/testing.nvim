@@ -210,6 +210,8 @@ do
   end
   M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] =
     '^export NVIM_APPNAME="%${NVIM_APPNAME:%-[%w_%-]+%-tests}"$'
+  -- the trap before the suite-lock release was added to it
+  M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] = "^trap 'rm %-rf \"%$scratch\"' EXIT$"
   -- the old `fail()` ended with a fixed code; the new one exits with $FAIL_CODE (3 under `ci`)
   M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] = "^exit 1$"
 end
