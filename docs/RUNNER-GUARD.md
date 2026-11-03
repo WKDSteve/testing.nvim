@@ -106,7 +106,7 @@ It refuses when:
 - a signature does not match its payload;
 - none of the last three reviewed commits is an ancestor (history rewritten), there is no reviewed commit at all, or
   the range holds more than 250 commits;
-- there is no `ssh-keygen` (`PATH`, Windows' OpenSSH, Git for Windows).
+- there is no `ssh-keygen` on the `PATH` (Windows has its OpenSSH client there).
 
 A refused job names `testing ci trust` as before. Rules 2 and 3 come first: a pull request or a foreign actor is
 refused, signed or not.

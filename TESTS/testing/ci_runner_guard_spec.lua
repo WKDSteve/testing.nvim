@@ -694,12 +694,12 @@ return function(H)
             if args[4] == ".private" then
               return tostring(private == true) .. "\n"
             end
-            local base, head = (args[2] or ""):match(
-              "^repos/WKDSteve/tasks%.nvim/compare/(%x+)%.%.%.(%x+)$"
+            local base = (args[2] or ""):match(
+              "^repos/WKDSteve/tasks%.nvim/compare/(%x+)%.%.%.%x+$"
             )
             if base then
               compared[#compared + 1] = base
-              local doc = compare(base, head)
+              local doc = compare(base)
               return doc and vim.json.encode(doc) or nil, doc and nil or "HTTP 404"
             end
             return nil, "unexpected " .. table.concat(args, " ")

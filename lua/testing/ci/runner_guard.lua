@@ -250,6 +250,7 @@ end
 ---@param f Testing.RunnerGuard.Facts
 ---@return boolean run
 ---@return string reason
+---@return string|nil why `unreviewed`: only the list was missing (rule 6 may still release it)
 function M.decide(f)
   local mode = f.entry and f.entry.mode or "auto"
   if mode == "off" then
@@ -345,19 +346,10 @@ local function keygen(ctx)
   if ctx and ctx.ssh_keygen then
     return ctx.ssh_keygen
   end
+  -- PATH only (Windows has its OpenSSH in the system PATH): a fixed path here would be a file outside the
+  -- project that the result cache cannot key
   local p = vim.fn.exepath("ssh-keygen")
-  if p ~= "" then
-    return p
-  end
-  for _, c in ipairs({
-    "C:/Windows/System32/OpenSSH/ssh-keygen.exe",
-    "C:/Program Files/Git/usr/bin/ssh-keygen.exe",
-  }) do
-    if uv.fs_stat(c) then
-      return c
-    end
-  end
-  return nil
+  return p ~= "" and p or nil
 end
 
 ---@param cmd string[]
@@ -514,7 +506,7 @@ local function check(sv, ctx)
     end
     if signers then
       local sha = facts.sha:lower()
-      local good, who = M.signed_release(repo, sha, facts.entry, signers, ctx)
+      local good, who = M.signed_release(facts.repo, sha, facts.entry, signers, ctx)
       if good then
         local done, err = update(M.store_path(root), function(rs)
           local e = rs[key] or { mode = "auto", shas = {} }
