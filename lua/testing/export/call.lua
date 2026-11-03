@@ -299,17 +299,22 @@ function M.apply_params(args, text)
   return args
 end
 
----The repository below the repositories root whose key is `key`, as `fleet` finds them.
+---The repository below the repositories root whose key is `key`, as `fleet` finds them. The key starts with the
+---directory name (`testing.export.repo_key`), so only the directories of that name are asked for theirs: a key costs
+---git calls, and a root holds dozens of repositories.
 ---@param root string
 ---@param key string
 ---@return string|nil dir
 local function dir_of_key(root, key)
   local export = require("testing.export")
+  local name = key:match("^(.*)%-%x+$")
   local dirs = export.resolve({ repos_roots = { root } })
   for _, dir in ipairs(dirs or {}) do
-    local okk, k = pcall(export.deps.key, dir)
-    if okk and k == key then
-      return dir
+    if vim.fs.basename(dir):gsub("[^%w_.%-]", "_") == name then
+      local okk, k = pcall(export.deps.key, dir)
+      if okk and k == key then
+        return dir
+      end
     end
   end
   return nil

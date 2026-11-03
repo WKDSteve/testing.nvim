@@ -429,6 +429,39 @@ return function(H)
     local fd =
       hub("finding", vim.json.encode({ repo = alpha, state_dir = fx.state, areas = fx.areas }))
     eq(fd.code, 0, "finding by key: exit 0: " .. fd.err)
+    -- a key costs git calls: only the directories of the key's name are asked for theirs
+    -- (gamma: the last of the root, so a loop that asked every directory would ask the others first)
+    local gamma
+    for _, row in ipairs(call({ "fleet", "--repos-root=" .. fx.root }).doc.repos) do
+      if row.name == "gamma.nvim" then
+        gamma = row.key
+      end
+    end
+    local asked = {}
+    local counted = call(
+      { "repo", "--params=-" },
+      {
+        after = function()
+          local inner = export.deps.key
+          export.deps.key = function(dir)
+            asked[#asked + 1] = vim.fs.basename(dir)
+            return inner(dir)
+          end
+        end,
+      },
+      none,
+      {
+        env = { TESTING_REPOS_ROOT = fx.root },
+        stdin = function()
+          return vim.json.encode({ repo = gamma })
+        end,
+      }
+    )
+    eq(counted.code, 0, "repo by key, counted: exit 0: " .. counted.err)
+    ok(#asked >= 1, "the key of gamma was asked")
+    for _, n in ipairs(asked) do
+      eq(n, "gamma.nvim", "no key is asked of a directory with another name")
+    end
     local unknown = hub("repo", vim.json.encode({ repo = "alpha.nvim-000000000000" }))
     eq(unknown.code, 2, "a key below the root that no repository has: exit 2")
     has(unknown.err, "no repository", "says so")
