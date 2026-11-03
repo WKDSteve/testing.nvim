@@ -86,8 +86,8 @@ your devices signs its commits with an SSH key of its own (`git config gpg.forma
 ssh-keygen:
 
 ```
-you@example.com,STEVESPC namespaces="git" ssh-ed25519 AAAA... STEVESPC
-you@example.com,WORKSTATION namespaces="git" ssh-ed25519 AAAA... WORKSTATION
+STEVESPC,you@example.com namespaces="git" ssh-ed25519 AAAA... STEVESPC
+WORKSTATION,you@example.com namespaces="git" ssh-ed25519 AAAA... WORKSTATION
 ```
 
 The registry is `$TESTING_ALLOWED_SIGNERS`, else `<runners>/allowed_signers`. `runner-guard install` writes the
