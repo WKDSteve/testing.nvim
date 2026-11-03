@@ -2,7 +2,7 @@
 -- check per engine, the skip when a prerequisite is missing, the runner's answer with a fake runner and, where
 -- node, playwright-core and chromium exist, one real page (Tab moves the focus, a failed expectation is red).
 -- @cache-allow time processes
----@diagnostic disable: missing-fields
+---@diagnostic disable: missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok = H.ok

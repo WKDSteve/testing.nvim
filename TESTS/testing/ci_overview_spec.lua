@@ -3,7 +3,7 @@
 -- that no pipeline or suite is started, HTML escaping, redaction (no absolute path), the red filter, determinism,
 -- --no-remote, --json and the exit codes. A fake CI adapter; no network.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

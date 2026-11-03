@@ -4,7 +4,7 @@
 -- Markdown, a sheet that does not load, the CLI entry.
 -- @cache-allow time
 -- (the clock only bounds how long a wait step may take; it decides nothing else)
----@diagnostic disable: missing-fields
+---@diagnostic disable: duplicate-set-field, inject-field, missing-fields, need-check-nil, param-type-mismatch, undefined-field
 -- (the report tests build entries, cases and states with only the fields under test)
 
 return function(H)

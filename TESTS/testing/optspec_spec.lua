@@ -1,6 +1,8 @@
 -- TESTS/testing/optspec_spec.lua -- the table-driven option parser (`testing.optspec`) and `testing surface`, whose
 -- parser is built on it: `--name value`, `--name=value`, a missing value, an unknown option, a path given twice.
 
+---@diagnostic disable: need-check-nil
+
 return function(H)
   local ok = H.ok
   local function eq(actual, expected, msg)

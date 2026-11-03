@@ -5,6 +5,8 @@
 --
 -- Used by the export_*_spec files and by TESTS/golden/regenerate_export.lua.
 
+---@diagnostic disable: duplicate-set-field, need-check-nil, param-type-mismatch
+
 local M = {}
 
 ---The golden files of the export form (an export folder, byte for byte).

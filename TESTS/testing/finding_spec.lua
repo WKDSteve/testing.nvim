@@ -3,7 +3,7 @@
 -- document (private and unclassified give none, exit 2), every document validates against the schema file, and
 -- `testing call finding` prints them.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

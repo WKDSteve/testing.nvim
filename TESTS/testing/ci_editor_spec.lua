@@ -2,7 +2,7 @@
 -- verdict and the statusline text (pure), a run through a fake process (live buffer, quickfix only on red, one run at a
 -- time), `testing ci list`, and one real run in a child.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: assign-type-mismatch, missing-fields, need-check-nil, param-type-mismatch
 -- test doubles replace functions of the module under test (and vim.ui.*) on purpose, each restored afterwards
 ---@diagnostic disable: duplicate-set-field
 

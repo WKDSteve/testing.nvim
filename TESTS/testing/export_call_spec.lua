@@ -2,7 +2,7 @@
 -- command line (argv, one line of JSON on stdout, the exit codes 0/2/3), the CI adapter through its own fakes (no
 -- network), what happens when the adapter fails, and the real key and head of a repository (no fakes).
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

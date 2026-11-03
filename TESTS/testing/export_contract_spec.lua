@@ -3,7 +3,7 @@
 -- digest for a changed source, the manifest's sums, every document valid against the JSON Schema (and documents
 -- that break it refused), and the rules of a reader (a higher schema refused, unknown fields ignored).
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

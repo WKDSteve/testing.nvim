@@ -3,7 +3,7 @@
 -- and fixed as a multiset, a red step without findings as a whole, a cut list is inexact). The runs on fixture
 -- repositories are in ci_commit_run_spec.lua.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: cast-local-type, duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok = H.ok

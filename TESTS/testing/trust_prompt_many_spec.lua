@@ -2,7 +2,7 @@
 -- are not trusted: yes stores each of them, no stores none and the run starts anyway, nothing is asked when all are
 -- trusted or when there is no UI, and the repositories of the run are those `repos_args` names.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

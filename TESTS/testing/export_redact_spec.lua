@@ -3,7 +3,7 @@
 -- redacts them, the absolute `root` is only in the local form, and the leak detector finds an absolute path that got
 -- past the redaction (an injected one, and the whole export refused when the redaction is switched off).
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

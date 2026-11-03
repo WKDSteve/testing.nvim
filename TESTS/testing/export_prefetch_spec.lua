@@ -2,7 +2,7 @@
 -- is byte-for-byte the one the one-by-one questions give: commit, branch (also none when detached), dirty, key.
 -- Real git in temp directories.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq = H.ok, H.eq

@@ -5,7 +5,7 @@
 -- the fixture, never the real one of this device), no absolute path for a fixture below $HOME (with a positive
 -- control), and the workstation (no local results read, no run started).
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: cast-local-type, duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

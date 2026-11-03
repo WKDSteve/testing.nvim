@@ -2,7 +2,7 @@
 -- child's progress log names the killer and keeps the results before it, so the run costs one more editor per
 -- killer (not a halving of the batch per killer); without the log the halving still finds them.
 
----@diagnostic disable: need-check-nil -- the case body is the guard: a nil raises and fails the case
+---@diagnostic disable: duplicate-set-field, need-check-nil -- the case body is the guard: a nil raises and fails the case
 return function(H)
   local ok = H.ok
   local dir = vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))

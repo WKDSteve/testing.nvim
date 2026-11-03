@@ -3,7 +3,7 @@
 -- filter, a run with zero jobs, a self-hosted job without a runner, cancelled, skipped, no run, a host that is not
 -- GitHub, the ETag cache, no token, and that the token never reaches an output or a file. No real network call.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: duplicate-set-field, missing-fields, need-check-nil, param-type-mismatch
 
 return function(H)
   local ok, eq, has = H.ok, H.eq, H.has

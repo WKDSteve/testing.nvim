@@ -3,6 +3,8 @@
 -- request is booked at once, the table and `taskkill` go on in callbacks, and requests of the same tick share one
 -- table. Driven on every platform through `child.platform` and a stubbed `vim.system`.
 
+---@diagnostic disable: duplicate-set-field
+
 -- @cache-allow spawn
 -- (`vim.system` is replaced by a stub: no process starts)
 return function(H)
