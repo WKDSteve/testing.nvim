@@ -339,6 +339,11 @@ there), `replaced` (the hook of `:MyPlugins ci`) or `skipped: <why>` (a hook tha
 repository does not have). Exit `0` when nothing was skipped, `1` otherwise. It only writes a file into the hooks folder, so it
 runs no step; the first push of a repository is the hand test, and `git push --no-verify` skips the hook as before.
 
+With a global `core.hooksPath` the folder git looks in is the global one. When its `pre-push` hands over to the hook of the
+repository (`$(git rev-parse --git-common-dir)/hooks/pre-push`, like a guard against force pushes), `install` and `remove` use the
+repository's own `hooks` folder, which that global hook runs next; the global hook is never touched. A global `pre-push` that
+does not hand over is a hook that is not ours and is left alone.
+
 `install` writes `pre-push` into the hooks folder git uses for the repository (a worktree, `core.hooksPath`), `remove`
 deletes it. The hook computes no verdict of its own:
 

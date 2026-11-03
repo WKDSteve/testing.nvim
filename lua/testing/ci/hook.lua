@@ -152,6 +152,39 @@ local function read(path)
   return text
 end
 
+---A global `core.hooksPath` (a guard against force pushes, say) puts its own `pre-push` where git looks for hooks and
+---hands over to the one of the repository, `<git-common-dir>/hooks/pre-push`. Writing ours over that hook is out of
+---the question; writing it to the repository's own folder is exactly what the global hook runs next.
+---@param dir string The checkout.
+---@param hooks string The folder git looks in (`M.hooks_dir`).
+---@return string hooks The folder to write to.
+---@return string|nil existing The text of the `pre-push` there.
+---@return boolean chained The hook of the repository's own folder is used because the global one chains to it.
+function M.resolve(dir, hooks)
+  local existing = read(hooks .. "/pre-push")
+  if existing and not (M.marked(existing, M.MARK) or M.marked(existing, M.LEGACY_MARK)) then
+    if existing:find("--git-common-dir)/hooks/pre-push", 1, true) then
+      local ok, obj = pcall(
+        vim.system,
+        { "git", "-C", dir, "rev-parse", "--git-common-dir" },
+        { text = true }
+      )
+      local res = ok and obj and obj:wait(10000) or nil
+      local out = res and res.code == 0 and vim.trim(res.stdout or "") or ""
+      if out ~= "" then
+        if not (out:match("^%a:[/\\]") or out:sub(1, 1) == "/") then
+          out = dir .. "/" .. out
+        end
+        local own = vim.fs.normalize(out) .. "/hooks"
+        if own ~= vim.fs.normalize(hooks) then
+          return own, read(own .. "/pre-push"), true
+        end
+      end
+    end
+  end
+  return hooks, existing, false
+end
+
 ---Does a hook carry the mark as its second line (right after the shebang)? A foreign hook that merely mentions it does not.
 ---@param text string|nil
 ---@param mark string
@@ -314,9 +347,16 @@ local function install_all(args, sv)
       skipped, worst = skipped + 1, math.max(worst, M.EXIT_REFUSED)
       sv.out(("%-28s skipped: not a git checkout"):format(name))
     else
-      local code, msg, state = M.install(dir, hooks, args, read(hooks .. "/pre-push"))
+      local own, existing, chained = M.resolve(dir, hooks)
+      local code, msg, state = M.install(dir, own, args, existing)
       if code == M.EXIT_OK then
-        sv.out(("%-28s %s"):format(name, state))
+        sv.out(
+          ("%-28s %s%s"):format(
+            name,
+            state,
+            chained and " (in the repository's own hooks: a global hook chains to it)" or ""
+          )
+        )
       else
         skipped = skipped + 1
         worst = math.max(worst, code == M.EXIT_INFRA and code or M.EXIT_REFUSED)
@@ -357,8 +397,9 @@ function M.main(argv, sv)
     sv.err(("testing ci hook: %s is not a git checkout"):format(root))
     return M.EXIT_USAGE
   end
+  local existing, chained
+  hooks, existing, chained = M.resolve(root, hooks)
   local path = hooks .. "/pre-push"
-  local existing = read(path)
   local ours = M.marked(existing, M.MARK)
   local legacy = M.marked(existing, M.LEGACY_MARK)
 
@@ -384,7 +425,7 @@ function M.main(argv, sv)
     sv.err(msg)
     return code
   end
-  sv.out(msg)
+  sv.out(msg .. (chained and " (in the repository's own hooks: a global hook chains to it)" or ""))
   return M.EXIT_OK
 end
 

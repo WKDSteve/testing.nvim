@@ -311,6 +311,38 @@ return function(H)
     )
   end
 
+  -- a global core.hooksPath whose own pre-push hands over to the repository's hook: ours goes to the repository's
+  -- folder, the global hook is never touched, and a global hook that does not chain is still refused
+  do
+    local global = tmp .. "/global-hooks"
+    local chain =
+      '#!/bin/sh\n# guard\nhook="$(git rev-parse --git-common-dir)/hooks/pre-push"\n[ -x "$hook" ] && exec "$hook" "$@"\nexit 0\n'
+    write(global .. "/pre-push", chain)
+    local root = project("chained", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    git(root, "config", "core.hooksPath", global)
+    local res = run("install", "--root=" .. root)
+    eq(res.code, 0, "chained: install works through the global hook (" .. res.err .. ")")
+    has(res.out, "a global hook chains to it", "chained: said so")
+    eq(read(global .. "/pre-push"), chain, "chained: the global hook is untouched")
+    has(
+      read(root .. "/.git/hooks/pre-push"),
+      hook.MARK,
+      "chained: ours is in the repository's folder"
+    )
+    eq(run("install", "--root=" .. root).code, 0, "chained: again")
+    has(run("install", "--root=" .. root).out, "already installed", "chained: ... unchanged")
+    eq(run("remove", "--root=" .. root).code, 0, "chained: remove takes ours away")
+    eq(read(root .. "/.git/hooks/pre-push"), nil, "chained: ... from the repository's folder")
+    eq(read(global .. "/pre-push"), chain, "chained: ... and leaves the global hook")
+
+    local plain = project("global-plain", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    write(global .. "-plain/pre-push", "#!/bin/sh\necho no chain\nexit 0\n")
+    git(plain, "config", "core.hooksPath", global .. "-plain")
+    res = run("install", "--root=" .. plain)
+    eq(res.code, 1, "global without a chain: refused")
+    eq(read(plain .. "/.git/hooks/pre-push"), nil, "global without a chain: nothing written")
+  end
+
   vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = saved_git_env[1], saved_git_env[2]
   vim.fn.delete(empty_config)
   vim.fn.delete(tmp, "rf")
