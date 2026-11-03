@@ -448,10 +448,24 @@ end
 ---@return { row: integer, col: integer }
 function M.cursor_cell()
   local mode = vim.api.nvim_get_mode().mode:sub(1, 1)
-  if ("niVvsR" .. string.char(22)):find(mode, 1, true) then
+  if ("niVvsSR" .. string.char(22) .. string.char(19)):find(mode, 1, true) then
     local pos = vim.fn.win_screenpos(0)
     if pos[1] > 0 and pos[2] > 0 then
-      return { row = pos[1] + vim.fn.winline() - 1, col = pos[2] + vim.fn.wincol() - 1 }
+      local row, col = pos[1] + vim.fn.winline() - 1, pos[2] + vim.fn.wincol() - 1
+      -- the text starts below a winbar, and inside the border of a floating window
+      if (vim.wo.winbar or "") ~= "" then
+        row = row + 1
+      end
+      local border = vim.api.nvim_win_get_config(0).border
+      if type(border) == "table" then
+        row = row + ((border[2] or "") ~= "" and 1 or 0)
+        col = col + ((border[8] or "") ~= "" and 1 or 0)
+      end
+      -- 'rightleft' draws the line mirrored: wincol() counts from the right edge
+      if vim.wo.rightleft then
+        col = pos[2] + vim.api.nvim_win_get_width(0) - vim.fn.wincol()
+      end
+      return { row = row, col = col }
     end
   end
   return { row = vim.fn.screenrow(), col = vim.fn.screencol() }

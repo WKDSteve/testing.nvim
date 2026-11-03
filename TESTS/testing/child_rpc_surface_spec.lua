@@ -268,6 +268,42 @@ return function(H)
     )
     c.cmd("tabclose!")
 
+    -- the cursor cell holds the character under the cursor: below a winbar, inside the border of a float and in a
+    -- 'rightleft' window (independent of screenrow(): the cell is read from the drawn grid)
+    do
+      c.cmd("tabnew")
+      c.api.nvim_buf_set_lines(0, 0, -1, false, { "xxxxx", "xxYxx" })
+      c.api.nvim_win_set_cursor(0, { 2, 2 })
+      local function under_cursor(label)
+        local shot = c.screen()
+        eq(
+          shot.cells[shot.cursor.row][shot.cursor.col],
+          "Y",
+          "cursor cell holds the character: " .. label
+        )
+      end
+      under_cursor("plain")
+      c.cmd("setlocal winbar=bar")
+      under_cursor("below a winbar")
+      c.cmd("setlocal winbar=")
+      c.cmd("setlocal rightleft")
+      under_cursor("rightleft")
+      c.cmd("setlocal norightleft")
+      local fb = c.api.nvim_create_buf(false, true)
+      c.api.nvim_buf_set_lines(fb, 0, -1, false, { "aaaaa", "aaYaa" })
+      c.api.nvim_open_win(fb, true, {
+        relative = "editor",
+        row = 3,
+        col = 10,
+        width = 10,
+        height = 3,
+        border = "single",
+      })
+      c.api.nvim_win_set_cursor(0, { 2, 2 })
+      under_cursor("inside a float border")
+      c.cmd("tabclose!")
+    end
+
     -- a snapshot of the real screen: written once, matched again, a change differs; the clock is masked
     local snap_root = S.new_dir()
     local screen_mod = require("testing.screen")

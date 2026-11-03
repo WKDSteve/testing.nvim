@@ -34,7 +34,7 @@ of the last 5 green runs** of the same runner type as the reference (`scripts/be
 `testing.budget.median_baseline`) and checks against that. One slow night does not become the reference and a slow
 drift does not move it at once. A regression turns the job red and shows the table in the step summary; no issue is
 opened. Only a green run uploads its baseline (`bench-baseline-<os>`, 30 days), so a red night never lowers the bar.
-The first run has no reference and only records one.
+The first run has no reference and only records one. A case the reference does not know yet (new or renamed) is checked with `--allow-new`, otherwise the job could never turn green again to teach the reference the case.
 
 ## The cases
 

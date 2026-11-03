@@ -15,6 +15,11 @@ if not lib then
   io.stderr:write((why or "testing: lib.nvim was not found") .. "\n")
   os.exit(3)
 end
+local too_old = deps.lib_problem(lib)
+if too_old then
+  io.stderr:write(too_old .. "\n")
+  os.exit(3)
+end
 vim.opt.rtp:append(lib.dir)
 
 local args = vim.deepcopy(_G.arg or {})

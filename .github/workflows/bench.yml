@@ -54,8 +54,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/prev"
-          ids=$(gh run list --workflow bench.yml --status success --limit 5 \
-            --json databaseId --jq '.[].databaseId')
+          # main only: a dispatch on a feature branch must not feed the reference; no earlier run (or no
+          # workflow on the default branch yet) is the first-run path, not a failure
+          ids=$(gh run list --workflow bench.yml --branch main --status success --limit 5 \
+            --json databaseId --jq '.[].databaseId' || true)
           for id in $ids; do
             gh run download "$id" --name "$ARTIFACT" --dir "$RUNNER_TEMP/prev/$id" || true
           done
@@ -72,14 +74,21 @@ jobs:
         if: steps.reference.outputs.found == 'true'
         run: |
           set +e
-          nvim -n -i NONE --headless -u NONE -l scripts/testing.lua budget . \
+          # --allow-new: a case the reference does not know yet (new or renamed) is not a regression; without
+          # it the job would stay red for ever, because only a green run uploads the baseline that would hold it
+          nvim -n -i NONE --headless -u NONE -l scripts/testing.lua budget . --allow-new \
             --baseline "$RUNNER_TEMP/reference.json" > "$RUNNER_TEMP/budget.txt" 2> "$RUNNER_TEMP/budget.err"
           code=$?
+          cat "$RUNNER_TEMP/budget.err" >&2
           cat "$RUNNER_TEMP/budget.txt"
           {
             echo '### Budget against the median of the last green runs'
             echo '```'
             cat "$RUNNER_TEMP/budget.txt"
+            if [ "$code" -ne 0 ]; then
+              echo "--- stderr (exit $code) ---"
+              cat "$RUNNER_TEMP/budget.err"
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
