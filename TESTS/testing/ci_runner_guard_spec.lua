@@ -594,6 +594,36 @@ return function(H)
     eq(guard.main({ "check", "extra" }, o.sv, ctx), 2, "main: check takes no argument")
   end
 
+  -- a reinstall without the variable keeps the registry the hook script names
+  do
+    local root = tmp()
+    write(root .. "/r1/run.cmd", "@echo off\r\n")
+    local registry = root .. "/it's signers"
+    write(registry, "x\n")
+    local hook_path = root .. "/_guard/job-started.ps1"
+    local base = { root = root, nvim = "/x/nvim", script = "/x/testing.lua" }
+    local o = sink()
+    guard.main(
+      { "install" },
+      o.sv,
+      vim.tbl_extend("force", base, { env = { TESTING_ALLOWED_SIGNERS = registry } })
+    )
+    eq(guard.hook_signers(slurp(hook_path) or ""), registry, "install: the hook names the registry")
+    o = sink()
+    eq(guard.main({ "install" }, o.sv, vim.tbl_extend("force", base, { env = {} })), 0, "reinstall")
+    eq(
+      guard.hook_signers(slurp(hook_path) or ""),
+      registry,
+      "reinstall without the variable: the registry is kept"
+    )
+    has(joined(o), "kept from the hook script", "reinstall: ... and says so")
+    os.remove(registry)
+    o = sink()
+    guard.main({ "install" }, o.sv, vim.tbl_extend("force", base, { env = {} }))
+    eq(guard.hook_signers(slurp(hook_path) or ""), nil, "a registry that is gone is not kept")
+    eq(guard.hook_signers("$x = 1\r\n"), nil, "hook_signers: no line, nil")
+  end
+
   -- ------------------------------------------------------------------ the hook script, run for real
 
   do

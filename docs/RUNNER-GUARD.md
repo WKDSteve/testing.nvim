@@ -92,7 +92,10 @@ WORKSTATION,you@example.com namespaces="git" ssh-ed25519 AAAA... WORKSTATION
 
 The registry is `$TESTING_ALLOWED_SIGNERS`, else `<runners>/allowed_signers`. `runner-guard install` writes the
 path of the variable into the hook script (a runner started before the variable was set does not see it), and
-`status` shows which registry is used. A new device: add its line, and run `install` again when the path changed.
+`status` shows which registry is used. A reinstall in a shell that does not see the variable (one started before
+it was set, or `runners.ps1 start|ensure` from such a shell) keeps the registry the hook script already names, as
+long as that file is still there, and says so. A new device: add its line; run `install` again only when the path
+changed.
 
 For a commit that is not on the list, the hook asks GitHub for the commits between the newest of the last three
 reviewed commits that is an ancestor and `GITHUB_SHA` (`compare`), and checks each one with `ssh-keygen -Y

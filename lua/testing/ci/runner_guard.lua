@@ -980,6 +980,19 @@ local function psq(s)
   return "'" .. s:gsub("'", "''") .. "'"
 end
 
+---The registry a hook script names (its `$env:TESTING_ALLOWED_SIGNERS = '...'` line), or nil.
+---@param text string
+---@return string|nil
+function M.hook_signers(text)
+  for line in text:gmatch("[^\r\n]+") do
+    local quoted = line:match("^%$env:" .. M.ENV_SIGNERS .. " = '(.*)'%s*$")
+    if quoted then
+      return (quoted:gsub("''", "'"))
+    end
+  end
+  return nil
+end
+
 ---The hook script. It decides nothing; no nvim or script: the job is refused.
 ---@param nvim string
 ---@param script string
@@ -1124,6 +1137,15 @@ local function manage(action, argv, sv, ctx)
   end
   local code = 0
   local signers, snote = M.signers_path(ctx, root)
+  local kept = false
+  if not signers and not snote then
+    -- no variable here (a shell started before it was set, or one that cannot see it): a reinstall keeps the
+    -- registry the hook script already names, rather than switching the signed release off without a word
+    local old = M.hook_signers(read_env(root .. "/_guard/job-started.ps1") or "")
+    if old and uv.fs_stat(old) then
+      signers, kept = old, true
+    end
+  end
   if action == "install" then
     local ok, err = require("lib.nvim.fs.write.atomic")(
       root .. "/_guard/job-started.ps1",
@@ -1190,7 +1212,8 @@ local function manage(action, argv, sv, ctx)
   end
   if action ~= "remove" then
     sv.out(
-      ("device registry: %s"):format(
+      ("device registry: %s%s"):format(
+        kept and "kept from the hook script, $" .. M.ENV_SIGNERS .. " is not set here: " or "",
         signers
           or (snote and ("unusable: " .. snote))
           or ("none ($" .. M.ENV_SIGNERS .. " or " .. root .. "/allowed_signers)")
