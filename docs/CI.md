@@ -319,6 +319,14 @@ that reproduces it. The terminal report (`--no-agent`) lists every finding. `--j
 From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD` (the script's `--state-dir`
 before the subcommand is understood).
 
+From the editor: `:Testing ci commit [<rev>...] [--range=<a>..<b>] [--base=<rev>] [--profile=<name>] [--force] [--root=<dir>]`
+(no revision: `HEAD`; the revisions complete from the latest commits). The child runs `testing ci commit --no-agent`, its
+output streams into a live buffer of its own (separate from the buffer of
+`:Testing ci`), and at the end the notification names the verdict per commit. The quickfix list holds only the findings
+that are **new** at the commit (`known` ones are red at the parent too and are not the commit's); it opens only when
+there are some. One commit check per project at a time. Not built yet: the form over several repositories
+(`--repos-root`, `--since`).
+
 Limits: the dependencies are not frozen (both sides see the same ones: `$<NAME>_DIR`, the repository's `.deps/` or its
 siblings, handed to the child as `$<NAME>_DIR`), so red that comes from a half-done dependency is known at both. A
 load-sensitive spec may be red on one side only. Submodules are not checked out. The snapshot of a trusted repository

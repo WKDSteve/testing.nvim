@@ -1573,6 +1573,156 @@ return function(H)
   eq(real and real.steps, { "again", "echo" }, "editor.list: the steps")
   eq(editor.list(tmp), nil, "editor.list: nil without .testing.lua")
 
+  -- `:Testing ci commit`: the argument list, the quickfix items (only `new`), the verdict, and a run through a fake child
+  do
+    local argv = editor.commit_argv({
+      root = "/r",
+      json = "/tmp/c.json",
+      revs = { "abc1234", "HEAD~1" },
+      range = "a..b",
+      base = "main",
+      profile = "fast",
+      force = true,
+    })
+    local tail = vim.list_slice(argv, 10)
+    eq(tail, {
+      "ci",
+      "commit",
+      "--no-agent",
+      "--json=/tmp/c.json",
+      "--range=a..b",
+      "--base=main",
+      "--profile=fast",
+      "--force",
+      "abc1234",
+      "HEAD~1",
+      "--root=/r",
+    }, "commit_argv: the verb, the document, the options, the revisions, --root last")
+
+    local DOC = {
+      schema = "testing-ci-commit/1",
+      commits = {
+        {
+          sha = "1234567890ab",
+          verdict = "regression",
+          new = {
+            { step = "luacheck", file = "lua/a.lua", line = 3, col = 5, text = "unused" },
+            { step = "suite", whole = true, text = "red", file = vim.NIL, line = vim.NIL },
+          },
+          known = { { step = "suite", file = "x_spec.lua", line = 1, text = "old red" } },
+        },
+        { sha = "fedcba098765", verdict = "clean", new = {}, known = {} },
+      },
+    }
+    local items = editor.commit_items(DOC, "/r")
+    eq(#items, 2, "commit_items: the new findings only, not the known ones")
+    eq(items[1].filename, "/r/lua/a.lua", "commit_items: the file is resolved against the root")
+    eq(items[1].lnum, 3, "commit_items: the line")
+    eq(
+      items[1].text,
+      "[1234567 luacheck] unused",
+      "commit_items: the commit and the step in the text"
+    )
+    eq(items[2].filename, nil, "commit_items: a finding without a file is a text-only item")
+    eq(editor.commit_items(nil, "/r"), {}, "commit_items: no document, no items")
+
+    local v = editor.commit_verdict(DOC, 1, "/r")
+    eq(v.level, "error", "commit_verdict: a regression is an error")
+    has(v.message, "1234567 regression, fedcba0 clean", "commit_verdict: a verdict per commit")
+    has(v.message, "2 new in the quickfix list", "commit_verdict: ... and the count")
+    v = editor.commit_verdict({ schema = DOC.schema, commits = { DOC.commits[2] } }, 0, "/r")
+    eq(v.level, "info", "commit_verdict: clean is info")
+    eq(v.items, {}, "commit_verdict: clean has no items")
+    v = editor.commit_verdict(
+      { schema = DOC.schema, commits = { { sha = "aaaaaaaaaaaa", verdict = "flaky", new = {} } } },
+      0,
+      "/r"
+    )
+    eq(v.level, "warn", "commit_verdict: flaky is a warning")
+    eq(editor.commit_verdict(nil, 3, "/r").level, "error", "commit_verdict: no document, a failure")
+
+    local argv_seen, opts_seen, on_exit_raw
+    editor.system = function(a, opts, on_exit)
+      argv_seen, opts_seen, on_exit_raw = a, opts, on_exit
+      opts.stdout(nil, "ci commit 1234567 REGRESSION 2 new\n")
+      local json = a[#a - 2]:match("^%-%-json=(.+)$")
+      vim.fn.writefile({ vim.json.encode(DOC) }, json)
+      return {}
+    end
+    messages = {}
+    vim.notify = function(msg, level)
+      messages[#messages + 1] = { msg = tostring(msg), level = level }
+    end
+    local done
+    local started = editor.run_commit({
+      root = root,
+      revs = { "HEAD" },
+      on_done = function(verdict)
+        done = verdict
+      end,
+    })
+    eq(started, true, "run_commit: starts")
+    local again, why = editor.run_commit({ root = root, revs = { "HEAD" } })
+    eq(again, false, "run_commit: one at a time")
+    has(why, "already running", "run_commit: ... says why")
+    ok(
+      opts_seen.timeout == require("testing.ci.commit").TIMEOUT_MS,
+      "run_commit: the deadline is the child's own"
+    )
+    eq(argv_seen[#argv_seen], "--root=" .. root, "run_commit: runs in the root")
+    on_exit_raw({ code = 1, stdout = "", stderr = "" })
+    ok(
+      vim.wait(2000, function()
+        return done ~= nil
+      end),
+      "run_commit: finishes"
+    )
+    eq(#done.items, 2, "run_commit: the quickfix items of the new findings")
+    eq(
+      vim.fn.getqflist({ title = true }).title,
+      "testing ci commit: new findings",
+      "run_commit: the list"
+    )
+    eq(#vim.fn.getqflist(), 2, "run_commit: ... holds the new ones")
+    has(said(), "ci commit: 1234567 regression", "run_commit: the verdict is notified")
+    local lines =
+      vim.api.nvim_buf_get_lines(vim.fn.bufnr(editor.view_name(root .. "/commit")), 0, -1, false)
+    eq(lines, { "ci commit 1234567 REGRESSION 2 new" }, "run_commit: the output is in its own view")
+    eq(
+      editor.state[root .. "/commit"] and editor.state[root .. "/commit"].running,
+      false,
+      "run_commit: not stuck"
+    )
+    vim.fn.setqflist({}, "r")
+    -- a green commit leaves the quickfix list alone
+    editor.system = function(a, _, on_exit)
+      local json = a[#a - 2]:match("^%-%-json=(.+)$")
+      vim.fn.writefile(
+        { vim.json.encode({ schema = DOC.schema, commits = { DOC.commits[2] } }) },
+        json
+      )
+      vim.schedule(function()
+        on_exit({ code = 0, stdout = "", stderr = "" })
+      end)
+      return {}
+    end
+    done = nil
+    editor.run_commit({
+      root = root,
+      revs = { "HEAD" },
+      on_done = function(verdict)
+        done = verdict
+      end,
+    })
+    ok(
+      vim.wait(2000, function()
+        return done ~= nil
+      end),
+      "run_commit: a green run finishes"
+    )
+    eq(#vim.fn.getqflist(), 0, "run_commit: a clean commit opens no list")
+  end
+
   -- one real run, end to end (its own state directory: the child writes a document there)
   do
     local state = tmp .. "/state"

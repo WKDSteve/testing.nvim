@@ -40,6 +40,7 @@ M.TYPE_REPORTER = "TESTING_REPORTER"
 M.TYPE_SPEC = "TESTING_SPEC"
 M.TYPE_MIGRATE = "TESTING_MIGRATE"
 M.TYPE_CI_PROFILE = "TESTING_CI_PROFILE"
+M.TYPE_COMMIT = "TESTING_COMMIT"
 M.TYPE_CI_STEPS = "TESTING_CI_STEPS"
 M.TYPE_LINT_CHECK = "TESTING_LINT_CHECK"
 
@@ -364,6 +365,25 @@ function M.lint_run(ctx)
   end
 end
 
+---The latest commits of a repository for the completion: `HEAD` and the short SHAs of the last 30, newest first.
+---Git is asked in the project root; an error or a directory that is no repository gives only `HEAD`.
+---@param root string
+---@return string[]
+function M.recent_commits(root)
+  local out = { "HEAD" }
+  local ok, res = pcall(function()
+    return vim
+      .system({ "git", "log", "-n", "30", "--format=%h", "--no-color" }, { cwd = root, text = true })
+      :wait(2000)
+  end)
+  if ok and res and res.code == 0 then
+    for line in (res.stdout or ""):gmatch("[^%s]+") do
+      out[#out + 1] = line
+    end
+  end
+  return out
+end
+
 ---`:Testing ci repos`: the pipelines of the repositories of `ci.repos` (setup option) in one child.
 ---@param ctx { args: table<string, any>, flags: table<string, any> }
 function M.ci_repos(ctx)
@@ -420,6 +440,35 @@ function M.ci_repos(ctx)
       }))
     end
   )
+end
+
+---`:Testing ci commit [<rev>...] [--range=a..b] [--base=<rev>] [--profile=<name>] [--force]`: the commits in a child,
+---each in its own snapshot, compared with its parent; live view, quickfix only for the findings that are new.
+---No revision: HEAD.
+---@param ctx { args: table<string, any>, flags: table<string, any>, rest?: string[] }
+function M.ci_commit(ctx)
+  local root = M.resolve_root(ctx.flags.root, vim.api.nvim_buf_get_name(0))
+  local revs = {}
+  if ctx.args.rev then
+    revs[1] = ctx.args.rev
+  end
+  vim.list_extend(revs, ctx.rest or {})
+  if #revs == 0 and not ctx.flags.range then
+    revs[1] = "HEAD"
+  end
+  local started, err = require("testing.ci.editor").run_commit({
+    root = root,
+    revs = revs,
+    range = ctx.flags.range,
+    base = ctx.flags.base,
+    profile = ctx.flags.profile,
+    force = ctx.flags.force,
+  })
+  if not started then
+    require("testing.notify").get().error("testing ci commit: " .. tostring(err))
+    return
+  end
+  require("testing.notify").get().info("testing ci commit: " .. root)
 end
 
 ---`:Testing ci status`: the last document of the project as lines in a viewer.
@@ -1055,6 +1104,25 @@ function M.routes()
       end,
     },
     {
+      path = { "ci", "commit" },
+      desc = "Check commits in their own snapshots against their parent (live view, quickfix: new findings only)",
+      args = { { name = "rev", type = M.TYPE_COMMIT, optional = true, variadic = true } },
+      flags = {
+        { name = "range", type = "STRING", desc = "Every commit of a..b, oldest first" },
+        { name = "base", type = M.TYPE_COMMIT, desc = "Compare with this commit, not the parent" },
+        {
+          name = "profile",
+          type = M.TYPE_CI_PROFILE,
+          desc = "The profile to run instead of ci.default",
+        },
+        { name = "force", bool = true, desc = "Run again even when a result is kept" },
+        { name = "root", type = "DIR", desc = "The project root directory" },
+      },
+      run = function(ctx)
+        M.ci_commit(ctx)
+      end,
+    },
+    {
       path = { "ci", "status" },
       desc = "Show the last pipeline result of the project (steps, states, findings)",
       flags = { { name = "root", type = "DIR", desc = "The project root directory" } },
@@ -1173,6 +1241,18 @@ local function register_types(composer)
       local list =
         require("testing.ci.editor").list(M.resolve_root(nil, vim.api.nvim_buf_get_name(0)))
       return list and prefix(vim.tbl_keys(list.profiles), lead) or {}
+    end,
+  })
+  composer.register_type(M.TYPE_COMMIT, {
+    desc = "a commit: a revision (HEAD, a branch, a SHA); the latest commits are offered",
+    validate = function(raw)
+      if raw == "" then
+        return false, nil, "expected a revision"
+      end
+      return true, raw, nil
+    end,
+    complete = function(lead)
+      return prefix(M.recent_commits(M.resolve_root(nil, vim.api.nvim_buf_get_name(0))), lead)
     end,
   })
   composer.register_type(M.TYPE_CI_STEPS, {

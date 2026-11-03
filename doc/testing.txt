@@ -252,7 +252,8 @@ static HTML page of the fleet from `ci verify`, `ci.json` and that adapter
 `ci commit {rev}` checks a commit in a git worktree of its own (another
 session's uncommitted work does not count) and sorts red into new, known and
 fixed against the parent: `clean` and `known-red` exit 0, `regression` 1
-(docs/CI.md, "Check a commit").
+(docs/CI.md, "Check a commit"). From the editor: `:Testing ci commit` (HEAD or
+the revisions given; the quickfix list holds only the new findings).
 
 Workspace trust ~                                             *testing-trust*
 The runner executes a project's `.testing.lua`, minimal init and specs, so it

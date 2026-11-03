@@ -928,6 +928,172 @@ function M.run_repos(o)
   return true
 end
 
+---The arguments of a commit check (`testing ci commit ...`).
+---@param o { root: string, json: string, revs?: string[], range?: string, base?: string, profile?: string, force?: boolean }
+---@return string[]
+function M.commit_argv(o)
+  local args = { "ci", "commit", "--no-agent", "--json=" .. o.json }
+  if o.range and o.range ~= "" then
+    args[#args + 1] = "--range=" .. o.range
+  end
+  if o.base and o.base ~= "" then
+    args[#args + 1] = "--base=" .. o.base
+  end
+  if o.profile and o.profile ~= "" then
+    args[#args + 1] = "--profile=" .. o.profile
+  end
+  if o.force then
+    args[#args + 1] = "--force"
+  end
+  for _, rev in ipairs(o.revs or {}) do
+    args[#args + 1] = rev
+  end
+  return M.child_argv(o.root, args)
+end
+
+---Quickfix items of a commit check: only the findings that are new at the commit (`new`; what is red at the base too,
+---`known`, is not a finding of the commit). With several commits the text names the commit.
+---@param doc table `testing-ci-commit/1`
+---@param root string
+---@return table[] items
+function M.commit_items(doc, root)
+  local items = {}
+  local commits = type(doc) == "table" and type(doc.commits) == "table" and doc.commits or {}
+  for _, r in ipairs(commits) do
+    local short = type(r.sha) == "string" and r.sha:sub(1, 7) or "?"
+    for _, f in ipairs(type(r.new) == "table" and r.new or {}) do
+      local named = type(f.file) == "string" and f.file ~= "" and f.file ~= "?"
+      items[#items + 1] = {
+        filename = named and resolve(f.file, root) or nil,
+        lnum = type(f.line) == "number" and f.line or 1,
+        col = type(f.col) == "number" and f.col or 1,
+        text = ("[%s %s] %s"):format(short, tostring(f.step), tostring(f.text)),
+        type = "E",
+      }
+    end
+  end
+  return items
+end
+
+---What the user is told when a commit check has ended.
+---@param doc table|nil The document the child wrote (nil: none could be read).
+---@param code integer The child's exit code.
+---@param root string
+---@return Testing.Ci.Verdict
+function M.commit_verdict(doc, code, root)
+  if
+    type(doc) ~= "table"
+    or doc.schema ~= "testing-ci-commit/1"
+    or type(doc.commits) ~= "table"
+  then
+    return {
+      level = code == 0 and "info" or "error",
+      message = ("ci commit: exit %d (see %s)"):format(code, M.view_name(root .. "/commit")),
+      items = {},
+    }
+  end
+  local items = M.commit_items(doc, root)
+  local parts = {}
+  for _, r in ipairs(doc.commits) do
+    parts[#parts + 1] = ("%s %s"):format(tostring(r.sha):sub(1, 7), tostring(r.verdict))
+  end
+  local level = code == 0 and "info" or "error"
+  if code == 0 then
+    for _, r in ipairs(doc.commits) do
+      if r.verdict == "flaky" then
+        level = "warn"
+      end
+    end
+  end
+  return {
+    level = level,
+    message = ("ci commit: %s%s (exit %d)"):format(
+      table.concat(parts, ", "),
+      #items > 0 and (", " .. #items .. " new in the quickfix list") or "",
+      code
+    ),
+    items = items,
+  }
+end
+
+---Check commits (`testing ci commit ...`) in a child, each in its own snapshot of the commit: the output streams into
+---the view `<root>/commit`, and the document the child wrote gives the verdict and a quickfix list of the new findings
+---(opened only when there are some). Returns false with a reason when one is already running or the child cannot start.
+---@param o { root: string, revs?: string[], range?: string, base?: string, profile?: string, force?: boolean, on_done?: fun(verdict: Testing.Ci.Verdict) }
+---@return boolean started
+---@return string|nil err
+function M.run_commit(o)
+  local refused = require("testing.machine").run_refusal("commit")
+  if refused then
+    return false, refused
+  end
+  local k = key(o.root) .. "/commit"
+  local entry = M.state[k] or {}
+  M.state[k] = entry
+  if entry.running then
+    M.show_view(o.root .. "/commit")
+    return false, "a commit check is already running for " .. o.root .. " (showing its output)"
+  end
+  local json = vim.fn.tempname() .. ".testing-ci-commit.json"
+  local argv = M.commit_argv({
+    root = o.root,
+    json = json,
+    revs = o.revs,
+    range = o.range,
+    base = o.base,
+    profile = o.profile,
+    force = o.force,
+  })
+  local view = M.open_view(o.root .. "/commit")
+  local progress = M.progress({ title = "testing ci commit" })
+  local feed, flush = M.feeder(view, function(line)
+    local head = line:match("^ci commit (%x+ %S+)")
+    if head then
+      progress:update({ text = head })
+    end
+  end)
+  entry.running = true
+  local ok, started = pcall(M.system, argv, {
+    cwd = o.root,
+    text = true,
+    timeout = require("testing.ci.commit").TIMEOUT_MS,
+    stdout = feed("out"),
+    stderr = feed("err"),
+  }, function(res)
+    vim.schedule(function()
+      flush()
+      entry.running = false
+      local code = res.code or -1
+      if (res.signal or 0) ~= 0 then
+        code = 3 -- killed by a signal: infrastructure, whatever code the runtime reports
+      end
+      local doc = read_json(json)
+      pcall(os.remove, json)
+      local verdict = M.commit_verdict(doc, code, o.root)
+      progress:finish(
+        verdict.level == "info" and "green" or verdict.level == "warn" and "partial" or "failed"
+      )
+      require("testing.notify").get()[verdict.level](verdict.message)
+      if #verdict.items > 0 then
+        require("lib.nvim.ui.list").qf(
+          verdict.items,
+          "testing ci commit: new findings",
+          { open = "auto" }
+        )
+      end
+      if o.on_done then
+        o.on_done(verdict)
+      end
+    end)
+  end)
+  if not ok or not started then
+    entry.running = false
+    progress:cancel()
+    return false, tostring(started)
+  end
+  return true
+end
+
 ---Start a pipeline run. Returns false with a reason when one is already running or the child cannot start.
 ---@param o { root: string, profile?: string, steps?: string[], keep_going?: boolean, reuse?: boolean, on_done?: fun(verdict: Testing.Ci.Verdict), trust_asked?: boolean }
 ---@return boolean started
