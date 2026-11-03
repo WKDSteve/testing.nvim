@@ -275,9 +275,9 @@ return function(H)
       c.api.nvim_buf_set_lines(0, 0, -1, false, { "xxxxx", "xxYxx" })
       c.api.nvim_win_set_cursor(0, { 2, 2 })
       local function under_cursor(label)
-        local shot = c.screen()
+        local snap = c.screen()
         eq(
-          shot.cells[shot.cursor.row][shot.cursor.col],
+          snap.cells[snap.cursor.row][snap.cursor.col],
           "Y",
           "cursor cell holds the character: " .. label
         )
