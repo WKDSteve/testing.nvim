@@ -94,6 +94,16 @@ for (const file of goldens) {
 for (const need of ["fleet", "manifest", "repo:beta.nvim"]) {
   report(need in docs, `golden document ${need} present`);
 }
+// `testing call hello` (what a hub asks first): its own golden folder, since the export folder holds an export only
+{
+  const file = path.join(repo, "TESTS/golden/testing-export-1-hello/hello.json");
+  const hello = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+  report(hello !== null && hello.kind === "hello", "golden document hello present");
+  if (hello !== null) {
+    docs.hello = hello;
+    report(validate(hello), "golden hello.json (hello)");
+  }
+}
 
 // ---- 2. documents that break the contract are refused
 const mutate = (name, base, fn) => {
@@ -170,6 +180,10 @@ mutate(
   "manifest",
   (d) => (d.files[0].sha256 = "abc"),
 );
+mutate("a hello without a version", "hello", (d) => (d.schemas = []));
+mutate("a hello whose versions are texts", "hello", (d) => (d.schemas = ["1"]));
+mutate("a hello with a form", "hello", (d) => (d.form = "local"));
+mutate("a hello without its engine", "hello", (d) => delete d.engine);
 {
   // the local form may say the data classes were not asked: the rule is the export form's only
   const local = structuredClone(docs.fleet);

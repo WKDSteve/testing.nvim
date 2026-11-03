@@ -15,7 +15,8 @@ return function(H)
   local base = fixture.base("call")
   local fx = fixture.build(base)
 
-  local function call(args, install, config)
+  -- `extra`: more services of the entry (`env`, `stdin`), as a hub's child gets them
+  local function call(args, install, config, extra)
     local out, err = {}, {}
     local restore = fixture.install(install)
     if install and install.after then
@@ -24,15 +25,19 @@ return function(H)
     -- the data classes of the fixture's "device" (never the real areas.json of this machine)
     local saved_env = vim.env.TASKS_DESKTOP_CONFIG_DIR
     vim.env.TASKS_DESKTOP_CONFIG_DIR = config or vim.fs.dirname(fx.areas)
-    local pass, code = pcall(cli.main, vim.list_extend({ "call" }, args), {
-      out = function(s)
-        out[#out + 1] = s
-      end,
-      err = function(s)
-        err[#err + 1] = s
-      end,
-      state_dir = fx.state,
-    })
+    local pass, code = pcall(
+      cli.main,
+      vim.list_extend({ "call" }, args),
+      vim.tbl_extend("force", {
+        out = function(s)
+          out[#out + 1] = s
+        end,
+        err = function(s)
+          err[#err + 1] = s
+        end,
+        state_dir = fx.state,
+      }, extra or {})
+    )
     vim.env.TASKS_DESKTOP_CONFIG_DIR = saved_env
     restore()
     if not pass then
@@ -338,6 +343,135 @@ return function(H)
       3,
       "the local form: all"
     )
+  end
+
+  -- ── the hub's way: `hello`, then the request on stdin, the root in $TESTING_REPOS_ROOT ──
+  do
+    local none = base .. "/hub-no-areas"
+    vim.fn.mkdir(none, "p")
+    -- what a hub's child gets: the root in its environment, the request on stdin, no areas.json of its own
+    local function hub(method, request, env)
+      return call({ method, "--params=-" }, nil, none, {
+        env = env or { TESTING_REPOS_ROOT = fx.root },
+        stdin = function()
+          return request
+        end,
+      })
+    end
+
+    local h = call({ "hello" })
+    eq(h.code, 0, "hello: exit 0: " .. h.err)
+    eq(#h.out, 1, "hello: one line")
+    eq(h.doc.kind, "hello", "hello: kind")
+    eq(
+      h.doc.schema,
+      "testing-export/1",
+      "hello: the head names the contract as every document does"
+    )
+    eq(h.doc.schemas, { 1 }, "hello: the versions as numbers")
+    eq(h.doc.capabilities, export.HELLO_CAPABILITIES, "hello: what this engine answers")
+    for _, need in ipairs({ "fleet", "repo", "finding", "hello", "params" }) do
+      ok(vim.tbl_contains(h.doc.capabilities, need), "hello names " .. need)
+    end
+    eq(type(h.doc.engine.version), "string", "hello: the engine's build")
+    eq(h.doc.form, nil, "hello: no form, it describes no state")
+    local valid, problems = export.validate(h.out[1])
+    ok(valid, "hello is valid: " .. table.concat(problems, "; "))
+    local golden = fixture.read(fixture.HELLO_GOLDEN)
+    ok(golden and not golden:find("\r", 1, true), "the golden hello is there, LF only")
+    eq(
+      h.doc,
+      golden and vim.json.decode(golden),
+      "hello: the golden document (TESTS/golden/regenerate_export.lua)"
+    )
+    eq(call({ "hello", "x" }).code, 2, "hello takes no argument")
+    eq(call({ "hello", "--params=-" }).code, 2, "hello takes no parameters")
+
+    -- the same document as the switches give, with the data classes named by the request
+    local want = call({ "fleet", "--repos-root=" .. fx.root, "--export" })
+    local r =
+      hub("fleet", vim.json.encode({ export = true, state_dir = fx.state, areas = fx.areas }))
+    eq(r.code, 0, "fleet by params: exit 0: " .. r.err)
+    eq(r.doc.digest, want.doc.digest, "fleet by params: the document of the switches")
+    eq(#r.doc.repos, #want.doc.repos, "fleet by params: the same repositories")
+    ok(#r.doc.repos > 0, "fleet by params: the released repositories are there")
+    -- without `areas` the child has no data classes: fail-closed, and it says why
+    local closed = hub("fleet", vim.json.encode({ export = true, state_dir = fx.state }))
+    eq(closed.code, 0, "fleet without areas: exit 0")
+    eq(closed.doc.repos, {}, "fleet without areas: nothing is released")
+    -- the root comes from the environment only when no root is named
+    -- (without either, fleet reads the current directory, as it always did: not the fixture's root)
+    local nowhere = hub("fleet", "{}", {})
+    local seen = {}
+    for _, row in ipairs(nowhere.doc and nowhere.doc.repos or {}) do
+      seen[#seen + 1] = row.name
+    end
+    ok(not vim.tbl_contains(seen, "alpha.nvim"), "without $TESTING_REPOS_ROOT the root is not read")
+    local notdir = hub("fleet", "{}", { TESTING_REPOS_ROOT = base .. "/not-there" })
+    eq(notdir.code, 2, "$TESTING_REPOS_ROOT that is no directory: exit 2")
+    has(notdir.err, "TESTING_REPOS_ROOT", "says which")
+
+    -- a repository by its key of fleet, below the root
+    local alpha
+    for _, row in ipairs(r.doc.repos) do
+      if row.name == "alpha.nvim" then
+        alpha = row.key
+      end
+    end
+    ok(type(alpha) == "string", "alpha has a key in fleet")
+    local rp = hub(
+      "repo",
+      vim.json.encode({ repo = alpha, export = true, state_dir = fx.state, areas = fx.areas })
+    )
+    eq(rp.code, 0, "repo by key: exit 0: " .. rp.err)
+    eq(rp.doc.kind, "repo", "repo by key: kind")
+    eq(rp.doc.repo.key, alpha, "repo by key: that repository")
+    local fd =
+      hub("finding", vim.json.encode({ repo = alpha, state_dir = fx.state, areas = fx.areas }))
+    eq(fd.code, 0, "finding by key: exit 0: " .. fd.err)
+    local unknown = hub("repo", vim.json.encode({ repo = "alpha.nvim-000000000000" }))
+    eq(unknown.code, 2, "a key below the root that no repository has: exit 2")
+    has(unknown.err, "no repository", "says so")
+    eq(
+      hub("repo", vim.json.encode({ repo = alpha }), {}).code,
+      2,
+      "repo by key without $TESTING_REPOS_ROOT: exit 2"
+    )
+
+    -- every request that is not exactly a request of this method is refused before anything is read
+    for _, bad in ipairs({
+      { "fleet", "[]", "a list" },
+      { "fleet", "not json", "no JSON" },
+      { "fleet", "", "nothing on stdin" },
+      { "fleet", '{"nope":1}', "an unknown key" },
+      { "fleet", '{"export":"yes"}', "a string for a boolean" },
+      { "fleet", '{"state_dir":"relative/state"}', "a relative state_dir" },
+      { "fleet", vim.json.encode({ state_dir = fx.state .. "/../x" }), "a state_dir that climbs" },
+      { "fleet", vim.json.encode({ areas = fx.areas }), "areas without the export form" },
+      { "fleet", '{"include":["a/b"]}', "a name with a separator" },
+      { "fleet", '{"include":"alpha.nvim"}', "a name that is no list" },
+      { "fleet", '{"repo":"' .. alpha .. '"}', "repo is no parameter of fleet" },
+      { "repo", '{"repo":"../alpha.nvim-000000000000"}', "a key that climbs" },
+      { "repo", '{"repo":"alpha.nvim"}', "a name that is no key" },
+      { "repo", '{"include":["alpha.nvim"]}', "include is no parameter of repo" },
+      { "finding", '{"fp":"xyz"}', "an fp that is not hex" },
+      { "fleet", '{"pad":"' .. string.rep("x", 70 * 1024) .. '"}', "more than 64 KiB" },
+    }) do
+      local b = hub(bad[1], bad[2])
+      eq(b.code, 2, bad[3] .. ": exit 2")
+      eq(#b.out, 0, bad[3] .. ": nothing on stdout")
+    end
+    eq(
+      call({ "fleet", "--params=-", "--export" }).code,
+      2,
+      "--params with a switch: exit 2 (the request is the whole of it)"
+    )
+    eq(call({ "fleet", "--params={}", "--params={}" }).code, 2, "--params twice: exit 2")
+    local inline = call({ "fleet", "--params=" .. vim.json.encode({ export = true }) }, nil, nil, {
+      env = { TESTING_REPOS_ROOT = fx.root },
+    })
+    eq(inline.code, 0, "--params=<json> inline: exit 0: " .. inline.err)
+    eq(inline.doc.digest, want.doc.digest, "--params=<json> inline: the same document")
   end
 
   vim.fn.delete(base, "rf")

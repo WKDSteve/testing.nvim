@@ -53,9 +53,14 @@ M.ENGINE_VERSION = "0.1.0-dev"
 ---@type string[]
 M.CAPABILITIES = { "data_classes", "fleet", "manifest", "repo" }
 
+---What `testing call hello` says this engine answers: the capabilities of its documents, the findings
+---(`testing-finding/1`), `hello` itself and the request on stdin (`--params=-`); sorted.
+---@type string[]
+M.HELLO_CAPABILITIES = { "data_classes", "finding", "fleet", "hello", "manifest", "params", "repo" }
+
 ---The kinds a reader of this version knows.
 ---@type table<string, true>
-M.KINDS = { fleet = true, repo = true, manifest = true }
+M.KINDS = { fleet = true, repo = true, manifest = true, hello = true }
 
 ---A document is never bigger (`payload_too_large`).
 M.MAX_DOC_BYTES = 8 * 1024 * 1024
@@ -790,6 +795,22 @@ local function head(kind, form, root)
     h.root = root
   end
   return h
+end
+
+---The document of `testing call hello`: what this engine is, which versions of the contract it speaks (`schemas`, as
+---numbers) and what it answers. A hub asks it before its first question (`appkit_hub::engine::probe`). It describes
+---the engine, not a state: no `form`, `rev` or `digest`, and it reads nothing.
+---@return table
+function M.hello()
+  return {
+    schema = M.SCHEMA,
+    plugin = M.PLUGIN,
+    kind = "hello",
+    generated_at = M.clock(),
+    engine = json.object(M.engine_info()),
+    schemas = { M.SCHEMA_VERSION },
+    capabilities = vim.list_slice(M.HELLO_CAPABILITIES, 1),
+  }
 end
 
 ---Put `rev` and `digest` on a document (`lib.nvim.contract.doc`: the digest leaves out `generated_at` and `engine`).

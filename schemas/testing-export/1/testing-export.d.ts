@@ -3,7 +3,7 @@
 /**
  * The documents testing.nvim writes for an app or a web page: the fleet, one repository, the manifest of an export folder. The engine writes them, never the app (docs/OUTPUT-FORMATS.md). This schema describes exactly what this version writes (a field nobody listed is refused here); a READER ignores unknown fields, refuses a higher schema and treats a missing or null value as unknown, never as 0.
  */
-export type TestingExport1 = Fleet | RepoDoc | Manifest;
+export type TestingExport1 = Fleet | RepoDoc | Manifest | Hello;
 export type Schema = "testing-export/1";
 export type Plugin = "testing.nvim";
 /**
@@ -258,4 +258,21 @@ export interface File {
   path: string;
   sha256: string;
   bytes: Count;
+}
+/**
+ * What the engine is and which versions of the contract it speaks (`testing call hello`), for a hub that asks it before its first question. It describes the engine, not a state: no form, rev or digest.
+ */
+export interface Hello {
+  schema: Schema;
+  plugin: Plugin;
+  kind: "hello";
+  generated_at: Time;
+  engine: Engine;
+  /**
+   * The versions of testing-export this engine writes, as numbers.
+   *
+   * @minItems 1
+   */
+  schemas: [number, ...number[]];
+  capabilities: Capabilities;
 }

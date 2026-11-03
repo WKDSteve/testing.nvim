@@ -6,7 +6,8 @@
   "oneOf": [
     { "$ref": "#/$defs/fleet" },
     { "$ref": "#/$defs/repo_doc" },
-    { "$ref": "#/$defs/manifest" }
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/hello" }
   ],
   "$defs": {
     "schema": { "const": "testing-export/1" },
@@ -446,6 +447,26 @@
         "digest": { "$ref": "#/$defs/digest" },
         "capabilities": { "$ref": "#/$defs/capabilities" },
         "files": { "type": "array", "items": { "$ref": "#/$defs/file" } }
+      },
+      "additionalProperties": false
+    },
+    "hello": {
+      "description": "What the engine is and which versions of the contract it speaks (`testing call hello`), for a hub that asks it before its first question. It describes the engine, not a state: no form, rev or digest.",
+      "type": "object",
+      "required": ["schema", "plugin", "kind", "generated_at", "engine", "schemas", "capabilities"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schema" },
+        "plugin": { "$ref": "#/$defs/plugin" },
+        "kind": { "const": "hello" },
+        "generated_at": { "$ref": "#/$defs/time" },
+        "engine": { "$ref": "#/$defs/engine" },
+        "schemas": {
+          "description": "The versions of testing-export this engine writes, as numbers.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
       },
       "additionalProperties": false
     }

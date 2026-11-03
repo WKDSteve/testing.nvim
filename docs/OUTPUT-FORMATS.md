@@ -434,6 +434,32 @@ sum, so it never sees half an export. The folder:
   repos/<key>.json           kind repo, one per repository of the fleet
 ```
 
+### `hello` and the request on stdin (a hub)
+
+`testing call hello` says what this engine is, for a hub that asks before its first question (the hub of
+testing-desktop, through `appkit_hub::engine::CliEngine`): the head without `form`, `rev` and `digest` (it describes the
+engine, not a state), `schemas` (the versions of `testing-export` it writes, as numbers: `[1]`) and `capabilities`
+(`data_classes`, `finding`, `fleet`, `hello`, `manifest`, `params`, `repo`). It reads nothing. Never in an export folder.
+
+A hub starts the engine as its child with an allow-listed environment, so the child cannot find the state folder or
+the data classes of the editor by itself. It asks `testing call fleet|repo|finding --params=-` with one JSON object on
+stdin (`--params=<json>` takes it inline), alone, in place of the options:
+
+| Key | Type | Methods | What |
+| --- | --- | --- | --- |
+| `state_dir` | whole path | fleet, repo, finding | the state folder (as `--state-dir`) |
+| `areas` | whole path | fleet, repo (with `export`), finding | the `areas.json` of the data classes; without it the child asks its own (none: nothing is released) |
+| `export` | boolean | fleet, repo | the export form (as `--export`) |
+| `remote` | boolean | fleet, repo | ask the CI adapter (as `--remote`) |
+| `include`, `exclude` | list of directory names | fleet | as `--include`, `--exclude` |
+| `repo` | a key of `fleet` | repo, finding | the repository below `$TESTING_REPOS_ROOT` with that key |
+| `fp` | 16 hex | finding | as `--fp` |
+
+The repositories root comes in `$TESTING_REPOS_ROOT`: `fleet` reads it when it is given no root, `repo` and `finding`
+find `params.repo` below it. A request that is not exactly a request of the method (not an object, an unknown key, a
+wrong type, a path that is not whole or climbs with `..`, a key that is no key, more than 64 KiB, a switch beside it)
+is exit `2` before anything is read.
+
 ### The export folder (`testing export --out`)
 
 ```sh

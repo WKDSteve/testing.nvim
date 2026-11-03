@@ -14,6 +14,12 @@ M.GOLDEN_DIR = vim.fs.normalize(
   vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))) .. "/golden/testing-export-1"
 )
 
+---The golden `hello` (`testing call hello`): beside the export folder, which must hold exactly the files of an export.
+M.HELLO_GOLDEN = vim.fs.normalize(
+  vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)))
+    .. "/golden/testing-export-1-hello/hello.json"
+)
+
 M.NOW_ISO = "2026-10-31T12:00:00Z"
 M.ENGINE = { version = "0.1.0-dev", git = "fixture", nvim = "0.0.0" }
 M.TS = 1793448000 -- 2026-10-31T12:00:00Z

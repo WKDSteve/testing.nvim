@@ -54,6 +54,8 @@ for _, name in ipairs({
   "AI_AGENT",
   "CLAUDECODE",
   "TESTING_CACHE_HOME",
+  -- the repositories root of `testing call` without one (a hub names it for its child: testing.export.call)
+  "TESTING_REPOS_ROOT",
 }) do
   env[name] = os.getenv(name)
 end

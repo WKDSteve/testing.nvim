@@ -24,7 +24,16 @@ local base = fixture.base("golden")
 local fx = fixture.build(base)
 local restore = fixture.install()
 local bundle, err = require("testing.export").export(fixture.opts(fx))
+-- `testing call hello` with the fixture's clock and engine (TESTS/testing/export_call_spec.lua compares it)
+local hello, herr =
+  require("testing.export").encode(require("testing.export").hello(), { indent = 2 })
 restore()
+if not hello then
+  io.stderr:write("regenerate_export: hello: " .. tostring(herr) .. "\n")
+  os.exit(1)
+end
+fixture.write(fixture.HELLO_GOLDEN, hello)
+io.stdout:write(("wrote %s (%d bytes)\n"):format(vim.fs.basename(fixture.HELLO_GOLDEN), #hello))
 vim.fn.delete(base, "rf")
 if not bundle then
   io.stderr:write("regenerate_export: " .. tostring(err) .. "\n")
