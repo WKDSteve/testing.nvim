@@ -1,3 +1,5 @@
+![testing-nvim](assets/icons/testing-nvim/png/testing-nvim-128.png)
+
 > **Pre-alpha, milestones M0 to M2 are done, M4 and M5 are being wired in.** A test runner for Neovim
 > plugins that runs the spec styles of the author's plugins unchanged, tells the truth about a run, and
 > tests itself with itself. Spec files can run in a child editor of their own, guards name what a spec
