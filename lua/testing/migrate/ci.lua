@@ -566,14 +566,18 @@ function M.own_checkout_path(doc, job)
   return nil
 end
 
----Where the job already checks the fleet out: `.deps/` (default), or "" for siblings of the workspace root
----(`path: lib.nvim`). A new checkout follows the same layout, because the repository's own scripts look there.
----(With the repository in the workspace root, `path: lib.nvim` is a folder INSIDE it, not its sibling: the edit
----says so in a note, `M.edit` (d).)
+---Where new checkouts go: `.deps/` (default), or "" for siblings of the repository (`path: lib.nvim`) when the
+---repository itself is checked out into a folder of the workspace and the job already checks the fleet out next to it,
+---because the repository's own scripts look there. With the repository in the workspace root `path: lib.nvim` would be
+---a folder INSIDE it, where `scripts/test.sh` does not look and which the repository would carry: new checkouts then
+---always go to `.deps/` (decision 2026-11-02), whatever the existing ones do.
 ---@param doc Testing.Migrate.CiDoc
 ---@param job Testing.Migrate.CiJob
 ---@return string prefix
 function M.checkout_prefix(doc, job)
+  if M.own_checkout_path(doc, job) == nil then
+    return ".deps/"
+  end
   for _, step in ipairs(job.steps) do
     local st = code_text(doc, step.dash, step.last)
     if
@@ -1000,13 +1004,11 @@ function M.edit(src, ctx)
 
       -- (d) checkouts: testing.nvim and the fleet dependencies the job does not mention yet
       local blocks = {}
-      local added_names = {}
       local prefix = M.checkout_prefix(doc, job)
       if not ctx.is_self and not info.testing_checkout then
         local t, err = ctx.dep_step("testing.nvim", prefix)
         if t then
           blocks[#blocks + 1] = t
-          added_names[#added_names + 1] = "testing.nvim"
         else
           result.notes[#result.notes + 1] = "testing.nvim checkout step: " .. tostring(err)
         end
@@ -1016,25 +1018,11 @@ function M.edit(src, ctx)
           local t, err = ctx.dep_step(dep, prefix)
           if t then
             blocks[#blocks + 1] = t
-            added_names[#added_names + 1] = dep
             result.added_deps[#result.added_deps + 1] = dep
           else
             result.notes[#result.notes + 1] = ("checkout step of %s: %s"):format(dep, tostring(err))
           end
         end
-      end
-      if #blocks > 0 and prefix == "" and M.own_checkout_path(doc, job) == nil then
-        -- the repository is the workspace root, so `path: <dep>` is a folder of the repository: `scripts/test.sh`
-        -- looks in `.deps/` and next to the repository, and `$<DEP>_DIR` is the way to name another place
-        local envs = {}
-        for _, dep in ipairs(added_names) do
-          envs[#envs + 1] = require("testing.deps").env_name(dep)
-        end
-        result.notes[#result.notes + 1] = ("job %s: the repository is checked out into the workspace root, so the checkout steps added before the run step (%s) put the dependencies into folders OF the repository, where scripts/test.sh does not look: set %s in the env of the run step to ${{ github.workspace }}/<folder>, or check them out to .deps/"):format(
-          job.id,
-          table.concat(added_names, ", "),
-          table.concat(envs, ", ")
-        )
       end
       if #blocks > 0 then
         local new = {}

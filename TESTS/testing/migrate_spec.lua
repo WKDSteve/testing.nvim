@@ -1147,10 +1147,10 @@ jobs:
   has(folded.text, "- name: keep\n        run: echo done\n", "an unrelated step stays")
   has(
     folded.text,
-    "path: testing.nvim\n",
-    "a new checkout follows the layout of the existing one (a sibling)"
+    "path: .deps/testing.nvim\n",
+    "the repository is the workspace root: a new checkout goes to .deps/, not next to the existing lib.nvim"
   )
-  lacks(folded.text, "path: .deps/testing.nvim", "not .deps/")
+  lacks(folded.text, "path: testing.nvim\n", "not a folder of the repository")
   eq(folded.added_deps, {}, "lib.nvim is already checked out: not added again")
 
   -- the same text again: nothing to do
@@ -1231,8 +1231,8 @@ jobs:
   has(nojobs.notes[1], "could not be read", "and the reason is given")
   eq(
     ci.checkout_prefix(ci.parse(FOLDED), ci.parse(FOLDED).jobs[1]),
-    "",
-    "the layout of existing checkouts is read"
+    ".deps/",
+    "the repository is the workspace root: .deps/, whatever the existing checkouts do"
   )
   eq(
     ci.checkout_prefix(ci.parse(PLENARY_CI), ci.parse(PLENARY_CI).jobs[1]),

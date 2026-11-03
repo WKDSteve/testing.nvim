@@ -134,9 +134,14 @@ return function(H)
   end
   eq(prefix_of(workflow("repo.nvim", "lib.nvim", "x")), "", "a checkout next to the existing one")
   eq(prefix_of(workflow(nil, ".deps/lib.nvim", "x")), ".deps/", "an existing .deps/ layout stays")
+  eq(
+    prefix_of(workflow(nil, "lib.nvim", "x")),
+    ".deps/",
+    "the repository in the workspace root: .deps/, also next to an existing lib.nvim folder"
+  )
 
-  -- With the repository in the workspace root, a new `path: testing.nvim` is a folder OF the repository (not next to
-  -- it, as in the other layout): the script does not look there, so the edit says how to name the place.
+  -- With the repository in the workspace root, a new `path: testing.nvim` would be a folder OF the repository (not next
+  -- to it, as in the other layout), where the script does not look: new checkouts go to `.deps/` (decision 2026-11-02).
   local scaffold = require("testing.scaffold")
   local adding = vim.tbl_extend("force", ctx, {
     is_self = false,
@@ -145,14 +150,13 @@ return function(H)
     end,
   })
   local root_layout = ci.edit(workflow(nil, "lib.nvim", WS .. "/lib.nvim"), adding)
-  has(
-    root_layout.text,
-    "path: testing.nvim\n",
-    "the checkout follows the layout of the existing one"
+  has(root_layout.text, "path: .deps/testing.nvim\n", "the checkout goes to .deps/")
+  lacks(root_layout.text, "path: testing.nvim\n", "not into a folder of the repository")
+  lacks(
+    table.concat(root_layout.notes, "\n"),
+    "checked out into the workspace root",
+    ".deps/ is where the script looks: no note"
   )
-  local note = table.concat(root_layout.notes, "\n")
-  has(note, "checked out into the workspace root", "the root layout is named")
-  has(note, "TESTING_NVIM_DIR", "with the variable that names the place")
   local sibling_layout = ci.edit(workflow("repo.nvim", "lib.nvim", WS .. "/lib.nvim"), adding)
   has(sibling_layout.text, "path: testing.nvim\n", "the same checkout in the other layout")
   lacks(
