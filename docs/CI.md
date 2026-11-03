@@ -208,7 +208,7 @@ plain run and for `ci`, and a second full suite prints a warning naming the pid 
 a dead pid, or older than 6 hours (`SUITE_LOCK_MAX_AGE` seconds), is taken over silently, and a partial run
 (`--file`, `--list`, `--changed`), `ci verify` and the other subcommands take no lock. Work in a worktree of your own.
 The `scripts/test.sh` that `testing init` writes does the same: it loads `scripts/suite-lock.sh` from the testing.nvim checkout it
-resolved and skips the check when that checkout is older and has no such file; `testing init --update` brings the template into a repository.
+resolved and skips the check when that checkout is older and has no such file (it never releases the lock: a dead pid is taken over); `testing init --update` brings the template into a repository.
 
 ## A run
 

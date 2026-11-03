@@ -261,11 +261,10 @@ return function(H)
     "a run without child editors does not write into the real state dir"
   )
   has(sh, "export XDG_CACHE_HOME=", "nor into the real cache dir")
-  has(sh, 'rm -rf "$scratch"\' EXIT', "and removes the scratch directory afterwards")
+  has(sh, "trap 'rm -rf \"$scratch\"' EXIT", "and removes the scratch directory afterwards")
   has(sh, "suite_lock_acquire", "a second full suite in the same checkout is warned about")
   has(sh, "scripts/suite-lock.sh", "...through the lock script of the runner checkout")
   has(sh, '-f "$lock_lib"', "...only when that checkout has it (an older runner runs without)")
-  has(sh, "suite_lock_release; rm -rf", "...and the lock is released with the scratch directory")
   ok(
     not sh:find("\nexec nvim", 1, true),
     "so the script does not `exec` (the trap would never run)"
