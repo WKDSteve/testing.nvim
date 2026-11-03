@@ -37,13 +37,14 @@ M.LEGACY_MARK = "# MyPlugins ci pre-push hook"
 M.DEFAULT_RUN = "fast"
 
 M.USAGE = table.concat({
-  "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
+  "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--snapshot] [--root=<dir>]",
   "       testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]",
   "       testing ci hook remove [--root=<dir>]",
   "  --run=<profile>     the profile the hook runs when the state is not proven (default: fast)",
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
   "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
   "                      were made here (no merge, none from a remote): testing ci trust --pushed",
+  "  --snapshot          run the profile on a snapshot of HEAD (testing ci --snapshot) instead of the working tree",
   "  --root=<dir>        the repository (default: the current directory)",
   "  --all               install: every repository below --repos-root=<dir> (repeatable) with a ci section",
   "  `git push --no-verify` skips the hook. A pre-push hook that is not ours is never touched.",
@@ -64,10 +65,12 @@ local function safe_word(s)
 end
 
 ---Text of the hook. No backslashes: it runs in Git Bash and in Linux sh alike.
----@param o { run: string, verify?: string, driver_dir: string, auto_trust?: boolean }
+---@param o { run: string, verify?: string, driver_dir: string, auto_trust?: boolean, snapshot?: boolean }
 ---@return string
 function M.text(o)
   local verify = o.verify and (" --profile=" .. o.verify) or ""
+  -- `--snapshot` runs on the snapshot of HEAD (the proof stays in the state for `verify`), `--reuse` on the working tree
+  local mode = o.snapshot and "--snapshot" or "--reuse"
   -- git gives the hook what it pushes on stdin; read once, before a step can take it. A release never blocks a push.
   local read_refs = o.auto_trust
       and {
@@ -101,8 +104,9 @@ function M.text(o)
       o.auto_trust and "{ trust_pushed; exit 0; }" or "exit 0"
     ),
     'echo "pre-push: not proven, running testing ci --profile=' .. o.run .. '"',
-    ('testing_ci --profile=%s --reuse || { echo "pre-push: testing ci is red, push blocked (git push --no-verify skips it)" >&2; exit 1; }'):format(
-      o.run
+    ('testing_ci --profile=%s %s || { echo "pre-push: testing ci is red, push blocked (git push --no-verify skips it)" >&2; exit 1; }'):format(
+      o.run,
+      mode
     ),
     "@TRUST_LAST@",
     "",
@@ -202,6 +206,7 @@ end
 ---@field run string
 ---@field verify? string
 ---@field auto_trust boolean
+---@field snapshot boolean
 ---@field root string
 ---@field all boolean
 ---@field repos_roots string[]
@@ -217,6 +222,7 @@ function M.parse(argv)
     root = ".",
     help = false,
     auto_trust = false,
+    snapshot = false,
     all = false,
     repos_roots = {},
   }
@@ -228,6 +234,8 @@ function M.parse(argv)
       args.action = a
     elseif a == "--auto-trust" then
       args.auto_trust = true
+    elseif a == "--snapshot" then
+      args.snapshot = true
     elseif a == "--all" then
       args.all = true
     elseif key == "repos-root" then
@@ -297,6 +305,7 @@ function M.install(root, hooks, args, existing)
     verify = args.verify,
     driver_dir = driver_dir,
     auto_trust = args.auto_trust,
+    snapshot = args.snapshot,
   })
   if ours and existing == text then
     return M.EXIT_OK,

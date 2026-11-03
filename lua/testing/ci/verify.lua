@@ -12,6 +12,7 @@
 --- The answer is one of the words of `testing verify`:
 ---
 ---   verified     same tree, same tools and pipeline, the suite stamp verifies; exit 0 and the sentinel
+---                (the document of `testing ci --snapshot` is the proof of its tree: no stamp is asked)
 ---   changed      the tree is another one (or the suite's stamp says so): `rerun` names the steps that must run again
 ---                (a change that no spec can see leaves the suite out: `testing ci --reuse`)
 ---   rejected     Neovim, the pipeline, a tool version or the system differs, or a tool is missing
@@ -347,7 +348,12 @@ local function check(args, sv)
     has_suite = has_suite or (p.step.inprocess == "run" and p.step.stamp == true)
   end
   local suite_ok = true
-  if has_suite then
+  -- the document of `testing ci --snapshot` is the proof of its tree: the suite ran on a snapshot, whose stamp names
+  -- another root and cannot be checked from here (docs/CI.md)
+  local snapshot_proof = doc.snapshot == true and doc.tree == facts.tree
+  if has_suite and snapshot_proof then
+    res.suite = "snapshot"
+  elseif has_suite then
     res.suite = M.suite_status(root, state_dir, sv, {
       allow_dirty = args.allow_dirty or facts.dirty == true,
       max_age = args.max_age,

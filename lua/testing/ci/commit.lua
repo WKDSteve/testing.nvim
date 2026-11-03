@@ -146,7 +146,7 @@ end
 ---@param root string
 ---@param sha string
 ---@return string|nil
-local function commit_testing_lua(root, sha)
+function M.testing_lua_at(root, sha)
   local ok, res = pcall(function()
     return snapshot
       .system({ "git", "cat-file", "blob", sha .. ":.testing.lua" }, { cwd = root, text = false })
@@ -980,7 +980,7 @@ function M.main(argv, sv)
 
   -- trusted through the store, the root is trusted for one `.testing.lua`: the one a commit carries is what runs
   for _, sha in ipairs(shas) do
-    local refusal = require("testing.trust").check_commit_file(root, commit_testing_lua(root, sha))
+    local refusal = require("testing.trust").check_commit_file(root, M.testing_lua_at(root, sha))
     if refusal then
       return fail(M.EXIT_USAGE, ("%s: %s"):format(sha:sub(1, 12), refusal))
     end

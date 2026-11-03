@@ -327,10 +327,31 @@ the trust store is trusted for the `.testing.lua` it was trusted with: a commit 
 (exit 2), because that file is what runs in the snapshot; `TESTING_TRUST_ROOTS`, `CI` and `TESTING_TRUST=1` trust the
 root whatever the file says. Refused on the workstation like every run.
 
+## Prove HEAD without the working tree: `testing ci --snapshot`
+
+```
+testing ci --snapshot [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
+```
+
+The pipeline runs on a snapshot of `HEAD` (a detached worktree outside the repository, as for `testing ci commit`), so
+another session's uncommitted edits cannot make the run red or green and the checkout is not touched. The snapshot and
+its throwaway state are removed afterwards; the document `testing-ci/1` of the run is written into the state of the
+real repository (`ci.json`, and `ci-<profile>.json` for a complete run) with `"snapshot": true`.
+
+`testing ci verify` takes that document as the proof of its tree (`HEAD^{tree}`) and does not ask for the suite's stamp:
+the keys of a stamp name the root they were made in, so a stamp made in the snapshot cannot be checked from the real
+root. Everything else is checked as for any proof: the tree, Neovim, the pipeline, the tool versions, the age, a clean
+working tree (`ci verify` says `dirty` while the tree has uncommitted changes, however green the snapshot was). The
+answer shows it: `ci verify: verified (profile full, suite stamp snapshot)`.
+
+Whole profiles only: `--step` and `--reuse` are refused with exit 2. The trust gate applies to the repository and to the
+`.testing.lua` that `HEAD` carries (a root trusted through the store is trusted for one file, see "Check a commit").
+`testing ci hook install --snapshot` makes the pre-push hook run its profile that way instead of on the working tree.
+
 ## The pre-push hook
 
 ```
-testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
+testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--snapshot] [--root=<dir>]
 testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]
 testing ci hook remove [--root=<dir>]
 ```

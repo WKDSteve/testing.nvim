@@ -51,6 +51,7 @@ M.USAGE = table.concat({
   "  --step=<a,b>      only these steps (a partial run: no proof, no sentinel)",
   "  --keep-going      run every step even after a red one",
   "  --reuse           skip the suite when its stamp still verifies (a docs-only change reruns the other steps)",
+  "  --snapshot        run on a snapshot of HEAD (the working tree is not touched) and keep the proof for `ci verify`",
   "  --agent           the agent report: the verdict first, then only the findings (default in an agent",
   "                    environment: TESTING_AGENT, CLAUDECODE, ...); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci/1 document there",
@@ -68,6 +69,7 @@ M.USAGE = table.concat({
 ---@field steps? string[]
 ---@field keep_going boolean
 ---@field reuse boolean
+---@field snapshot? boolean `--snapshot`: run on the snapshot of HEAD and keep the proof in the real state.
 ---@field json? string
 ---@field junit? string
 ---@field state_dir? string
@@ -110,6 +112,8 @@ function M.parse(argv)
       args.keep_going = true
     elseif key == "reuse" and value == nil then
       args.reuse = true
+    elseif key == "snapshot" and value == nil then
+      args.snapshot = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -1007,6 +1011,17 @@ local function seconds(ms)
   return ("%.1f s"):format(ms / 1000)
 end
 
+---Write the document of a run that happened elsewhere (the snapshot of `testing ci --snapshot`) the way a run writes
+---its own: `ci.json`, and `ci-<profile>.json` when the run was complete, plus `json_path` when given.
+---@param doc table `testing-ci/1`
+---@param root string The repository whose state gets it.
+---@param json_path? string
+---@param state_dir? string
+---@return string[] notes One per write that failed.
+function M.write_proof(doc, root, json_path, state_dir)
+  return write_doc(doc, root, json_path, state_dir, false)
+end
+
 ---Helpers `testing.ci.verify` and `testing.lint` share with a run (not an API).
 M.internal = {
   plan = plan,
@@ -1088,6 +1103,9 @@ function M.main(argv, sv)
     )
     bad_root_events.close()
     return M.EXIT_USAGE
+  end
+  if args.snapshot then
+    return require("testing.ci.snapshot_run").main(args, root, sv)
   end
   local report = require("testing.ci.report")
   local agent = args.agent
