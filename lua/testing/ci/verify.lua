@@ -349,8 +349,11 @@ local function check(args, sv)
   end
   local suite_ok = true
   -- the document of `testing ci --snapshot` is the proof of its tree: the suite ran on a snapshot, whose stamp names
-  -- another root and cannot be checked from here (docs/CI.md)
-  local snapshot_proof = doc.snapshot == true and doc.tree == facts.tree
+  -- another root and cannot be checked from here (docs/CI.md). Not in CI: there a proof is the suite's stamp, written
+  -- by CI itself on a trusted ref (`testing.stamp.verify`), and a local document says nothing about that.
+  local snapshot_proof = doc.snapshot == true
+    and doc.tree == facts.tree
+    and not require("testing.affected").in_ci(sv.getenv)
   if has_suite and snapshot_proof then
     res.suite = "snapshot"
   elseif has_suite then

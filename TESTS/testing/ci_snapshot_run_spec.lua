@@ -13,6 +13,8 @@ return function(H)
   ).new(H, "ci-snapshot")
   local eq, has = S.eq, S.has
 
+  -- the environment the command sees (this suite may itself run in CI)
+  local env = {}
   local function ci(...)
     local out, err = {}, {}
     local code = S.cli.main(vim.list_extend({ "ci" }, { ... }), {
@@ -24,6 +26,9 @@ return function(H)
       end,
       state_dir = S.state_dir,
       color = false,
+      getenv = function(name)
+        return env[name]
+      end,
     })
     return { code = code, out = table.concat(out, "\n"), err = table.concat(err, "\n") }
   end
@@ -61,6 +66,12 @@ return function(H)
   eq(r.code, 0, "verify takes the snapshot proof: " .. r.out .. r.err)
   has(r.out, "ci verify: verified", "verify: verified")
   has(r.out, "suite stamp snapshot", "verify: ... saying where the suite's answer comes from")
+
+  -- in CI a proof is the stamp CI wrote on a trusted ref: a local snapshot document is not one
+  env.CI = "true"
+  r = ci("verify", unpack(with("--profile=full")))
+  eq(r.code, 1, "in CI: the snapshot proof does not hold: " .. r.out .. r.err)
+  env.CI = nil
 
   -- the working tree is dirty: not proven (the snapshot is HEAD, the tree is something else)
   S.write(root .. "/README.md", "# proj\n\nedited\n")
