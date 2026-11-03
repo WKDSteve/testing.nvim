@@ -433,6 +433,49 @@ return function(H)
   )
   eq(cases[1].status, "fail", "no check at all fails")
 
+  -- `H.run_after_spec` of the project's harness runs once the file is done, also when it ended in an error: what a
+  -- spec patched for itself would otherwise stay patched for the next file (this process builds a new harness per file)
+  local after_root = vim.fs.normalize(vim.fn.tempname())
+  write(
+    after_root .. "/harness.lua",
+    table.concat({
+      "local H = {}",
+      "local later = {}",
+      "function H.eq(a, b, msg) if a ~= b then error(msg or 'eq', 2) end end",
+      "function H.after_spec(fn) later[#later + 1] = fn end",
+      "function H.run_after_spec() for i = #later, 1, -1 do pcall(later[i]) end end",
+      "return H",
+      "",
+    }, "\n")
+  )
+  write(
+    after_root .. "/restore_spec.lua",
+    table.concat({
+      "return function(H)",
+      "  _G.testing_after_spec_marks = (_G.testing_after_spec_marks or 0) + 1",
+      "  H.after_spec(function() _G.testing_after_spec_marks = _G.testing_after_spec_marks - 1 end)",
+      "  H.eq(1, 1, 'ran')",
+      "  if _G.testing_after_spec_raise then error('spec raised') end",
+      "end",
+      "",
+    }, "\n")
+  )
+  for _, raise in ipairs({ false, true }) do
+    _G.testing_after_spec_marks, _G.testing_after_spec_raise = 0, raise
+    dialect.run_file("h", assert_mod.new(), {
+      path = after_root .. "/restore_spec.lua",
+      rel = "TESTS/restore_spec.lua",
+      root = after_root,
+    })
+    eq(
+      _G.testing_after_spec_marks,
+      0,
+      "the callbacks of H.after_spec ran (spec " .. (raise and "raised" or "passed") .. ")"
+    )
+  end
+  _G.testing_after_spec_marks, _G.testing_after_spec_raise = nil, nil
+  vim.fn.delete(after_root, "rf")
+
   -- no harness at all, and a harness that is not a table: named errors
   local lonely = vim.fs.normalize(vim.fn.tempname())
   write(lonely .. "/x_spec.lua", "return function(H) end\n")

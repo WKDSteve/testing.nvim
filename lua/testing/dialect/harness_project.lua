@@ -916,6 +916,12 @@ function M.run_file(a, spec, opts)
           -- keep the traceback of a raise of the spec itself; other error values travel untouched
           return type(e) == "string" and debug.traceback(e, 2) or e
         end)
+        -- the project's own runner calls `H.run_after_spec` once a file is done (lib.nvim's TESTS/run.lua): what a spec
+        -- patched for itself (`H.after_spec(restore)`) is put back, also when it failed. This process runs the next
+        -- file with a fresh harness table, so callbacks nobody calls would leak into it.
+        if type(harness.run_after_spec) == "function" then
+          pcall(harness.run_after_spec)
+        end
         M.reconcile(state)
         if not ran and not M.record_escaped(state, raw_err) then
           error(run_err, 0)
