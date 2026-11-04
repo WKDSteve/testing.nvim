@@ -1758,6 +1758,42 @@ return function(H)
       "run_commit: a green run finishes"
     )
     eq(#vim.fn.getqflist(), 0, "run_commit: a clean commit opens no list")
+
+    -- the deadline of the whole call: 15 minutes per commit, at least an hour, at most 12 hours
+    local hour, per = 60 * 60 * 1000, editor.COMMIT_TIMEOUT_PER_MS
+    eq(editor.commit_timeout({ revs = { "HEAD" } }), hour, "commit_timeout: one commit is an hour")
+    eq(
+      editor.commit_timeout({ revs = { "a", "b", "c", "d", "e", "f" } }),
+      6 * per,
+      "commit_timeout: six commits take 15 minutes each"
+    )
+    local most = editor.COMMIT_TIMEOUT_MAX_MS
+    eq(editor.commit_timeout({ range = "a..b" }), most, "commit_timeout: a range has no count")
+    eq(editor.commit_timeout({ since = "2.days.ago" }), most, "commit_timeout: neither has a time")
+    eq(
+      editor.commit_timeout({ repos = { "--repos-root=/r" } }),
+      most,
+      "commit_timeout: nor a fleet"
+    )
+    eq(editor.commit_timeout({}), hour, "commit_timeout: nothing named is the hour")
+
+    -- the command asks for trust before it starts, for the root of a single check too
+    local usrcmds = require("testing.bindings.usrcmds")
+    local trust_prompt = require("testing.bindings.trust_prompt")
+    local real_ask, real_run = trust_prompt.ask_many, editor.run_commit
+    local asked, ran
+    trust_prompt.ask_many = function(dirs, on_done)
+      asked = dirs
+      on_done()
+    end
+    editor.run_commit = function(o)
+      ran = o
+      return true
+    end
+    usrcmds.ci_commit({ args = {}, flags = { root = root } })
+    trust_prompt.ask_many, editor.run_commit = real_ask, real_run
+    eq(asked, { root }, "ci_commit: the root of a single check is asked about")
+    ok(ran ~= nil and ran.revs[1] == "HEAD", "ci_commit: ... and the check starts after the answer")
   end
 
   -- one real run, end to end (its own state directory: the child writes a document there)

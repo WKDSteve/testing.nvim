@@ -333,11 +333,13 @@ the document is the same `testing-ci-commit/1`: every commit names its `repo`, a
 From the editor: `:Testing ci commit [<rev>...] [--range=<a>..<b>] [--since=<time>] [--base=<rev>] [--profile=<name>]
 [--force] [--root=<dir>]` (no revision: `HEAD`; the revisions complete from the latest commits). With `--since` and
 `--repos-root=<dir>` (or `--repos`: the roots, include and exclude of the setting `ci.repos`) it checks several
-repositories; the untrusted ones are asked about once before the child starts. The child runs `testing ci commit
+repositories; a single project is asked about too, and the untrusted ones are asked about once before the child starts. The child runs `testing ci commit
 --no-agent`, its output streams into a live buffer of its own (separate from the buffer of `:Testing ci`), and at the end
 the notification names the verdict per commit. The quickfix list holds only the findings that are **new** at the commit
 (`known` ones are red at the parent too and are not the commit's; with several repositories each item names its
-repository); it opens only when there are some. One commit check per project at a time.
+repository); it opens only when there are some. One commit check per project at a time. The child may run 15 minutes per
+commit, at least an hour and at most 12 hours (a range, `--since` or several repositories count as the most commits one
+call takes); then it is stopped as infrastructure (exit 3).
 
 Limits: the dependencies are not frozen (both sides see the same ones: `$<NAME>_DIR`, the repository's `.deps/` or its
 siblings, handed to the child as `$<NAME>_DIR`), so red that comes from a half-done dependency is known at both. A

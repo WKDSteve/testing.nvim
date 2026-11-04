@@ -489,12 +489,9 @@ function M.ci_commit(ctx)
     end
     say.info("testing ci commit: " .. (repos and "several repositories" or root))
   end
-  if repos then
-    -- one question for all the repositories that are not trusted, before the child is started
-    require("testing.bindings.trust_prompt").ask_many(editor.repos_dirs(repos), launch)
-  else
-    launch()
-  end
+  -- one question for all the repositories that are not trusted, before the child is started
+  local dirs = repos and editor.repos_dirs(repos) or { root }
+  require("testing.bindings.trust_prompt").ask_many(dirs, launch)
 end
 
 ---`:Testing ci status`: the last document of the project as lines in a viewer.

@@ -1035,6 +1035,24 @@ function M.commit_verdict(doc, code, root)
   }
 end
 
+M.COMMIT_TIMEOUT_PER_MS = 15 * 60 * 1000
+M.COMMIT_TIMEOUT_MAX_MS = 12 * 60 * 60 * 1000
+
+---How long the child of a commit check may run as a whole: `commit.TIMEOUT_MS` is the limit of one commit, so a call
+---gets 15 minutes per commit, at least that hour and at most 12 hours. A range, a time or several repositories name no
+---count the editor knows, so they get the most commits one call takes.
+---@param o { revs?: string[], range?: string, since?: string, repos?: string[] }
+---@return integer ms
+function M.commit_timeout(o)
+  local commit = require("testing.ci.commit")
+  local open_ended = o.range or o.since or (o.repos and #o.repos > 0)
+  local count = open_ended and commit.MAX_COMMITS or #(o.revs or {})
+  return math.min(
+    M.COMMIT_TIMEOUT_MAX_MS,
+    math.max(commit.TIMEOUT_MS, count * M.COMMIT_TIMEOUT_PER_MS)
+  )
+end
+
 ---Check commits (`testing ci commit ...`) in a child, each in its own snapshot of the commit: the output streams into
 ---the view `<root>/commit`, and the document the child wrote gives the verdict and a quickfix list of the new findings
 ---(opened only when there are some). Returns false with a reason when one is already running or the child cannot start.
@@ -1077,7 +1095,7 @@ function M.run_commit(o)
   local ok, started = pcall(M.system, argv, {
     cwd = o.root,
     text = true,
-    timeout = require("testing.ci.commit").TIMEOUT_MS,
+    timeout = M.commit_timeout(o),
     stdout = feed("out"),
     stderr = feed("err"),
   }, function(res)
