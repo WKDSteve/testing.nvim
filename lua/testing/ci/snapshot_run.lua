@@ -105,9 +105,15 @@ function M.main(args, root, sv)
   for _, n in ipairs(notes) do
     err("testing ci --snapshot: " .. n)
   end
-  local shown = code ~= M.EXIT_OK and output_tail(output or "") or nil
-  if shown then
-    out(shown)
+  if code ~= M.EXIT_OK then
+    -- both streams: a step prints to stdout, a problem of the run itself (a missing dependency) only to stderr
+    local shown = output_tail(output or "")
+    if shown then
+      out(shown)
+    end
+    if tail ~= nil and tail ~= "" then
+      err(tail)
+    end
   end
   local verdict = type(doc.verdict) == "string" and doc.verdict or "?"
   out(

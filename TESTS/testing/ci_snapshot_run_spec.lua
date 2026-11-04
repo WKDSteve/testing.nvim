@@ -112,6 +112,22 @@ return function(H)
   eq(r.code, 2, "--rev without --snapshot: usage")
   has(r.err, "--snapshot", "--rev without --snapshot: said why")
 
+  -- a problem of the run itself reaches only stderr of the child: it must not get lost because a document exists
+  do
+    local commit = require("testing.ci.commit")
+    local saved = commit.run_ci
+    commit.run_ci = function()
+      return 3,
+        { verdict = "infra", profile = "full", partial = true, steps = {} },
+        "dep is missing",
+        ""
+    end
+    r = ci(unpack(with("--snapshot", "--profile=full")))
+    commit.run_ci = saved
+    eq(r.code, 3, "a run that could not start: its exit code")
+    has(r.err, "dep is missing", "a run that could not start: says why")
+  end
+
   -- refused forms
   r = ci(unpack(with("--snapshot", "--step=gate")))
   eq(r.code, 2, "--step with --snapshot: usage")
