@@ -7,7 +7,8 @@
     { "$ref": "#/$defs/fleet" },
     { "$ref": "#/$defs/repo_doc" },
     { "$ref": "#/$defs/manifest" },
-    { "$ref": "#/$defs/hello" }
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/findings_doc" }
   ],
   "$defs": {
     "schema": { "const": "testing-export/1" },
@@ -467,6 +468,37 @@
           "items": { "type": "integer", "minimum": 1 }
         },
         "capabilities": { "$ref": "#/$defs/capabilities" }
+      },
+      "additionalProperties": false
+    },
+    "findings_doc": {
+      "description": "The findings of the last run of one repository in one document (`testing call finding --params`), for a hub that reads one document per question. No finding is an empty list. Never in an export folder.",
+      "type": "object",
+      "required": ["schema", "plugin", "kind", "form", "generated_at", "engine", "rev", "digest", "capabilities", "repo", "findings"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schema" },
+        "plugin": { "$ref": "#/$defs/plugin" },
+        "kind": { "const": "findings" },
+        "form": { "const": "export" },
+        "generated_at": { "$ref": "#/$defs/time" },
+        "engine": { "$ref": "#/$defs/engine" },
+        "rev": { "$ref": "#/$defs/rev" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "repo": { "$ref": "#/$defs/key" },
+        "findings": {
+          "description": "The findings, sorted by `fp`. Each is a document of `testing-finding/1` (its own schema, schemas/testing-finding/1/; contract/check.mjs checks the golden against it).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["schema", "fp", "kind"],
+            "properties": {
+              "schema": { "const": "testing-finding/1" },
+              "fp": { "type": "string" },
+              "kind": { "type": "string" }
+            }
+          }
+        }
       },
       "additionalProperties": false
     }

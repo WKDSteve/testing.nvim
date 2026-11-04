@@ -460,6 +460,11 @@ find `params.repo` below it. A request that is not exactly a request of the meth
 wrong type, a path that is not whole or climbs with `..`, a key that is no key, more than 64 KiB, a switch beside it)
 is exit `2` before anything is read.
 
+A hub reads one document per question, so `finding` by `--params` answers with one document, kind `findings` (`form`
+`export`, never in an export folder): `repo` (the key) and `findings`, the documents of `testing-finding/1` sorted by
+`fp`. No finding is an empty list; an `fp` that is not there, and a repository that is not released, are exit `2`. By the
+switches `finding` keeps its form, one line per finding (see *The finding* below).
+
 ### The export folder (`testing export --out`)
 
 ```sh

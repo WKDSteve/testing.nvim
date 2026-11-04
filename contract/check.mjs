@@ -104,6 +104,24 @@ for (const need of ["fleet", "manifest", "repo:beta.nvim"]) {
     report(validate(hello), "golden hello.json (hello)");
   }
 }
+// `testing call finding --params`: its own golden folder too; each finding is valid against its own schema as well
+{
+  const file = path.join(repo, "TESTS/golden/testing-export-1-findings/findings.json");
+  const found = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+  report(found !== null && found.kind === "findings", "golden document findings present");
+  if (found !== null) {
+    docs.findings = found;
+    report(validate(found), "golden findings.json (findings)");
+    const findingSchema = JSON.parse(
+      fs.readFileSync(path.join(repo, "schemas/testing-finding/1/testing-finding.schema.json"), "utf8"),
+    );
+    const validFinding = new Ajv2020({ strict: true, allErrors: true }).compile(findingSchema);
+    report(
+      found.findings.length > 0 && found.findings.every((f) => validFinding(f)),
+      "every finding of the golden findings.json is valid against testing-finding/1",
+    );
+  }
+}
 
 // ---- 2. documents that break the contract are refused
 const mutate = (name, base, fn) => {
@@ -116,6 +134,10 @@ const mutate = (name, base, fn) => {
   report(!validate(copy), `refused: ${name}`);
 };
 mutate("an unknown top-level field", "fleet", (d) => (d.surprise = 1));
+mutate("findings without a list", "findings", (d) => delete d.findings);
+mutate("findings in the local form", "findings", (d) => (d.form = "local"));
+mutate("a finding of another contract", "findings", (d) => (d.findings[0].schema = "testing-finding/2"));
+mutate("findings of a key without its hash", "findings", (d) => (d.repo = "alpha.nvim"));
 mutate("an unknown row field", "fleet", (d) => (d.repos[0].surprise = 1));
 mutate("root in the head of the export form", "fleet", (d) => (d.root = "/srv/repos"));
 mutate(

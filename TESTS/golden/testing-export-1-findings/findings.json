@@ -1,0 +1,112 @@
+{
+  "capabilities": [
+    "data_classes",
+    "fleet",
+    "manifest",
+    "repo"
+  ],
+  "digest": "sha256:46e8252afa9a1040",
+  "engine": {
+    "git": "fixture",
+    "nvim": "0.0.0",
+    "version": "0.1.0-dev"
+  },
+  "findings": [
+    {
+      "area": "beta.nvim",
+      "class": "internal",
+      "excerpt": "\u003cREPO>/lua/beta/parser.lua:40: cannot open \u003cHOME>/secret-notes/beta.txt",
+      "fp": "0131da64ae656bac",
+      "kind": "case",
+      "repo": "beta.nvim",
+      "repro": "testing . --file TESTS/x_spec.lua",
+      "rule": null,
+      "run": {
+        "id": "2026-10-31T11:30:00Z-bbbb",
+        "os": null,
+        "source": "local",
+        "url": null
+      },
+      "schema": "testing-finding/1",
+      "sha": null,
+      "title": "fail: reads a file",
+      "where": {
+        "file": "TESTS/x_spec.lua",
+        "line": 12
+      }
+    },
+    {
+      "area": "beta.nvim",
+      "class": "internal",
+      "excerpt": "",
+      "fp": "27deb46fabd9b7a5",
+      "kind": "flaky",
+      "repo": "beta.nvim",
+      "repro": "testing . --file TESTS/x_spec.lua",
+      "rule": null,
+      "run": {
+        "id": "2026-10-31T11:30:00Z-bbbb",
+        "os": null,
+        "source": "local",
+        "url": null
+      },
+      "schema": "testing-finding/1",
+      "sha": null,
+      "title": "flaky: flaky",
+      "where": {
+        "file": "TESTS/x_spec.lua",
+        "line": 50
+      }
+    },
+    {
+      "area": "beta.nvim",
+      "class": "internal",
+      "excerpt": "",
+      "fp": "5af8e067a812c2de",
+      "kind": "ci-run",
+      "repo": "beta.nvim",
+      "repro": "testing ci --step=suite",
+      "rule": null,
+      "run": {
+        "id": "2026-10-31T11:40:00Z",
+        "os": null,
+        "source": "local",
+        "url": null
+      },
+      "schema": "testing-finding/1",
+      "sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "title": "pipeline red at suite",
+      "where": null
+    },
+    {
+      "area": "beta.nvim",
+      "class": "internal",
+      "excerpt": "the case ran longer than 5000 ms",
+      "fp": "b063cb0083d490c6",
+      "kind": "case",
+      "repo": "beta.nvim",
+      "repro": "testing . --file TESTS/x_spec.lua",
+      "rule": null,
+      "run": {
+        "id": "2026-10-31T11:30:00Z-bbbb",
+        "os": null,
+        "source": "local",
+        "url": null
+      },
+      "schema": "testing-finding/1",
+      "sha": null,
+      "title": "timeout: times out",
+      "where": {
+        "file": "TESTS/x_spec.lua",
+        "line": 30
+      }
+    }
+  ],
+  "form": "export",
+  "generated_at": "2026-10-31T12:00:00Z",
+  "kind": "findings",
+  "plugin": "testing.nvim",
+  "repo": "beta.nvim-ac6d3a4ece7f",
+  "rev": "rev:2ef8f4",
+  "schema": "testing-export/1"
+}

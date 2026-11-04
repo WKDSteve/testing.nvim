@@ -3,7 +3,7 @@
 /**
  * The documents testing.nvim writes for an app or a web page: the fleet, one repository, the manifest of an export folder. The engine writes them, never the app (docs/OUTPUT-FORMATS.md). This schema describes exactly what this version writes (a field nobody listed is refused here); a READER ignores unknown fields, refuses a higher schema and treats a missing or null value as unknown, never as 0.
  */
-export type TestingExport1 = Fleet | RepoDoc | Manifest | Hello;
+export type TestingExport1 = Fleet | RepoDoc | Manifest | Hello | FindingsDoc;
 export type Schema = "testing-export/1";
 export type Plugin = "testing.nvim";
 /**
@@ -275,4 +275,27 @@ export interface Hello {
    */
   schemas: [number, ...number[]];
   capabilities: Capabilities;
+}
+/**
+ * The findings of the last run of one repository in one document (`testing call finding --params`), for a hub that reads one document per question. No finding is an empty list. Never in an export folder.
+ */
+export interface FindingsDoc {
+  schema: Schema;
+  plugin: Plugin;
+  kind: "findings";
+  form: "export";
+  generated_at: Time;
+  engine: Engine;
+  rev: Rev;
+  digest: Digest;
+  capabilities: Capabilities;
+  repo: Key;
+  /**
+   * The findings, sorted by `fp`. Each is a document of `testing-finding/1` (its own schema, schemas/testing-finding/1/; contract/check.mjs checks the golden against it).
+   */
+  findings: {
+    schema: "testing-finding/1";
+    fp: string;
+    kind: string;
+  }[];
 }

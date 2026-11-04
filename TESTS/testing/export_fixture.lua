@@ -20,6 +20,12 @@ M.HELLO_GOLDEN = vim.fs.normalize(
     .. "/golden/testing-export-1-hello/hello.json"
 )
 
+---The golden `findings` (`testing call finding --params`, of the repository beta): beside it too.
+M.FINDINGS_GOLDEN = vim.fs.normalize(
+  vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)))
+    .. "/golden/testing-export-1-findings/findings.json"
+)
+
 M.NOW_ISO = "2026-10-31T12:00:00Z"
 M.ENGINE = { version = "0.1.0-dev", git = "fixture", nvim = "0.0.0" }
 M.TS = 1793448000 -- 2026-10-31T12:00:00Z

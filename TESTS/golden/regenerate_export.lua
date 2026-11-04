@@ -27,13 +27,31 @@ local bundle, err = require("testing.export").export(fixture.opts(fx))
 -- `testing call hello` with the fixture's clock and engine (TESTS/testing/export_call_spec.lua compares it)
 local hello, herr =
   require("testing.export").encode(require("testing.export").hello(), { indent = 2 })
+-- `testing call finding --params` of the repository beta (the same spec compares it)
+local found = require("testing.finding").collect({
+  dir = fx.beta,
+  state_dir = fx.state,
+  classes = { path = fx.areas },
+})
+local findings, ferr = require("testing.export").encode(
+  require("testing.export").findings(require("testing.export").deps.key(fx.beta), found or {}),
+  { indent = 2 }
+)
 restore()
 if not hello then
   io.stderr:write("regenerate_export: hello: " .. tostring(herr) .. "\n")
   os.exit(1)
 end
+if not found or not findings then
+  io.stderr:write("regenerate_export: findings: " .. tostring(ferr) .. "\n")
+  os.exit(1)
+end
 fixture.write(fixture.HELLO_GOLDEN, hello)
 io.stdout:write(("wrote %s (%d bytes)\n"):format(vim.fs.basename(fixture.HELLO_GOLDEN), #hello))
+fixture.write(fixture.FINDINGS_GOLDEN, findings)
+io.stdout:write(
+  ("wrote %s (%d bytes)\n"):format(vim.fs.basename(fixture.FINDINGS_GOLDEN), #findings)
+)
 vim.fn.delete(base, "rf")
 if not bundle then
   io.stderr:write("regenerate_export: " .. tostring(err) .. "\n")

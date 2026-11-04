@@ -822,6 +822,23 @@ local function seal(doc, lines)
   return b.seal(doc, b.rev_of(lines))
 end
 
+---The document of `testing call finding --params`: the findings of one repository (`testing-finding/1`) in one
+---document, for a hub that reads one document per question. Findings hold no absolute path, so it is the export form
+---for every caller. Never in an export folder.
+---@param key string The key of the repository.
+---@param findings table[] The documents of `testing.finding`, sorted by `fp`.
+---@return table
+function M.findings(key, findings)
+  local doc = head("findings", "export")
+  doc.repo = key
+  doc.findings = findings
+  local lines = { key }
+  for _, f in ipairs(findings) do
+    lines[#lines + 1] = f.fp
+  end
+  return seal(doc, lines)
+end
+
 ---@param s string
 ---@return string
 local function slashes(s)

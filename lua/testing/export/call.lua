@@ -65,7 +65,8 @@ M.USAGE = table.concat({
   "  fleet               one row per repository (document testing-export/1, kind fleet)",
   "  repo                one repository with its red cases (kind repo; <dir> defaults to the current directory)",
   "  finding             the findings of the last run of a repository (documents testing-finding/1), one line each;",
-  "                      with --fp only that one (exit 2 when there is none, or the data classes do not release it)",
+  "                      with --fp only that one (exit 2 when there is none, or the data classes do not release it);",
+  "                      with --params one document instead (kind findings), also when there is no finding",
   "  --repos-root=<dir>  the repositories below <dir> (workflows or a .testing.lua; no vault; repeatable)",
   "  --include=<names>   also these directory names below --repos-root (besides lib.nvim)",
   "  --exclude=<names>   leave these directory names out",
@@ -320,12 +321,15 @@ local function dir_of_key(root, key)
   return nil
 end
 
----`testing call finding [<dir>] [--fp=<fp>]`: the findings of a repository as documents of `testing-finding/1`.
+---`testing call finding [<dir>] [--fp=<fp>]`: the findings of a repository as documents of `testing-finding/1`, one
+---line each. A hub reads one document per question, so a request by `--params` gets them in one document (kind
+---`findings`), which is also there when there is no finding.
 ---@param args Testing.Export.Call.Args
 ---@param state_dir? string
 ---@param sv { out: fun(s: string), err: fun(s: string) }
+---@param as_document? boolean
 ---@return integer exit_code
-function M.finding(args, state_dir, sv)
+function M.finding(args, state_dir, sv, as_document)
   local dir = args.roots[1] or "."
   if vim.fn.isdirectory(dir) ~= 1 then
     sv.err(("testing call: %s is not a directory"):format(dir))
@@ -354,6 +358,15 @@ function M.finding(args, state_dir, sv)
   if args.fp and #shown == 0 then
     sv.err(("testing call: no finding %s in the last run of this repository"):format(args.fp))
     return M.EXIT_USAGE
+  end
+  if as_document then
+    local export = require("testing.export")
+    local okk, key = pcall(export.deps.key, dir)
+    if not okk then
+      sv.err("testing call: the key of this repository is not known")
+      return M.EXIT_INFRA
+    end
+    shown = { export.findings(key, shown) }
   end
   for _, d in ipairs(shown) do
     local text, eerr = require("testing.export").encode(d)
@@ -391,6 +404,7 @@ function M.main(argv, sv)
     sv.out(text)
     return M.EXIT_OK
   end
+  local by_params = args.params ~= nil
   if args.params then
     local text = args.params --[[@as string]]
     if text == "-" then
@@ -432,7 +446,7 @@ function M.main(argv, sv)
       and vim.fs.normalize(vim.fn.fnamemodify(args.state_dir, ":p")):gsub("([^:/])/+$", "%1")
     or sv.state_dir
   if args.method == "finding" then
-    return M.finding(args, state_dir, sv)
+    return M.finding(args, state_dir, sv, by_params)
   end
   ---@type Testing.Export.Opts
   local opts = {

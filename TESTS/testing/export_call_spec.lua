@@ -429,6 +429,62 @@ return function(H)
     local fd =
       hub("finding", vim.json.encode({ repo = alpha, state_dir = fx.state, areas = fx.areas }))
     eq(fd.code, 0, "finding by key: exit 0: " .. fd.err)
+    eq(#fd.out, 1, "finding by key: one document, whatever the number of findings")
+    eq(fd.doc.kind, "findings", "finding by key: its kind")
+    eq(fd.doc.schema, "testing-export/1", "finding by key: the head names the contract")
+    eq(fd.doc.repo, alpha, "finding by key: that repository")
+    local fd_valid, fd_problems = export.validate(fd.out[1])
+    ok(fd_valid, "findings is valid: " .. table.concat(fd_problems, "; "))
+    -- the document of the repository beta is the golden one
+    local beta
+    for _, row in ipairs(call({ "fleet", "--repos-root=" .. fx.root }).doc.repos) do
+      if row.name == "beta.nvim" then
+        beta = row.key
+      end
+    end
+    local beta_doc =
+      hub("finding", vim.json.encode({ repo = beta, state_dir = fx.state, areas = fx.areas }))
+    local golden_findings = fixture.read(fixture.FINDINGS_GOLDEN)
+    ok(
+      golden_findings and not golden_findings:find("\r", 1, true),
+      "the golden findings are there, LF only"
+    )
+    eq(
+      beta_doc.doc,
+      golden_findings and vim.json.decode(golden_findings),
+      "findings: the golden document (TESTS/golden/regenerate_export.lua)"
+    )
+    ok(#beta_doc.doc.findings > 0, "the golden document holds findings")
+    -- with --fp, only that one; one that is not there is exit 2, not an empty document
+    local one_fp = beta_doc.doc.findings[1].fp
+    local one = hub(
+      "finding",
+      vim.json.encode({ repo = beta, fp = one_fp, state_dir = fx.state, areas = fx.areas })
+    )
+    eq(#one.doc.findings, 1, "findings with fp: that one")
+    eq(one.doc.findings[1].fp, one_fp, "findings with fp: the one asked for")
+    eq(
+      hub(
+        "finding",
+        vim.json.encode({
+          repo = beta,
+          fp = "0000000000000000",
+          state_dir = fx.state,
+          areas = fx.areas,
+        })
+      ).code,
+      2,
+      "findings with an fp that is not there: exit 2"
+    )
+    -- no finding is an empty list in a document, not an empty answer
+    local empty_state = base .. "/empty-state"
+    vim.fn.mkdir(empty_state, "p")
+    local none_found =
+      hub("finding", vim.json.encode({ repo = beta, state_dir = empty_state, areas = fx.areas }))
+    eq(none_found.code, 0, "no finding: exit 0: " .. none_found.err)
+    eq(#none_found.out, 1, "no finding: still one document")
+    eq(none_found.doc.findings, {}, "no finding: an empty list")
+    has(none_found.out[1], '"findings":[]', "no finding: a list on the wire, not an object")
     -- a key costs git calls: only the directories of the key's name are asked for theirs
     -- (gamma: the last of the root, so a loop that asked every directory would ask the others first)
     local gamma
