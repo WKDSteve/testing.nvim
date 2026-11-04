@@ -476,7 +476,7 @@ local function run_files(opts, holder)
         local seen_in_file = 0
         ---@type Testing.Result.Case[]|nil
         local cases
-        local ok, err = pcall(function()
+        local function body()
           if entry.missing then
             cases = {
               synthetic_case(
@@ -538,7 +538,19 @@ local function run_files(opts, holder)
               end,
             })
           end
+        end
+        -- The file deadline stays armed once it has passed, so the hook can also raise in the few instructions between
+        -- the end of the body and `stop`. Outside a pcall that would end the whole run and lose every result. A raise
+        -- there lands in the outer pcall; the hook fires again only HOOK_COUNT instructions later, so `stop` below is
+        -- reached first.
+        local ok, err
+        local guarded, raised = pcall(function()
+          ok, err = pcall(body)
+          guard:stop()
         end)
+        if not guarded and ok == nil then
+          ok, err = false, raised
+        end
         local file_fired = false
         for _ = 1, 3 do
           local sok, fired = pcall(guard.stop, guard)
