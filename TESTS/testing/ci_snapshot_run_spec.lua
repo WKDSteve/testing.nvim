@@ -77,6 +77,49 @@ return function(H)
   eq(r.code, 2, "--force without --snapshot: usage")
   has(r.err, "--snapshot", "--force without --snapshot: said why")
 
+  -- --with: the commit plus MY paths. Another session's broken spec lies in the tree and does not count; my own red change does
+  do
+    local proofs = require("testing.state").dir(root, { state_dir = S.state_dir }) .. "/ci-proofs"
+    local function count_proofs()
+      local n = 0
+      for _ in vim.fs.dir(proofs) do
+        n = n + 1
+      end
+      return n
+    end
+    local before = count_proofs()
+    S.write(
+      root .. "/TESTS/foreign_spec.lua",
+      "return function(H)\n  H.ok(false, 'someone else')\nend\n"
+    )
+    r = ci(unpack(with("--snapshot", "--profile=full", "--with=gate.txt", "--force")))
+    eq(r.code, 0, "--with: a foreign broken spec does not count (" .. r.out .. r.err .. ")")
+    has(
+      r.out,
+      "+ 1 file(s) of the working tree",
+      "--with: the answer says what came from the working tree"
+    )
+    has(r.out, "no proof", "--with: ... and that it is no proof")
+    ok(not r.out:find("TESTING_CI_OK", 1, true), "--with: no sentinel")
+    eq(count_proofs(), before, "--with: nothing is kept")
+    S.write(root .. "/gate.txt", "red\n")
+    r = ci(unpack(with("--snapshot", "--profile=full", "--with=gate.txt")))
+    eq(r.code, 1, "--with: my own red change makes the run red")
+    S.git_out(root, "checkout", "--", "gate.txt")
+    os.remove(root .. "/TESTS/foreign_spec.lua")
+    r = ci(unpack(with("--snapshot", "--profile=full", "--with=../outside")))
+    eq(r.code, 2, "--with: a path outside the root is a usage error")
+    r = ci(unpack(with("--with=gate.txt")))
+    eq(r.code, 2, "--with without --snapshot: usage")
+    local overlay = require("testing.ci.overlay")
+    eq(overlay.clean("lua/a.lua"), "lua/a.lua", "overlay.clean: a plain path")
+    eq(overlay.clean("./lua/"), "lua", "overlay.clean: dot and slash go")
+    eq((overlay.clean("../x")), nil, "overlay.clean: not above the root")
+    eq((overlay.clean("/etc/passwd")), nil, "overlay.clean: not absolute")
+    eq((overlay.clean("C:/x")), nil, "overlay.clean: not a drive path")
+    eq((overlay.clean("a/.git/config")), nil, "overlay.clean: not below .git")
+  end
+
   r = ci("verify", unpack(with("--profile=full")))
   eq(r.code, 0, "verify takes the snapshot proof: " .. r.out .. r.err)
   has(r.out, "ci verify: verified", "verify: verified")
@@ -93,6 +136,7 @@ return function(H)
   r = ci("verify", unpack(with("--profile=full")))
   eq(r.code, 1, "dirty tree: not proven")
   has(r.out, "dirty", "dirty tree: said so")
+  has(r.out, "HEAD is proven by a snapshot run", "dirty tree: ... and that HEAD itself is proven")
   S.git_out(root, "checkout", "--", "README.md")
 
   -- a new commit: another tree, the proof is for the old one

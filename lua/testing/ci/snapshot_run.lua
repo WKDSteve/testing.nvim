@@ -22,6 +22,10 @@
 --- anyway. The tree holds `.testing.lua` too, so the pipeline is the same; the versions of the tools are not asked again
 --- (the CI of the host is the gate that runs everything).
 ---
+--- `--with=<a,b>` lays the named paths of the working tree over the snapshot (`testing.ci.overlay`): the commit plus YOUR
+--- changes, without what other sessions have lying uncommitted. Such a run is never a proof: nothing is kept, the document
+--- is partial, the sentinel is not printed, and the summary line says how many files came from the working tree.
+---
 --- `--rev` takes another commit than HEAD (the pre-push hook: what is pushed need not be HEAD). A run that is not green
 --- prints what the child printed: the verdict line alone does not say what to fix, and the run's state is gone by then.
 ---
@@ -180,7 +184,7 @@ function M.main(args, root, sv)
   local proofs, proof
   if tree and profile then
     proofs, proof = proof_path(root, state_dir, tree, profile)
-    if not args.force and kept_proof(proof, tree) then
+    if not args.force and not args.with and kept_proof(proof, tree) then
       out(
         ("ci --snapshot %s green exit 0 (profile %s, kept: tree %s was green)"):format(
           sha:sub(1, 7),
@@ -198,6 +202,16 @@ function M.main(args, root, sv)
   if not snap then
     err(("testing ci --snapshot: cannot check %s out: %s"):format(sha:sub(1, 12), tostring(why)))
     return M.EXIT_INFRA
+  end
+  local laid
+  if args.with then
+    local why_with
+    laid, why_with = require("testing.ci.overlay").apply(root, snap.tree, args.with)
+    if not laid then
+      pcall(snapshot.remove, snap)
+      err("testing ci --snapshot: --with: " .. tostring(why_with))
+      return M.EXIT_USAGE
+    end
   end
   local extra = {}
   if args.profile then
@@ -218,7 +232,19 @@ function M.main(args, root, sv)
   end
 
   doc.snapshot = true
-  local notes = require("testing.ci").write_proof(doc, root, args.json, state_dir)
+  if laid then
+    -- not the commit alone: no proof of the commit, nothing in the state
+    doc.partial = true
+    if args.json then
+      pcall(
+        require("lib.nvim.fs.write.atomic"),
+        vim.fn.fnamemodify(args.json, ":p"),
+        require("lib.nvim.json.canonical").encode(doc) .. "\n",
+        { mkdirp = true }
+      )
+    end
+  end
+  local notes = laid and {} or require("testing.ci").write_proof(doc, root, args.json, state_dir)
   for _, n in ipairs(notes) do
     err("testing ci --snapshot: " .. n)
   end
@@ -234,11 +260,13 @@ function M.main(args, root, sv)
   end
   local verdict = type(doc.verdict) == "string" and doc.verdict or "?"
   out(
-    ("ci --snapshot %s %s exit %d%s"):format(
+    ("ci --snapshot %s%s %s exit %d%s%s"):format(
       sha:sub(1, 7),
+      laid and (" + %d file(s) of the working tree"):format(laid) or "",
       verdict,
       code,
-      type(doc.profile) == "string" and (" (profile " .. doc.profile .. ")") or ""
+      type(doc.profile) == "string" and (" (profile " .. doc.profile .. ")") or "",
+      laid and ", no proof" or ""
     )
   )
   if #notes > 0 then

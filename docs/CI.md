@@ -352,7 +352,7 @@ root whatever the file says. Refused on the workstation like every run.
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```
-testing ci --snapshot [--rev=<rev>] [--force] [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
+testing ci --snapshot [--rev=<rev>] [--with=<paths>] [--force] [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
 ```
 
 The pipeline runs on a snapshot of `HEAD` (a detached worktree outside the repository, as for `testing ci commit`), so
@@ -365,6 +365,15 @@ the keys of a stamp name the root they were made in, so a stamp made in the snap
 root. Everything else is checked as for any proof: the tree, Neovim, the pipeline, the tool versions, the age, a clean
 working tree (`ci verify` says `dirty` while the tree has uncommitted changes, however green the snapshot was). The
 answer shows it: `ci verify: verified (profile full, suite stamp snapshot)`.
+
+**The commit plus your own changes: `--with=<a,b>`.** Before committing, `testing ci --snapshot --with=lua/x.lua,TESTS/x_spec.lua`
+runs the snapshot of `HEAD` with exactly these paths of the working tree laid over it (a file, a directory with everything
+below it; a path the working tree no longer has is removed from the snapshot). What other sessions have lying uncommitted
+anywhere else is not part of the run, so nobody waits for a clean tree. The paths are relative to the root, inside it, never
+below `.git`, at most 2000 files. The checkout, its index and its branches are not touched. Such a run is **never a proof**:
+nothing is kept or written to the state, the document (`--json`) is partial, the sentinel is not printed, and the summary line
+says `+ N file(s) of the working tree ... no proof`. `ci verify` says apart what it finds: when `HEAD` has a snapshot proof but
+the working tree is dirty, it names `HEAD is proven by a snapshot run` and that the uncommitted changes are what no proof covers.
 
 **A green run is kept per tree.** Besides `ci-<profile>.json` (the last run) the document of a green, complete run is kept
 in `<state>/ci-proofs/<tree>-<profile>.json` (the last 24). A commit whose git tree has such a record is not run again: the

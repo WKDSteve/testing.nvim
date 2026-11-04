@@ -17,6 +17,10 @@ scripts/test.sh                       # die ganze Suite (Dogfood), Einzelnes: sc
 - Mehrere Sitzungen teilen den Rechner: eine Suite unter Last kann Timeouts und die bekannten Lastflakes zeigen
   (`child_run_spec`, `sheet_spec`); erst bei Ruhe wiederholen, bevor ein Fehler gesucht wird.
 - Fremde uncommittete Änderungen nie committen oder zurücksetzen; nur eigene Dateien mit Pfad stagen.
+- Auf einen sauberen Baum wird nicht gewartet: die Pipeline läuft auf einem Schnappschuss, ohne Arbeitsbaum und ohne die
+  Änderungen anderer Sitzungen. Vor dem Commit: `scripts/test.sh ci --snapshot --profile=<p> --with=<meine,pfade>`
+  (Stand plus eigene Änderungen, nie ein Beweis); nach dem Commit: `scripts/test.sh ci --snapshot --profile=<p>` oder
+  `ci commit <sha>`.
 
 ## Doku
 

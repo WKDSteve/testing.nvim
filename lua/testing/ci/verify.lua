@@ -323,6 +323,16 @@ local function check(args, sv)
   end
 
   if facts.dirty and not args.allow_dirty then
+    if doc.snapshot == true and doc.tree == facts.tree then
+      -- the commit itself is proven; what is not covered is whatever lies uncommitted (often another session's work)
+      return fail(
+        "dirty",
+        M.EXIT_NOT_PROVEN,
+        ("HEAD is proven by a snapshot run (tree %s); only the working tree has uncommitted changes, which no proof covers (--allow-dirty overrules)"):format(
+          short(facts.tree)
+        )
+      )
+    end
     return fail("dirty", M.EXIT_NOT_PROVEN, "git status is not empty (--allow-dirty overrules)")
   end
   local max_age = require("testing.stamp").parse_age(args.max_age) --[[@as integer]]

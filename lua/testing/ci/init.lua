@@ -54,6 +54,8 @@ M.USAGE = table.concat({
   "  --snapshot        run on a snapshot of HEAD (the working tree is not touched) and keep the proof for `ci verify`",
   "  --rev=<rev>       with --snapshot: the commit to run on instead of HEAD (what a pre-push hook is pushing)",
   "  --force           with --snapshot: run even when a green run of the same tree is kept",
+  "  --with=<a,b>      with --snapshot: lay these paths of the working tree over the snapshot (the commit plus your own changes;",
+  "                    other sessions' changes stay out). Such a run is no proof and is not kept",
   "  --agent           the agent report: the verdict first, then only the findings (default in an agent",
   "                    environment: TESTING_AGENT, CLAUDECODE, ...); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci/1 document there",
@@ -74,6 +76,7 @@ M.USAGE = table.concat({
 ---@field snapshot? boolean `--snapshot`: run on the snapshot of HEAD and keep the proof in the real state.
 ---@field rev? string `--rev=<rev>`, with `--snapshot`: the commit instead of HEAD.
 ---@field force? boolean `--force`, with `--snapshot`: run although a green run of the same tree is kept.
+---@field with? string[] `--with=<a,b>`, with `--snapshot`: paths of the working tree laid over the snapshot.
 ---@field json? string
 ---@field junit? string
 ---@field state_dir? string
@@ -94,6 +97,7 @@ local VALUED = {
   ["suite-events"] = true,
   events = true,
   rev = true,
+  with = true,
 }
 
 ---@param argv string[] The arguments after `ci`.
@@ -139,6 +143,8 @@ function M.parse(argv)
         args.steps = vim.split(value, ",", { trimempty = true })
       elseif key == "state-dir" then
         args.state_dir = value
+      elseif key == "with" then
+        args.with = vim.split(value, ",", { trimempty = true })
       else
         args[key] = value
       end
@@ -1120,6 +1126,10 @@ function M.main(argv, sv)
   end
   if args.force then
     err("testing ci: --force only goes with --snapshot")
+    return M.EXIT_USAGE
+  end
+  if args.with then
+    err("testing ci: --with only goes with --snapshot")
     return M.EXIT_USAGE
   end
   local report = require("testing.ci.report")
