@@ -13,8 +13,16 @@ return function(H)
     return x
   end
 
-  local g = timeout.start({ label = "suspend", file_ms = 30 })
-  vim.uv.sleep(80) -- C code: nothing interrupts it, the deadline has passed when it returns
+  -- a clock of our own: the deadline passes when WE say so, not when a loaded machine stalls the spec for 30 ms
+  local now = 0
+  local g = timeout.start({
+    label = "suspend",
+    file_ms = 30,
+    clock = function()
+      return now
+    end,
+  })
+  now = 80 -- the deadline has passed
 
   local worked, a, b = pcall(g.suspend, g, function()
     return busy(), "second"
