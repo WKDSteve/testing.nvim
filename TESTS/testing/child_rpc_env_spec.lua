@@ -2,6 +2,9 @@
 -- allowlist (secrets and $NVIM* never arrive), XDG/temp sandbox, determinism variables with their opt-out
 -- (for the RPC child and for the per-file child plan), the guard hook (install once, handle forwarded,
 -- effects(), a failing install fails the spawn), the prompt capture hands over to the guard.
+-- The only programs it starts are editors (the one running it, on its own files): the key holds the editor, the
+-- dependency checkouts the child loads and the tools of `testing.cache.tools` (reviewed 2026-11-04).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok

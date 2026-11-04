@@ -2,6 +2,9 @@
 -- (install, again, remove; a foreign hook is never touched; the hook of `:MyPlugins ci` is replaced), the script's text,
 -- and the hook run for real with bash: a proven state passes without a run, an unproven one runs the profile, a red
 -- profile blocks the push.
+-- It starts git (fixture repositories in the temp directory) and bash (the generated hook script): the key holds both
+-- versions, git's configuration, the editor and the dependency checkouts (reviewed 2026-11-04).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 

@@ -57,6 +57,7 @@ local CONFIG_NOT_IN_KEY = {
 ---@field details table<string, Testing.Cache.Detail> Spec file -> why it has no key, in a form a program can read.
 ---@field parts table<string, string[]> Spec file -> the lines its key is the hash of (kept in the stored entry).
 ---@field allow_flip table<string, boolean> Spec file -> declares `-- @cache-allow nondeterministic`.
+---@field spawn_ok table<string, boolean> Spec file -> vouches `-- @cache-allow spawn` and its key covers the processes of `testing.cache.tools` (see `Testing.Cache.Detail.spawn_ok`).
 ---@field vouched table<string, Testing.Cache.Vouched[]> Spec file -> the directives of its closure that vouch for inputs.
 ---@field audits table<string, Testing.Run.CacheAudit> Spec file -> a cache hit that runs anyway (`--cache-audit`).
 ---@field audit? { rate: number, audited: integer, stale: integer, skipped: integer } The audit of this run (nil: none asked for).
@@ -317,6 +318,7 @@ function M.prepare(o)
     details = {},
     parts = {},
     allow_flip = {},
+    spawn_ok = {},
     vouched = {},
     audits = {},
     findings = {},
@@ -382,6 +384,7 @@ function M.prepare(o)
       else
         prep.allow_flip[f.rel] = detail and detail.allow_nondeterministic or false
         prep.vouched[f.rel] = detail and detail.vouched or nil
+        prep.spawn_ok[f.rel] = detail and detail.spawn_ok or nil
         local cases
         if mode == "use" then
           cases = cache.get(key, { root = plan.root, cache_dir = o.cache_dir, file = f.rel })
@@ -507,6 +510,7 @@ function M.finish_inner(prep, report, opts)
   prep.findings = prep.findings or {}
   prep.parts = prep.parts or {}
   prep.allow_flip = prep.allow_flip or {}
+  prep.spawn_ok = prep.spawn_ok or {}
   prep.vouched = prep.vouched or {}
   prep.nondeterministic = prep.nondeterministic or {}
   local keylog = prep.keylog
@@ -585,6 +589,7 @@ function M.finish_inner(prep, report, opts)
             file = rel,
             run = res.run.id,
             parts = prep.parts[rel],
+            spawn_ok = prep.spawn_ok[rel],
             -- a file with a case that failed and then passed on a retry (`--retry-failed`) is never stored
             flaky = report.flaky_files and report.flaky_files[rel] or nil,
           }, { root = base_root, cache_dir = opts.cache_dir })

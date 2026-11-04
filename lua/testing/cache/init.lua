@@ -62,6 +62,7 @@
 local scan = require("testing.affected.scan")
 local hash = require("testing.cache.hash")
 local store = require("testing.cache.store")
+local tools = require("testing.cache.tools")
 
 local M = {}
 
@@ -168,6 +169,9 @@ local memo = {}
 ---@field nvim? string Replaces the Neovim version string (specs).
 ---@field runner_version? string Replaces the runner digest (specs).
 ---@field dep_roots? string[] Directories whose `lua/` resolves modules outside the project (default: the runtime path).
+---@field deps_declared? string[] The dependencies a spec that vouches `-- @cache-allow spawn` is keyed on (default: `testing.deps.declared(root)`, specs).
+---@field deps_opts? Testing.Deps.Opts Where those dependencies are looked up (specs).
+---@field tools? table<string, string> Replaces the identity of `git`, `bash` and `nvim` in the key (specs).
 ---@field spec_pattern? string[] Lua patterns of spec files (default `_spec%.lua$`).
 ---@field snapshots_dir? string `snapshots.dir` of the project: where `testing.screen` keeps its files (default `TESTS/__snapshots__`).
 ---@field spec_roots? string[] Spec roots relative to the root (default: the first path component of the spec).
@@ -920,6 +924,7 @@ end
 ---@field key? string `nondeterministic`: the key that gave different results.
 ---@field classes? string[] `nondeterministic`: the results it gave.
 ---@field allow_nondeterministic? boolean With a key: the spec declares `-- @cache-allow nondeterministic`.
+---@field spawn_ok? boolean With a key: the spec vouches `-- @cache-allow spawn` and the key holds what its processes start from (`spawn_lines`), so `put` takes the processes of `testing.cache.tools.SPAWN_TOOLS` out of the effects.
 ---@field flipped? string[] With a key: the results the key has given when they differ.
 ---@field vouched? Testing.Cache.Vouched[] With a key: the directives of the closure (`-- @cache-allow ...`, `-- @cache-env ...`) that vouch for what the scanner cannot see.
 
@@ -991,6 +996,61 @@ local function runtime_lines(ctx, hasher, root)
         end
         lines[#lines + 1] = ("runtime %s=%s"):format(name, sha)
       end
+    end
+  end
+  t[root] = { lines, why }
+  return lines, why
+end
+
+---What a process that a spec vouches for (`-- @cache-allow spawn`) starts from and the closure cannot show: the checkouts the
+---project declares as dependencies (a child editor loads them whole: `lua/` and the runtime directories), and the
+---programs the ledger lets through (`testing.cache.tools`: their version, for git also its configuration). A dependency
+---that cannot be found or hashed is no key.
+---@param ctx Testing.Cache.Ctx
+---@param hasher Testing.Cache.Hasher
+---@param root string
+---@return string[]|nil lines
+---@return string|nil why
+local function spawn_lines(ctx, hasher, root)
+  local t = memo_table(ctx, "#spawn")
+  local hit = t[root]
+  if hit then
+    return hit[1], hit[2]
+  end
+  local deps = require("testing.deps")
+  -- lib.nvim is the runner's own dependency: every child editor loads it, declared or not
+  local names = vim.deepcopy(ctx.deps_declared or deps.declared(root))
+  if not vim.tbl_contains(names, "lib.nvim") then
+    names[#names + 1] = "lib.nvim"
+  end
+  local resolved, failures = deps.resolve_all(names, root, ctx.deps_opts)
+  if #failures > 0 then
+    local why_dep = "dependency: " .. vim.trim(tostring(failures[1]):match("^[^\n]*"))
+    t[root] = { nil, why_dep }
+    return nil, why_dep
+  end
+  local lines, why = {}, nil
+  for _, res in ipairs(resolved) do
+    local name = res.name
+    local dig, derr =
+      tree_of(ctx, hasher, res.dir .. "/lua", "dep-lua", { ignore_dirs = PROJECT_IGNORE })
+    if not dig then
+      lines, why = nil, ("dependency %s: %s"):format(name, tostring(derr))
+      break
+    end
+    lines[#lines + 1] = ("spawn dep %s lua/=%s"):format(name, dig)
+    local rt, rwhy = runtime_lines(ctx, hasher, res.dir)
+    if not rt then
+      lines, why = nil, ("dependency %s: %s"):format(name, tostring(rwhy))
+      break
+    end
+    for _, l in ipairs(rt) do
+      lines[#lines + 1] = ("spawn dep %s %s"):format(name, l)
+    end
+  end
+  if lines then
+    for _, tool in ipairs({ "bash", "git", "nvim" }) do
+      lines[#lines + 1] = ("spawn tool %s=%s"):format(tool, tools.identity(tool, ctx.tools))
     end
   end
   t[root] = { lines, why }
@@ -1487,6 +1547,18 @@ local function key_once(file_info, ctx)
     return nil, why_rt, nil, { kind = "inputs" }
   end
   vim.list_extend(in_lines, rt_lines)
+  -- `-- @cache-allow spawn` of the spec itself: the processes it starts see the dependencies and the tools whole
+  local spawn_ok = false
+  for _, w in ipairs(info.directives.allow or {}) do
+    spawn_ok = spawn_ok or w == "spawn"
+  end
+  if spawn_ok then
+    local sp_lines, why_sp = spawn_lines(ctx, hasher, root)
+    if not sp_lines then
+      return nil, why_sp, nil, { kind = "inputs" }
+    end
+    vim.list_extend(in_lines, sp_lines)
+  end
   -- files that decide what the spec does without being required by it: the harness a dialect-h spec runs on,
   -- the project's `minit`
   for _, extra in ipairs(file_info.extra or {}) do
@@ -1565,6 +1637,7 @@ local function key_once(file_info, ctx)
     parts,
     {
       allow_nondeterministic = allowed,
+      spawn_ok = spawn_ok or nil,
       flipped = flip and flip.classes or nil,
       vouched = #agg.vouched > 0 and agg.vouched or nil,
     }
@@ -1619,6 +1692,7 @@ end
 ---@field crashed? boolean
 ---@field partial? boolean The file ran only some of its cases.
 ---@field parts? string[] The key lines (third result of `key`), kept in the entry for `testing explain`.
+---@field spawn_ok? boolean The key covers the processes of `testing.cache.tools.SPAWN_TOOLS` (`detail.spawn_ok` of the key): they are no reason to refuse the file.
 
 ---Is this case list storable? Returns the reason when it is not.
 ---@param cases any
@@ -1690,6 +1764,15 @@ function M.put(key, fragment, meta, opts)
     return false, "meta.file is required"
   end
   local file = meta.file:gsub("\\", "/")
+  if meta.spawn_ok and type(fragment) == "table" then
+    -- the processes the key covers leave the effects (a replay has empty effects anyway); any other still refuses
+    local stripped, strip_why = tools.strip(fragment)
+    if not stripped then
+      skipped("not stored: " .. tostring(strip_why))
+      return false, strip_why
+    end
+    fragment = stripped
+  end
   local why = unstorable(fragment, meta)
   if why then
     skipped("not stored: " .. why)
@@ -1903,7 +1986,7 @@ function M.wrap_file(runner_fn, file_info, ctx)
     skipped("case selection is active")
     return cases, { status = "uncacheable", reason = "case selection is active" }
   end
-  local key, why, parts = M.key(file_info, ctx)
+  local key, why, parts, detail = M.key(file_info, ctx)
   if not key then
     skipped(why or "no key")
     local cases = runner_fn()
@@ -1926,6 +2009,7 @@ function M.wrap_file(runner_fn, file_info, ctx)
     crashed = extra.crashed,
     partial = extra.partial,
     parts = parts,
+    spawn_ok = detail and detail.spawn_ok or nil,
   }, { root = ctx.root, cache_dir = ctx.cache_dir, prune = ctx.prune })
   return cases,
     {

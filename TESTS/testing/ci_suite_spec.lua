@@ -1,6 +1,9 @@
 -- TESTS/testing/ci_suite_spec.lua -- `testing ci` with the suite as an in-process step: green, red, options after --
 -- (a selection makes the run partial, a stamping step then runs as a plain run), --state-dir for the document and the
 -- stamp, a suite whose own verdict is green-partial. Split off ci_spec.lua for the per-file deadline; same helpers.
+-- It starts git (fixture repositories in the temp directory) and editors that run files of the fixture: the key holds
+-- git (version, configuration), the editor and the dependency checkouts (reviewed 2026-11-04).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 

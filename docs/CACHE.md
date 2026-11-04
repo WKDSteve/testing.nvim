@@ -211,6 +211,25 @@ list of words separated by blanks, and **only the leading run of words from the 
 (`time random spawn net outside env nondeterministic`): the first token that is not one of them ends the directive, so
 a remark behind it vouches for nothing (`-- @cache-allow time (log stamps only; never random numbers)` grants `time`
 and not `random`), and so does a comma (`time, random` grants nothing: write `time random`).
+**A spec that starts processes.** `-- @cache-allow spawn` of the spec itself does two things. The scanner no longer refuses
+the spec for its own `vim.system`, `jobstart` or `S.spawn`, and the key gets what those processes start from, which the
+closure of `require`s cannot show:
+
+- `spawn dep <name> lua/=<digest>` and `spawn dep <name> runtime <dir>/=<digest>` for every dependency the project declares
+  (`deps` of `.testing.lua`, `DEPS` of `TESTS/minimal_init.lua`) and always `lib.nvim`, the runner's own: a child editor
+  loads these checkouts whole, so an edit there changes the key. A dependency that cannot be found is no key,
+- `spawn tool <name>=<identity>` for `bash`, `git` and `nvim` (`testing.cache.tools`): the version line, for git also a
+  digest of the system and global configuration (`git config --system|--global --list --show-origin`: a `core.hookspath` or
+  a `user.*` changes what a fixture repository does) and one of the `GIT_*` variables that decide that (`HOME`,
+  `XDG_CONFIG_HOME`, `GIT_CONFIG_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, ...).
+
+The effects ledger still sees what the run started. After a run, the processes of `bash`, `git` and `nvim` are taken out of
+the `spawned` list before the cases are stored (a replay has empty effects anyway), and **any other program** (`stylua`,
+`luacheck`, `node`, ...), a blocked entry or the note that the ledger dropped entries keeps the file out of the cache as
+before: the key cannot say what such a program was. The programs are found by the first word of the entry, so a
+spec that starts a tool of another name needs a key that names it (add it to `tools.SPAWN_TOOLS` and `tools.identity`). The
+author's statement is still the author's: `testing explain` prints `vouched: @cache-allow spawn (<file>)`.
+
 `-- @cache-allow outside` says that the places outside the project this file names (`".."` in path arithmetic, the
 sibling-checkout lookup of `testing.deps`, the bad values a path validator is tested with) are not read for what a spec
 sees; the file is then not judged for them.
@@ -300,7 +319,9 @@ example one that runs a program that writes CRLF itself, or one that reads a fil
 `cache.key` returns `nil, reason` when the inputs cannot be known. When in doubt, do not cache. Never cached:
 
 - a spec that reads the clock (`os.time`, `hrtime`, `os.date`, `.now()`, an aliased `os`, ...) or random numbers,
-- a spec that starts a process or touches the network (`vim.system`, `jobstart`, `io.popen`, `curl`, ...),
+- a spec that starts a process or touches the network (`vim.system`, `jobstart`, `io.popen`, `curl`, ...); a process of
+  `bash`, `git` or `nvim` can be vouched for with `-- @cache-allow spawn` (the key then holds the tools and the dependency
+  checkouts, see "A spec that starts processes"),
 - a spec that reads an environment variable that is not part of the key (and does not declare it with `-- @cache-env`) or
   computes the name; a project module that computes a name or reads the whole environment without declaring it,
 - a spec or project module that reads files and names an EXISTING place outside the project,
@@ -327,10 +348,11 @@ module with `-- @cache-allow` (which is then a statement, not a guess).
 
 ### What is never stored
 
-`cache.put` refuses a file with a case that is not a plain `pass`, a case that does not apply here (`case.na`, the n/a
+`cache.put` (`meta.spawn_ok`: see "A spec that starts processes" above) refuses a file with a case that is not a plain `pass`, a case that does not apply here (`case.na`, the n/a
 convention: a replay would keep saying so after the platform or tool is there, and would turn a `--strict` red into a
 green), a retried case (`--retry-failed`: a case that
-failed and then passed is flaky, also under `--allow-flaky`, and the run reports the file as flaky), an effect in the ledger (spawn,
+failed and then passed is flaky, also under `--allow-flaky`, and the run reports the file as flaky), an effect in the ledger (spawn, except the
+processes of `bash`, `git` and `nvim` of a spec that vouches `-- @cache-allow spawn`;
 network, write outside tmp), a guard finding, a flaky file, a timeout or crash, a partial run (a case selection:
 `--filter`, `--lf`, ...), or cases that are themselves cached. Guards that are off do not make a file
 uncacheable; the static markers above are the authority for spawn and network.
