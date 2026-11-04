@@ -52,6 +52,7 @@ M.HOOK_COUNT = 10000
 ---@field case_ms integer|nil
 ---@field file_deadline number|nil Clock value (ms) after which the file is over; nil = none.
 ---@field case_deadline number|nil Clock value of the current case window; nil = none or already fired.
+---@field case_opened boolean A case window was opened (always, unless `defer_case`).
 ---@field fired_file boolean The file deadline passed.
 ---@field fired_case boolean A case deadline passed since the last `take_case`.
 ---@field stopped boolean
@@ -178,6 +179,7 @@ end
 ---@field label? string
 ---@field file_ms? integer Deadline of the whole file, from now.
 ---@field case_ms? integer Window of one case, from now (re-armed with `arm_case`).
+---@field defer_case? boolean The first case window does not open now but with `first_case` or `arm_case`: what a file does before its first case (big `describe` bodies) is not a stuck case, only `file_ms` counts, as for the hard limit of a child.
 ---@field clock? fun(): number Monotonic milliseconds (default: `uv.hrtime`, bound at load time).
 
 ---Start guarding. The caller MUST `stop` the guard (also after an error).
@@ -193,7 +195,8 @@ function M.start(opts)
     file_ms = opts.file_ms,
     case_ms = opts.case_ms,
     file_deadline = opts.file_ms and (now + opts.file_ms) or nil,
-    case_deadline = opts.case_ms and (now + opts.case_ms) or nil,
+    case_deadline = (opts.case_ms and not opts.defer_case) and (now + opts.case_ms) or nil,
+    case_opened = not opts.defer_case,
     fired_file = false,
     fired_case = false,
     stopped = false,
@@ -209,8 +212,17 @@ end
 ---A new case window starts now (the previous case ended).
 function Guard:arm_case()
   self.fired_case = false
+  self.case_opened = true
   if self.case_ms and not self.stopped then
     self.case_deadline = self.clock() + self.case_ms
+  end
+end
+
+---A case is about to start: opens the window of a `defer_case` guard if none was open yet. Later cases
+---keep the window the end of the previous one opened (`arm_case`).
+function Guard:first_case()
+  if not self.case_opened then
+    self:arm_case()
   end
 end
 

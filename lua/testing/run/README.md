@@ -102,7 +102,7 @@ The file deadline is persistent (a spec that swallows the error with `pcall` is 
 case deadline is one-shot and re-armed by the driver after each case. The status is `timeout`
 (exit 1), never `error` or `pass`; a spec that caught the error and finished is still a `timeout`.
 
-`case_ms` applies per `it` of a busted file. The one-case-per-file dialects have no case boundary
+`case_ms` applies per `it` of a busted file, from the start of the first one: what the file does before that (big `describe` bodies) only counts against `file_ms`. The one-case-per-file dialects have no case boundary
 inside the file, so only `file_ms` applies there.
 
 **Child editors have hard limits.** With `--isolated file` (default for busted files) the file runs

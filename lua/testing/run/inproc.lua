@@ -469,6 +469,7 @@ local function run_files(opts, holder)
           label = rel,
           file_ms = timeouts.file_ms,
           case_ms = is_busted and timeouts.case_ms or nil,
+          defer_case = true,
         })
         file_guard = guard
         a.orphans = {}
@@ -504,6 +505,9 @@ local function run_files(opts, holder)
             cases = dialect.run_file(entry.dialect, a, spec, {
               select = accept,
               assertions = opts.assertions,
+              on_case_start = function()
+                guard:first_case()
+              end,
               on_case = function(case)
                 if guard:take_case() then
                   case.status = "timeout"

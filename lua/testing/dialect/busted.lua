@@ -88,6 +88,7 @@ local GLOBALS = {
 
 ---@class Testing.Busted.Opts
 ---@field on_case? fun(case: Testing.Result.Case) Called after every case (progress output).
+---@field on_case_start? fun() Called right before an `it` that runs, before its `before_each` hooks.
 ---@field select? fun(id: string): boolean Run only the cases this accepts.
 ---@field dry? boolean Only run the describe bodies; `list` of the return value holds the case ids.
 ---@field assertions? "error"|"warn" What an `it` without assertions is (`testing.policy`); default `error`.
@@ -301,6 +302,9 @@ function M.run_file(a, spec, opts)
       return
     end
     local broken = top().broken
+    if opts.on_case_start then
+      opts.on_case_start()
+    end
     local case = policy.guard(opts, function()
       return a.run_case({
         file = rel,
