@@ -929,13 +929,18 @@ function M.run_repos(o)
 end
 
 ---The arguments of a commit check (`testing ci commit ...`).
----@param o { root: string, json: string, revs?: string[], range?: string, base?: string, profile?: string, force?: boolean }
+---@param o { root: string, json: string, revs?: string[], range?: string, since?: string, repos?: string[], base?: string, profile?: string, force?: boolean }
 ---@return string[]
 function M.commit_argv(o)
   local args = { "ci", "commit", "--no-agent", "--json=" .. o.json }
   if o.range and o.range ~= "" then
     args[#args + 1] = "--range=" .. o.range
   end
+  if o.since and o.since ~= "" then
+    args[#args + 1] = "--since=" .. o.since
+  end
+  -- `--repos-root=...`, `--repos-include=...`, `--repos-exclude=...` (see `M.repos_args`)
+  vim.list_extend(args, o.repos or {})
   if o.base and o.base ~= "" then
     args[#args + 1] = "--base=" .. o.base
   end
@@ -959,15 +964,29 @@ end
 function M.commit_items(doc, root)
   local items = {}
   local commits = type(doc) == "table" and type(doc.commits) == "table" and doc.commits or {}
+  -- several repositories: a finding's file is relative to the root of its own repository
+  local roots = {}
+  for _, repo in ipairs(type(doc) == "table" and type(doc.repos) == "table" and doc.repos or {}) do
+    if type(repo.name) == "string" and type(repo.root) == "string" then
+      roots[repo.name] = repo.root
+    end
+  end
+  local multi = next(roots) ~= nil
   for _, r in ipairs(commits) do
+    local at = type(r.repo) == "string" and roots[r.repo] or root
     local short = type(r.sha) == "string" and r.sha:sub(1, 7) or "?"
     for _, f in ipairs(type(r.new) == "table" and r.new or {}) do
       local named = type(f.file) == "string" and f.file ~= "" and f.file ~= "?"
       items[#items + 1] = {
-        filename = named and resolve(f.file, root) or nil,
+        filename = named and resolve(f.file, at) or nil,
         lnum = type(f.line) == "number" and f.line or 1,
         col = type(f.col) == "number" and f.col or 1,
-        text = ("[%s %s] %s"):format(short, tostring(f.step), tostring(f.text)),
+        text = ("[%s%s %s] %s"):format(
+          multi and type(r.repo) == "string" and (r.repo .. " ") or "",
+          short,
+          tostring(f.step),
+          tostring(f.text)
+        ),
         type = "E",
       }
     end
@@ -1019,7 +1038,7 @@ end
 ---Check commits (`testing ci commit ...`) in a child, each in its own snapshot of the commit: the output streams into
 ---the view `<root>/commit`, and the document the child wrote gives the verdict and a quickfix list of the new findings
 ---(opened only when there are some). Returns false with a reason when one is already running or the child cannot start.
----@param o { root: string, revs?: string[], range?: string, base?: string, profile?: string, force?: boolean, on_done?: fun(verdict: Testing.Ci.Verdict) }
+---@param o { root: string, revs?: string[], range?: string, since?: string, repos?: string[], base?: string, profile?: string, force?: boolean, on_done?: fun(verdict: Testing.Ci.Verdict) }
 ---@return boolean started
 ---@return string|nil err
 function M.run_commit(o)
@@ -1040,6 +1059,8 @@ function M.run_commit(o)
     json = json,
     revs = o.revs,
     range = o.range,
+    since = o.since,
+    repos = o.repos,
     base = o.base,
     profile = o.profile,
     force = o.force,

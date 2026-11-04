@@ -453,22 +453,48 @@ function M.ci_commit(ctx)
     revs[1] = ctx.args.rev
   end
   vim.list_extend(revs, ctx.rest or {})
-  if #revs == 0 and not ctx.flags.range then
+  local editor = require("testing.ci.editor")
+  local say = require("testing.notify").get()
+  -- several repositories: the roots of the flag, or of the setting `ci.repos` (`--repos`)
+  local repos
+  if ctx.flags["repos-root"] or ctx.flags.repos then
+    local cfg = require("testing.config").get().ci
+    if not ctx.flags["repos-root"] and #cfg.repos.roots == 0 then
+      say.error("testing ci commit: set ci.repos.roots in setup() (or pass --repos-root=<dir>)")
+      return
+    end
+    if not ctx.flags.since then
+      say.error("testing ci commit: several repositories need --since=<time>")
+      return
+    end
+    repos = editor.repos_args(cfg, { ["repos-root"] = ctx.flags["repos-root"] })
+    revs = {}
+  elseif #revs == 0 and not ctx.flags.range and not ctx.flags.since then
     revs[1] = "HEAD"
   end
-  local started, err = require("testing.ci.editor").run_commit({
-    root = root,
-    revs = revs,
-    range = ctx.flags.range,
-    base = ctx.flags.base,
-    profile = ctx.flags.profile,
-    force = ctx.flags.force,
-  })
-  if not started then
-    require("testing.notify").get().error("testing ci commit: " .. tostring(err))
-    return
+  local function launch()
+    local started, err = editor.run_commit({
+      root = root,
+      revs = revs,
+      range = ctx.flags.range,
+      since = ctx.flags.since,
+      repos = repos,
+      base = ctx.flags.base,
+      profile = ctx.flags.profile,
+      force = ctx.flags.force,
+    })
+    if not started then
+      say.error("testing ci commit: " .. tostring(err))
+      return
+    end
+    say.info("testing ci commit: " .. (repos and "several repositories" or root))
   end
-  require("testing.notify").get().info("testing ci commit: " .. root)
+  if repos then
+    -- one question for all the repositories that are not trusted, before the child is started
+    require("testing.bindings.trust_prompt").ask_many(editor.repos_dirs(repos), launch)
+  else
+    launch()
+  end
 end
 
 ---`:Testing ci status`: the last document of the project as lines in a viewer.
@@ -1109,6 +1135,13 @@ function M.routes()
       args = { { name = "rev", type = M.TYPE_COMMIT, optional = true, variadic = true } },
       flags = {
         { name = "range", type = "STRING", desc = "Every commit of a..b, oldest first" },
+        { name = "since", type = "STRING", desc = "Every non-merge commit newer than this time" },
+        {
+          name = "repos-root",
+          type = "DIR",
+          desc = "With --since: every repository below this directory",
+        },
+        { name = "repos", bool = true, desc = "With --since: the repositories of ci.repos" },
         { name = "base", type = M.TYPE_COMMIT, desc = "Compare with this commit, not the parent" },
         {
           name = "profile",

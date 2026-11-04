@@ -257,7 +257,8 @@ skips a suite whose stamp does not verify, and a suite with options after `--` a
 ## Check a commit: `testing ci commit`
 
 ```
-testing ci commit <rev>... | --range=<a>..<b>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
+testing ci commit <rev>... | --range=<a>..<b> | --since=<time>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
+testing ci commit --repos-root=<dir> --since=<time> [--repos-include=<a,b>] [--repos-exclude=<a,b>]
                            [--include-docs] [--json=<file>] [--agent|--no-agent] [--state-dir=<dir>] [--root=<dir>]
                            [-- <suite options>]
 ```
@@ -319,13 +320,24 @@ that reproduces it. The terminal report (`--no-agent`) lists every finding. `--j
 From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD` (the script's `--state-dir`
 before the subcommand is understood).
 
-From the editor: `:Testing ci commit [<rev>...] [--range=<a>..<b>] [--base=<rev>] [--profile=<name>] [--force] [--root=<dir>]`
-(no revision: `HEAD`; the revisions complete from the latest commits). The child runs `testing ci commit --no-agent`, its
-output streams into a live buffer of its own (separate from the buffer of
-`:Testing ci`), and at the end the notification names the verdict per commit. The quickfix list holds only the findings
-that are **new** at the commit (`known` ones are red at the parent too and are not the commit's); it opens only when
-there are some. One commit check per project at a time. Not built yet: the form over several repositories
-(`--repos-root`, `--since`).
+Since a time, and across repositories: `testing ci commit --since=<time>` checks every non-merge commit of `HEAD` newer
+than the time (git's date: `2.days.ago`, `2026-11-01`), oldest first; `testing ci commit --repos-root=<dir>
+--since=<time>` does it for every repository below the directory that has a `ci` section (the same detection as
+`testing ci --repos-root`; `--repos-include=a,b` and `--repos-exclude=a,b` narrow it by name). That is the review of a
+fleet run in one call: at most 50 commits in all, the output has a `== <repo>` section per repository and one summary
+line (`ci commits 3 in 2 repositories: 1 regression, 2 clean exit 1`), the exit is the worst of all. A repository that
+cannot be checked (no git repository, not trusted) is reported and exits 2 without stopping the others. With `--json`
+the document is the same `testing-ci-commit/1`: every commit names its `repo`, and `repos` lists each repository
+(`name`, `root`, `commits`, `exit`, `problem`).
+
+From the editor: `:Testing ci commit [<rev>...] [--range=<a>..<b>] [--since=<time>] [--base=<rev>] [--profile=<name>]
+[--force] [--root=<dir>]` (no revision: `HEAD`; the revisions complete from the latest commits). With `--since` and
+`--repos-root=<dir>` (or `--repos`: the roots, include and exclude of the setting `ci.repos`) it checks several
+repositories; the untrusted ones are asked about once before the child starts. The child runs `testing ci commit
+--no-agent`, its output streams into a live buffer of its own (separate from the buffer of `:Testing ci`), and at the end
+the notification names the verdict per commit. The quickfix list holds only the findings that are **new** at the commit
+(`known` ones are red at the parent too and are not the commit's; with several repositories each item names its
+repository); it opens only when there are some. One commit check per project at a time.
 
 Limits: the dependencies are not frozen (both sides see the same ones: `$<NAME>_DIR`, the repository's `.deps/` or its
 siblings, handed to the child as `$<NAME>_DIR`), so red that comes from a half-done dependency is known at both. A

@@ -15,7 +15,22 @@
       "additionalProperties": { "type": "integer", "minimum": 1 }
     },
     "time": { "type": "string" },
-    "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } }
+    "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } },
+    "repos": {
+      "description": "Only with --repos-root: one entry per repository, also one that could not be checked (problem).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "root", "commits", "exit"],
+        "properties": {
+          "name": { "type": "string" },
+          "root": { "type": "string" },
+          "commits": { "type": "integer", "minimum": 0 },
+          "exit": { "enum": [0, 1, 2, 3] },
+          "problem": { "type": ["string", "null"] }
+        }
+      }
+    }
   },
   "$defs": {
     "verdict": {
@@ -46,6 +61,7 @@
       "required": ["sha", "verdict", "exit", "exact", "new", "known", "fixed", "problems", "rerun"],
       "properties": {
         "sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "repo": { "type": "string", "description": "The directory name of the repository (only with --repos-root)." },
         "base": { "type": ["string", "null"] },
         "verdict": { "$ref": "#/$defs/verdict" },
         "exit": { "enum": [0, 1, 2, 3] },

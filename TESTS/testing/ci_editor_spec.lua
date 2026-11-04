@@ -1599,6 +1599,43 @@ return function(H)
       "--root=/r",
     }, "commit_argv: the verb, the document, the options, the revisions, --root last")
 
+    local multi_argv = editor.commit_argv({
+      root = "/r",
+      json = "/tmp/c.json",
+      since = "2.days.ago",
+      repos = { "--repos-root=/fleet", "--repos-include=a,b" },
+    })
+    eq(vim.list_slice(multi_argv, 10), {
+      "ci",
+      "commit",
+      "--no-agent",
+      "--json=/tmp/c.json",
+      "--since=2.days.ago",
+      "--repos-root=/fleet",
+      "--repos-include=a,b",
+      "--root=/r",
+    }, "commit_argv: --since and the repository arguments")
+    local multi_items = editor.commit_items({
+      repos = { { name = "a", root = "/fleet/a" }, { name = "b", root = "/fleet/b" } },
+      commits = {
+        {
+          sha = "1234567890ab",
+          repo = "b",
+          new = { { step = "luacheck", file = "x.lua", line = 2, text = "t" } },
+        },
+      },
+    }, "/cwd")
+    eq(
+      multi_items[1].filename,
+      "/fleet/b/x.lua",
+      "commit_items: the file is relative to its own repository"
+    )
+    eq(
+      multi_items[1].text,
+      "[b 1234567 luacheck] t",
+      "commit_items: ... and the text names the repository"
+    )
+
     local DOC = {
       schema = "testing-ci-commit/1",
       commits = {

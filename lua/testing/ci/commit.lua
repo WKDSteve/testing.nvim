@@ -2,9 +2,13 @@
 ---@brief `testing ci commit`: the pipeline on the snapshot of a commit, red sorted into new, known and fixed.
 ---@description
 --- ```
---- testing ci commit <rev>... | --range=<a>..<b>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
+--- testing ci commit <rev>... | --range=<a>..<b> | --since=<time>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
 ---                            [--include-docs] [--json=<file>] [--agent|--no-agent] [--root=<dir>] [-- <suite options>]
+--- testing ci commit --repos-root=<dir> --since=<time> [--repos-include=<a,b>] [--repos-exclude=<a,b>]
 --- ```
+---
+--- `--since` takes the non-merge commits of HEAD newer than a time; with `--repos-root` that is done for every repository
+--- below the directory that has a `ci` section (a repository that cannot be checked is reported, the others go on).
 ---
 --- Each commit is checked out into a detached `git worktree` of its own (`testing.ci.snapshot`) and its pipeline runs
 --- there in a child process (`testing ci --keep-going`, a throwaway state directory): what another session does in the
@@ -45,9 +49,13 @@ M.MAX_COMMITS = 50
 M.TIMEOUT_MS = 60 * 60 * 1000
 
 M.USAGE = table.concat({
-  "usage: testing ci commit <rev>... | --range=<a>..<b> [options] [-- <suite options>]",
+  "usage: testing ci commit <rev>... | --range=<a>..<b> | --since=<time> [options] [-- <suite options>]",
+  "       testing ci commit --repos-root=<dir> --since=<time> [options] [-- <suite options>]",
   "  <rev>...          the commits to check (a SHA, a branch, HEAD~2, ...)",
   "  --range=<a>..<b>  every commit of a..b, oldest first (at most 50)",
+  "  --since=<time>    every non-merge commit of HEAD newer than this (git's date: 2.days.ago, 2026-11-01)",
+  "  --repos-root=<d>  with --since: every repository below d with a ci section (repeatable); 50 commits in all",
+  "  --repos-include=<a,b>, --repos-exclude=<a,b>  narrow those repositories by directory name",
   "  --base=<rev>      compare with this commit instead of the first parent",
   "  --profile=<name>  the profile to run (default: ci.default of the commit)",
   "  --force           run again even when a result for the commit is kept",
@@ -64,6 +72,10 @@ M.USAGE = table.concat({
 ---@class Testing.Ci.Commit.Args
 ---@field revs string[]
 ---@field range? string
+---@field since? string
+---@field repos_roots string[]
+---@field repos_include string[]
+---@field repos_exclude string[]
 ---@field base? string
 ---@field profile? string
 ---@field force boolean
@@ -76,8 +88,18 @@ M.USAGE = table.concat({
 ---@field suite_args string[]
 ---@field help boolean
 
-local VALUED =
-  { range = true, base = true, profile = true, json = true, ["state-dir"] = true, root = true }
+local VALUED = {
+  range = true,
+  since = true,
+  base = true,
+  profile = true,
+  json = true,
+  ["state-dir"] = true,
+  root = true,
+  ["repos-root"] = true,
+  ["repos-include"] = true,
+  ["repos-exclude"] = true,
+}
 
 ---@param argv string[] The arguments after `ci commit`.
 ---@return Testing.Ci.Commit.Args|nil args
@@ -86,6 +108,9 @@ function M.parse(argv)
   ---@type Testing.Ci.Commit.Args
   local args = {
     revs = {},
+    repos_roots = {},
+    repos_include = {},
+    repos_exclude = {},
     force = false,
     keep = false,
     include_docs = false,
@@ -123,7 +148,16 @@ function M.parse(argv)
       if value == nil or value == "" then
         return nil, ("--%s needs a value"):format(key)
       end
-      args[key == "state-dir" and "state_dir" or key] = value
+      if key == "repos-root" then
+        args.repos_roots[#args.repos_roots + 1] = value
+      elseif key == "repos-include" or key == "repos-exclude" then
+        vim.list_extend(
+          args[key == "repos-include" and "repos_include" or "repos_exclude"],
+          vim.split(value, ",", { plain = true, trimempty = true })
+        )
+      else
+        args[key == "state-dir" and "state_dir" or key] = value
+      end
     elseif a:sub(1, 1) == "-" then
       return nil, ("unknown argument %s"):format(a)
     else
@@ -132,11 +166,25 @@ function M.parse(argv)
     i = i + 1
   end
   if not args.help then
-    if args.range and #args.revs > 0 then
+    local named = (#args.revs > 0 and 1 or 0) + (args.range and 1 or 0) + (args.since and 1 or 0)
+    if #args.repos_roots > 0 then
+      if not args.since or named > 1 then
+        return nil, "--repos-root takes --since=<time> and no commits or --range"
+      end
+      if args.base then
+        return nil, "--base names one commit: it does not go with --repos-root"
+      end
+    elseif #args.repos_include > 0 or #args.repos_exclude > 0 then
+      return nil, "--repos-include and --repos-exclude narrow --repos-root"
+    elseif #args.revs > 0 and args.range then
       return nil, "name commits or a --range, not both"
+    elseif named > 1 then
+      return nil, "name commits, a --range or --since, only one of them"
+    elseif named == 0 then
+      return nil, "name a commit (testing ci commit HEAD), a --range or --since"
     end
-    if not args.range and #args.revs == 0 then
-      return nil, "name a commit (testing ci commit HEAD) or a --range"
+    if args.since and (args.since:sub(1, 1) == "-" or args.since:find("%c")) then
+      return nil, "--since: expected a date git understands (2.days.ago, 2026-11-01)"
     end
   end
   return args
@@ -911,6 +959,135 @@ end
 ---Helpers a spec reaches (not an API).
 M.internal = { range_shas = range_shas, memory_path = memory_path }
 
+---The non-merge commits of HEAD newer than `since`, oldest first.
+---@param root string
+---@param since string
+---@return string[]|nil shas
+---@return string|nil problem
+local function since_shas(root, since)
+  local code, out, err =
+    git({ "log", "--no-merges", "--reverse", "--format=%H", "--since=" .. since }, root)
+  if code ~= 0 then
+    return nil, ("--since=%s: %s"):format(since, vim.trim(err))
+  end
+  return vim.split(out, "\n", { trimempty = true })
+end
+
+---What one repository of a call is checked for: its top level, the trust, the commits and the trust of the
+---`.testing.lua` each commit carries. A repository that cannot be checked gets a `problem`; the others go on.
+---@param dir string A directory of the repository.
+---@param args Testing.Ci.Commit.Args
+---@return { dir: string, root?: string, shas: string[], problem?: string }
+local function plan_repo(dir, args)
+  local entry = { dir = dir, shas = {} }
+  local code, top = git({ "rev-parse", "--show-toplevel" }, dir)
+  if vim.fn.isdirectory(dir) ~= 1 or code ~= 0 then
+    entry.problem = ("%s is not a git repository"):format(dir)
+    return entry
+  end
+  local root = vim.fs.normalize(vim.trim(top))
+  entry.root = root
+  local refused = require("testing.trust").check(root)
+  if refused then
+    entry.problem = refused
+    return entry
+  end
+  local shas, problem
+  if args.range then
+    shas, problem = range_shas(root, args.range)
+  elseif args.since then
+    shas, problem = since_shas(root, args.since)
+  else
+    shas = {}
+    for _, rev in ipairs(args.revs) do
+      local sha
+      sha, problem = snapshot.resolve(root, rev)
+      if not sha then
+        shas = nil
+        break
+      end
+      shas[#shas + 1] = sha
+    end
+  end
+  if not shas then
+    entry.problem = problem
+    return entry
+  end
+  if #shas == 0 and not args.since then
+    entry.problem = "the range names no commit"
+    return entry
+  end
+  -- trusted through the store, the root is trusted for one `.testing.lua`: the one a commit carries is what runs
+  for _, sha in ipairs(shas) do
+    local refusal = require("testing.trust").check_commit_file(root, M.testing_lua_at(root, sha))
+    if refusal then
+      entry.problem = ("%s: %s"):format(sha:sub(1, 12), refusal)
+      return entry
+    end
+  end
+  entry.shas = shas
+  return entry
+end
+
+---Check the commits of one repository.
+---@param root string
+---@param shas string[]
+---@param args Testing.Ci.Commit.Args
+---@param say fun(line: string)
+---@return table[] results
+local function check_shas(root, shas, args, say)
+  pcall(snapshot.sweep, root, { state_dir = args.state_dir })
+  local results = {}
+  for _, sha in ipairs(shas) do
+    local ok_c, r = pcall(M.check, root, sha, args, say)
+    if not ok_c then
+      r = { sha = sha, verdict = "infra", problems = { "internal error: " .. tostring(r) } }
+    end
+    r.exit = exit_of(r.verdict)
+    r.new, r.known, r.fixed, r.flaky = r.new or {}, r.known or {}, r.fixed or {}, r.flaky or {}
+    r.problems = r.problems or {}
+    r.rerun = r.rerun or ("testing ci commit %s --force --keep"):format(sha:sub(1, 12))
+    if r.exact == nil then
+      r.exact = true
+    end
+    results[#results + 1] = r
+  end
+  return results
+end
+
+local VERDICT_ORDER = {
+  "regression",
+  "unclassified",
+  "error",
+  "infra",
+  "flaky",
+  "known-red",
+  "clean",
+  "docs-only",
+  "empty",
+}
+
+---The summary line of several commits: how many per verdict, the worst exit.
+---@param tally table<string, integer>
+---@param n integer
+---@param worst integer
+---@param repos? integer
+---@return string
+function M.summary(tally, n, worst, repos)
+  local parts = {}
+  for _, v in ipairs(VERDICT_ORDER) do
+    if tally[v] then
+      parts[#parts + 1] = ("%d %s"):format(tally[v], v)
+    end
+  end
+  return ("ci commits %d%s: %s exit %d"):format(
+    n,
+    repos and (" in %d repositories"):format(repos) or "",
+    #parts > 0 and table.concat(parts, ", ") or "none",
+    worst
+  )
+end
+
 ---`testing ci commit ...`.
 ---@param argv string[] The arguments after `ci commit`.
 ---@param sv table `out`, `err`, `env`, `state_dir`.
@@ -942,95 +1119,95 @@ function M.main(argv, sv)
     return code
   end
 
-  local dir = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
-  local code, top = git({ "rev-parse", "--show-toplevel" }, dir)
-  if vim.fn.isdirectory(dir) ~= 1 or code ~= 0 then
-    return fail(M.EXIT_USAGE, ("%s is not a git repository"):format(args.root))
-  end
-  local root = vim.fs.normalize(vim.trim(top))
-  local refused = require("testing.trust").check(root)
-  if refused then
-    return fail(M.EXIT_USAGE, refused)
+  -- the repositories: the one of --root, or those below the roots of --repos-root
+  local multi = #args.repos_roots > 0
+  local dirs = {}
+  if multi then
+    local repos, why = require("testing.ci.repos").resolve({
+      repos = {},
+      roots = args.repos_roots,
+      include = args.repos_include,
+      exclude = args.repos_exclude,
+      refresh = false,
+      force = false,
+      jobs = 1,
+      keep_going = false,
+      reuse = false,
+      help = false,
+    }, (args.state_dir or vim.fn.stdpath("state")) .. "/testing-ci-repos.json")
+    if not repos then
+      return fail(M.EXIT_USAGE, tostring(why))
+    end
+    dirs = repos
+  else
+    dirs[1] = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
   end
 
-  local shas = {}
-  if args.range then
-    local list
-    list, problem = range_shas(root, args.range)
-    if not list then
-      return fail(M.EXIT_USAGE, problem)
+  local plans, total = {}, 0
+  for _, dir in ipairs(dirs) do
+    local plan = plan_repo(dir, args)
+    if plan.problem and not multi then
+      return fail(M.EXIT_USAGE, plan.problem)
     end
-    shas = list
-  else
-    for _, rev in ipairs(args.revs) do
-      local sha
-      sha, problem = snapshot.resolve(root, rev)
-      if not sha then
-        return fail(M.EXIT_USAGE, problem)
-      end
-      shas[#shas + 1] = sha
-    end
+    total = total + #plan.shas
+    plans[#plans + 1] = plan
   end
-  if #shas == 0 then
+  if total > M.MAX_COMMITS then
+    return fail(M.EXIT_USAGE, ("%d commits, at most %d per call"):format(total, M.MAX_COMMITS))
+  end
+  if total == 0 and not multi then
     return fail(M.EXIT_USAGE, "the range names no commit")
   end
-  if #shas > M.MAX_COMMITS then
-    return fail(M.EXIT_USAGE, ("%d commits, at most %d per call"):format(#shas, M.MAX_COMMITS))
-  end
 
-  -- trusted through the store, the root is trusted for one `.testing.lua`: the one a commit carries is what runs
-  for _, sha in ipairs(shas) do
-    local refusal = require("testing.trust").check_commit_file(root, M.testing_lua_at(root, sha))
-    if refusal then
-      return fail(M.EXIT_USAGE, ("%s: %s"):format(sha:sub(1, 12), refusal))
-    end
-  end
-
-  pcall(snapshot.sweep, root, { state_dir = args.state_dir })
   ---@param _ string
   local function quiet(_) end
   local say = agent and quiet or out
-  local results, worst = {}, M.EXIT_OK
-  for _, sha in ipairs(shas) do
-    local ok_c, r = pcall(M.check, root, sha, args, say)
-    if not ok_c then
-      r = { sha = sha, verdict = "infra", problems = { "internal error: " .. tostring(r) } }
+  local results, worst, tally = {}, M.EXIT_OK, {}
+  local repo_docs = {}
+  for _, plan in ipairs(plans) do
+    local name = vim.fs.basename(plan.root or plan.dir)
+    local rs = {}
+    if plan.problem then
+      worst = math.max(worst, M.EXIT_USAGE)
+    elseif #plan.shas > 0 then
+      if multi then
+        say(("== %s: %d commit(s)"):format(name, #plan.shas))
+      end
+      rs = check_shas(plan.root, plan.shas, args, say)
     end
-    r.exit = exit_of(r.verdict)
-    r.new, r.known, r.fixed, r.flaky = r.new or {}, r.known or {}, r.fixed or {}, r.flaky or {}
-    r.problems = r.problems or {}
-    r.rerun = r.rerun or ("testing ci commit %s --force --keep"):format(sha:sub(1, 12))
-    if r.exact == nil then
-      r.exact = true
+    local repo_worst = plan.problem and M.EXIT_USAGE or M.EXIT_OK
+    for _, r in ipairs(rs) do
+      r.repo = name
+      repo_worst = math.max(repo_worst, r.exit)
+      worst = math.max(worst, r.exit)
+      tally[r.verdict] = (tally[r.verdict] or 0) + 1
+      results[#results + 1] = r
     end
-    results[#results + 1] = r
-    worst = math.max(worst, r.exit)
+    repo_docs[#repo_docs + 1] = {
+      name = name,
+      root = plan.root or plan.dir,
+      commits = #rs,
+      exit = repo_worst,
+      problem = plan.problem or vim.NIL,
+    }
   end
 
-  local tally = {}
-  for _, r in ipairs(results) do
-    tally[r.verdict] = (tally[r.verdict] or 0) + 1
+  if #results > 1 or multi then
+    out(M.summary(tally, #results, worst, multi and #plans or nil))
   end
-  if #results > 1 then
-    local parts = {}
-    for _, v in ipairs({
-      "regression",
-      "unclassified",
-      "error",
-      "infra",
-      "flaky",
-      "known-red",
-      "clean",
-      "docs-only",
-      "empty",
-    }) do
-      if tally[v] then
-        parts[#parts + 1] = ("%d %s"):format(tally[v], v)
-      end
+  for _, rd in ipairs(repo_docs) do
+    if rd.problem ~= vim.NIL then
+      out(("ci commit repository %s ERROR %s"):format(rd.name, rd.problem))
+    elseif multi and rd.commits == 0 then
+      out(("ci commit repository %s: no commits since %s"):format(rd.name, args.since))
     end
-    out(("ci commits %d: %s exit %d"):format(#results, table.concat(parts, ", "), worst))
   end
+  local last_repo
   for _, r in ipairs(results) do
+    if multi and r.repo ~= last_repo then
+      out(("== %s"):format(r.repo))
+      last_repo = r.repo
+    end
     for _, line in ipairs(M.lines(r, agent)) do
       out(line)
     end
@@ -1039,12 +1216,15 @@ function M.main(argv, sv)
   if args.json then
     local doc = {
       schema = M.SCHEMA,
-      repo = vim.fs.basename(root),
+      repo = multi and ("%d repositories"):format(#plans) or vim.fs.basename(plans[1].root),
       exit = worst,
       tally = tally,
       time = os.date("!%Y-%m-%dT%H:%M:%SZ"),
       commits = results,
     }
+    if multi then
+      doc.repos = repo_docs
+    end
     local ok_w, werr = require("lib.nvim.fs.write.atomic")(
       vim.fn.fnamemodify(args.json, ":p"),
       require("lib.nvim.json.canonical").encode(doc) .. "\n",

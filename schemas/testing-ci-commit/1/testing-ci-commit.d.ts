@@ -10,6 +10,17 @@ export interface TestingCiCommit {
   time: string;
   /** In the order they were named (a range: oldest first). */
   commits: CommitResult[];
+  /** Only with `--repos-root`: one entry per repository, also one that could not be checked. */
+  repos?: RepoResult[];
+}
+
+export interface RepoResult {
+  name: string;
+  root: string;
+  commits: number;
+  exit: 0 | 1 | 2 | 3;
+  /** Why the repository could not be checked (not a repository, not trusted, ...). */
+  problem?: string | null;
 }
 
 export type Verdict =
@@ -26,6 +37,8 @@ export type Verdict =
 export interface CommitResult {
   /** The full commit id. */
   sha: string;
+  /** The directory name of the repository (only with `--repos-root`). */
+  repo?: string;
   /** What red is compared with: `--base` or the first parent; null for a root commit. */
   base?: string | null;
   verdict: Verdict;
