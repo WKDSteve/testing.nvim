@@ -43,8 +43,13 @@ local memo = {}
 ---@param argv string[]
 ---@return string|nil
 local function output(argv)
+  -- not from the project: on Windows a program is looked for in the working directory first, and a `git.exe` in the
+  -- root of the project under test must not be what the key asks for its version
+  local cwd = vim.fn.stdpath("data")
   local ok, res = pcall(function()
-    return vim.system(argv, { text = true, timeout = 10000 }):wait(11000)
+    return vim
+      .system(argv, { text = true, timeout = 10000, cwd = vim.fn.isdirectory(cwd) == 1 and cwd or nil })
+      :wait(11000)
   end)
   if not ok or type(res) ~= "table" or res.code ~= 0 then
     return nil

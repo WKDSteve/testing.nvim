@@ -45,6 +45,26 @@ return function(H)
   )
   eq(tools.covered({ ["git status"] = 1 }), false, "covered: not a list")
 
+  -- the tools are asked for their version away from the project (a `git.exe` in its root must not be found first)
+  do
+    local real_system, cwds = vim.system, {}
+    vim.system = function(argv, opts, ...)
+      cwds[#cwds + 1] = opts and opts.cwd
+      return real_system(argv, opts, ...)
+    end
+    tools.reset()
+    local line = tools.identity("git")
+    vim.system = real_system
+    tools.reset()
+    ok(type(line) == "string" and line ~= "", "identity: git has a line: " .. tostring(line))
+    ok(#cwds > 0, "identity: git was asked")
+    local away = true
+    for _, cwd in ipairs(cwds) do
+      away = away and cwd == vim.fn.stdpath("data")
+    end
+    ok(away, "identity: ... from the data directory, not the project: " .. vim.inspect(cwds))
+  end
+
   -- ---------------------------------------------------------------- the key lines
   local spawn_spec = "-- @cache-allow spawn\nreturn function(H)\n  H.ok(true, 'x')\nend\n"
   local A = "TESTS/proj/spawn_spec.lua"
