@@ -117,6 +117,15 @@ local function deps_of(test_sh, dot)
   return vim.deepcopy(scaffold.DEFAULT_DEPS), nil, risks
 end
 
+---The dependencies a repository already names, from the text of its files: nothing of the project runs.
+---@param root string
+---@return string[] deps
+---@return string|nil from Where they came from; nil: no file names them, these are the default.
+---@return string[] risks
+function M.read_deps(root)
+  return deps_of(read(root .. "/scripts/test.sh"), read(root .. "/.testing.lua"))
+end
+
 ---Lines of `s` that are code: trimmed, no blank lines, no comment lines (`#` for shell, `--` for Lua).
 ---@param s string
 ---@param comment string Lua pattern of a comment start.

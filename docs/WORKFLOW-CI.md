@@ -85,6 +85,82 @@ The GitHub workflow of a repository does not spell the commands out again: it ch
 - **The same files, a different machine.** What the runner does and what you did locally are the same steps; a
   difference is a finding (a tool version, a missing dependency), not a second pipeline to maintain.
 
+## One pipeline, two kinds of runner
+
+CI stays on the local runner. macOS is the one exception, because there is no local Mac: its leg runs in a throwaway
+GitHub-hosted VM, never on the local machine. `testing init` writes this as a workflow, so a move to the local runner
+no longer loses macOS:
+
+```bash
+testing init --workflow=two-runner           # a public repository
+testing init --workflow=two-runner-private   # a private repository
+```
+
+It writes only `.github/workflows/ci.yml` and touches nothing else. An existing file is kept; `--force` replaces this
+one file. The checkouts below `.deps/` come from the `DEPS=(...)` line of `scripts/test.sh`, else from `deps` in the
+text of `.testing.lua`, else `lib.nvim`; nothing of the project runs for that, and a name it cannot read is an error.
+Plain `testing init` still writes the hosted three-system matrix.
+
+| Event | `two-runner` (public) | `two-runner-private` |
+| --- | --- | --- |
+| push to `main` | local runner, whole profile; **hosted macOS**, `--step=suite` | local runner, whole profile |
+| `workflow_dispatch` | no such trigger | **hosted macOS**, `--step=suite` |
+| `pull_request` | hosted ubuntu (whole profile), hosted windows and macOS (`--step=suite`) | no such trigger |
+
+- **Why private is by hand.** Standard runners are free for public repositories. A private one has 12 USD a month on
+  GitHub Free and macOS costs 0.062 USD per minute (GitHub docs, 2026-11-04), about 190 minutes. Start the leg with
+  `gh workflow run ci.yml`. The 30-minute timeout limits one run to 1.86 USD.
+- **Steps.** A hosted leg runs what depends on the platform. When `.testing.lua` makes `conformance` a gate, add it
+  (`--step=suite,conformance`); a pipeline without that step answers with a usage error, never a pass. A pipeline
+  written by hand may name its steps differently.
+- **Entry point.** The workflow calls `scripts/test.sh ci`, which `testing init` writes. A repository with the
+  `scripts/ci.sh` shim can call that instead, it is the same pipeline.
+- **The runner guard does not see the hosted leg.** The guard is a hook in the `.env` of a local runner
+  ([RUNNER-GUARD.md](RUNNER-GUARD.md#hosted-legs)). A guard that refuses the local job does not stop the macOS leg
+  (`fail-fast: false`).
+- **A job with `needs: [pipeline]` waits for every leg.** A `publish-ci-verified` job behind this matrix does not move
+  the branch while macOS alone is red, and a push with the local runner off stays open until that job is discarded
+  after 24 h.
+- **First run.** The templates are checked against the rendered file, not on a real macOS VM; the first push of a
+  repository is that check.
+
+### Why there is no `testing ci workflow`
+
+Decided on 2026-11-04: `testing init` already writes the workflow of a repository, so `--workflow` is a second kind of
+the same thing, and a `ci` verb would be a second place for it. `testing ci` runs a pipeline; it writes no setup.
+
+### What `testing ci remote` shows
+
+`testing ci remote` counts push runs only:
+
+- A system without a job is `-`, with no state in `--json`: no verdict, neither `ok` nor red. The summary
+  `fully green: n / m` counts the jobs that exist, so read the `MACOS` column for whether macOS ran at all.
+- Red only on macOS is red, also for the exit code.
+- On a private repository the `MACOS` cell therefore stays `-`, also after a run by hand: that run can neither hide a
+  red push run nor turn it green. Its result: `gh run list -R <owner>/<repo> --workflow=ci.yml --event workflow_dispatch`.
+
+### The log of a red macOS run
+
+No device is needed:
+
+```bash
+gh run list -R <owner>/<repo> --workflow=ci.yml --limit 10
+```
+
+```bash
+gh run view <run-id> -R <owner>/<repo> --log-failed
+```
+
+One job: `gh api repos/<owner>/<repo>/actions/jobs/<job-id>/logs` (the job ids are in `gh run view <run-id> --json jobs`;
+the `url` of the `macos` cell in `testing ci remote --json` links the job). The report and the suite IR stay 14 days as
+the artifact `ci-macos` (`testing-ir-macos-latest` with the workflow of plain `testing init`):
+
+```bash
+gh run download <run-id> -R <owner>/<repo> -n ci-macos
+```
+
+Save what matters at once: GitHub can answer an old run with HTTP 404 well before the usual retention ends.
+
 ## What the `conformance` step checks
 
 K1 to K15 of [CONFORMANCE.md](CONFORMANCE.md): layout, documentation, tooling, and static rules read from the text of
@@ -105,7 +181,8 @@ prints it. See [EXIT-CODES.md](EXIT-CODES.md).
 2. Add the `ci` section; `testing ci list` shows the resolved profiles.
 3. Replace `scripts/ci.sh` by the shim (keep the name: workflows, hooks and `:MyPlugins ci` call it).
 4. Check it from both sides: a format error and a red case turn it red (exit `1`), a missing tool gives exit `3`.
-5. Point the workflow at `scripts/ci.sh` and give the job the dependency checkouts.
+5. Point the workflow at `scripts/ci.sh` and give the job the dependency checkouts; on the local runner,
+   `testing init --workflow=<kind>` writes it ([above](#one-pipeline-two-kinds-of-runner)).
 
 ## Not there yet
 

@@ -23,6 +23,10 @@ Also reachable as `:Testing init [<root>] [--force] [--plugin=<name>]` and
 | `.github/workflows/ci.yml` | 3-OS matrix, `timeout-minutes`, the JSON IR uploaded on failure, dependencies from `ci-verified` |
 | `stylua.toml`, `.luacheckrc`, `.gitattributes` | the formatter and linter settings the generated files expect |
 
+`workflow = "two-runner"` or `"two-runner-private"` (the CLI's `--workflow=<kind>`) writes only
+`.github/workflows/ci.yml`: the self-hosted runner plus a GitHub-hosted macOS leg, on every push in a public repository
+and by hand (`workflow_dispatch`) in a private one. `force` then replaces that one file. See `docs/WORKFLOW-CI.md`.
+
 A dependency is looked up in `$<NAME>_DIR`, `<repo>/.deps/<name>`, `<repo>/../<name>` and
 `stdpath('data')/lazy/<name>`; an override that is set but wrong decides alone.
 

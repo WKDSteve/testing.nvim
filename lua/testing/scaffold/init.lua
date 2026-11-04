@@ -13,6 +13,9 @@
 ---                                 lib.nvim and testing.nvim checked out from `ci-verified`
 ---   stylua.toml, .luacheckrc, .gitattributes   (NEW-45, NEW-49) so the generated files are lint-clean
 ---
+--- `opts.workflow` (`M.WORKFLOWS`) writes only `.github/workflows/ci.yml`, as the pattern "one pipeline, two kinds of
+--- runner" with a GitHub-hosted macOS leg; `force` then replaces that one file.
+---
 --- Rules:
 ---   * An existing file is NEVER overwritten: it is reported in `skipped`. `opts.force = true`
 ---     replaces it (atomically); the CLI maps that to the explicit `--force` flag, nothing else
@@ -77,6 +80,52 @@ M.HOOK_FILES = {
   { path = "scripts/hooks/pre-commit", template = "hook_pre_commit.tpl", exec = true },
   { path = "scripts/hooks/claude-stop", template = "hook_claude_stop.tpl", exec = true },
 }
+
+---The workflows of `opts.workflow` (`testing init --workflow=<kind>`), one template each: the self-hosted runner for a
+---push, plus a GitHub-hosted macOS leg (docs/WORKFLOW-CI.md). A public repository runs that leg on every push, a private
+---one only by hand, because its hosted minutes are paid. Written instead of the setup, so a repository that already has
+---one moves to the local runner without its other files being touched.
+---@type table<string, string>
+M.WORKFLOWS = {
+  ["two-runner"] = "ci_two_runner.yml.tpl",
+  ["two-runner-private"] = "ci_two_runner_private.yml.tpl",
+}
+
+---The kinds of `M.WORKFLOWS`, sorted.
+---@return string[]
+function M.workflow_kinds()
+  local kinds = vim.tbl_keys(M.WORKFLOWS)
+  table.sort(kinds)
+  return kinds
+end
+
+---What is left to do by hand after `init --workflow=<kind>`, one line each.
+---@param kind string
+---@param result Testing.Scaffold.Result
+---@return string[] lines
+function M.workflow_next_steps(kind, result)
+  local lines = {}
+  if #result.skipped > 0 then
+    lines[#lines + 1] =
+      "kept: an existing workflow is not replaced; --force replaces this one file only"
+  end
+  lines[#lines + 1] = ("dependencies checked out: %s (from %s)"):format(
+    table.concat(result.workflow_deps or {}, ", "),
+    result.workflow_deps_from or "the default, no file names them"
+  )
+  lines[#lines + 1] =
+    "next: `testing init` writes scripts/test.sh, which every leg runs, if it is missing"
+  lines[#lines + 1] =
+    "      when .testing.lua makes conformance a gate, add it to --step of the hosted legs"
+  if kind == "two-runner-private" then
+    lines[#lines + 1] =
+      "      macOS runs by hand only: gh workflow run ci.yml (docs/WORKFLOW-CI.md)"
+  else
+    lines[#lines + 1] =
+      "      `testing ci runner-guard install` guards the local runner (docs/RUNNER-GUARD.md)"
+  end
+  return lines
+end
 
 ---What is left to do by hand after `init --hooks`, one line each (docs/HOOKS.md, Install). The `chmod` of the scaffold
 ---does nothing on NTFS, and git there records every file as `100644`; a clone on Linux, macOS or WSL then skips a hook
@@ -243,10 +292,11 @@ end
 ---@param dir string Template directory.
 ---@param prefix? string
 ---@param ref? string Branch to check out (default `ci-verified`).
+---@param template? string Template of one step (default `ci_dep_step.yml.tpl`).
 ---@return string|nil block
 ---@return string|nil err
-local function dep_steps(names, owner, dir, prefix, ref)
-  local tpl, err = read_template(dir, "ci_dep_step.yml.tpl")
+local function dep_steps(names, owner, dir, prefix, ref, template)
+  local tpl, err = read_template(dir, template or "ci_dep_step.yml.tpl")
   if not tpl then
     return nil, err
   end
@@ -291,11 +341,19 @@ function M.build_vars(plugin, deps, owner, extra)
   if not steps then
     return nil, err
   end
+  -- The workflows that reach the self-hosted runner: third-party code runs on the maintainer's machine there, so the
+  -- action is pinned by commit, and it keeps no credentials.
+  local pinned, perr =
+    dep_steps(all, owner, M.template_dir(), nil, nil, "ci_dep_step_pinned.yml.tpl")
+  if not pinned then
+    return nil, perr
+  end
   local vars = {
     PLUGIN = plugin,
     DEPS = deps,
     ALL_DEPS = all,
     DEP_STEPS = steps,
+    DEP_STEPS_PINNED = pinned,
     -- Extra arguments of `testing run .` baked into scripts/test.sh (empty: nothing).
     RUN_ARGS = "",
   }
@@ -457,10 +515,40 @@ function M.init(root, opts)
     result.plugin = plugin
     ---@cast plugin string
 
-    local deps, derr = normalize_deps(opts.deps)
+    local given_deps = opts.deps
+    if opts.workflow then
+      if opts.hooks then
+        fail("workflow and hooks exclude each other")
+        return
+      end
+      if not M.WORKFLOWS[opts.workflow] then
+        fail(
+          ("unknown workflow %s (workflows: %s)"):format(
+            vim.inspect(opts.workflow),
+            table.concat(M.workflow_kinds(), ", ")
+          )
+        )
+        return
+      end
+      -- The checkouts of an existing repository are its own dependencies, read from the text of its files. One that
+      -- cannot be read stops here: a workflow without it would be red for a reason nobody wrote down.
+      if given_deps == nil then
+        local read_deps, from, risks = require("testing.scaffold.update").read_deps(abs)
+        if #risks > 0 then
+          fail(table.concat(risks, "; "))
+          return
+        end
+        given_deps = read_deps
+        result.workflow_deps_from = from
+      end
+    end
+    local deps, derr = normalize_deps(given_deps)
     if not deps then
       fail(tostring(derr))
       return
+    end
+    if opts.workflow then
+      result.workflow_deps = vim.list_extend({ "testing.nvim" }, deps)
     end
     local owner = opts.owner == nil and M.DEFAULT_OWNER or opts.owner
     if not is_owner(owner) then
@@ -479,7 +567,12 @@ function M.init(root, opts)
     -- Render everything first: a problem must not leave half a setup behind.
     ---@type { path: string, rel: string, text: string, spec: Testing.Scaffold.FileSpec }[]
     local planned = {}
-    for _, spec in ipairs(opts.hooks and M.HOOK_FILES or M.FILES) do
+    local files = opts.hooks and M.HOOK_FILES
+      or opts.workflow and {
+        { path = ".github/workflows/ci.yml", template = M.WORKFLOWS[opts.workflow] },
+      }
+      or M.FILES
+    for _, spec in ipairs(files) do
       local rel, rerr = render.render(spec.path, vars)
       local tpl, terr = read_template(dir, spec.template)
       local text, xerr

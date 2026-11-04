@@ -133,9 +133,11 @@ lint ~
                          TestingHoverRegister waits for it.
 :Testing terminal         Repeat the last run in a terminal.nvim terminal.
 :Testing list [{root}]    List what would run.
-:Testing init [{root}] [--force] [--plugin={name}]
+:Testing init [{root}] [--force] [--plugin={name}] [--workflow={kind}]
         Generate the test setup of a plugin repository. An existing file is
-        never overwritten without `--force`.
+        never overwritten without `--force`. `--workflow=two-runner` or
+        `two-runner-private` writes only `.github/workflows/ci.yml`: the local
+        runner plus a GitHub-hosted macOS leg.
 :Testing conformance [{root}] [--gate] [--only={ids}] [--skip={ids}] [--bridge]
         Run the conformance checks K1..K16 on the project (a report; a failed
         gate is a warning, not an error).

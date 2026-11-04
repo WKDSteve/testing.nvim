@@ -660,6 +660,57 @@ return function(H)
     "no_runner: a job from an old cache, without the fields, stays what it was"
   )
 
+  -- ------------------------------------------------------------------ a repository without a macOS job
+
+  do
+    local now = 1800000000
+    local run_rec = run_(77, "CI", "completed", "success", "2026-10-31T11:00:00Z")
+    local nomac = { dir = "/x/nomac", repo = "nomac", owner = "o" }
+    remote.classify(nomac, run_rec, {
+      job_(771, "testing ci (windows)", "completed", "success", {
+        labels = { "self-hosted", "windows" },
+      }),
+    }, {}, now)
+    eq(nomac.overall, "success", "no macOS job: the jobs that exist decide")
+    eq(nomac.os.macos, nil, "no macOS job: no cell in the document, so no state at all")
+    local shown = remote.render({ nomac })
+    ok(
+      shown[2]:match("^nomac%s+%-%s+ok%s+%-") ~= nil,
+      "no macOS job: the cell is `-`, never `ok`: " .. shown[2]
+    )
+
+    -- the two-runner workflow: the hosted macOS leg gets its own cell, and red there is red
+    local two = { dir = "/x/two", repo = "two", owner = "o" }
+    remote.classify(two, run_rec, {
+      job_(781, "testing ci (windows)", "completed", "success", {
+        labels = { "self-hosted", "windows" },
+      }),
+      job_(782, "testing ci (macos)", "completed", "failure", { labels = { "macos-latest" } }),
+    }, {}, now)
+    eq(two.os.macos.state, "failure", "two runners: the hosted leg is the macOS cell")
+    eq(two.os.windows.state, "success", "two runners: the local leg is the windows cell")
+    eq(two.overall, "failure", "two runners: red only on macOS is red")
+
+    -- queued on a hosted runner is not "the local runner is off"
+    local q = { dir = "/x/q", repo = "q", owner = "o" }
+    remote.classify(q, run_(79, "CI", "queued", nil, "2026-10-31T11:00:00Z"), {
+      job_(791, "testing ci (macos)", "queued", nil, {
+        labels = { "macos-latest" },
+        created_at = "2020-01-01T00:00:00Z",
+      }),
+    }, {}, now)
+    eq(q.os.macos.state, "queued", "two runners: a hosted leg never waits for the local runner")
+
+    -- a macOS run by hand on a private repository is no verdict about the commit: it cannot hide a red push
+    local dispatched = remote.pick_run({
+      run_(90, "CI", "completed", "failure", "2026-10-31T10:00:00Z"),
+      vim.tbl_extend("force", run_(91, "CI", "completed", "success", "2026-10-31T12:00:00Z"), {
+        event = "workflow_dispatch",
+      }),
+    }, "CI")
+    eq(dispatched.id, 90, "workflow_dispatch: the newer run by hand does not replace the push run")
+  end
+
   -- ------------------------------------------------------------------ the human table
 
   local tbl = run({ dirs.eps, dirs.zeta, dirs.allskip })

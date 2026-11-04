@@ -741,5 +741,205 @@ return function(H)
   has(art, "if: failure()", "it is uploaded when the job fails")
   has(art, "path: ${{ runner.temp }}/testing-ir.json", "the IR is what it uploads")
 
+  -- ---------------------------------------------------------------- --workflow: two kinds of runner, a macOS leg
+  do
+    local CI_FILE = ".github/workflows/ci.yml"
+
+    ---The two lists of the matrix expression: what a push runs, what every other event runs.
+    ---@param text string
+    ---@return table[] on_push
+    ---@return table[] otherwise
+    local function legs(text)
+      local pushed, other = text:match("github%.event_name == 'push' && '(%[.-%])' || '(%[.-%])'")
+      ok(
+        pushed ~= nil and other ~= nil,
+        "the matrix has a list for a push and one for any other event"
+      )
+      return vim.json.decode(pushed), vim.json.decode(other)
+    end
+    ---@param list table[]
+    ---@param name string
+    ---@return table|nil
+    local function leg(list, name)
+      for _, l in ipairs(list) do
+        if l.name == name then
+          return l
+        end
+      end
+    end
+    ---@param l table
+    ---@return boolean
+    local function is_self_hosted(l)
+      return type(l["runs-on"]) == "table" and vim.tbl_contains(l["runs-on"], "self-hosted")
+    end
+
+    -- an existing repository: its other files stay, and its dependencies are its own
+    local wf_root = mkproj("wf.nvim", { "lua/wf" })
+    eq(scaffold.init(wf_root).errors, {}, "workflow: the setup exists first")
+    local test_sh = slurp(wf_root .. "/scripts/test.sh")
+    local patched =
+      test_sh:gsub("DEPS=%(([^)\n]*)%)", "DEPS=('testing.nvim' 'lib.nvim' 'ui.nvim')", 1)
+    local fh = assert(io.open(wf_root .. "/scripts/test.sh", "wb"))
+    fh:write(patched)
+    fh:close()
+    local old_ci = slurp(wf_root .. "/" .. CI_FILE)
+    local kept = scaffold.init(wf_root, { workflow = "two-runner" })
+    eq(kept.errors, {}, "workflow: no error when the file exists")
+    eq(kept.skipped, { CI_FILE }, "workflow: an existing ci.yml is kept without force")
+    eq(slurp(wf_root .. "/" .. CI_FILE), old_ci, "workflow: ... unchanged")
+    has(
+      table.concat(scaffold.workflow_next_steps("two-runner", kept), "\n"),
+      "--force replaces this one file only",
+      "workflow: ... and it says how to replace it"
+    )
+
+    local dot_before = slurp(wf_root .. "/.testing.lua")
+    local wf_forced = scaffold.init(wf_root, { workflow = "two-runner", force = true })
+    eq(wf_forced.errors, {}, "workflow: force works")
+    eq(wf_forced.replaced, { CI_FILE }, "workflow: force replaces the workflow and nothing else")
+    eq(slurp(wf_root .. "/scripts/test.sh"), patched, "workflow: test.sh is untouched")
+    eq(slurp(wf_root .. "/.testing.lua"), dot_before, "workflow: .testing.lua is untouched")
+    eq(
+      wf_forced.workflow_deps_from,
+      "scripts/test.sh",
+      "workflow: the dependencies were read from test.sh"
+    )
+    eq(
+      wf_forced.workflow_deps,
+      { "testing.nvim", "lib.nvim", "ui.nvim" },
+      "workflow: the runner and the repository's own dependencies"
+    )
+
+    local public = slurp(wf_root .. "/" .. CI_FILE)
+    lacks(public, "@@", "two-runner: no placeholder left")
+    lacks(public, "\r", "two-runner: LF only")
+    has(public, 'repository: "WKDSteve/ui.nvim"', "two-runner: the dependency is checked out")
+    has(public, "path: .deps/ui.nvim", "two-runner: ... where scripts/test.sh looks")
+    has(public, "scripts/test.sh ci @steps", "two-runner: runs what `testing init` writes")
+    lacks(public, "scripts/ci.sh", "two-runner: not a shim that `testing init` does not write")
+    has(public, "persist-credentials: false", "two-runner: a checkout keeps no credentials")
+    has(public, "fail-fast: false", "two-runner: a red macOS leg does not cancel the local one")
+    has(public, "pull_request:", "two-runner: pull requests run")
+    lacks(public, "workflow_dispatch", "two-runner: public needs no run by hand")
+    -- every action reaches the maintainer's machine: pinned by commit, as in the repositories it comes from
+    for line in public:gmatch("uses: ([^\n]+)") do
+      ok(line:match("@%x%x%x%x%x%x%x+ # v%d") ~= nil, "two-runner: pinned by commit: " .. line)
+    end
+
+    local on_push, otherwise = legs(public)
+    local mac = leg(on_push, "macos")
+    ok(mac ~= nil, "two-runner: a push has a macOS leg")
+    eq(mac["runs-on"], "macos-latest", "two-runner: ... on a GitHub-hosted runner")
+    eq(mac.hosted, true, "two-runner: ... which gets its tools from the workflow")
+    eq(mac.steps, "--step=suite", "two-runner: ... and runs what depends on the platform")
+    ok(is_self_hosted(leg(on_push, "windows")), "two-runner: a push uses the local runner")
+    eq(leg(on_push, "windows").hosted, false, "two-runner: ... with the tools on its PATH")
+    eq(leg(on_push, "windows").steps, "", "two-runner: ... and the whole profile")
+    for _, l in ipairs(otherwise) do
+      ok(not is_self_hosted(l), "two-runner: no other event reaches the local runner: " .. l.name)
+    end
+    ok(leg(otherwise, "macos") ~= nil, "two-runner: a pull request runs on macOS too")
+    eq(leg(otherwise, "ubuntu").steps, "", "two-runner: ubuntu carries the whole profile")
+
+    -- the runner guard is a hook in the `.env` of a local runner: nothing in the workflow reaches it, and a hosted leg
+    -- names no label of a local runner
+    local guard = require("testing.ci.runner_guard")
+    lacks(public, guard.HOOK_VAR, "two-runner: the workflow does not touch the guard's hook")
+    for _, l in ipairs(on_push) do
+      eq(l.hosted, not is_self_hosted(l), "two-runner: hosted means no local runner: " .. l.name)
+    end
+
+    -- the steps of the hosted legs exist in what `testing init` set up (an unknown step is a usage error)
+    local section = assert(
+      require("testing.ci.derive").section(
+        wf_root,
+        require("testing.config.project").load(wf_root).config
+      )
+    )
+    local derived = table.concat(section.profiles.full, " ")
+    has(derived, "suite", "two-runner: --step=suite exists in the derived pipeline")
+    lacks(derived, "conformance", "two-runner: ... and conformance does not, without a gate")
+
+    -- private: macOS only by hand, and the file says why
+    local priv_root = mkproj("priv.nvim", { "lua/priv" })
+    local priv_result = scaffold.init(priv_root, { workflow = "two-runner-private" })
+    eq(priv_result.errors, {}, "two-runner-private: no error")
+    eq(priv_result.created, { CI_FILE }, "two-runner-private: only the workflow is written")
+    eq(priv_result.workflow_deps_from, nil, "two-runner-private: no file names dependencies")
+    eq(
+      priv_result.workflow_deps,
+      { "testing.nvim", "lib.nvim" },
+      "two-runner-private: ... so the default"
+    )
+    local private = slurp(priv_root .. "/" .. CI_FILE)
+    lacks(private, "@@", "two-runner-private: no placeholder left")
+    has(private, "workflow_dispatch:", "two-runner-private: macOS runs by hand")
+    has(private, "gh workflow run ci.yml", "two-runner-private: ... and the file says how")
+    has(private, "0.062 USD per minute", "two-runner-private: ... and why not on every push")
+    lacks(private, "\n  pull_request:", "two-runner-private: no paid pull-request legs")
+    has(
+      private,
+      "${{ github.event_name }}-${{ github.ref }}",
+      "two-runner-private: a push does not cancel the paid run by hand, nor it a push"
+    )
+    local p_push, p_other = legs(private)
+    eq(#p_push, 1, "two-runner-private: a push has one leg")
+    ok(is_self_hosted(p_push[1]), "two-runner-private: ... on the local runner")
+    eq(#p_other, 1, "two-runner-private: the run by hand has one leg")
+    eq(p_other[1].name, "macos", "two-runner-private: ... macOS")
+    eq(p_other[1]["runs-on"], "macos-latest", "two-runner-private: ... GitHub-hosted")
+    has(
+      table.concat(scaffold.workflow_next_steps("two-runner-private", priv_result), "\n"),
+      "gh workflow run ci.yml",
+      "two-runner-private: the report names the run by hand"
+    )
+
+    -- what cannot be right writes nothing
+    local bad_root = mkproj("bad.nvim", { "lua/bad" })
+    local unknown = scaffold.init(bad_root, { workflow = "nope" })
+    has(unknown.errors[1], "unknown workflow", "workflow: an unknown kind is an error")
+    has(unknown.errors[1], "two-runner-private", "workflow: ... that names the kinds")
+    eq(list_files(bad_root), {}, "workflow: ... and writes nothing")
+    has(
+      scaffold.init(bad_root, { workflow = "two-runner", hooks = true }).errors[1],
+      "exclude each other",
+      "workflow: not together with hooks"
+    )
+    vim.fn.mkdir(bad_root .. "/scripts", "p")
+    local bad_sh = assert(io.open(bad_root .. "/scripts/test.sh", "wb"))
+    bad_sh:write("#!/bin/sh\nDEPS=('testing.nvim' '$(evil)')\n")
+    bad_sh:close()
+    local risky = scaffold.init(bad_root, { workflow = "two-runner" })
+    has(risky.errors[1], "names a dependency", "workflow: a dependency it cannot read is an error")
+    eq(risky.created, {}, "workflow: ... a checkout must not vanish without a word")
+
+    -- the command line
+    local cli = require("testing.cli")
+    local function init_cli(args)
+      local out, err = {}, {}
+      local code = cli.main(vim.list_extend({ "init" }, args), {
+        out = function(s)
+          out[#out + 1] = s
+        end,
+        err = function(s)
+          err[#err + 1] = s
+        end,
+      })
+      return code, table.concat(out, "\n"), table.concat(err, "\n")
+    end
+    local cli_root = mkproj("clip.nvim", { "lua/clip" })
+    local code, out = init_cli({ cli_root, "--workflow=two-runner" })
+    eq(code, 0, "cli: --workflow is exit 0")
+    has(out, "created: " .. CI_FILE, "cli: it says what it created")
+    has(out, "runner-guard install", "cli: and what is left to do")
+    eq(list_files(cli_root), { CI_FILE }, "cli: only the workflow")
+    local bad_code, _, bad_err = init_cli({ cli_root, "--workflow=nope" })
+    eq(bad_code, 2, "cli: an unknown kind is a usage error")
+    has(bad_err, "unknown workflow", "cli: ... and says so")
+    eq(init_cli({ cli_root, "--workflow=two-runner", "--hooks" }), 2, "cli: not with --hooks")
+    eq(init_cli({ cli_root, "--workflow=two-runner", "--update" }), 2, "cli: not with --update")
+    eq(init_cli({ cli_root, "--workflow=two-runner", "--plugin=x" }), 2, "cli: not with --plugin")
+  end
+
   vim.fn.delete(tmp, "rf")
 end

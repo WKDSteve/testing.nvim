@@ -629,7 +629,9 @@ States, worst first; a cell has the worst state of its jobs, the repository (`ov
 
 The table (one row per repository: repo, with the directory in front when it is named otherwise, ubuntu, windows,
 macos, note; `ok`, `FAIL`, `no-runner`, `-` for a cell
-without a job, `!` for a rejected run, `?` for unknown) ends with `fully green: <n> / <total>`. `--json` prints the
+without a job, `!` for a rejected run, `?` for unknown) ends with `fully green: <n> / <total>`. A `-` is no verdict,
+neither `ok` nor red, and `fully green` counts the jobs that exist: a repository without a macOS job can be fully green
+with `-` in that column. `--json` prints the
 document `testing-ci-remote/1` instead: `schema`, `generated_at`, `token_source` (`env:TESTING_GITHUB_TOKEN` or `gh`,
 never the token) or `token_error`, `workflow` (the `--workflow`), and `repos`, sorted by name, each with `repo`, `owner`,
 `dir`, `branch`, `workflow`, `sha`, `overall`, `run` (`id`, `url`, `status`, `conclusion`, `created_at`, `updated_at`,

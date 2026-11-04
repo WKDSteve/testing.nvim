@@ -103,7 +103,7 @@ return function(H)
   }, "list offers the flags that do something on it")
   eq(
     sorted(complete("Testing init --")),
-    { "--force", "--hooks", "--plugin", "--update", "--write" },
+    { "--force", "--hooks", "--plugin", "--update", "--workflow", "--write" },
     "init offers its flags"
   )
   eq(complete("Testing file --"), { "--rtp" }, "file offers its flag")

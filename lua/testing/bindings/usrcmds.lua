@@ -7,7 +7,7 @@
 ---   :Testing file [<spec>]       run the spec of the current buffer (mapping a source file to its spec is M3)
 ---   :Testing last                repeat the last run
 ---   :Testing list [<root>] ...   list what would run (the flags of `run` without --cached and --reporter)
----   :Testing init [<root>] [--force] [--plugin=<name>] [--hooks]   generate the test setup of a plugin repo (--hooks: the git and agent hook recipes instead, never over an existing file)
+---   :Testing init [<root>] [--force] [--plugin=<name>] [--hooks] [--workflow=<kind>]   generate the test setup of a plugin repo (--hooks: the git and agent hook recipes instead, never over an existing file; --workflow: only ci.yml, self-hosted plus hosted macOS)
 ---   :Testing migrate [dry-run|apply] [<root>] [--fleet-root=<dir>]   plan (or write) the move of a repo to testing.nvim
 ---   :Testing conformance [<root>] [--gate] [--only=K1,K3] [--skip=K10] [--bridge] [--markdown]   the K1..K16 checks
 ---   :Testing surface [<root>] [--from=<ir.json>] [--threshold=<n>] [--markdown] [--matrix] [--csv] [--no-tags]   keymaps/commands/... and how much the specs exercised (`--matrix` alone: the interactive view, testing.surface.view)
@@ -637,7 +637,7 @@ end
 ---Say what `:Testing init` did: what was created, replaced and kept, and the errors.
 ---@param root string
 ---@param result { created: string[], replaced: string[], skipped: string[], errors: string[] }
----@param flags { hooks?: boolean, force?: boolean }
+---@param flags { hooks?: boolean, force?: boolean, workflow?: string }
 function M.report_init(root, result, flags)
   local lines = {}
   if #result.created > 0 then
@@ -658,6 +658,9 @@ function M.report_init(root, result, flags)
   end
   if flags.hooks and #result.created > 0 and #result.errors == 0 then
     vim.list_extend(lines, require("testing.scaffold").hook_next_steps())
+  end
+  if flags.workflow and #result.errors == 0 then
+    vim.list_extend(lines, require("testing.scaffold").workflow_next_steps(flags.workflow, result))
   end
   if #lines == 0 then
     lines[1] = "nothing to do"
@@ -784,6 +787,11 @@ function M.routes()
           desc = "Generate the git and agent hook scripts instead of the setup",
         },
         {
+          name = "workflow",
+          type = "STRING",
+          desc = "Write only ci.yml, self-hosted plus hosted macOS: two-runner, two-runner-private",
+        },
+        {
           name = "update",
           bool = true,
           desc = "Bring scripts/test.sh and minimal_init to the templates (a preview)",
@@ -799,6 +807,10 @@ function M.routes()
         if ctx.flags.update then
           if ctx.flags.hooks or ctx.flags.plugin then
             notify().error("testing init: --update takes neither --hooks nor --plugin")
+            return
+          end
+          if ctx.flags.workflow then
+            notify().error("testing init: --workflow does not go with --update")
             return
           end
           local update = require("testing.scaffold.update")
@@ -819,10 +831,12 @@ function M.routes()
           end
           return
         end
-        local result = require("testing.scaffold").init(
-          root,
-          { force = ctx.flags.force, plugin = ctx.flags.plugin, hooks = ctx.flags.hooks }
-        )
+        local result = require("testing.scaffold").init(root, {
+          force = ctx.flags.force,
+          plugin = ctx.flags.plugin,
+          hooks = ctx.flags.hooks,
+          workflow = ctx.flags.workflow,
+        })
         M.report_init(root, result, ctx.flags)
         -- Kept setup files: asked once whether to replace them (Keep first), instead of leaving the person to type the
         -- whole command again with `--force`. Hooks are never offered (`--force` does not apply to them), and a run
@@ -839,11 +853,13 @@ function M.routes()
             if index ~= 2 then
               return
             end
-            local again = require("testing.scaffold").init(
-              root,
-              { force = true, plugin = ctx.flags.plugin, hooks = false }
-            )
-            M.report_init(root, again, { force = true })
+            local again = require("testing.scaffold").init(root, {
+              force = true,
+              plugin = ctx.flags.plugin,
+              hooks = false,
+              workflow = ctx.flags.workflow,
+            })
+            M.report_init(root, again, { force = true, workflow = ctx.flags.workflow })
           end)
         end
       end,

@@ -38,6 +38,13 @@ covers the tree that runs; its ancestors are not executed.
 Rules 5 and 6 only apply to public repositories (rule 4), so the private repositories are unaffected and keep their
 no-friction CI; use `--mode=always` to guard one anyway.
 
+## Hosted legs
+
+The guard protects the machine of the runner and exists only there: `install` writes one line into the `.env` of a local
+runner folder. A GitHub-hosted job, such as the macOS leg of `testing init --workflow=two-runner`
+([WORKFLOW-CI.md](WORKFLOW-CI.md#one-pipeline-two-kinds-of-runner)), runs in a VM without that line, so no rule above
+applies to it. It starts while the local job is refused or queued, and a commit needs no `trust` for it.
+
 ## Setting up
 
 ```sh

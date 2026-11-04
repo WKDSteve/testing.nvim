@@ -241,9 +241,10 @@ local function run_migrate(rest, sv)
 end
 
 local INIT_USAGE =
-  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
+  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --workflow=two-runner|two-runner-private [--force]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
 
----`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`), and
+---`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`),
+---`testing init [<root>] --workflow=<kind> [--force]`: write only the two-runner workflow with its macOS leg, and
 ---`testing init [<root>] --update [--write [--force | --force-comments] | --check]`: bring `scripts/test.sh` and `TESTS/minimal_init.lua`
 ---to the current templates (`testing.scaffold.update`; a preview with the diff unless `--write`; `--write` holds back a
 ---file with a risk, uncommitted changes or comments of your own that would be lost unless `--force`; `--force-comments`
@@ -260,6 +261,8 @@ local function run_init(rest, sv)
     local key, value = a:match("^%-%-([%w-]+)=(.*)$")
     if key == "plugin" then
       o.plugin = value
+    elseif key == "workflow" then
+      o.workflow = value
     elseif
       a == "--force"
       or a == "--force-comments"
@@ -288,6 +291,9 @@ local function run_init(rest, sv)
     or (o.update and (o.hooks or o.plugin)) and "--update takes neither --hooks nor --plugin"
     or (o.update and (o.force or o.force_comments) and not o.write) and "--force and --force-comments go with --update only together with --write"
     or (not o.update and o.force_comments) and "--force-comments goes with --update"
+    or (o.workflow and (o.update or o.hooks or o.plugin)) and "--workflow takes neither --update, --hooks nor --plugin"
+    or (o.workflow and not require("testing.scaffold").WORKFLOWS[o.workflow])
+      and ("unknown workflow %s"):format(vim.inspect(o.workflow))
   if misuse then
     sv.err(("testing: init: %s\n%s"):format(misuse, INIT_USAGE))
     return 2
@@ -332,7 +338,10 @@ local function run_init(rest, sv)
     return 0
   end
   local scaffold = require("testing.scaffold")
-  local result = scaffold.init(root, { force = o.force, hooks = o.hooks, plugin = o.plugin })
+  local result = scaffold.init(
+    root,
+    { force = o.force, hooks = o.hooks, plugin = o.plugin, workflow = o.workflow }
+  )
   for _, kind in ipairs({ "created", "replaced", "skipped" }) do
     if #result[kind] > 0 then
       sv.out(("%s: %s"):format(kind, table.concat(result[kind], ", ")))
@@ -343,6 +352,11 @@ local function run_init(rest, sv)
   end
   if o.hooks and #result.created > 0 and #result.errors == 0 then
     for _, line in ipairs(scaffold.hook_next_steps()) do
+      sv.out(line)
+    end
+  end
+  if o.workflow and #result.errors == 0 then
+    for _, line in ipairs(scaffold.workflow_next_steps(o.workflow, result)) do
       sv.out(line)
     end
   end
