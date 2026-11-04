@@ -343,6 +343,17 @@ return function(H)
     eq(read(plain .. "/.git/hooks/pre-push"), nil, "global without a chain: nothing written")
   end
 
+  -- bash 3.2 (macOS, also as /bin/sh) refuses a `case` inside `$(...)`; checked on the text, so that every system sees it.
+  local snapshot_text =
+    hook.text({ run = "fast", driver_dir = "/d", snapshot = true, auto_trust = true })
+  for hook_line in snapshot_text:gmatch("[^\n]+") do
+    eq(
+      hook_line:find("%$%(.*case ") == nil,
+      true,
+      "snapshot hook: no case inside a substitution: " .. hook_line
+    )
+  end
+
   -- `--snapshot`: the shell of the hook decides what is checked from what git hands it on stdin. The real text, with
   -- `testing ci` replaced by a stub that logs its arguments.
   local snapshot_bash = require("lib.nvim.cross.bash").find()

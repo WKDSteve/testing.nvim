@@ -84,10 +84,13 @@ function M.text(o)
   if o.snapshot then
     -- Every commit the push names on a branch, on a snapshot of its own: the working tree (another session's edits)
     -- has no say, and neither has HEAD when the push names something else. A tag or a deletion checks nothing.
+    -- A function, not a `case` inside `$(...)`: the bash 3.2 of macOS (its /bin/sh too) takes the `)` of a pattern for
+    -- the end of the substitution and refuses the whole hook.
     run_lines = {
+      'pushed_commits() { echo "$refs" | while read -r local_ref local_sha remote_ref remote_sha; do case "$remote_ref" in refs/heads/*) case "$local_sha" in *[!0]*) echo "$local_sha" ;; esac ;; esac; done; }',
       'head="$(git rev-parse HEAD)"',
       'seen=""',
-      'for sha in $(echo "$refs" | while read -r local_ref local_sha remote_ref remote_sha; do case "$remote_ref" in refs/heads/*) case "$local_sha" in *[!0]*) echo "$local_sha" ;; esac ;; esac; done); do',
+      "for sha in $(pushed_commits); do",
       '  case " $seen " in *" $sha "*) continue ;; esac',
       '  seen="$seen $sha"',
       ('  if [ "$sha" = "$head" ] && testing_ci verify%s; then continue; fi'):format(verify),
