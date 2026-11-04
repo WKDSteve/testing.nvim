@@ -1009,6 +1009,11 @@ local function plan_repo(dir, args)
     entry.problem = "the range names no commit"
     return entry
   end
+  if #shas > M.MAX_COMMITS then
+    -- the call is refused for the count; no need to ask git for the `.testing.lua` of every one of them first
+    entry.shas = shas
+    return entry
+  end
   -- trusted through the store, the root is trusted for one `.testing.lua`: the one a commit carries is what runs
   for _, sha in ipairs(shas) do
     local refusal = require("testing.trust").check_commit_file(root, M.testing_lua_at(root, sha))
@@ -1080,6 +1085,37 @@ function M.summary(tally, n, worst, repos)
   )
 end
 
+---A name per repository that is unique within one call: the directory name, `<parent>/<name>` when two share one,
+---the whole path when even that is shared (the name keys the document's `repo` of a commit and its `repos` list).
+---@param plans { root?: string, dir: string }[]
+---@return string[]
+function M.repo_names(plans)
+  local paths, names = {}, {}
+  for i, plan in ipairs(plans) do
+    paths[i] = plan.root or plan.dir
+    names[i] = vim.fs.basename(paths[i])
+  end
+  for _, deeper in ipairs({
+    function(path, name)
+      return vim.fs.basename(vim.fs.dirname(path)) .. "/" .. name
+    end,
+    function(path)
+      return path
+    end,
+  }) do
+    local count = {}
+    for _, name in ipairs(names) do
+      count[name] = (count[name] or 0) + 1
+    end
+    for i, name in ipairs(names) do
+      if count[name] > 1 then
+        names[i] = deeper(paths[i], vim.fs.basename(paths[i]))
+      end
+    end
+  end
+  return names
+end
+
 ---`testing ci commit ...`.
 ---@param argv string[] The arguments after `ci commit`.
 ---@param sv table `out`, `err`, `env`, `state_dir`.
@@ -1143,6 +1179,9 @@ function M.main(argv, sv)
     end
     total = total + #plan.shas
     plans[#plans + 1] = plan
+    if total > M.MAX_COMMITS then
+      break
+    end
   end
   if total > M.MAX_COMMITS then
     return fail(M.EXIT_USAGE, ("%d commits, at most %d per call"):format(total, M.MAX_COMMITS))
@@ -1156,8 +1195,9 @@ function M.main(argv, sv)
   local say = agent and quiet or out
   local results, worst, tally = {}, M.EXIT_OK, {}
   local repo_docs = {}
-  for _, plan in ipairs(plans) do
-    local name = vim.fs.basename(plan.root or plan.dir)
+  local names = M.repo_names(plans)
+  for i, plan in ipairs(plans) do
+    local name = names[i]
     local rs = {}
     if plan.problem then
       worst = math.max(worst, M.EXIT_USAGE)

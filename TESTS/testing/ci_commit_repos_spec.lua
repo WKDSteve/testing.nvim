@@ -3,7 +3,7 @@
 -- line, the document with `repo` per commit and `repos`, the usage errors, and a repository that cannot be checked.
 -- The verdicts themselves are in ci_commit_run_spec.
 
----@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
+---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields, duplicate-set-field
 
 return function(H)
   local ok = H.ok
@@ -125,6 +125,54 @@ return function(H)
     eq(r.code, 2, "usage: --since is not an option of git")
     r = run("--root=" .. a, "--repos-include=a", "HEAD")
     eq(r.code, 2, "usage: --repos-include without --repos-root")
+  end
+
+  do
+    -- two repositories of one name below different roots keep apart: the name keys `repo` and `repos`
+    local dup_a = S.project("dups/x/same", { ["gate.txt"] = "green\n" })
+    local dup_b = S.project("dups/y/same", { ["gate.txt"] = "green\n" })
+    ok(dup_a ~= nil and dup_b ~= nil, "dups: both repositories are there")
+    local json = tmp .. "/dups.json"
+    local r = run(
+      "--repos-root=" .. tmp .. "/dups/x",
+      "--repos-root=" .. tmp .. "/dups/y",
+      "--since=1.day.ago",
+      "--json=" .. json
+    )
+    eq(r.code, 0, "dups: both clean: " .. r.err .. r.out)
+    local doc = vim.json.decode((require("lib.nvim.fs.read")(json)))
+    eq(#doc.repos, 2, "dups: a summary per repository")
+    ok(doc.repos[1].name ~= doc.repos[2].name, "dups: ... under names of their own")
+    eq(doc.commits[1].repo ~= doc.commits[2].repo, true, "dups: ... and the commits name theirs")
+
+    local commit = require("testing.ci.commit")
+    eq(
+      commit.repo_names({ { dir = "/r/x/same" }, { dir = "/r/y/same" }, { dir = "/r/solo" } }),
+      { "x/same", "y/same", "solo" },
+      "names: the parent tells equal names apart"
+    )
+    eq(
+      commit.repo_names({ { dir = "/r/x/same" }, { dir = "/q/x/same" } }),
+      { "/r/x/same", "/q/x/same" },
+      "names: the whole path when the parent is equal too"
+    )
+  end
+
+  do
+    -- too many commits are refused before git is asked for the `.testing.lua` of each of them
+    local commit = require("testing.ci.commit")
+    local max, at, asked = commit.MAX_COMMITS, commit.testing_lua_at, 0
+    commit.MAX_COMMITS = 1
+    commit.testing_lua_at = function(...)
+      asked = asked + 1
+      return at(...)
+    end
+    local ok_run, r = pcall(run, "--root=" .. a, "--since=1.day.ago")
+    commit.MAX_COMMITS, commit.testing_lua_at = max, at
+    ok(ok_run, "limit: the run did not raise")
+    eq(r.code, 2, "limit: more commits than the limit is a usage error")
+    has(r.err, "2 commits, at most 1 per call", "limit: ... said")
+    eq(asked, 0, "limit: no `.testing.lua` was asked for")
   end
 
   S.cleanup()
