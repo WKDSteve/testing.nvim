@@ -948,6 +948,37 @@ function M.lines(r, agent)
   return out
 end
 
+---The system this process runs on, the only one its verdicts speak for.
+---@return "windows"|"macos"|"linux"
+function M.system()
+  local platform = require("testing.platform")
+  return platform.is_windows() and "windows" or platform.is_macos() and "macos" or "linux"
+end
+
+---Verdicts that come from a run, so a green one could be read as more than it is.
+local RAN = {
+  clean = true,
+  ["known-red"] = true,
+  flaky = true,
+  regression = true,
+  unclassified = true,
+}
+
+---The line that says what the verdicts above it do not cover: a commit can be clean here and red in the CI of
+---another system. Nil when nothing ran.
+---@param results table[]
+---@return string|nil
+function M.system_note(results)
+  for _, r in ipairs(results) do
+    if RAN[r.verdict] then
+      return ("checked on %s only; the other systems: `testing ci remote` after the push"):format(
+        M.system()
+      )
+    end
+  end
+  return nil
+end
+
 ---Helpers a spec reaches (not an API).
 M.internal = { range_shas = range_shas, memory_path = memory_path }
 
@@ -1244,6 +1275,10 @@ function M.main(argv, sv)
       out(line)
     end
   end
+  local note = M.system_note(results)
+  if note then
+    out(note)
+  end
 
   if args.json then
     local doc = {
@@ -1252,6 +1287,7 @@ function M.main(argv, sv)
       exit = worst,
       tally = tally,
       time = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+      system = M.system(),
       commits = results,
     }
     if multi then

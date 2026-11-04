@@ -317,6 +317,12 @@ that reproduces it. The terminal report (`--no-agent`) lists every finding. `--j
 `testing-ci-commit/1` (`schemas/testing-ci-commit/1/`, with a `.d.ts`): per commit `sha`, `base`, `verdict`, `exit`,
 `changed_files`, `new`/`known`/`fixed`, `problems`, `rerun` and both `testing-ci/1` documents.
 
+**A verdict speaks for one system.** The commit is checked where the command runs, so `CLEAN` on Windows says nothing
+about a test that breaks on Linux. The report ends with `checked on windows only; the other systems: ...`, the document
+carries `system`. After the push, `testing ci remote` shows the CI per system; that run decides. There is deliberately
+no second run under WSL or in a container here: the worktree, the dependencies and the trust would each need a
+translated path, and macOS would stay uncovered anyway. By hand it works: the specs run under WSL from `/mnt/<drive>`.
+
 From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD` (the script's `--state-dir`
 before the subcommand is understood).
 

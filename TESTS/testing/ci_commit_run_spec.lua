@@ -27,6 +27,9 @@ return function(H)
     local r = call(root, c1, "--agent")
     eq(r.code, 0, "a green root commit: exit 0")
     has(r.first, "ci commit " .. c1:sub(1, 7) .. " CLEAN full 2 steps exit 0", "... clean")
+    local system = require("testing.ci.commit").system()
+    has(r.out, "checked on " .. system .. " only", "... and says which system that speaks for")
+    has(r.out, "`testing ci remote`", "... and where the others are")
   end
 
   do
@@ -46,6 +49,7 @@ return function(H)
     local doc = vim.json.decode((require("lib.nvim.fs.read")(json)))
     eq(doc.schema, "testing-ci-commit/1", "json: the schema")
     eq(doc.exit, 0, "json: the exit code")
+    eq(doc.system, require("testing.ci.commit").system(), "json: the system")
     local c = doc.commits[1]
     eq({ c.sha, c.base, c.verdict, c.exit }, { c3, c2, "known-red", 0 }, "json: the commit")
     eq(c.changed_files, { "lua/proj/x.lua" }, "json: the changed files")

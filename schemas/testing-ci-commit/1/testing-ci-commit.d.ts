@@ -8,6 +8,8 @@ export interface TestingCiCommit {
   tally: Partial<Record<Verdict, number>>;
   /** UTC, ISO 8601. */
   time: string;
+  /** The system the commits were checked on, the only one the verdicts speak for. */
+  system?: "windows" | "macos" | "linux";
   /** In the order they were named (a range: oldest first). */
   commits: CommitResult[];
   /** Only with `--repos-root`: one entry per repository, also one that could not be checked. */

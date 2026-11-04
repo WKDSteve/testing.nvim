@@ -37,6 +37,8 @@ prüfe ihn mit `scripts/test.sh ci commit <sha>` im Repo (ohne Template-Skript:
 nie mit `scripts/test.sh` oder `testing ci` im Arbeitsbaum. Mehrere: `ci commit <a> <b>`, `--range=<von>..<bis>` oder
 `--since=<zeit>` (alle Nicht-Merge-Commits seit dann); über mehrere Repos: `--repos-root=<dir> --since=<zeit>`. Im Editor:
 `:Testing ci commit`.
+Das Urteil gilt nur für das System, auf dem der Befehl lief: nach dem Push `scripts/test.sh ci remote` (die CI je System),
+fertig ist ein Commit erst, wenn sie grün ist.
 Der Befehl prüft jeden Commit in einem eigenen Git-Worktree, andere Chats im selben Checkout stören also nicht, und
 er vergleicht Rot mit dem Parent. Lies die erste Zeile: `CLEAN`, `KNOWN-RED` und `FLAKY` heißen "der Commit macht nichts
 neu kaputt" (Exit 0), `REGRESSION` listet darunter die neuen Befunde (`new ...`, Exit 1; beheben oder melden),
