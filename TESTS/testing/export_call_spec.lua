@@ -518,6 +518,30 @@ return function(H)
     for _, n in ipairs(asked) do
       eq(n, "gamma.nvim", "no key is asked of a directory with another name")
     end
+    -- the document of the findings names the key of the request and does not ask for it again
+    local asked_finding = {}
+    local counted_finding = call(
+      { "finding", "--params=-" },
+      {
+        after = function()
+          local inner = export.deps.key
+          export.deps.key = function(dir)
+            asked_finding[#asked_finding + 1] = vim.fs.basename(dir)
+            return inner(dir)
+          end
+        end,
+      },
+      none,
+      {
+        env = { TESTING_REPOS_ROOT = fx.root },
+        stdin = function()
+          return vim.json.encode({ repo = beta, state_dir = fx.state, areas = fx.areas })
+        end,
+      }
+    )
+    eq(counted_finding.code, 0, "finding by key, counted: exit 0: " .. counted_finding.err)
+    eq(counted_finding.doc.repo, beta, "finding by key, counted: its key")
+    eq(asked_finding, { "beta.nvim" }, "the key is asked once, to find the repository")
     local unknown = hub("repo", vim.json.encode({ repo = "alpha.nvim-000000000000" }))
     eq(unknown.code, 2, "a key below the root that no repository has: exit 2")
     has(unknown.err, "no repository", "says so")

@@ -361,10 +361,15 @@ function M.finding(args, state_dir, sv, as_document)
   end
   if as_document then
     local export = require("testing.export")
-    local okk, key = pcall(export.deps.key, dir)
-    if not okk then
-      sv.err("testing call: the key of this repository is not known")
-      return M.EXIT_INFRA
+    -- a key costs git calls: the one of the request was just found to be this repository's
+    local key = args.repo
+    if not key then
+      local okk, k = pcall(export.deps.key, dir)
+      if not okk then
+        sv.err("testing call: the key of this repository is not known")
+        return M.EXIT_INFRA
+      end
+      key = k
     end
     shown = { export.findings(key, shown) }
   end
