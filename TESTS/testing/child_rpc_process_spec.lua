@@ -151,6 +151,7 @@ return function(H)
     local dead_ok, dead_err = pcall(hung.lua, "return 1")
     ok(not dead_ok, "afterwards the child is dead")
     has(dead_err, "killed after a call timed out", "and says why")
+    has(dead_err, "while true do end", "and which call it was, not the one that found it dead")
 
     -- opt out: the child is left alone (and killed by the test)
     local keep = S.spawn({ call_timeout_ms = 300, kill_on_timeout = false })
@@ -307,5 +308,22 @@ return function(H)
     for i = 1, 200 do
       eq(big.lua("return ... + 1", i), i + 1, "call " .. i)
     end
+    -- More lines than the screen has, in ONE call: without a UI nobody can answer "-- More --", and the call
+    -- would wait for a key until it times out. Seen as dap.nvim's setup(), run twice in one call without nvim-dap:
+    -- the child was killed, and the checks after it reported "child died" (conformance K5, K12, K13).
+    eq(
+      big.lua([[
+        local lines = {}
+        for i = 1, 200 do
+          lines[i] = "line " .. i
+        end
+        vim.notify(table.concat(lines, "\n"), vim.log.levels.ERROR)
+        return "done"
+      ]]),
+      "done",
+      "a long message in one call does not wait for a key"
+    )
+    eq(big.lua("return vim.o.more"), false, "no pager in a child without a screen")
+    ok(big.alive(), "and the child goes on")
   end)
 end

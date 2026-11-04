@@ -222,6 +222,9 @@ value snapshots (`a.snapshot`) yet.
   answer "cancelled" immediately and are recorded (`prompts()`: `{ fn, text }`). `child.fn.input(...)`
   goes through `vim.fn` and is covered; `:call input()` and Vimscript are not (a request that blocks
   on a prompt ends as a timeout, never a hang).
+* `more` is off in an RPC child: it has no screen to page, and a long message in one call would wait for a key
+  (`-- More --`, measured on Linux) until the call timed out. The child would be killed, and every later call could
+  only say "child died". That message names the call that timed out, so look there and not at the call that reported it.
 * **Guard**: if `testing.guard` exists in the child's runtimepath, `install(cfg)` is called once at
   start (config: the `guard` option). The returned handle is kept: `child.guard.begin_case(...)`,
   `end_case()`, `collect()` forward to it, `effects()` returns the ledger. When a guard is installed it

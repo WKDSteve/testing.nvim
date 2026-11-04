@@ -82,6 +82,7 @@ M.REAP_MS = 10000
 ---@field notifies table[]
 ---@field prompts table[]
 ---@field kill_reason? "kill"|"timeout"|"protocol"
+---@field timed_out_call? string The call that timed out and cost the child its life: a later call only sees a dead child.
 ---@field trace_artifact? { kind: string, path: string }
 ---@field api_params? table<string, string[]>
 ---@field ui boolean
@@ -163,6 +164,9 @@ local function death_message(S, during)
     how = "it was killed by kill()"
   elseif S.kill_reason == "timeout" then
     how = "it was killed after a call timed out"
+    if S.timed_out_call then
+      how = how .. " (" .. S.timed_out_call .. ")"
+    end
   elseif S.kill_reason == "protocol" then
     how = "it was killed after an rpc protocol error"
   elseif h and h.exit and (h.exit.code or h.exit.signal) then
@@ -329,6 +333,9 @@ local function call(S, method, args, timeout_ms)
   S.trace:finish(tc, "timeout")
   local killed = S.opts.kill_on_timeout ~= false
   if killed then
+    -- every Lua call is `nvim_exec_lua`: its code is what tells them apart
+    local code = method == "nvim_exec_lua" and type(args[1]) == "string" and args[1] or method
+    S.timed_out_call = vim.trim(code):match("^[^\n]*"):sub(1, 100)
     kill_process(S, "timeout")
   end
   local path = write_trace(S, "timeout")

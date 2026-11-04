@@ -51,6 +51,10 @@ end
 pcall(vim.fn.setenv, "TESTING_CHILD_JOB", vim.NIL)
 error_file = type(job.error_file) == "string" and job.error_file or nil
 
+-- an embedded child has no screen to page: more lines than it has in one call would wait for a key
+-- ("-- More --", measured on Linux and not on Windows) until the call times out and the child is killed
+vim.o.more = false
+
 -- DEFERRED PLUGINS (`job.defer_plugins`, the warm pool): the runtimepath the project's minit builds must
 -- not be the one the editor sources `plugin/` files from after this file. A per-file child (started
 -- with `-c`, like plenary's host) never has the project on the runtimepath while the editor loads its
