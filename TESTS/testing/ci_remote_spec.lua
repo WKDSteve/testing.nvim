@@ -678,6 +678,11 @@ return function(H)
       shown[2]:match("^nomac%s+%-%s+ok%s+%-") ~= nil,
       "no macOS job: the cell is `-`, never `ok`: " .. shown[2]
     )
+    eq(
+      shown[#shown],
+      "fully green: 1 / 1 (no macos job: 1)",
+      "no macOS job: the summary says so, it counts the jobs that exist"
+    )
 
     -- the two-runner workflow: the hosted macOS leg gets its own cell, and red there is red
     local two = { dir = "/x/two", repo = "two", owner = "o" }
@@ -690,6 +695,11 @@ return function(H)
     eq(two.os.macos.state, "failure", "two runners: the hosted leg is the macOS cell")
     eq(two.os.windows.state, "success", "two runners: the local leg is the windows cell")
     eq(two.overall, "failure", "two runners: red only on macOS is red")
+    local two_shown = remote.render({ two })
+    eq(two_shown[#two_shown], "fully green: 0 / 1", "two runners: no addition with a macOS job")
+    local no_run = { dir = "/x/none", repo = "none", owner = "o", overall = "no_run" }
+    local none_shown = remote.render({ no_run })
+    eq(none_shown[#none_shown], "fully green: 0 / 1", "no run at all says nothing about macOS")
 
     -- queued on a hosted runner is not "the local runner is off"
     local q = { dir = "/x/q", repo = "q", owner = "o" }

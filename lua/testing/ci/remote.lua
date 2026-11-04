@@ -1213,8 +1213,11 @@ function M.render(records)
   end
   local fmt = "%-" .. width .. "s %-10s %-10s %-10s %s"
   local lines = { (fmt:format("REPO", "UBUNTU", "WINDOWS", "MACOS", "NOTE")) }
-  local green = 0
+  local green, no_macos = 0, 0
   for _, rec in ipairs(records) do
+    if rec.os and not rec.os.macos then
+      no_macos = no_macos + 1
+    end
     local cells = {}
     for i, sys in ipairs(M.OS) do
       local cell = rec.os and rec.os[sys]
@@ -1241,7 +1244,9 @@ function M.render(records)
     lines[#lines + 1] = fmt:format(label(rec), cells[1], cells[2], cells[3], note)
   end
   lines[#lines + 1] = ""
-  lines[#lines + 1] = ("fully green: %d / %d"):format(green, #records)
+  -- green means the jobs that exist: whoever reads only this line must not take macOS for checked
+  local without = no_macos > 0 and (" (no macos job: %d)"):format(no_macos) or ""
+  lines[#lines + 1] = ("fully green: %d / %d%s"):format(green, #records, without)
   return lines
 end
 

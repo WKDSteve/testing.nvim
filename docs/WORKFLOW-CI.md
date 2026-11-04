@@ -133,8 +133,8 @@ the same thing, and a `ci` verb would be a second place for it. `testing ci` run
 
 `testing ci remote` counts push runs only:
 
-- A system without a job is `-`, with no state in `--json`: no verdict, neither `ok` nor red. The summary
-  `fully green: n / m` counts the jobs that exist, so read the `MACOS` column for whether macOS ran at all.
+- A system without a job is `-`, with no state in `--json`: no verdict, neither `ok` nor red. The summary counts the
+  jobs that exist and says how many repositories have no macOS job: `fully green: 3 / 3 (no macos job: 1)`.
 - Red only on macOS is red, also for the exit code.
 - On a private repository the `MACOS` cell therefore stays `-`, also after a run by hand: that run can neither hide a
   red push run nor turn it green. Its result: `gh run list -R <owner>/<repo> --workflow=ci.yml --event workflow_dispatch`.
