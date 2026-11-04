@@ -618,6 +618,7 @@ States, worst first; a cell has the worst state of its jobs, the repository (`ov
 | `failure` | a job failed or timed out (or the run concluded `failure` although no job did) |
 | `rejected` | a run that failed (`failure`, `startup_failure`, no conclusion) with **zero jobs**: GitHub found the workflow file invalid and started nothing. Counting red jobs would read it as a pass |
 | `cancelled` | a job was cancelled, or the run was cancelled before any job started (often `cancel-in-progress`: a newer run took over) |
+| `no_runner` | a job cancelled without a runner and without a step: no test ran, so the code is not the cause. Usually GitHub never supplied a runner, or a newer run took over. The note names `gh run rerun <id> --failed`, the first thing to try. Red like `cancelled` |
 | `unknown` | no token, no network, an API error (a redirect too: a renamed repository), git could not read the directory, an answer that is not one, a run without a job that is neither failed, cancelled nor skipped (`action_required`), a run with only non-gating jobs: never green |
 | `waiting_runner` | a job queued on a `self-hosted` runner for longer than 2 minutes: the runner is off |
 | `queued`, `running` | the run is not done |

@@ -55,7 +55,7 @@ run, never a `--step` selection.
 
 `testing ci remote` ([CI.md](CI.md#the-github-actions-status-testing-ci-remote)) reads GitHub, it runs nothing: `0` every
 repository was fetched and none is red (`no_run`, `no_github`, `skipped`, `queued`, `running` and `waiting_runner` are not
-red), `1` a repository is `failure`, `rejected` or `cancelled` (red wins over everything else), `2` a usage error (an
+red), `1` a repository is `failure`, `rejected`, `cancelled` or `no_runner` (red wins over everything else), `2` a usage error (an
 unknown flag, a root that is not a directory, no repository found below `--repos-root`), `3` a repository could not be
 fetched (`unknown`: no token, no network, an API error, git could not read it) and none is red, or lib.nvim has no
 `net.github` (older than ccd30b5; nothing is asked). An `unknown` is never reported as green.

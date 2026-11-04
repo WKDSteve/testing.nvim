@@ -16,7 +16,8 @@
 --- contains a `ci_remote.non_gating` text (default "nightly") is listed but never decides.
 ---
 --- States, worst first (the overall state of a repository is the worst of its cells): failure, rejected (a run that
---- failed with zero jobs: GitHub refused the workflow file), cancelled, unknown (no token, git, network or API error,
+--- failed with zero jobs: GitHub refused the workflow file), cancelled, no_runner (a job cancelled without a runner
+--- and without a step: no test ran, a re-run is the first thing to try), unknown (no token, git, network or API error,
 --- an unexpected answer, only non-gating jobs: never green), waiting_runner (a queued job on a self-hosted runner for
 --- longer than `WAITING_RUNNER_S`), queued, running, success, skipped (every job skipped, or a head commit with
 --- `[skip ci]` and no run), no_run (no run of the workflow for the commit), no_github.
@@ -30,7 +31,7 @@
 --- `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json`; a `304` reuses the stored answer (it does not count
 --- against the rate limit), and the jobs of a completed run whose `updated_at` did not change are not asked for again.
 ---
---- Exit codes: 0 every repository was fetched and none is red, 1 a repository is failure, rejected or cancelled, 2 a
+--- Exit codes: 0 every repository was fetched and none is red, 1 a repository is failure, rejected, cancelled or no_runner, 2 a
 --- usage error, 3 a repository could not be fetched (unknown) and none is red: no token, no network; also when
 --- lib.nvim has no `net.github`.
 
@@ -60,6 +61,7 @@ M.ORDER = {
   "failure",
   "rejected",
   "cancelled",
+  "no_runner",
   "unknown",
   "waiting_runner",
   "queued",
@@ -76,7 +78,7 @@ for i, s in ipairs(M.ORDER) do
 end
 
 ---What makes the exit code 1.
-local RED = { failure = true, rejected = true, cancelled = true }
+local RED = { failure = true, rejected = true, cancelled = true, no_runner = true }
 
 M.USAGE = table.concat({
   "usage: testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]",
@@ -87,7 +89,7 @@ M.USAGE = table.concat({
   '  --workflow=<name>   the workflow of every repository (default: ci_remote.workflow, "CI")',
   "  --state-dir=<dir>   where the ETag cache lives (default: stdpath('state'))",
   "  token: $" .. M.TOKEN_ENV .. " (read-only), else `gh auth token`; never GITHUB_TOKEN",
-  "  exit: 0 nothing red, 1 failure/rejected/cancelled, 2 usage, 3 a repository could not be fetched",
+  "  exit: 0 nothing red, 1 failure/rejected/cancelled/no_runner, 2 usage, 3 a repository could not be fetched",
 }, "\n")
 
 ---Replaced by a spec: the processes and the network this module uses.
@@ -293,6 +295,14 @@ local function trim_job(raw)
     created_at = text(raw.created_at, 40),
     started_at = text(raw.started_at, 40),
     labels = labels,
+    -- Only what GitHub said outright: a job from an old cache file, without these fields, stays what it was. A job
+    -- from the cache comes through here again and only has the flag by then.
+    no_runner = raw.no_runner == true
+      or (
+        type(raw.steps) == "table"
+        and #raw.steps == 0
+        and (type(raw.runner_name) ~= "string" or raw.runner_name == "")
+      ),
   }
 end
 
@@ -352,7 +362,7 @@ function M.job_state(job, now, fallback_ts)
     if c == "success" then
       return "success"
     elseif c == "cancelled" then
-      return "cancelled"
+      return job.no_runner and "no_runner" or "cancelled"
     elseif c == "skipped" or c == "neutral" then
       return "skipped"
     elseif c == "failure" or c == "timed_out" or c == "startup_failure" then
@@ -497,6 +507,12 @@ function M.classify(rec, run, jobs, non_gating, now)
     else
       local sys = M.job_os(job)
       local cell = cells[sys]
+      if state == "no_runner" then
+        notes[#notes + 1] = ("%s: no runner, no test ran; again with `gh run rerun %s --failed`"):format(
+          sys,
+          tostring(run.id)
+        )
+      end
       if not cell or worse(cell.state, state) ~= cell.state then
         cells[sys] = { state = state, url = job.html_url, job = job.name }
       end
@@ -1149,6 +1165,7 @@ local CELL = {
   success = "ok",
   failure = "FAIL",
   cancelled = "cancelled",
+  no_runner = "no-runner",
   running = "running",
   queued = "queued",
   waiting_runner = "no-runner",

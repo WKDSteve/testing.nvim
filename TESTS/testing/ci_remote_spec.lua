@@ -199,6 +199,8 @@ return function(H)
       "docs: map\n\n[skip ci]\n"
     ),
     allskip = repo("allskip", "https://github.com/WKDSteve/allskip", sha("1")),
+    norun = repo("norun", "https://github.com/WKDSteve/norun", sha("3")),
+    norun2 = repo("norun2", "https://github.com/WKDSteve/norun2", sha("4")),
     zeta = repo("zeta", "https://gitlab.com/WKDSteve/zeta.git", sha("2")),
   }
 
@@ -295,6 +297,53 @@ return function(H)
     [R .. "allskip/actions/runs/70/jobs"] = {
       etag = '"jobs-allskip"',
       body = { jobs = { job_(701, "test (ubuntu-latest)", "completed", "skipped") } },
+    },
+    [R .. "norun/actions/runs"] = {
+      etag = '"runs-norun"',
+      body = { workflow_runs = { run_(80, "CI", "completed", "failure", "2026-10-31T11:00:00Z") } },
+    },
+    [R .. "norun/actions/runs/80/jobs"] = {
+      etag = '"jobs-norun"',
+      body = {
+        jobs = {
+          job_(801, "test (ubuntu-latest)", "completed", "success", {
+            runner_name = "GitHub Actions 1",
+            steps = { { name = "Run" } },
+          }),
+          job_(802, "test (macos-latest)", "completed", "cancelled", {
+            runner_name = vim.NIL,
+            steps = {},
+          }),
+        },
+      },
+    },
+    [R .. "norun2/actions/runs"] = {
+      etag = '"runs-norun2"',
+      body = {
+        workflow_runs = { run_(90, "CI", "completed", "cancelled", "2026-10-31T11:00:00Z") },
+      },
+    },
+    [R .. "norun2/actions/runs/90/jobs"] = {
+      etag = '"jobs-norun2"',
+      body = {
+        jobs = {
+          -- cancelled while it ran: someone or a limit stopped real work, that is no missing runner
+          job_(901, "test (macos-latest)", "completed", "cancelled", {
+            runner_name = "GitHub Actions 2",
+            steps = { { name = "Run" } },
+          }),
+          -- a runner was assigned, the steps list is still empty
+          job_(902, "test (ubuntu-latest)", "completed", "cancelled", {
+            runner_name = "GitHub Actions 3",
+            steps = {},
+          }),
+          -- an empty runner name counts as none, but only together with no step
+          job_(903, "test (windows-latest)", "completed", "cancelled", {
+            runner_name = "",
+            steps = { { name = "Run" } },
+          }),
+        },
+      },
     },
   }
 
@@ -555,6 +604,34 @@ return function(H)
   )
   eq(third.code, remote.EXIT_RED, "a red windows leg is exit 1")
   eq(vim.json.decode(third.out).repos[1].os.windows.state, "failure", "... in the windows cell")
+
+  -- ------------------------------------------------------------------ a job that never got a runner
+
+  local norun = run({ "--json", dirs.norun })
+  eq(norun.code, remote.EXIT_RED, "no_runner: red, the run on GitHub is too")
+  local nr = vim.json.decode(norun.out).repos[1]
+  eq(nr.overall, "no_runner", "no_runner: the repository says so, not `cancelled`")
+  eq(
+    { nr.os.macos.state, nr.os.ubuntu.state },
+    { "no_runner", "success" },
+    "no_runner: only the job without a runner"
+  )
+  has(nr.note, "macos: no runner, no test ran", "no_runner: the note says what it means")
+  has(nr.note, "gh run rerun 80 --failed", "no_runner: ... and what to try")
+  has(run({ dirs.norun }).out, "no-runner", "no_runner: in the table")
+
+  local nr2 = vim.json.decode(run({ "--json", dirs.norun2 }).out).repos[1]
+  eq(
+    { nr2.overall, nr2.os.macos.state, nr2.os.ubuntu.state, nr2.os.windows.state },
+    { "cancelled", "cancelled", "cancelled", "cancelled" },
+    "no_runner: a runner or a step means it was cancelled, not left without one"
+  )
+  eq((nr2.note or ""):find("rerun", 1, true), nil, "no_runner: and no such hint")
+  eq(
+    remote.job_state({ status = "completed", conclusion = "cancelled", labels = {} }, 0),
+    "cancelled",
+    "no_runner: a job from an old cache, without the fields, stays what it was"
+  )
 
   -- ------------------------------------------------------------------ the human table
 

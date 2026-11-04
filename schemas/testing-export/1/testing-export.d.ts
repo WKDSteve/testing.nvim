@@ -101,6 +101,7 @@ export type RemoteState =
   | "failure"
   | "rejected"
   | "cancelled"
+  | "no_runner"
   | "unknown"
   | "waiting_runner"
   | "queued"
