@@ -520,7 +520,7 @@ function M.classify(rec, run, jobs, non_gating, now)
   end
   if #without_runner > 0 then
     -- with the repository: the row of a `--repos-root` table can be read from anywhere
-    notes[#notes + 1] = ("no runner, no test ran (%s): `gh run rerun %s -R %s/%s --failed`"):format(
+    notes[#notes + 1] = ("not started, no test ran (%s): `gh run rerun %s -R %s/%s --failed`"):format(
       table.concat(without_runner, ", "),
       tostring(run.id),
       tostring(rec.owner),

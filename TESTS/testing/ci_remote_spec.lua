@@ -616,12 +616,10 @@ return function(H)
     { "no_runner", "success" },
     "no_runner: only the job without a runner"
   )
-  has(nr.note, "no runner, no test ran (macos)", "no_runner: the note says what it means")
-  has(
-    nr.note,
-    "gh run rerun 80 -R WKDSteve/norun --failed",
-    "no_runner: ... and what to try, anywhere"
-  )
+  has(nr.note, "not started, no test ran (macos)", "no_runner: the note says what it means")
+  -- the owner is redacted where the user of the machine has its name, so only around it
+  has(nr.note, "gh run rerun 80 -R ", "no_runner: ... and what to try")
+  has(nr.note, "/norun --failed", "no_runner: ... from anywhere")
   has(
     run({ dirs.norun }).out,
     "not-started",
