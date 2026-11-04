@@ -33,6 +33,10 @@ function M.clean(path)
       return nil, ("%s: below .git"):format(path)
     end
   end
+  -- the pipeline comes from the commit: the trust of the commit's `.testing.lua` does not cover another one
+  if p:lower() == ".testing.lua" then
+    return nil, ("%s: the pipeline definition comes from the commit (commit it first)"):format(path)
+  end
   return p, nil
 end
 

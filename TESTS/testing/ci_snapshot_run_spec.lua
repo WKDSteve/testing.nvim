@@ -118,6 +118,10 @@ return function(H)
     eq((overlay.clean("/etc/passwd")), nil, "overlay.clean: not absolute")
     eq((overlay.clean("C:/x")), nil, "overlay.clean: not a drive path")
     eq((overlay.clean("a/.git/config")), nil, "overlay.clean: not below .git")
+    eq((overlay.clean(".testing.lua")), nil, "overlay.clean: not the pipeline definition")
+    r = ci(unpack(with("--snapshot", "--profile=full", "--with=.testing.lua")))
+    eq(r.code, 2, "--with .testing.lua: refused, the pipeline comes from the commit")
+    has(r.err, "comes from the commit", "--with .testing.lua: said why")
   end
 
   r = ci("verify", unpack(with("--profile=full")))

@@ -370,7 +370,7 @@ answer shows it: `ci verify: verified (profile full, suite stamp snapshot)`.
 runs the snapshot of `HEAD` with exactly these paths of the working tree laid over it (a file, a directory with everything
 below it; a path the working tree no longer has is removed from the snapshot). What other sessions have lying uncommitted
 anywhere else is not part of the run, so nobody waits for a clean tree. The paths are relative to the root, inside it, never
-below `.git`, at most 2000 files. The checkout, its index and its branches are not touched. Such a run is **never a proof**:
+below `.git`, not `.testing.lua` (the pipeline comes from the commit, whose file the trust covered), at most 2000 files. The checkout, its index and its branches are not touched. Such a run is **never a proof**:
 nothing is kept or written to the state, the document (`--json`) is partial, the sentinel is not printed, and the summary line
 says `+ N file(s) of the working tree ... no proof`. `ci verify` says apart what it finds: when `HEAD` has a snapshot proof but
 the working tree is dirty, it names `HEAD is proven by a snapshot run` and that the uncommitted changes are what no proof covers.
