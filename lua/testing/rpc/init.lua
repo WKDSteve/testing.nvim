@@ -519,6 +519,25 @@ local function start(S, async_cb)
       extra_env[deps.env_name("lib.nvim")] = extra_env[deps.env_name("lib.nvim")] or lib.dir
     end
     extra_env[deps.env_name("testing.nvim")] = extra_env[deps.env_name("testing.nvim")] or self_dir
+    -- The project's minit looks for every dependency it declares. Without a sibling checkout or
+    -- `.deps/` (a worktree, `ci commit`) only `$<NAME>_DIR` can tell it, and the allowlist drops that.
+    local parent_env = opts.parent_env
+    local resolve_opts = parent_env
+        and {
+          getenv = function(name)
+            return parent_env[name]
+          end,
+        }
+      or nil
+    for _, name in ipairs(deps.declared(S.root)) do
+      local var = deps.env_name(name)
+      if not extra_env[var] then
+        local found = deps.resolve(name, S.root, resolve_opts)
+        if found then
+          extra_env[var] = found.dir
+        end
+      end
+    end
   end
 
   local e = child_mod.environment({

@@ -240,25 +240,17 @@ end
 ---@param tree string
 ---@return string[]
 function M.dep_names(tree)
-  local deps = require("testing.deps")
   local names, seen = {}, {}
   local function add(n)
-    if not seen[n] and deps.is_valid_name(n) then
+    if not seen[n] then
       seen[n] = true
       names[#names + 1] = n
     end
   end
   add("testing.nvim")
   add("lib.nvim")
-  for _, spec in ipairs({
-    { ".testing.lua", "deps%s*=%s*(%b{})" },
-    { "TESTS/minimal_init.lua", "DEPS%s*=%s*(%b{})" },
-  }) do
-    local text = require("lib.nvim.fs.read")(tree .. "/" .. spec[1])
-    local list = text and text:match(spec[2])
-    for q in (list or ""):gmatch("[\"']([^\"']+)[\"']") do
-      add(q)
-    end
+  for _, name in ipairs(require("testing.deps").declared(tree)) do
+    add(name)
   end
   return names
 end

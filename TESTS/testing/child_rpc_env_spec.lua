@@ -55,6 +55,31 @@ return function(H)
 
   S.run(function()
     -- ===================================================================
+    -- 0. a declared dependency reaches the child as $<NAME>_DIR (a project's minit without a sibling
+    -- checkout, as in a worktree or `ci commit`, has nothing else); an undeclared one stays out
+    do
+      local project, dep, other = S.new_dir(), S.new_dir(), S.new_dir()
+      vim.fn.mkdir(dep .. "/lua", "p")
+      vim.fn.mkdir(other .. "/lua", "p")
+      vim.fn.writefile(
+        { 'return { deps = { "lib.nvim", "rpc-fixture-dep.nvim" } }' },
+        project .. "/.testing.lua"
+      )
+      local child = S.spawn({
+        root = project,
+        parent_env = dirty_env({ RPC_FIXTURE_DEP_NVIM_DIR = dep, RPC_UNDECLARED_NVIM_DIR = other }),
+      })
+      eq(
+        norm(child.lua_get("vim.env.RPC_FIXTURE_DEP_NVIM_DIR") or ""),
+        norm(dep),
+        "a declared dependency arrives"
+      )
+      eq(child.lua_get("vim.env.RPC_UNDECLARED_NVIM_DIR"), nil, "an undeclared one does not")
+      eq(child.lua_get("vim.env.GITHUB_TOKEN"), nil, "and the allowlist still holds")
+      child.kill()
+    end
+
+    -- ===================================================================
     -- 1. environment: an allowlist, never a copy
     local c = S.spawn({
       parent_env = dirty_env(),

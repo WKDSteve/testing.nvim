@@ -56,6 +56,32 @@ function M.is_valid_name(name)
     and not name:find("..", 1, true)
 end
 
+---The dependencies a project declares: `deps` of its `.testing.lua`, then `DEPS` of its
+---`TESTS/minimal_init.lua`, read as text (nothing of the project runs), without duplicates.
+---@param root string
+---@return string[]
+function M.declared(root)
+  local names, seen = {}, {}
+  for _, spec in ipairs({
+    { ".testing.lua", "deps%s*=%s*(%b{})" },
+    { "TESTS/minimal_init.lua", "DEPS%s*=%s*(%b{})" },
+  }) do
+    local f = io.open(root .. "/" .. spec[1], "rb")
+    local text = f and f:read("*a")
+    if f then
+      f:close()
+    end
+    local list = text and text:match(spec[2])
+    for q in (list or ""):gmatch("[\"']([^\"']+)[\"']") do
+      if not seen[q] and M.is_valid_name(q) then
+        seen[q] = true
+        names[#names + 1] = q
+      end
+    end
+  end
+  return names
+end
+
 ---Environment variable that overrides `<name>`: `lib.nvim` -> `LIB_NVIM_DIR`.
 ---@param name string
 ---@return string
