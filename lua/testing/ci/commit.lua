@@ -341,7 +341,7 @@ function M.run_ci(snap, root, extra, suite_args)
   local lines = vim.split(vim.trim(res.stderr or ""), "\n", { trimempty = true })
   local tail = table.concat(vim.list_slice(lines, math.max(1, #lines - 9)), "\n")
   local code = (res.signal or 0) ~= 0 and M.EXIT_INFRA or res.code or M.EXIT_INFRA
-  return code, okd and type(doc) == "table" and doc or nil, tail
+  return code, okd and type(doc) == "table" and doc or nil, tail, res.stdout or ""
 end
 
 ---Where kept results go.

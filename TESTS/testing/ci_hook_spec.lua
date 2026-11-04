@@ -343,6 +343,90 @@ return function(H)
     eq(read(plain .. "/.git/hooks/pre-push"), nil, "global without a chain: nothing written")
   end
 
+  -- `--snapshot`: the shell of the hook decides what is checked from what git hands it on stdin. The real text, with
+  -- `testing ci` replaced by a stub that logs its arguments.
+  local snapshot_bash = require("lib.nvim.cross.bash").find()
+  if snapshot_bash then
+    local root = project("snapshot-refs", CFG, { ["lua/proj/echo.lua"] = ECHO })
+    local head = vim.trim(vim.fn.system({ "git", "-C", root, "rev-parse", "HEAD" }))
+    local other = ("1"):rep(40)
+    local zero = ("0"):rep(40)
+    local log = tmp .. "/snapshot-refs.log"
+    local driver_dir = vim.fs.dirname(vim.fs.dirname(require("testing.bindings.child").driver()))
+    local script = tmp .. "/snapshot-refs-hook"
+    ---@param verify_code integer exit code of the stubbed `verify`
+    ---@param red? string the sha the stubbed snapshot run is red on
+    local function write_hook(verify_code, red)
+      local hook_text = hook.text({ run = "fast", driver_dir = driver_dir, snapshot = true })
+      local stub = ('testing_ci() { echo "$*" >> "%s"; case "$*" in verify*) return %d ;; *--rev=%s*) return 1 ;; esac; return 0; }'):format(
+        log,
+        verify_code,
+        red or "none"
+      )
+      local replaced
+      hook_text, replaced = hook_text:gsub("testing_ci%(%) {[^\n]*", function()
+        return stub
+      end)
+      eq(replaced, 1, "snapshot hook: the stub replaced the runner")
+      write(script, hook_text)
+    end
+    ---@param stdin string
+    ---@return integer code
+    ---@return string[] calls
+    local function push(stdin)
+      os.remove(log)
+      local res = vim
+        .system({ snapshot_bash, script }, { cwd = root, text = true, stdin = stdin })
+        :wait(30000)
+      local calls = {}
+      for line in (read(log) or ""):gmatch("[^\r\n]+") do
+        calls[#calls + 1] = line
+      end
+      return res.code, calls
+    end
+    local function line(lref, sha, rref, rsha)
+      return ("%s %s %s %s\n"):format(lref, sha, rref, rsha or zero)
+    end
+
+    write_hook(1)
+    local code, calls = push(line("refs/heads/main", head, "refs/heads/main"))
+    eq(code, 0, "snapshot hook: HEAD, not proven, green snapshot: passes")
+    eq(calls[1], "verify", "snapshot hook: HEAD asks verify first")
+    eq(calls[2], "--profile=fast --snapshot --rev=" .. head, "snapshot hook: ... then its snapshot")
+
+    write_hook(0)
+    code, calls = push(line("refs/heads/main", head, "refs/heads/main"))
+    eq({ code, #calls }, { 0, 1 }, "snapshot hook: HEAD, proven: verify ends it")
+
+    write_hook(0)
+    code, calls = push(line("refs/heads/x", other, "refs/heads/x"))
+    eq(code, 0, "snapshot hook: another commit than HEAD: green")
+    eq(
+      calls,
+      { "--profile=fast --snapshot --rev=" .. other },
+      "snapshot hook: verify says nothing about it"
+    )
+
+    write_hook(0, other)
+    code = push(line("refs/heads/x", other, "refs/heads/x"))
+    eq(code, 1, "snapshot hook: a red pushed commit blocks, however proven HEAD is")
+
+    write_hook(1, head)
+    code = push(line("refs/heads/main", head, "refs/heads/main"))
+    eq(code, 1, "snapshot hook: a red HEAD blocks")
+
+    write_hook(1)
+    code, calls = push(
+      line("refs/tags/v1", other, "refs/tags/v1") .. line("(delete)", zero, "refs/heads/gone", head)
+    )
+    eq({ code, #calls }, { 0, 0 }, "snapshot hook: a tag and a deletion run nothing")
+
+    code, calls = push(
+      line("refs/heads/a", other, "refs/heads/a") .. line("refs/heads/b", other, "refs/heads/b")
+    )
+    eq({ code, #calls }, { 0, 1 }, "snapshot hook: one commit on two branches runs once")
+  end
+
   vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = saved_git_env[1], saved_git_env[2]
   vim.fn.delete(empty_config)
   vim.fn.delete(tmp, "rf")

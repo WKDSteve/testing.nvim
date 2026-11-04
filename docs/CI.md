@@ -350,7 +350,7 @@ root whatever the file says. Refused on the workstation like every run.
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```
-testing ci --snapshot [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
+testing ci --snapshot [--rev=<rev>] [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
 ```
 
 The pipeline runs on a snapshot of `HEAD` (a detached worktree outside the repository, as for `testing ci commit`), so
@@ -364,9 +364,14 @@ root. Everything else is checked as for any proof: the tree, Neovim, the pipelin
 working tree (`ci verify` says `dirty` while the tree has uncommitted changes, however green the snapshot was). The
 answer shows it: `ci verify: verified (profile full, suite stamp snapshot)`.
 
-Whole profiles only: `--step` and `--reuse` are refused with exit 2. The trust gate applies to the repository and to the
-`.testing.lua` that `HEAD` carries (a root trusted through the store is trusted for one file, see "Check a commit").
-`testing ci hook install --snapshot` makes the pre-push hook run its profile that way instead of on the working tree.
+Whole profiles only: `--step` and `--reuse` are refused with exit 2; `--rev` without `--snapshot` too. The trust gate
+applies to the repository and to the `.testing.lua` the commit carries (a root trusted through the store is trusted for
+one file, see "Check a commit"). `--rev=<rev>` runs on that commit instead of `HEAD`; its proof names that commit's
+tree, so `verify` only takes it when `HEAD` has the same tree. A run that is not green prints the last 200 lines of what
+the run printed: its state is gone with the snapshot, and the verdict line alone does not say what to fix.
+
+`testing ci hook install --snapshot` makes the pre-push hook run its profile that way instead of on the working tree,
+on each commit the push names: see below.
 
 ## The pre-push hook
 
@@ -400,7 +405,14 @@ deletes it. The hook computes no verdict of its own:
 in the `ci` section, or `install` refuses (exit `2`) and writes nothing.
 
 The hook proves `HEAD`, not the refs a push names (git hands those on stdin; they are ignored, except with `--auto-trust`, which
-releases own commits for the runner guard after a green hook: [RUNNER-GUARD.md](RUNNER-GUARD.md#releasing-your-own-pushes-pre-push)). It runs the `--run`
+releases own commits for the runner guard after a green hook: [RUNNER-GUARD.md](RUNNER-GUARD.md#releasing-your-own-pushes-pre-push)).
+
+With `--snapshot` it proves what is pushed instead, for a checkout that other sessions share: each commit the push names
+on a branch gets `testing ci --profile=<run> --snapshot --rev=<sha>`, so uncommitted work of another session neither
+blocks the push nor makes it pass. A commit that is `HEAD` asks `verify` first (a clean tree whose proof holds ends
+there; a dirty tree always runs the snapshot). A push of tags or a deletion runs nothing. The first red commit blocks.
+
+It runs the `--run`
 profile, which writes `ci-<run>.json`, while `verify` asks for the `--verify` profile (default `ci.default`): to make
 the second push of the same state pass at once, install with `--verify=<run>` or run the default profile once.
 

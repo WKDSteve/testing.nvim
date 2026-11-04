@@ -91,8 +91,26 @@ return function(H)
   eq(r.code, 1, "a red snapshot run: exit 1")
   has(r.out, "ci --snapshot", "a red snapshot run: the summary line")
   ok(not r.out:find("TESTING_CI_OK", 1, true), "a red snapshot run: no sentinel")
+  has(r.out, "== ", "a red snapshot run: prints what the run printed, not only the verdict")
   r = ci("verify", unpack(with("--profile=full")))
   eq(r.code, 1, "a red snapshot run: not proven")
+
+  -- --rev: the commit that is pushed, not HEAD. HEAD is red here, its parent green, and the other way round
+  local red = S.git_out(root, "rev-parse", "HEAD")
+  local green = S.git_out(root, "rev-parse", "HEAD~1")
+  r = ci(unpack(with("--snapshot", "--profile=full", "--rev=" .. green)))
+  eq(r.code, 0, "--rev: a green parent under a red HEAD is green (" .. r.out .. r.err .. ")")
+  has(r.out, "ci --snapshot " .. green:sub(1, 7), "--rev: names the commit it ran on")
+  eq(S.worktrees(root), 1, "--rev: no snapshot is left registered")
+  r = ci("verify", unpack(with("--profile=full")))
+  eq(r.code, 1, "--rev: the proof of another commit does not prove HEAD")
+  r = ci(unpack(with("--snapshot", "--profile=full", "--rev=" .. red)))
+  eq(r.code, 1, "--rev: the red commit is red")
+  r = ci(unpack(with("--snapshot", "--profile=full", "--rev=no-such-commit")))
+  eq(r.code, 2, "--rev: an unknown commit is a usage error, never a pass")
+  r = ci(unpack(with("--rev=" .. red)))
+  eq(r.code, 2, "--rev without --snapshot: usage")
+  has(r.err, "--snapshot", "--rev without --snapshot: said why")
 
   -- refused forms
   r = ci(unpack(with("--snapshot", "--step=gate")))
@@ -103,11 +121,10 @@ return function(H)
 
   -- the pre-push hook runs the profile that way when asked
   local hook = require("testing.ci.hook")
-  has(
-    hook.text({ run = "fast", driver_dir = "/opt/testing.nvim", snapshot = true }),
-    "--profile=fast --snapshot ||",
-    "hook --snapshot: runs the snapshot"
-  )
+  local snap_text = hook.text({ run = "fast", driver_dir = "/opt/testing.nvim", snapshot = true })
+  has(snap_text, '--profile=fast --snapshot --rev="$sha" ||', "hook --snapshot: the pushed commit")
+  has(snap_text, 'refs="$(cat)"', "hook --snapshot: reads what is pushed")
+  ok(not snap_text:find("\\", 1, true), "hook --snapshot: no backslash")
   has(
     hook.text({ run = "fast", driver_dir = "/opt/testing.nvim" }),
     "--profile=fast --reuse ||",

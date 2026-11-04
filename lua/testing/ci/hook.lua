@@ -44,7 +44,7 @@ M.USAGE = table.concat({
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
   "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
   "                      were made here (no merge, none from a remote): testing ci trust --pushed",
-  "  --snapshot          run the profile on a snapshot of HEAD (testing ci --snapshot) instead of the working tree",
+  "  --snapshot          run the profile on a snapshot of each pushed commit (testing ci --snapshot --rev) instead of the working tree",
   "  --root=<dir>        the repository (default: the current directory)",
   "  --all               install: every repository below --repos-root=<dir> (repeatable) with a ci section",
   "  `git push --no-verify` skips the hook. A pre-push hook that is not ours is never touched.",
@@ -69,15 +69,44 @@ end
 ---@return string
 function M.text(o)
   local verify = o.verify and (" --profile=" .. o.verify) or ""
-  -- `--snapshot` runs on the snapshot of HEAD (the proof stays in the state for `verify`), `--reuse` on the working tree
-  local mode = o.snapshot and "--snapshot" or "--reuse"
   -- git gives the hook what it pushes on stdin; read once, before a step can take it. A release never blocks a push.
-  local read_refs = o.auto_trust
-      and {
-        'refs="$(cat)"',
-        "trust_pushed() { printf '%s\\n' \"$refs\" | testing_ci trust --pushed >&2 || true; }",
-      }
-    or {}
+  local read_refs = {}
+  if o.auto_trust or o.snapshot then
+    read_refs[1] = 'refs="$(cat)"'
+  end
+  if o.auto_trust then
+    read_refs[2] =
+      "trust_pushed() { printf '%s\\n' \"$refs\" | testing_ci trust --pushed >&2 || true; }"
+  end
+  local blocked =
+    'echo "pre-push: testing ci is red, push blocked (git push --no-verify skips it)" >&2; exit 1;'
+  local run_lines
+  if o.snapshot then
+    -- Every commit the push names on a branch, on a snapshot of its own: the working tree (another session's edits)
+    -- has no say, and neither has HEAD when the push names something else. A tag or a deletion checks nothing.
+    run_lines = {
+      'head="$(git rev-parse HEAD)"',
+      'seen=""',
+      'for sha in $(echo "$refs" | while read -r local_ref local_sha remote_ref remote_sha; do case "$remote_ref" in refs/heads/*) case "$local_sha" in *[!0]*) echo "$local_sha" ;; esac ;; esac; done); do',
+      '  case " $seen " in *" $sha "*) continue ;; esac',
+      '  seen="$seen $sha"',
+      ('  if [ "$sha" = "$head" ] && testing_ci verify%s; then continue; fi'):format(verify),
+      '  echo "pre-push: not proven, running testing ci --profile='
+        .. o.run
+        .. ' --snapshot --rev=$sha"',
+      ('  testing_ci --profile=%s --snapshot --rev="$sha" || { %s }'):format(o.run, blocked),
+      "done",
+    }
+  else
+    run_lines = {
+      ("testing_ci verify%s && %s"):format(
+        verify,
+        o.auto_trust and "{ trust_pushed; exit 0; }" or "exit 0"
+      ),
+      'echo "pre-push: not proven, running testing ci --profile=' .. o.run .. '"',
+      ("testing_ci --profile=%s --reuse || { %s }"):format(o.run, blocked),
+    }
+  end
   local lines = {
     "#!/bin/sh",
     M.MARK .. " (git push --no-verify skips it)",
@@ -99,15 +128,7 @@ function M.text(o)
     "unset GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE",
     'testing_ci() { nvim -n -i NONE --headless -u NONE -l "$driver" ci "$@"; }',
     "@READ_REFS@",
-    ("testing_ci verify%s && %s"):format(
-      verify,
-      o.auto_trust and "{ trust_pushed; exit 0; }" or "exit 0"
-    ),
-    'echo "pre-push: not proven, running testing ci --profile=' .. o.run .. '"',
-    ('testing_ci --profile=%s %s || { echo "pre-push: testing ci is red, push blocked (git push --no-verify skips it)" >&2; exit 1; }'):format(
-      o.run,
-      mode
-    ),
+    "@RUN@",
     "@TRUST_LAST@",
     "",
   }
@@ -115,6 +136,8 @@ function M.text(o)
   for _, line in ipairs(lines) do
     if line == "@READ_REFS@" then
       vim.list_extend(out, read_refs)
+    elseif line == "@RUN@" then
+      vim.list_extend(out, run_lines)
     elseif line == "@TRUST_LAST@" then
       out[#out + 1] = o.auto_trust and "trust_pushed" or nil
     else

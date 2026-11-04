@@ -52,6 +52,7 @@ M.USAGE = table.concat({
   "  --keep-going      run every step even after a red one",
   "  --reuse           skip the suite when its stamp still verifies (a docs-only change reruns the other steps)",
   "  --snapshot        run on a snapshot of HEAD (the working tree is not touched) and keep the proof for `ci verify`",
+  "  --rev=<rev>       with --snapshot: the commit to run on instead of HEAD (what a pre-push hook is pushing)",
   "  --agent           the agent report: the verdict first, then only the findings (default in an agent",
   "                    environment: TESTING_AGENT, CLAUDECODE, ...); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci/1 document there",
@@ -70,6 +71,7 @@ M.USAGE = table.concat({
 ---@field keep_going boolean
 ---@field reuse boolean
 ---@field snapshot? boolean `--snapshot`: run on the snapshot of HEAD and keep the proof in the real state.
+---@field rev? string `--rev=<rev>`, with `--snapshot`: the commit instead of HEAD.
 ---@field json? string
 ---@field junit? string
 ---@field state_dir? string
@@ -89,6 +91,7 @@ local VALUED = {
   root = true,
   ["suite-events"] = true,
   events = true,
+  rev = true,
 }
 
 ---@param argv string[] The arguments after `ci`.
@@ -1106,6 +1109,10 @@ function M.main(argv, sv)
   end
   if args.snapshot then
     return require("testing.ci.snapshot_run").main(args, root, sv)
+  end
+  if args.rev then
+    err("testing ci: --rev only goes with --snapshot")
+    return M.EXIT_USAGE
   end
   local report = require("testing.ci.report")
   local agent = args.agent
