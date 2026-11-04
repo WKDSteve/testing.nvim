@@ -1026,8 +1026,9 @@ function M.commit_verdict(doc, code, root)
   end
   return {
     level = level,
-    message = ("ci commit: %s%s (exit %d)"):format(
+    message = ("ci commit: %s%s%s (exit %d)"):format(
       table.concat(parts, ", "),
+      type(doc.system) == "string" and (" on " .. doc.system) or "",
       #items > 0 and (", " .. #items .. " new in the quickfix list") or "",
       code
     ),

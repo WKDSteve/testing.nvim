@@ -491,7 +491,7 @@ function M.classify(rec, run, jobs, non_gating, now)
     return a.id < b.id
   end)
   local cells = {}
-  local others_red, ng = {}, {}
+  local others_red, ng, without_runner = {}, {}, {}
   for _, job in ipairs(jobs) do
     local state = M.job_state(job, now, run.created_at)
     local lname = job.name:lower()
@@ -507,11 +507,8 @@ function M.classify(rec, run, jobs, non_gating, now)
     else
       local sys = M.job_os(job)
       local cell = cells[sys]
-      if state == "no_runner" then
-        notes[#notes + 1] = ("%s: no runner, no test ran; again with `gh run rerun %s --failed`"):format(
-          sys,
-          tostring(run.id)
-        )
+      if state == "no_runner" and not vim.tbl_contains(without_runner, sys) then
+        without_runner[#without_runner + 1] = sys
       end
       if not cell or worse(cell.state, state) ~= cell.state then
         cells[sys] = { state = state, url = job.html_url, job = job.name }
@@ -520,6 +517,15 @@ function M.classify(rec, run, jobs, non_gating, now)
         others_red[#others_red + 1] = job.name
       end
     end
+  end
+  if #without_runner > 0 then
+    -- with the repository: the row of a `--repos-root` table can be read from anywhere
+    notes[#notes + 1] = ("no runner, no test ran (%s): `gh run rerun %s -R %s/%s --failed`"):format(
+      table.concat(without_runner, ", "),
+      tostring(run.id),
+      tostring(rec.owner),
+      tostring(rec.repo)
+    )
   end
   local overall
   for _, cell in pairs(cells) do
@@ -1165,7 +1171,7 @@ local CELL = {
   success = "ok",
   failure = "FAIL",
   cancelled = "cancelled",
-  no_runner = "no-runner",
+  no_runner = "not-started",
   running = "running",
   queued = "queued",
   waiting_runner = "no-runner",

@@ -1670,6 +1670,15 @@ return function(H)
     v = editor.commit_verdict({ schema = DOC.schema, commits = { DOC.commits[2] } }, 0, "/r")
     eq(v.level, "info", "commit_verdict: clean is info")
     eq(v.items, {}, "commit_verdict: clean has no items")
+    has(
+      editor.commit_verdict(
+        { schema = DOC.schema, system = "linux", commits = { DOC.commits[2] } },
+        0,
+        "/r"
+      ).message,
+      "fedcba0 clean on linux (exit 0)",
+      "commit_verdict: says which system that speaks for"
+    )
     v = editor.commit_verdict(
       { schema = DOC.schema, commits = { { sha = "aaaaaaaaaaaa", verdict = "flaky", new = {} } } },
       0,

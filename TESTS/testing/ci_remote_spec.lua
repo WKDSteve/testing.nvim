@@ -616,9 +616,38 @@ return function(H)
     { "no_runner", "success" },
     "no_runner: only the job without a runner"
   )
-  has(nr.note, "macos: no runner, no test ran", "no_runner: the note says what it means")
-  has(nr.note, "gh run rerun 80 --failed", "no_runner: ... and what to try")
-  has(run({ dirs.norun }).out, "no-runner", "no_runner: in the table")
+  has(nr.note, "no runner, no test ran (macos)", "no_runner: the note says what it means")
+  has(
+    nr.note,
+    "gh run rerun 80 -R WKDSteve/norun --failed",
+    "no_runner: ... and what to try, anywhere"
+  )
+  has(
+    run({ dirs.norun }).out,
+    "not-started",
+    "no_runner: in the table, not the word of waiting_runner"
+  )
+  do
+    local rec_ = { owner = "o", repo = "r" }
+    local jobs_ = {}
+    for i, name in ipairs({ "test (macos-latest)", "lint", "publish" }) do
+      jobs_[i] = {
+        id = i,
+        name = name,
+        status = "completed",
+        conclusion = "cancelled",
+        no_runner = true,
+        labels = {},
+      }
+    end
+    remote.classify(rec_, { id = 7, status = "completed", conclusion = "cancelled" }, jobs_, {}, 0)
+    eq(
+      select(2, rec_.note:gsub("gh run rerun", "")),
+      1,
+      "no_runner: one hint for a run, however many jobs: " .. rec_.note
+    )
+    has(rec_.note, "(other, macos)", "no_runner: ... naming each system once")
+  end
 
   local nr2 = vim.json.decode(run({ "--json", dirs.norun2 }).out).repos[1]
   eq(
