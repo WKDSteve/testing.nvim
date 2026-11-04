@@ -552,6 +552,27 @@ return function(H)
       questions, messages = {}, {}
       vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --force")
       eq(#questions, 0, "--force does not ask")
+
+      -- --workflow: "Replace" means this one file, never the whole setup of the repository
+      vim.fn.writefile({ "-- mine" }, target .. "/.testing.lua")
+      vim.fn.writefile({ "# mine" }, target .. "/.github/workflows/ci.yml")
+      questions, reply, messages = {}, 2, {}
+      vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --workflow=two-runner")
+      eq(#questions, 1, "--workflow: a kept workflow is asked about once")
+      has(questions[1].question, "ci.yml", "--workflow: the question names the workflow")
+      lacks(questions[1].question, ".testing.lua", "--workflow: and nothing else")
+      eq(
+        vim.fn.readfile(target .. "/.testing.lua"),
+        { "-- mine" },
+        "--workflow: Replace leaves the rest of the setup alone"
+      )
+      has(
+        table.concat(vim.fn.readfile(target .. "/.github/workflows/ci.yml"), "\n"),
+        "macos-latest",
+        "--workflow: Replace writes the two-runner workflow"
+      )
+      has(all_messages(), "runner-guard install", "--workflow: the report names what is left to do")
+      vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --force")
     end)
     usrcmds.ask, vim.api.nvim_list_uis = real_ask, real_uis
   end
