@@ -352,7 +352,7 @@ root whatever the file says. Refused on the workstation like every run.
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```
-testing ci --snapshot [--rev=<rev>] [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
+testing ci --snapshot [--rev=<rev>] [--force] [--profile=<name>] [--keep-going] [--json=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]
 ```
 
 The pipeline runs on a snapshot of `HEAD` (a detached worktree outside the repository, as for `testing ci commit`), so
@@ -365,6 +365,15 @@ the keys of a stamp name the root they were made in, so a stamp made in the snap
 root. Everything else is checked as for any proof: the tree, Neovim, the pipeline, the tool versions, the age, a clean
 working tree (`ci verify` says `dirty` while the tree has uncommitted changes, however green the snapshot was). The
 answer shows it: `ci verify: verified (profile full, suite stamp snapshot)`.
+
+**A green run is kept per tree.** Besides `ci-<profile>.json` (the last run) the document of a green, complete run is kept
+in `<state>/ci-proofs/<tree>-<profile>.json` (the last 24). A commit whose git tree has such a record is not run again: the
+answer is `ci --snapshot <sha> green exit 0 (profile <p>, kept: tree <t> was green)` and the sentinel. That covers a push
+that was refused for another reason and is tried again, the same commit pushed to a second branch, a commit made again
+with another message, and it does not depend on the working tree, so a dirty checkout of another session changes
+nothing. The record counts when it is a snapshot run on this system and this Neovim and is not older than the age of
+`ci verify` (7 days); the tree holds `.testing.lua`, so the pipeline is the same, while the versions of the tools are not
+asked again (the CI of the host runs everything). `--force` runs anyway; without `--snapshot` it is refused with exit 2.
 
 Whole profiles only: `--step` and `--reuse` are refused with exit 2; `--rev` without `--snapshot` too. The trust gate
 applies to the repository and to the `.testing.lua` the commit carries (a root trusted through the store is trusted for

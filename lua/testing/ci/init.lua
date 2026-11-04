@@ -53,6 +53,7 @@ M.USAGE = table.concat({
   "  --reuse           skip the suite when its stamp still verifies (a docs-only change reruns the other steps)",
   "  --snapshot        run on a snapshot of HEAD (the working tree is not touched) and keep the proof for `ci verify`",
   "  --rev=<rev>       with --snapshot: the commit to run on instead of HEAD (what a pre-push hook is pushing)",
+  "  --force           with --snapshot: run even when a green run of the same tree is kept",
   "  --agent           the agent report: the verdict first, then only the findings (default in an agent",
   "                    environment: TESTING_AGENT, CLAUDECODE, ...); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci/1 document there",
@@ -72,6 +73,7 @@ M.USAGE = table.concat({
 ---@field reuse boolean
 ---@field snapshot? boolean `--snapshot`: run on the snapshot of HEAD and keep the proof in the real state.
 ---@field rev? string `--rev=<rev>`, with `--snapshot`: the commit instead of HEAD.
+---@field force? boolean `--force`, with `--snapshot`: run although a green run of the same tree is kept.
 ---@field json? string
 ---@field junit? string
 ---@field state_dir? string
@@ -117,6 +119,8 @@ function M.parse(argv)
       args.reuse = true
     elseif key == "snapshot" and value == nil then
       args.snapshot = true
+    elseif key == "force" and value == nil then
+      args.force = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -1112,6 +1116,10 @@ function M.main(argv, sv)
   end
   if args.rev then
     err("testing ci: --rev only goes with --snapshot")
+    return M.EXIT_USAGE
+  end
+  if args.force then
+    err("testing ci: --force only goes with --snapshot")
     return M.EXIT_USAGE
   end
   local report = require("testing.ci.report")

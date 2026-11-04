@@ -15,6 +15,13 @@
 --- document as the proof of its tree (`HEAD^{tree}`) and skips the stamp, while the tree, the tools, the pipeline, the
 --- age and a clean working tree are checked as for any proof (`testing.ci.verify`).
 ---
+--- A green, complete run is kept per git TREE (`<state>/ci-proofs/<tree>-<profile>.json`, the last 24): a commit whose
+--- tree has such a proof is not run again (the pre-push hook of a push that was refused for another reason, a second
+--- push of the same commit, a commit made again with another message), whatever the working tree looks like. The proof
+--- must come from this system and this Neovim and be younger than `testing.ci.verify.DEFAULT_MAX_AGE`; `--force` runs
+--- anyway. The tree holds `.testing.lua` too, so the pipeline is the same; the versions of the tools are not asked again
+--- (the CI of the host is the gate that runs everything).
+---
 --- `--rev` takes another commit than HEAD (the pre-push hook: what is pushed need not be HEAD). A run that is not green
 --- prints what the child printed: the verdict line alone does not say what to fix, and the run's state is gone by then.
 ---
@@ -28,6 +35,93 @@ M.EXIT_OK, M.EXIT_FAILED, M.EXIT_USAGE, M.EXIT_INFRA = 0, 1, 2, 3
 
 ---Lines of the child's output a run that is not green prints, from the end.
 M.MAX_OUTPUT_LINES = 200
+
+M.PROOFS_KEEP = 24
+
+---The tree of a commit.
+---@param root string
+---@param sha string
+---@return string|nil
+local function tree_of(root, sha)
+  local ok, res = pcall(function()
+    return vim
+      .system({ "git", "-C", root, "rev-parse", sha .. "^{tree}" }, { text = true })
+      :wait(30000)
+  end)
+  local tree = ok and res.code == 0 and vim.trim(res.stdout or "") or nil
+  return tree and tree:match("^%x+$") and tree or nil
+end
+
+---Where the kept run of a tree and a profile lives.
+---@param root string
+---@param state_dir string|nil
+---@param tree string
+---@param profile string
+---@return string dir
+---@return string path
+local function proof_path(root, state_dir, tree, profile)
+  local dir = require("testing.state").dir(root, { state_dir = state_dir }) .. "/ci-proofs"
+  return dir, ("%s/%s-%s.json"):format(dir, tree:sub(1, 20), (profile:gsub("[^%w_%-]", "_")))
+end
+
+---Is there a green, complete run of this tree that is still good?
+---@param path string
+---@param tree string
+---@return table|nil doc
+local function kept_proof(path, tree)
+  local text = require("lib.nvim.fs.read")(path)
+  local okd, doc = pcall(vim.json.decode, text or "")
+  if not okd or type(doc) ~= "table" then
+    return nil
+  end
+  local ci = require("testing.ci")
+  local verify = require("testing.ci.verify")
+  local max_age = require("testing.stamp").parse_age(verify.DEFAULT_MAX_AGE) --[[@as integer]]
+  local age = verify._age_of(doc.time)
+  if
+    doc.schema ~= ci.SCHEMA
+    or doc.verdict ~= "green"
+    or doc.partial == true
+    or doc.snapshot ~= true
+    or doc.tree ~= tree
+    or doc.os ~= ci.internal.this_os()
+    or doc.nvim ~= tostring(vim.version())
+    or age == nil
+    or age < -300
+    or age > max_age
+  then
+    return nil
+  end
+  return doc
+end
+
+---Keep the run of a tree; the oldest records beyond `PROOFS_KEEP` go.
+---@param dir string
+---@param path string
+---@param doc table
+local function keep_proof(dir, path, doc)
+  local wrote = require("lib.nvim.fs.write.atomic")(
+    path,
+    require("lib.nvim.json.canonical").encode(doc) .. "\n",
+    { mkdirp = true }
+  )
+  if not wrote then
+    return
+  end
+  local files = {}
+  for name, kind in vim.fs.dir(dir) do
+    local st = kind == "file" and vim.uv.fs_stat(dir .. "/" .. name) or nil
+    if st and name:match("%.json$") then
+      files[#files + 1] = { path = dir .. "/" .. name, time = st.mtime.sec }
+    end
+  end
+  table.sort(files, function(a, b)
+    return a.time > b.time
+  end)
+  for i = M.PROOFS_KEEP + 1, #files do
+    pcall(os.remove, files[i].path)
+  end
+end
 
 ---The end of what the child printed.
 ---@param text string
@@ -74,6 +168,29 @@ function M.main(args, root, sv)
   if refused then
     err(("testing ci --snapshot: %s: %s"):format(sha:sub(1, 12), refused))
     return M.EXIT_USAGE
+  end
+
+  -- a green run of this very tree is kept: nothing to run again
+  local tree = tree_of(root, sha)
+  local profile = args.profile
+  if not profile then
+    local pipeline = require("testing.ci.schema").load(root)
+    profile = pipeline and pipeline.default or nil
+  end
+  local proofs, proof
+  if tree and profile then
+    proofs, proof = proof_path(root, state_dir, tree, profile)
+    if not args.force and kept_proof(proof, tree) then
+      out(
+        ("ci --snapshot %s green exit 0 (profile %s, kept: tree %s was green)"):format(
+          sha:sub(1, 7),
+          profile,
+          tree:sub(1, 8)
+        )
+      )
+      out(require("testing.ci").SENTINEL)
+      return M.EXIT_OK
+    end
   end
 
   pcall(snapshot.sweep, root, { state_dir = state_dir })
@@ -128,6 +245,9 @@ function M.main(args, root, sv)
     return M.EXIT_INFRA
   end
   if code == M.EXIT_OK and not doc.partial then
+    if proofs and proof and doc.verdict == "green" then
+      keep_proof(proofs, proof, doc)
+    end
     out(require("testing.ci").SENTINEL)
   end
   return code
