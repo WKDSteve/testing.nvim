@@ -69,6 +69,7 @@ return function(H)
     "list",
     "migrate",
     "run",
+    "sheet",
     "surface",
     "terminal",
   }

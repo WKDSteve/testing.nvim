@@ -296,6 +296,9 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 * Exit codes: 0 green or a skip, 1 a step failed, 2 bad usage or refused (nothing ran, no event, the reason on stderr),
   3 aborted.
 
+From the editor: `:Testing sheet step [<sheet>]` ([BINDINGS.md](BINDINGS.md)) is a client of this command, with the steps
+in a buffer and, under them, what the step under the cursor did. Debugging the Lua code of a spec stays `--debug`.
+
 Underneath is `require("testing.sheet.session")`: `open(s, opts)`, `peek()` (the next step, starting the target of a
 size when needed), `step()`, `close()` (always), `result()` (the shape of `sheet.run`), `cancel()`. `sheet.run` of an
 rpc sheet is the loop over it. A browser sheet runs one step at a time through `browser_runner.mjs --driver`, which

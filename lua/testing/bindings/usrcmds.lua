@@ -442,6 +442,43 @@ function M.ci_repos(ctx)
   )
 end
 
+---`:Testing sheet step`: the panel of a sheet, without a name the choice of the project's sheets.
+---@param ctx table
+function M.sheet_step(ctx)
+  local root = M.resolve_root(ctx.flags.root, vim.api.nvim_buf_get_name(0))
+  local say = require("testing.notify").get()
+  local delay = ctx.flags.delay and tonumber(ctx.flags.delay) or nil
+  if ctx.flags.delay and not delay then
+    say.error("testing sheet step: --delay takes milliseconds")
+    return
+  end
+  local function open(target)
+    require("testing.sheet.panel").open(root, target, {
+      headed = not ctx.flags.headless,
+      delay = delay,
+    })
+  end
+  if ctx.args.sheet then
+    open(ctx.args.sheet)
+    return
+  end
+  local files = require("testing.sheet").files(root .. "/TESTS/sheets")
+  if #files == 0 then
+    say.warn("testing sheet step: no sheet in " .. root .. "/TESTS/sheets")
+    return
+  end
+  vim.ui.select(files, {
+    prompt = "Which test sheet?",
+    format_item = function(file)
+      return (vim.fs.basename(file):gsub("%.sheet%.lua$", ""))
+    end,
+  }, function(file)
+    if file then
+      open(file)
+    end
+  end)
+end
+
 ---`:Testing ci commit [<rev>...] [--range=a..b] [--base=<rev>] [--profile=<name>] [--force]`: the commits in a child,
 ---each in its own snapshot, compared with its parent; live view, quickfix only for the findings that are new.
 ---No revision: HEAD.
@@ -1166,6 +1203,30 @@ function M.routes()
       },
       run = function(ctx)
         M.ci_commit(ctx)
+      end,
+    },
+    {
+      path = { "sheet", "step" },
+      desc = "Go through a test sheet step by step, as with a debugger (no sheet: pick one)",
+      args = {
+        {
+          name = "sheet",
+          type = "STRING",
+          optional = true,
+          desc = "A file, or an id or name below TESTS/sheets",
+        },
+      },
+      flags = {
+        { name = "headless", bool = true, desc = "No visible window for a browser sheet" },
+        {
+          name = "delay",
+          type = "STRING",
+          desc = "Milliseconds before each step that does not stop",
+        },
+        { name = "root", type = "DIR", desc = "The project root directory" },
+      },
+      run = function(ctx)
+        M.sheet_step(ctx)
       end,
     },
     {
