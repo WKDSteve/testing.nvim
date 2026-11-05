@@ -7,6 +7,11 @@
 # 0 green, 1 failures, 2 usage/config, 3 infrastructure. Never silent: a missing nvim or an exit code
 # outside 0..3 (a crash) is named on stderr.
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 3
+if [ ! -f "$here/../scripts/testing.lua" ]; then
+  # a copy or a symlink of this file elsewhere: put the checkout's bin/ folder on the PATH instead
+  echo "testing: cannot find $here/../scripts/testing.lua: run bin/testing of a testing.nvim checkout" >&2
+  exit 3
+fi
 if ! command -v nvim >/dev/null 2>&1; then
   echo "testing: nvim is not on the PATH: nothing ran" >&2
   exit 3

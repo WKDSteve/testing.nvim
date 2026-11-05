@@ -47,10 +47,11 @@ return {
     prompt = "error",
     deprecation = "error",
     -- ci_runner_guard_spec runs the generated hook script with pwsh and signs and checks commits with ssh-keygen;
-    -- pty_spec drives tmux (through wsl on Windows); container_spec runs podman
+    -- pty_spec drives tmux (through wsl on Windows); container_spec runs podman; launcher_spec runs the `testing`
+    -- command itself (bin/testing with sh, bin/testing.cmd with cmd)
     process_net = {
       mode = "error",
-      allow_exec = { "pwsh", "wsl", "tmux", "podman", "ssh-keygen" },
+      allow_exec = { "pwsh", "wsl", "tmux", "podman", "ssh-keygen", "sh", "cmd" },
     },
   },
   -- `testing ci remote`: the job "lib.nvim suite via testing.nvim (<os>)" runs lib.nvim's suite on this runner, it is
