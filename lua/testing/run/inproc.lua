@@ -783,13 +783,24 @@ function M.list(opts)
       end
     else
       local guard = timeout.start({ label = rel, file_ms = (opts.timeouts or {}).file_ms })
-      local ok, cases, list = pcall(
-        dialect.run_file,
-        "busted",
-        a,
-        { path = entry.path, rel = rel, root = root },
-        { dry = true, select = accept }
-      )
+      -- The file deadline stays armed once it has passed, so the hook can also raise in the few
+      -- instructions between the end of `run_file` and `stop` (same window as c919b32, run path).
+      -- The call and the stop now share an outer pcall: a raise there is caught instead of leaving
+      -- `M.list` and losing every item collected so far.
+      local ok, cases, list
+      local guarded, raised = pcall(function()
+        ok, cases, list = pcall(
+          dialect.run_file,
+          "busted",
+          a,
+          { path = entry.path, rel = rel, root = root },
+          { dry = true, select = accept }
+        )
+        guard:stop()
+      end)
+      if not guarded and ok == nil then
+        ok, cases = false, raised
+      end
       for _ = 1, 3 do
         if pcall(guard.stop, guard) then
           break
