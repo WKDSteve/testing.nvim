@@ -496,6 +496,12 @@ local SCHEMA = {
     end,
     expect = "a table (the pipeline of `testing ci`, docs/CI.md)",
   },
+  sheets = {
+    check = function(v)
+      return type(v) == "table"
+    end,
+    expect = "a table (the apps and the browser of test sheets, docs/SHEETS.md)",
+  },
   ci_remote = {
     workflow = {
       check = function(v)

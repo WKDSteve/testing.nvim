@@ -32,6 +32,7 @@
         "title": { "type": "string" },
         "engine": { "type": "string", "minLength": 1 },
         "task": { "type": "string" },
+        "app": { "description": "The program of `sheets.apps` the sheet runs against.", "type": "string" },
         "path": { "type": "string" },
         "root": { "type": "string" },
         "sizes": {

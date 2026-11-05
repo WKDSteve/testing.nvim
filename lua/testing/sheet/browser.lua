@@ -69,10 +69,32 @@ end
 ---@field node? string
 ---@field playwright_dir? string
 ---@field run? fun(argv: string[]): { code: integer, stdout: string, stderr: string } Injectable runner for specs.
+---@field channel? string An installed browser instead of Playwright's Chromium (`chrome`, `msedge`).
 ---@field headed? boolean A visible window (a stepped run only; the suite stays headless).
 ---@field driver_argv? string[] Another driver process that speaks `testing-sheet-driver/1` (specs).
 ---@field driver_margin_ms? integer How long a driver may take beyond a step's own timeout (default 60 s).
 ---@field driver_stop_ms? integer How long a driver may take to end after its stdin closed (default 6 s).
+
+---`sheets.browser` of the project's `.testing.lua` under what the caller gave: which playwright-core, which browser.
+---@param root string
+---@param opts Testing.Sheet.BrowserOpts
+---@return Testing.Sheet.BrowserOpts
+local function with_config(root, opts)
+  -- without the file nothing has to be loaded; a file that does not load says so where an app needs it
+  if not vim.uv.fs_stat(root .. "/.testing.lua") then
+    return opts
+  end
+  local sheets = require("testing.sheet.app").config(root)
+  local cfg = type(sheets.browser) == "table" and sheets.browser or {}
+  local out = vim.tbl_extend("force", {}, opts)
+  if out.playwright_dir == nil and type(cfg.playwright_dir) == "string" then
+    out.playwright_dir = root .. "/" .. cfg.playwright_dir
+  end
+  if out.channel == nil and type(cfg.channel) == "string" then
+    out.channel = cfg.channel
+  end
+  return out
+end
 
 ---@param s Testing.Sheet
 ---@param opts? Testing.Sheet.BrowserOpts
@@ -88,9 +110,32 @@ function M.run(s, opts)
     return result
   end
 
+  opts = with_config(root, opts)
   local node, pw = prerequisites(root, opts)
   if not node then
     return skip(pw)
+  end
+
+  local steps, app = s.steps, nil
+  if s.app then
+    local started, aerr = require("testing.sheet.app").start(s.app, root)
+    if not started then
+      result.ok, result.status = false, "fail"
+      result.failures[1] = ("the app %s did not start: %s"):format(s.app, tostring(aerr))
+      return result
+    end
+    app = started
+    steps = {}
+    for n, step in ipairs(s.steps) do
+      local expanded, eerr = require("testing.sheet.app").expand_step(step, app.vars)
+      if not expanded then
+        app.stop()
+        result.ok, result.status = false, "fail"
+        result.failures[1] = ("step %d: %s"):format(n, tostring(eerr))
+        return result
+      end
+      steps[n] = expanded
+    end
   end
 
   local plan_path = vim.fn.tempname() .. ".plan.json"
@@ -100,8 +145,9 @@ function M.run(s, opts)
     root = root,
     out_dir = opts.out_dir or (root .. "/TESTS/sheets/out"),
     playwright_dir = pw,
+    channel = opts.channel,
     sizes = s.sizes,
-    steps = s.steps,
+    steps = steps,
   }))
   f:close()
 
@@ -114,6 +160,9 @@ function M.run(s, opts)
     res = { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
   end
   os.remove(plan_path)
+  if app then
+    app.stop()
+  end
 
   if res.code == 77 then
     return skip(res.stdout:match("SKIP: ([^\n]*)") or "a browser prerequisite is missing")
@@ -138,11 +187,12 @@ end
 ---@param ctx Testing.Sheet.DriverContext
 ---@return table driver See `testing.sheet.driver_rpc`.
 function M.driver(s, opts, ctx)
+  opts = with_config(ctx.root, opts)
   local margin = opts.driver_margin_ms or 60000
   local stop_ms = opts.driver_stop_ms or 6000
   local proc, exit_code
   local answers, partial, stderr = {}, "", {}
-  local pw
+  local pw, app
 
   ---Fast context: only tables.
   local function on_stdout(_, data)
@@ -249,6 +299,15 @@ function M.driver(s, opts, ctx)
         return { failure = ("%s: %s"):format(tag, fail_why) }
       end
     end
+    -- one app for all sizes, as one browser: it starts with the first size, after what a skip depends on
+    if s.app and not app then
+      local started, aerr =
+        require("testing.sheet.app").start(s.app, ctx.root, { cancelled = ctx.cancelled })
+      if not started then
+        return { failure = ("%s: the app %s did not start: %s"):format(tag, s.app, tostring(aerr)) }
+      end
+      app = started
+    end
     local answer, why = request({
       cmd = "open",
       sheet = {
@@ -257,7 +316,7 @@ function M.driver(s, opts, ctx)
         out_dir = opts.out_dir or (ctx.root .. "/TESTS/sheets/out"),
       },
       size = size,
-      options = { headed = opts.headed == true, playwright_dir = pw },
+      options = { headed = opts.headed == true, playwright_dir = pw, channel = opts.channel },
     }, margin)
     if not answer then
       return { failure = ("%s: %s"):format(tag, why) }
@@ -275,6 +334,13 @@ function M.driver(s, opts, ctx)
   ---@param n integer
   ---@return { reason?: string, shot?: string }
   function D.run(step, n)
+    if app then
+      local expanded, eerr = require("testing.sheet.app").expand_step(step, app.vars)
+      if not expanded then
+        return { reason = eerr }
+      end
+      step = expanded
+    end
     local answer, why = request({ cmd = "step", n = n, step = step }, (step.timeout or 0) + margin)
     if not answer then
       return { reason = why }
@@ -289,14 +355,17 @@ function M.driver(s, opts, ctx)
   function D.close_size() end
 
   function D.close()
-    if not proc then
-      return
+    if proc then
+      if exit_code == nil and not ctx.cancelled() then
+        request({ cmd = "close" }, 10000)
+      end
+      stop()
+      proc = nil
     end
-    if exit_code == nil and not ctx.cancelled() then
-      request({ cmd = "close" }, 10000)
+    if app then
+      app.stop()
+      app = nil
     end
-    stop()
-    proc = nil
   end
 
   return D

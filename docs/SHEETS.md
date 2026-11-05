@@ -304,6 +304,51 @@ line per command on stdin, `open`, `step`, `close`, one answer on stdout; the en
 browser sheet still runs the plan in one go, through the same step function: the suite has no use for a channel
 that could hang.
 
+## Apps (`sheets.apps`)
+
+A browser sheet can run against a program of the project. The sheet stays data and only names it (`app = "demo-hub"`,
+and `open = "${link}"`); how it starts is in `.testing.lua`, which runs under the trust gate anyway:
+
+```lua
+return {
+  sheets = {
+    browser = { playwright_dir = "tools/page-check", channel = "chrome" },
+    apps = {
+      ["demo-hub"] = {
+        build = { "cargo", "build", "-p", "pult-hub", "--example", "demo-hub", "--locked" },
+        run = { "target/debug/examples/demo-hub.exe" },
+        env = { PULT_PORT = "0", PULT_CONFIG_DIR = "${temp}" },
+        ready = { stdout = "^http", as = "link" },
+      },
+    },
+  },
+}
+```
+
+* `build` and `run` are argv lists, never a shell, and run in the project root. A program named by a path is relative
+  to the root; a bare name comes from the PATH.
+* `${temp}` is a folder of this run, removed afterwards: the user's real settings stay untouched. It can be used in `run`
+  and `env`.
+* `ready` waits (`timeout_ms`, default 30 s) for a line on the app's stdout that matches the Lua pattern `stdout`; `as`
+  makes the trimmed line available in the `open` steps of the sheet. Only fixed names are filled in, an unknown one
+  fails the step, no Lua runs.
+* One app for the whole sheet, all sizes. At the end its stdin is closed, then the whole process tree is ended.
+* An app that does not build, does not start or does not get ready fails the sheet, with what it said.
+* `sheets.browser`: `playwright_dir` is the folder (relative to the root) whose `node_modules` holds `playwright-core`;
+  `channel` runs an installed browser (`chrome`, `msedge`) instead of Playwright's Chromium, and without it the sheet is
+  a skip, not a run in another browser.
+
+A repository without a Lua spec needs no suite for its sheets:
+
+```
+testing sheets run --all [--root <dir>]... [--json <ir>] [--strict]
+```
+
+runs every sheet of the roots (default the current directory; trust gate and workstation rule as above) and writes
+the Result-IR `testing sheets report --from` reads. `--strict` makes a skip red, for a CI job that exists to prove
+something: without it a missing browser would leave the job green. Exit codes: 0 green, 1 a sheet is red (or a skip
+with `--strict`), 2 bad usage, refused or no sheet, 3 the IR could not be written.
+
 ## Limits
 
 * The engines are RPC and browser; desktop windows and terminal byte streams are later engines.
@@ -332,4 +377,4 @@ size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-c
 `$TESTING_PLAYWRIGHT_DIR`, the project or `../mdview.nvim`). Without node, `playwright-core` or chromium the sheet
 is a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. There is no
 `prepare` step on purpose: a sheet is data and must not start programs; a page a sheet needs is a file the project
-produces (a fixture, a build output).
+produces (a fixture, a build output), or a program it names (`app`, see [Apps](#apps-sheetsapps)).

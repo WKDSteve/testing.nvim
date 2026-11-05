@@ -21,6 +21,8 @@ export interface Start extends Base {
   title: string;
   engine: string;
   task?: string;
+  /** The program of `sheets.apps` the sheet runs against. */
+  app?: string;
   path?: string;
   root: string;
   sizes: { rows: number; cols: number }[];

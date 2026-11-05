@@ -30,6 +30,21 @@ function target(value, root) {
   return pathToFileURL(isAbsolute(value) ? value : resolve(root, value)).href;
 }
 
+// Polls with `evaluate`, not `waitForFunction`: that one evaluates a string with `eval` inside the page, which the
+// Content-Security-Policy of a good page refuses. A navigation in between is no failure, the next poll asks the new page.
+async function waitFor(page, expression, timeout) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    try {
+      if (await page.evaluate(expression)) return;
+    } catch (e) {
+      if (!/context was destroyed|Cannot find context|navigat/i.test(String(e.message))) throw e;
+    }
+    if (Date.now() >= deadline) throw new Error(`Timeout ${timeout}ms exceeded.`);
+    await new Promise((done) => setTimeout(done, 50));
+  }
+}
+
 // Throws when the step fails; a `shot` answers with its file.
 async function runStep(page, step, where) {
   if (step.open !== undefined) {
@@ -39,7 +54,7 @@ async function runStep(page, step, where) {
   } else if (step.click !== undefined) {
     await page.click(step.click, { timeout: 5000 });
   } else if (step.wait !== undefined) {
-    await page.waitForFunction(step.wait, null, { timeout: step.timeout ?? 2000 });
+    await waitFor(page, step.wait, step.timeout ?? 2000);
   } else if (step.expect !== undefined) {
     const value = await page.evaluate(step.expect);
     if (!value) throw new Error(`got ${JSON.stringify(value)}`);
@@ -53,12 +68,20 @@ async function runStep(page, step, where) {
 }
 
 // Answers with the browser, or throws an Error whose message is the reason for the skip.
-async function launch(playwrightDir, headless) {
+async function launch(playwrightDir, headless, channel) {
   let chromium;
   try {
     ({ chromium } = createRequire(resolve(playwrightDir, 'package.json'))('playwright-core'));
   } catch {
     throw new Error('playwright-core cannot be loaded');
+  }
+  // the project asked for this browser (sheets.browser of .testing.lua): nothing else proves what it wants proved
+  if (channel) {
+    try {
+      return await chromium.launch({ headless, channel });
+    } catch (e) {
+      throw new Error(`${channel} cannot be started (${String(e.message).split('\n')[0]})`);
+    }
   }
   try {
     return await chromium.launch({ headless });
@@ -82,7 +105,7 @@ async function wholePlan(planPath) {
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
   let browser;
   try {
-    browser = await launch(plan.playwright_dir, true);
+    browser = await launch(plan.playwright_dir, true, plan.channel);
   } catch (e) {
     console.log(`SKIP: ${e.message}`);
     process.exit(SKIP);
@@ -146,7 +169,7 @@ function driver() {
       await closePage();
       if (!browser) {
         try {
-          browser = await launch(cmd.options.playwright_dir, !cmd.options.headed);
+          browser = await launch(cmd.options.playwright_dir, !cmd.options.headed, cmd.options.channel);
         } catch (e) {
           answer({ ok: false, skip: e.message });
           return;

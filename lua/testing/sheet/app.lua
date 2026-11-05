@@ -1,0 +1,312 @@
+---@module 'testing.sheet.app'
+---@brief The program a test sheet runs against: named in the sheet, described in `.testing.lua`, started for one run.
+---@description
+--- A sheet is data and starts nothing; it names an app (`app = "demo-hub"`). How that app starts is the project's
+--- `.testing.lua`, which runs under the trust gate anyway:
+---
+---   sheets = {
+---     browser = { playwright_dir = "tools/page-check", channel = "chrome" },
+---     apps = {
+---       ["demo-hub"] = {
+---         build = { "cargo", "build", "-p", "pult-hub", "--example", "demo-hub", "--locked" },
+---         run = { "target/debug/examples/demo-hub.exe" },
+---         env = { PULT_PORT = "0", PULT_CONFIG_DIR = "${temp}" },
+---         ready = { stdout = "^http", as = "link", timeout_ms = 30000 },
+---       },
+---     },
+---   }
+---
+--- `build` and `run` are argv lists, never a shell. Both run in the project root. `${temp}` is a folder of this run,
+--- gone afterwards, so the user's real settings stay untouched. `ready` waits for a line on the app's stdout that
+--- matches the Lua pattern; `as` makes that line available to the sheet as `${link}` in an `open` step. That is all a
+--- sheet can do with it: it fills in fixed names, it runs no Lua.
+
+local M = {}
+
+M.BUILD_MS = 600000
+M.READY_MS = 30000
+M.STOP_MS = 2000
+
+---Fill in `${name}`; an unknown name is an error, not an empty string.
+---@param text string
+---@param vars table<string, string>
+---@return string|nil text, string|nil err
+function M.expand(text, vars)
+  local missing
+  local out = text:gsub("%${([%w_]+)}", function(name)
+    local v = vars[name]
+    if v == nil then
+      missing = name
+      return ""
+    end
+    return v
+  end)
+  if missing then
+    return nil, ("unknown ${%s}"):format(missing)
+  end
+  return out, nil
+end
+
+---@param v any
+---@return boolean
+local function is_argv(v)
+  if type(v) ~= "table" or #v == 0 then
+    return false
+  end
+  for k, s in pairs(v) do
+    if type(k) ~= "number" or type(s) ~= "string" or s == "" then
+      return false
+    end
+  end
+  return true
+end
+
+---What is wrong with the description of an app.
+---@param spec any
+---@return string|nil err
+function M.check(spec)
+  if type(spec) ~= "table" then
+    return "must be a table"
+  end
+  for k in pairs(spec) do
+    if k ~= "build" and k ~= "run" and k ~= "env" and k ~= "ready" and k ~= "window" then
+      return "unknown field " .. tostring(k)
+    end
+  end
+  if not is_argv(spec.run) then
+    return "run must be a list of strings (an argv, no shell)"
+  end
+  if spec.build ~= nil and not is_argv(spec.build) then
+    return "build must be a list of strings (an argv, no shell)"
+  end
+  if spec.env ~= nil then
+    if type(spec.env) ~= "table" then
+      return "env must be a table of strings"
+    end
+    for k, v in pairs(spec.env) do
+      if type(k) ~= "string" or type(v) ~= "string" then
+        return "env must be a table of strings"
+      end
+    end
+  end
+  if spec.ready ~= nil then
+    local r = spec.ready
+    if type(r) ~= "table" or type(r.stdout) ~= "string" or r.stdout == "" then
+      return "ready needs stdout, a Lua pattern"
+    end
+    if r.as ~= nil and (type(r.as) ~= "string" or not r.as:match("^[%w_]+$") or r.as == "temp") then
+      return "ready.as must be a name (letters, digits, _), not temp"
+    end
+    if
+      r.timeout_ms ~= nil
+      and (type(r.timeout_ms) ~= "number" or r.timeout_ms < 1 or r.timeout_ms > M.BUILD_MS)
+    then
+      return "ready.timeout_ms must be a number of milliseconds"
+    end
+    local ok = pcall(string.find, "", r.stdout)
+    if not ok then
+      return "ready.stdout is not a Lua pattern"
+    end
+  end
+  return nil
+end
+
+---The `sheets` section of the project's `.testing.lua`; {} without one. Runs that file: the caller has passed the
+---trust gate (a command) or runs the project's code anyway (a spec).
+---@param root string
+---@return table sheets, string|nil err
+function M.config(root)
+  local loaded = require("testing.config.project").load(root)
+  if loaded.error then
+    return {}, loaded.error
+  end
+  local sheets = loaded.config.sheets
+  return type(sheets) == "table" and sheets or {}, nil
+end
+
+---A program named by a path runs from the project root; a bare name comes from the PATH.
+---@param program string
+---@param root string
+---@return string
+local function resolve(program, root)
+  if not program:find("[/\\]") or program:match("^%a:[/\\]") or program:match("^[/\\]") then
+    return program
+  end
+  return root .. "/" .. program
+end
+
+---@param argv string[]
+---@param vars table<string, string>
+---@return string[]|nil argv, string|nil err
+local function expand_all(argv, vars)
+  local out = {}
+  for i, a in ipairs(argv) do
+    local e, err = M.expand(a, vars)
+    if not e then
+      return nil, err
+    end
+    out[i] = e
+  end
+  return out, nil
+end
+
+---@class Testing.Sheet.App
+---@field vars table<string, string> What a sheet may fill in: `temp`, and the name of `ready.as`.
+---@field stop fun() The whole process tree and the folder go away. Safe to call twice.
+
+---Build and start an app, wait until it is ready.
+---@param name string
+---@param root string
+---@param opts? { cancelled?: fun(): boolean }
+---@return Testing.Sheet.App|nil app, string|nil err
+function M.start(name, root, opts)
+  opts = opts or {}
+  local sheets, cerr = M.config(root)
+  if cerr then
+    return nil, cerr
+  end
+  local spec = type(sheets.apps) == "table" and sheets.apps[name] or nil
+  if spec == nil then
+    return nil, ("no app %s in sheets.apps of %s/.testing.lua"):format(name, root)
+  end
+  local bad = M.check(spec)
+  if bad then
+    return nil, ("sheets.apps[%q]: %s"):format(name, bad)
+  end
+
+  if spec.build then
+    local argv = vim.deepcopy(spec.build)
+    argv[1] = resolve(argv[1], root)
+    local ok, obj = pcall(vim.system, argv, { cwd = root, text = true })
+    if not ok then
+      return nil, "its build did not start: " .. tostring(obj)
+    end
+    local done = obj:wait(M.BUILD_MS)
+    if done.code ~= 0 then
+      local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
+      return nil, ("its build failed (exit %d): %s"):format(done.code, why)
+    end
+  end
+
+  local temp = vim.fs.normalize(vim.fn.tempname()) .. "-app"
+  vim.fn.mkdir(temp, "p")
+  local vars = { temp = temp }
+  local proc
+  local exit_code
+  local stopped = false
+
+  local function stop()
+    if stopped then
+      return
+    end
+    stopped = true
+    if proc then
+      -- closed stdin first, for a program that ends on it; then the tree, whatever it has started
+      pcall(proc.write, proc, nil)
+      vim.wait(M.STOP_MS, function()
+        return exit_code ~= nil
+      end, 20)
+      if exit_code == nil then
+        require("testing.child").kill_tree({ pid = proc.pid })
+        pcall(proc.kill, proc, 9)
+      end
+    end
+    pcall(vim.fn.delete, temp, "rf")
+  end
+
+  local argv, aerr = expand_all(spec.run, vars)
+  if not argv then
+    stop()
+    return nil, aerr
+  end
+  argv[1] = resolve(argv[1], root)
+  local env = {}
+  for k, v in pairs(spec.env or {}) do
+    local e, eerr = M.expand(v, vars)
+    if not e then
+      stop()
+      return nil, ("env %s: %s"):format(k, eerr)
+    end
+    env[k] = e
+  end
+
+  local lines, partial, stderr = {}, "", {}
+  local ok, obj = pcall(vim.system, argv, {
+    cwd = root,
+    env = env,
+    stdin = true,
+    text = false,
+    stdout = function(_, data)
+      if data then
+        partial = partial .. data
+        for line in partial:gmatch("([^\n]*)\n") do
+          lines[#lines + 1] = line
+        end
+        partial = partial:match("([^\n]*)$") or ""
+      end
+    end,
+    stderr = function(_, data)
+      if data and #stderr < 50 then
+        stderr[#stderr + 1] = data
+      end
+    end,
+  }, function(done)
+    exit_code = done.code
+  end)
+  if not ok then
+    stop()
+    return nil, "it did not start: " .. tostring(obj)
+  end
+  proc = obj
+
+  if spec.ready then
+    local timeout = spec.ready.timeout_ms or M.READY_MS
+    local cancelled = opts.cancelled or function()
+      return false
+    end
+    local matched
+    vim.wait(timeout, function()
+      for _, line in ipairs(lines) do
+        if line:find(spec.ready.stdout) then
+          matched = vim.trim(line)
+          return true
+        end
+      end
+      return exit_code ~= nil or cancelled()
+    end, 20)
+    if not matched then
+      local why = exit_code ~= nil
+          and ("it ended (exit %d) before it was ready: %s"):format(
+            exit_code,
+            vim.trim(table.concat(stderr)):sub(1, 300)
+          )
+        or cancelled() and "aborted"
+        or ("no line matched %q in %d ms"):format(spec.ready.stdout, timeout)
+      stop()
+      return nil, why
+    end
+    if spec.ready.as then
+      vars[spec.ready.as] = matched
+    end
+  end
+  return { vars = vars, stop = stop }, nil
+end
+
+---The steps with the `${names}` of the app filled in. Only `open` takes them.
+---@param step Testing.Sheet.Step
+---@param vars table<string, string>
+---@return Testing.Sheet.Step|nil step, string|nil err
+function M.expand_step(step, vars)
+  if not step.open then
+    return step, nil
+  end
+  local open, err = M.expand(step.open, vars)
+  if not open then
+    return nil, err
+  end
+  local copy = vim.deepcopy(step)
+  copy.open = open
+  return copy, nil
+end
+
+return M

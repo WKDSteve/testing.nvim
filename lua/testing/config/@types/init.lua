@@ -168,6 +168,7 @@
 ---@field minit string|false
 ---@field deps string[] Directory names, resolved by `testing.deps`.
 ---@field setup table<string, any> Options for the plugin's `setup()`.
+---@field sheets table `apps` and `browser` of test sheets (`testing.sheet.app`, checked when an app starts).
 ---@field ci_remote Testing.ProjectConfig.CiRemote `testing ci remote`.
 ---@field ci_overview Testing.ProjectConfig.CiOverview `testing ci overview`.
 ---@field conformance Testing.ProjectConfig.Conformance

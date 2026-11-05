@@ -291,6 +291,7 @@ function M.main(argv, sv, deps)
     title = s.title,
     engine = s.engine,
     task = s.task,
+    app = s.app,
     path = s.path,
     root = root,
     sizes = s.sizes,

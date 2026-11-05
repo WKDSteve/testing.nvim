@@ -4,7 +4,7 @@ export type TestingSheetDriverCommand =
       cmd: "open";
       sheet: { id: string; root: string; out_dir: string };
       size: { rows: number; cols: number };
-      /** `headed`, and what the engine's driver needs to find (`playwright_dir`). */
+      /** `headed`, and what the engine's driver needs to find (`playwright_dir`, `channel`). */
       options: { headed?: boolean; [key: string]: unknown };
     }
   | { cmd: "step"; n: number; step: Record<string, unknown> }

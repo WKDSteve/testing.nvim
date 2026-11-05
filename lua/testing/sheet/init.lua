@@ -72,6 +72,10 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field timeout? integer Milliseconds of a `wait`.
 ---@field expect? string
 ---@field screen? string
+---@field open? string
+---@field press? string
+---@field click? string
+---@field shot? string
 ---@field masks? (string|table)[]
 ---@field cursor? boolean
 ---@field mode? boolean
@@ -90,6 +94,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field manual string[]
 ---@field notes? string
 ---@field requires? Testing.Sheet.Requirement[] Conditions the child editor must meet, else the sheet is a reported skip.
+---@field app? string The name of a program in `sheets.apps` of the project's `.testing.lua` (`testing.sheet.app`).
 ---@field path? string Where it was loaded from.
 
 ---@class Testing.Sheet.Requirement
@@ -134,6 +139,7 @@ local SHEET_KEYS = {
   manual = "table",
   notes = "string",
   requires = "table",
+  app = "string",
 }
 
 ---@param v any
@@ -355,6 +361,14 @@ function M.validate(s)
   end
   if s.requires and s.engine ~= "rpc" then
     return nil, "requires belongs to an rpc sheet"
+  end
+  if s.app then
+    if s.engine ~= "browser" then
+      return nil, "app belongs to a browser sheet"
+    end
+    if not s.app:match("^[%w][%w_.%-]*$") then
+      return nil, "app: letters, digits, '_', '-', '.'"
+    end
   end
   return s, nil
 end

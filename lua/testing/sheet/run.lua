@@ -18,8 +18,8 @@
 
 local M = {}
 
-M.USAGE =
-  "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]"
+M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]\n"
+  .. "       testing sheets run --all [--root <dir>]... [--json <ir>] [--strict]"
 
 ---@class Testing.SheetRun.Deps
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
@@ -81,6 +81,53 @@ function M.refused(getenv)
   return nil
 end
 
+---The result of the run as a Result-IR, the input of `testing sheets report --from`: a repository without a Lua spec
+---gets its checklist and its task block this way. A sheet that does not load is a failed case of its file.
+---@param path string
+---@param entries Testing.SheetReport.Entry[]
+---@param root string
+---@return string|nil err
+function M.write_ir(path, entries, root)
+  local R = require("testing.core.result")
+  local result = R.new({ project_key = vim.fs.basename(root), nvim = "sheets run" })
+  local sheet = require("testing.sheet")
+  for _, e in ipairs(entries) do
+    local name = e.sheet and sheet.spec_name(e.sheet)
+      or ("sheet:" .. vim.fs.basename(tostring(e.rel)))
+    local case = R.new_case({ file = e.case and e.case.file or tostring(e.rel), name = name })
+    local status = e.case and e.case.status or "fail"
+    local message = e.case and e.case.message
+      or (not e.sheet and ("does not load: " .. tostring(e.error)) or nil)
+    case.status = status
+    case.duration_ms = e.case and e.case.duration_ms or 0
+    if status == "fail" then
+      case.assertions[1] = { ok = false, kind = "sheet", msg = message or "failed" }
+    else
+      case.assertions[1] = { ok = true, kind = "sheet" }
+      if status == "skip" then
+        case.notes[1] = message
+      end
+    end
+    R.add_case(result, case)
+  end
+  R.finalize(result)
+  -- paths as placeholders, as in the IR of a run: this file may land in a CI artifact
+  local text, eerr = R.encode(result, {
+    roots = require("testing.run.inproc").path_roots(root),
+    case_insensitive = require("testing.child").platform.windows == true,
+  })
+  if not text then
+    return tostring(eerr)
+  end
+  local f = io.open(path, "wb")
+  if not f then
+    return "cannot write " .. path
+  end
+  f:write(text)
+  f:close()
+  return nil
+end
+
 ---`testing sheets run`: exit 0 every sheet green (or waiting for a person) and the task written, 1 a sheet is
 ---red or the task could not be written, 2 bad usage, refused (trust, workstation) or no sheet names the task, 3
 ---the engine of tasks.nvim could not be reached.
@@ -92,13 +139,13 @@ function M.main(argv, sv, deps)
   deps = deps or {}
   local getenv = deps.getenv or vim.uv.os_getenv
   ---@type table<string, any>
-  local o = { dry_run = false }
+  local o = { dry_run = false, all = false, strict = false }
   local roots = {}
   local i = 1
   while i <= #argv do
     local a = argv[i]
-    if a == "--dry-run" then
-      o.dry_run = true
+    if a == "--dry-run" or a == "--all" or a == "--strict" then
+      o[a:sub(3):gsub("-", "_")] = true
       i = i + 1
     else
       local key = ({
@@ -106,6 +153,7 @@ function M.main(argv, sv, deps)
         ["--root"] = "root",
         ["--tasks"] = "vault",
         ["--tasks-cli"] = "cli",
+        ["--json"] = "json",
       })[a]
       if not key or not argv[i + 1] then
         sv.err(
@@ -126,7 +174,14 @@ function M.main(argv, sv, deps)
       i = i + 2
     end
   end
-  if not o.id or not o.id:match("^[%w_][%w_.%-]*/[%w_.%-]+$") then
+  if o.all and (o.id or o.vault) then
+    sv.err("testing sheets: --all runs every sheet of the roots, without a task\n" .. M.USAGE)
+    return 2
+  end
+  if o.all and #roots == 0 then
+    roots = { "." }
+  end
+  if not o.all and not o.id or (o.id and not o.id:match("^[%w_][%w_.%-]*/[%w_.%-]+$")) then
     sv.err("testing sheets: --task <area/slug> is required\n" .. M.USAGE)
     return 2
   end
@@ -216,20 +271,24 @@ function M.main(argv, sv, deps)
   local mine = {}
   for _, e in ipairs(report.collect(roots, { cases = {} })) do
     local id = e.sheet and e.sheet.task or (not e.sheet and tasks.task_of_unloadable(e))
-    if id == o.id then
+    if o.all or id == o.id then
       mine[#mine + 1] = e
     end
   end
   if #mine == 0 then
     sv.err(
-      ("testing sheets: no sheet in %s names the task %s"):format(table.concat(roots, ", "), o.id)
+      o.all and ("testing sheets: no sheet in %s"):format(table.concat(roots, ", "))
+        or ("testing sheets: no sheet in %s names the task %s"):format(
+          table.concat(roots, ", "),
+          o.id
+        )
     )
     return 2
   end
 
   local run = deps.run or require("testing.sheet").run
   local sheet = require("testing.sheet")
-  local red = false
+  local red, skipped = false, false
   for _, e in ipairs(mine) do
     if not e.sheet then
       red = true
@@ -251,6 +310,7 @@ function M.main(argv, sv, deps)
         duration_ms = math.floor((vim.uv.hrtime() - started) / 1e6),
       }
       red = red or status == "fail"
+      skipped = skipped or status == "skip"
       sv.out(
         ("sheet %s: %s%s"):format(
           e.sheet.id,
@@ -264,6 +324,15 @@ function M.main(argv, sv, deps)
   if deps.on_ran then
     deps.on_ran(mine)
   end
+  if o.json then
+    local werr = M.write_ir(o.json, mine, roots[1])
+    if werr then
+      sv.err("testing sheets: " .. werr)
+      return 3
+    end
+  end
+  -- a job that exists to prove something must not stay green because the browser is missing
+  red = red or (o.strict and skipped)
   if not o.vault or deps.no_write then
     return red and 1 or 0
   end

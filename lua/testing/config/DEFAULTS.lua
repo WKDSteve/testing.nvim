@@ -98,6 +98,8 @@ local DEFAULTS = {
     deps = {},
     -- Options the conformance suite calls the plugin's setup() with.
     setup = {},
+    -- Test sheets (docs/SHEETS.md, "Apps"): how the programs start that a sheet names, and which browser it runs in.
+    sheets = {},
     -- `testing ci remote` (docs/CI.md): the GitHub Actions workflow whose latest run is reported, the branch whose
     -- fetched head is asked about, and the job names (lowercase texts) that are listed but never decide (a nightly leg).
     ci_remote = { workflow = "CI", branch = "main", non_gating = { "nightly" } },
