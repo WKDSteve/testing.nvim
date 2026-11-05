@@ -276,9 +276,14 @@ first parent), and every finding is sorted:
 - **known**: red at both: it was red before, the commit did not cause it;
 - **fixed**: red at the base, not at the commit (only within the steps red at the commit).
 
-A new finding of the suite is confirmed before it counts: its spec files run once more at the commit
-(`--step=<suite> -- --file <file>`). A finding that is not red again is `flaky` (a spec that is red only under load),
-not the commit's fault; a step that takes no file selection keeps its new findings as they are.
+A new finding of the suite is confirmed before it counts: its spec files run again at the commit
+(`--step=<suite> -- --file <file>`), up to `testing.ci.commit.CONFIRM_ATTEMPTS` times (3), stopping at the first
+rerun that is not red. A finding still red after every attempt stays as it is; a step that takes no file
+selection keeps its new findings as they are too. More than one rerun exists because a single rerun is not always
+enough: a busy machine (several self-hosted runners, several sessions) can keep a load-sensitive spec red across
+one rerun too, which is what turned a whole-sheet case of `gitsuite.nvim`'s `TESTS/sheets_spec.lua` into a false
+`regression` (task `ALL/app-ci-wird-rot-wenn-mehrere-runner-gleichzeitig-laufen` and
+`gitsuite.nvim/sheets-spec-ein-ganzes-blatt-laeuft-als-ein-fall-und-reisst` of the tasks-vault).
 
 The suite at the base is not run whole either: it gets a `--file` for every spec file that is red at the commit (a
 finding of the commit is in one of them). The whole suite runs at the base when that cannot be said for sure: the
@@ -297,7 +302,7 @@ exit code) is compared as a whole. When a list of findings was cut, the rest cou
 | --- | --- | --- |
 | `clean` | the pipeline is green at the commit | `0` |
 | `known-red` | red, and nothing of it is new | `0` |
-| `flaky` | what was new is green when its spec files run once more at the commit (red under load only) | `0` |
+| `flaky` | what was new is green on one of up to 3 reruns of its spec files at the commit (red under load only) | `0` |
 | `docs-only` / `empty` | the commit changes only documentation (`*.md`, `doc/`, `docs/`, `LICENSE*`, `CHANGELOG*`) or nothing; not run (`--include-docs` runs it) | `0` |
 | `regression` | at least one finding is new | `1` |
 | `unclassified` | red, and there is no base (a root commit) or the base did not run | `1` |

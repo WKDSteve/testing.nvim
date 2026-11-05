@@ -353,6 +353,88 @@ return function(H)
     vim.fn.delete(tmp, "rf")
   end
 
+  -- confirm retries up to CONFIRM_ATTEMPTS times: red, red, green on the last attempt is still flaky (load
+  -- that took more than one rerun to ease), and a spec red on every attempt stays a regression -- never
+  -- retried once more than that
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-flaky-retries"
+    vim.fn.mkdir(tmp, "p")
+    local saved = {
+      create = snapshot.create,
+      remove = snapshot.remove,
+      parent = snapshot.parent,
+      changed = snapshot.changed_files,
+      run_ci = commit.run_ci,
+      runner_key = commit.runner_key,
+    }
+    snapshot.parent = function()
+      return ("b"):rep(40)
+    end
+    snapshot.changed_files = function()
+      return { "lua/x.lua" }
+    end
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = tmp .. "/" .. sha:sub(1, 1), state = tmp }
+    end
+    snapshot.remove = function()
+      return true
+    end
+    local function suite(state, findings)
+      return { profile = "full", steps = { { name = "suite", state = state, findings = findings } } }
+    end
+    local BOOM = { { file = "TESTS/x_spec.lua", line = 3, text = "x_spec.lua:3: slow" } }
+    commit.runner_key = function()
+      return "runner-1"
+    end
+    local args = commit.parse({ ("a"):rep(40), "--force" })
+    args.state_dir = tmp
+
+    local confirm_calls = 0
+    commit.run_ci = function(snap, _, _, suite_args)
+      if snap.sha:sub(1, 1) == "b" then
+        return 0, suite("green", {}), ""
+      end
+      if vim.tbl_contains(suite_args, "--file") then
+        confirm_calls = confirm_calls + 1
+        -- Green only on the LAST attempt production actually takes (3, fixed here rather than read from
+        -- commit.CONFIRM_ATTEMPTS): were that constant ever lowered, this mock must still demand the same
+        -- number of reruns the fix exists to provide, so a regression in the retry count fails this assertion
+        -- instead of trivially tracking it.
+        if confirm_calls >= 3 then
+          return 0, suite("green", {}), ""
+        end
+        return 1, suite("red", BOOM), ""
+      end
+      return 1, suite("red", BOOM), ""
+    end
+    local r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.verdict, #r.new, #r.flaky }, { "flaky", 0, 1 }, "flaky: green on the 3rd attempt")
+    eq(confirm_calls, commit.CONFIRM_ATTEMPTS, "flaky: exactly CONFIRM_ATTEMPTS reruns, not fewer")
+
+    confirm_calls = 0
+    commit.run_ci = function(snap, _, _, suite_args)
+      if snap.sha:sub(1, 1) == "b" then
+        return 0, suite("green", {}), ""
+      end
+      if vim.tbl_contains(suite_args, "--file") then
+        confirm_calls = confirm_calls + 1
+      end
+      return 1, suite("red", BOOM), ""
+    end
+    r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.verdict, #r.new, #r.flaky }, { "regression", 1, 0 }, "regression: red on every attempt")
+    eq(
+      confirm_calls,
+      commit.CONFIRM_ATTEMPTS,
+      "regression: stops after CONFIRM_ATTEMPTS, never retried more"
+    )
+
+    snapshot.create, snapshot.remove = saved.create, saved.remove
+    snapshot.parent, snapshot.changed_files = saved.parent, saved.changed
+    commit.run_ci, commit.runner_key = saved.run_ci, saved.runner_key
+    vim.fn.delete(tmp, "rf")
+  end
+
   -- the base runs only the red spec files of the suite, and the commit and its base share one cache folder
   do
     local tree = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-narrow"

@@ -17,8 +17,9 @@
 --- known or fixed. A commit that changes only documentation is not run (`docs-only`, `--include-docs` runs it).
 ---
 --- Verdicts and exit codes (several commits: the worst code): `clean` 0 (green at the commit), `known-red` 0 (red, and
---- all of it red at the base too), `flaky` 0 (what was new is green when its spec files run once more at the commit),
---- `regression` 1 (something new is red, also when run again), `unclassified` 1 (red, and there is no base
+--- all of it red at the base too), `flaky` 0 (what was new is green on one of up to `CONFIRM_ATTEMPTS` reruns of its
+--- spec files at the commit), `regression` 1 (something new is red on every one of those reruns too),
+--- `unclassified` 1 (red, and there is no base
 --- or the base did not run), `docs-only` / `empty` 0 (not run), `error` 2 (usage, pipeline), `infra` 3 (git, the
 --- snapshot, a tool). A result is kept per commit, profile, base, suite options and runner (the trees of testing.nvim
 --- and lib.nvim) in the project's state directory (`ci-commit/`) and returned again without a run (`reused`) until
@@ -453,9 +454,21 @@ local function step_states(doc)
   return out
 end
 
----Run the spec files of new findings once more at the commit: a finding whose spec file is not red again is flaky
----(red under load, green alone), not a regression. A file that is red again keeps all its new findings, and so does a
----step that is red again without findings or takes no file selection (not the suite).
+---How many times a step's spec files are run again before a finding that stays red counts as a regression.
+---
+---A single rerun (the previous behaviour) catches a spec that happened to be red once under load and green
+---right after; a machine busy for longer than that (several self-hosted runners, several Claude sessions)
+---can keep a load-sensitive spec red across one rerun too, which is exactly how a sheet test (`gitsuite.nvim`
+---`TESTS/sheets_spec.lua`, a whole test sheet as one busted case, no budget smaller than `timeouts.case_ms`)
+---turned load into a false `regression`. More attempts cost time only on the rare path a commit actually has
+---a new finding, and a spec that is genuinely broken stays red on every one of them regardless.
+---@type integer
+M.CONFIRM_ATTEMPTS = 3
+
+---Run the spec files of new findings again at the commit, up to `M.CONFIRM_ATTEMPTS` times: a finding whose
+---spec file is not red on any of those reruns is flaky (red under load, green once load eases), not a
+---regression. A file that is red on every rerun keeps all its new findings, and so does a step that is red
+---again without findings or takes no file selection (not the suite).
 ---@param snap Testing.Ci.Snapshot The commit's snapshot.
 ---@param root string
 ---@param profile any The profile the commit ran.
@@ -484,9 +497,22 @@ function M.confirm(snap, root, profile, new_items, suite_args)
         vim.list_extend(sel, { "--file", it.file })
       end
     end
-    local code, doc = M.run_ci(snap, root, extra, sel)
-    -- 2: the step takes no file selection (not the suite) or another usage problem: nothing is confirmed
-    if (code == M.EXIT_OK or code == M.EXIT_FAILED) and doc then
+    -- Still-red items only: an item already proven flaky by an earlier attempt needs no further run, and a
+    -- step whose run reports a usage problem (code outside OK/FAILED, or no doc) stops retrying altogether --
+    -- that is not "red", it is the rerun itself not having worked.
+    local pending = {}
+    for _, it in ipairs(by_step[step]) do
+      pending[it] = true
+    end
+    for _ = 1, M.CONFIRM_ATTEMPTS do
+      if not next(pending) then
+        break
+      end
+      local code, doc = M.run_ci(snap, root, extra, sel)
+      -- 2: the step takes no file selection (not the suite) or another usage problem: nothing is confirmed
+      if (code ~= M.EXIT_OK and code ~= M.EXIT_FAILED) or not doc then
+        break
+      end
       -- by file, not by text: a message with a measured number differs between two runs of the same red spec
       local red_files, red_whole = {}, false
       for _, s in ipairs(doc.steps or {}) do
@@ -497,9 +523,10 @@ function M.confirm(snap, root, profile, new_items, suite_args)
           end
         end
       end
-      for _, it in ipairs(by_step[step]) do
+      for it in pairs(pending) do
         if not red_whole and not red_files[it.file:gsub("\\", "/")] then
           flaky_set[it] = true
+          pending[it] = nil
         end
       end
     end
