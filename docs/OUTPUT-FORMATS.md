@@ -451,6 +451,8 @@ stdin (`--params=<json>` takes it inline), alone, in place of the options:
 | `areas` | whole path | fleet, repo (with `export`), finding | the `areas.json` of the data classes; without it the child asks its own (none: nothing is released) |
 | `export` | boolean | fleet, repo | the export form (as `--export`) |
 | `remote` | boolean | fleet, repo | ask the CI adapter (as `--remote`) |
+| `github_token` | a GitHub token | fleet, repo, with `remote` | the token the adapter takes before `$TESTING_GITHUB_TOKEN` and `gh auth token`, for a child without an environment. Only on stdin (`--params=-`): inline it is refused, there is no switch. In no document, no message, no cache; redacted as `<TOKEN>` like every token of the adapter. `hello` names it as the capability `remote_token`. |
+| `remote_max_age` | whole seconds, 1 to 86400 | fleet, repo, with `remote` | stored answers of the commit younger than this stand in for a request: however often a hub asks, GitHub is asked at most once in that time per repository. A failed request stores nothing and is tried at the next asking. |
 | `include`, `exclude` | list of directory names | fleet | as `--include`, `--exclude` |
 | `repo` | a key of `fleet` | repo, finding | the repository below `$TESTING_REPOS_ROOT` with that key |
 | `fp` | 16 hex | finding | as `--fp` |

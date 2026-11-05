@@ -56,7 +56,8 @@ M.CAPABILITIES = { "data_classes", "fleet", "manifest", "repo" }
 ---What `testing call hello` says this engine answers: the capabilities of its documents, the findings
 ---(`testing-finding/1`), `hello` itself and the request on stdin (`--params=-`); sorted.
 ---@type string[]
-M.HELLO_CAPABILITIES = { "data_classes", "finding", "fleet", "hello", "manifest", "params", "repo" }
+M.HELLO_CAPABILITIES =
+  { "data_classes", "finding", "fleet", "hello", "manifest", "params", "remote_token", "repo" }
 
 ---The kinds a reader of this version knows.
 ---@type table<string, true>
@@ -1093,6 +1094,8 @@ end
 ---@field form? "local"|"export" Default "export".
 ---@field state_dir? string The state directory (default `stdpath('state')`).
 ---@field remote? boolean Ask the CI adapter (default false).
+---@field github_token? string The token the adapter takes before its own sources (a hub's, on stdin).
+---@field remote_max_age? integer Seconds the adapter's stored answers are good for, without a request.
 ---@field previous? fun(path: string): string|nil `export` only: the text of a file of the export folder as it is now
 ---(nil: none). A document whose digest did not change keeps that file's `generated_at` and `engine`, so an
 ---unchanged state is the same bytes (no git diff in a results repository).
@@ -1144,7 +1147,11 @@ local function ask_remote(dirs, opts)
     list[i] = { dir = dir, from_root = false }
   end
   local base = opts.state_dir or vim.fn.stdpath("state")
-  local ok, records, info = pcall(M.deps.remote, list, { state_dir = base })
+  local ok, records, info = pcall(
+    M.deps.remote,
+    list,
+    { state_dir = base, token = opts.github_token, max_age = opts.remote_max_age }
+  )
   -- the token the adapter used is a secret of this document from here on, whatever its source (`gh auth token`
   -- is no environment variable `M.secrets` could find): every text built later is redacted against it
   if ok and type(info) == "table" then

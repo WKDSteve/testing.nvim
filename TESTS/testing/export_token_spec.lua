@@ -103,4 +103,84 @@ return function(H)
     eq(leaks[1].what, "the token of the CI adapter", "what")
     eq(#export.leaks(doc, { roots = {}, secrets = {} }), 0, "outside a document no token is known")
   end
+
+  -- ── the token of the caller comes first, and its own sources are not even asked ──
+  do
+    local CALLER = "github_pat_" .. string.rep("Zq3m", 8)
+    with_gh_token(function(used)
+      remote.deps.token = function()
+        error("the adapter's own sources must not be asked")
+      end
+      local records, info = remote.collect(
+        { { dir = fx.alpha, from_root = false } },
+        { state_dir = fx.state .. "/caller", token = CALLER }
+      )
+      eq(records[1].overall ~= "unknown", true, "asked with the token of the caller")
+      eq(info.token_source, "the caller", "the source names the caller, not the token")
+      eq(info.token, CALLER, "handed back for the redaction")
+      ok(#used > 0, "requests went out")
+      for _, t in ipairs(used) do
+        eq(t, CALLER, "every request carries it")
+      end
+      eq(
+        remote.document(records, info, {}).token,
+        nil,
+        "testing-ci-remote/1 has no field for the token"
+      )
+    end)
+
+    -- in a document it is redacted as a value (the fake answer of GitHub echoes the old token, so it echoes this one)
+    with_gh_token(function()
+      local saved = fixture.API[JOBS].jobs[1].name
+      fixture.API[JOBS].jobs[1].name = "test (ubuntu-latest) " .. CALLER
+      local doc = export.fleet(fixture.opts(fx, { form = "export", github_token = CALLER }))
+      fixture.API[JOBS].jobs[1].name = saved
+      ok(doc, "the fleet is built with the token of the caller")
+      eq(export.encode(doc):find(CALLER, 1, true), nil, "the token of the caller is in no document")
+    end)
+  end
+
+  -- ── `max_age`: stored answers stand in for requests, for that long ──
+  do
+    local NOW = 1800000000
+    local state = fx.state .. "/max-age"
+    local function ask(now, max_age)
+      local requests = 0
+      local run_state
+      with_gh_token(function()
+        local transport = remote.deps.transport
+        remote.deps.now = function()
+          return now
+        end
+        remote.deps.transport = function(url, copts, done)
+          requests = requests + 1
+          return transport(url, copts, done)
+        end
+        local records = remote.collect(
+          { { dir = fx.alpha, from_root = false } },
+          { state_dir = state, max_age = max_age }
+        )
+        run_state = records[1].overall
+      end)
+      return requests, run_state
+    end
+
+    local first, first_state = ask(NOW, 60)
+    ok(first > 0, "nothing is stored: the first asking goes to GitHub")
+    local again, again_state = ask(NOW + 59, 60)
+    eq(again, 0, "younger than max_age: no request at all")
+    eq(again_state, first_state, "and the state of the stored answers")
+    local kept = ask(NOW + 59, 60)
+    eq(kept, 0, "still young")
+    ok(
+      ask(NOW + 60, 60) > 0,
+      "as old as max_age: asked again; a reuse did not make the answers younger"
+    )
+    eq(ask(NOW + 61, 60), 0, "that request counts from its own time")
+    ok(ask(NOW + 61) > 0, "without max_age every asking is a request (ETags as before)")
+    ok(
+      ask(NOW - 1000, 60) > 0,
+      "a clock that went back: stored answers from the future are not reused"
+    )
+  end
 end

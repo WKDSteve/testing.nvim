@@ -599,7 +599,8 @@ local function read_cache(path)
   if not ok or type(doc) ~= "table" or doc.v ~= 1 then
     return nil
   end
-  local out = { sha = text(doc.sha, 64) }
+  local out =
+    { sha = text(doc.sha, 64), asked_at = type(doc.asked_at) == "number" and doc.asked_at or nil }
   if type(doc.runs) == "table" and type(doc.runs.etag) == "string" then
     local list = trim_list(doc.runs.list, trim_run)
     if list then
@@ -635,13 +636,31 @@ end
 
 ---Ask GitHub about one repository; `done()` once `rec` is filled.
 ---@param rec table
----@param ctx { token: string, state_dir: string, now: integer, non_gating: table<table, string[]>, closed?: boolean }
+---@param ctx { token: string, state_dir: string, now: integer, max_age?: integer, non_gating: table<table, string[]>, closed?: boolean }
 ---@param done fun()
 local function fetch(rec, ctx, done)
   local github = require("lib.nvim.net.github")
   local path = cache_path(ctx.state_dir, rec)
   local cache = read_cache(path) or {}
-  local fresh = { sha = rec.sha }
+  -- `max_age`: stored answers of this commit that young stand in for a request (a clock that went back: too old)
+  local reuse = false
+  if ctx.max_age and cache.sha == rec.sha and cache.runs and cache.asked_at then
+    local age = ctx.now - cache.asked_at
+    reuse = age >= 0 and age < ctx.max_age
+  end
+  ---A request, or with `reuse` the answer "not modified" for a stored one: the time of the asking stays that of the
+  ---request, so that the answers do not stay young by being reused.
+  ---@param stored table|nil
+  ---@param route string
+  ---@param ropts table
+  ---@param answer fun(res: table|nil, err: string|nil)
+  local function ask(stored, route, ropts, answer)
+    if reuse and stored then
+      return answer({ not_modified = true, etag = stored.etag })
+    end
+    return github.request(route, ropts, answer)
+  end
+  local fresh = { sha = rec.sha, asked_at = reuse and cache.asked_at or ctx.now }
   local finished = false
   local function finish(err)
     -- past the deadline the record is reported already: a late answer changes nothing, writes nothing
@@ -668,7 +687,8 @@ local function fetch(rec, ctx, done)
   local runs_cache = cache.sha == rec.sha and cache.runs or nil
   -- an older lib.nvim lets a throwing curl (none on PATH) through: that is this repository's error, not a crash
   local sent, send_err = pcall(
-    github.request,
+    ask,
+    runs_cache,
     base,
     opts(runs_cache and runs_cache.etag, { head_sha = rec.sha, per_page = "20" }),
     function(res, err)
@@ -713,7 +733,8 @@ local function fetch(rec, ctx, done)
           M.classify(rec, run, vim.deepcopy(jc.list), ctx.non_gating[rec], ctx.now)
           return finish()
         end
-        github.request(
+        ask(
+          jc,
           ("%s/%d/jobs"):format(base, run.id),
           opts(jc and jc.etag, { per_page = "100" }),
           function(res2, err2)
@@ -955,7 +976,7 @@ end
 
 ---The records of `repos`, sorted by name; the token source (or why there is none).
 ---@param repos { dir: string, from_root: boolean }[]
----@param opts { workflow?: string, state_dir: string, clones?: table<string, string[]> } `clones`: the result of `M.dedupe_clones` when the caller did it
+---@param opts { workflow?: string, state_dir: string, clones?: table<string, string[]>, token?: string, max_age?: integer } `clones`: the result of `M.dedupe_clones` when the caller did it; `token`: the caller's, before the adapter's own sources; `max_age`: stored answers of the commit younger than these seconds stand in for a request
 ---@return table[] records
 ---@return { token_source?: string, token_error?: string, token?: string } info `token`: the token the adapter used
 ---(whatever its source, `gh auth token` included), so that a caller that writes documents can redact it as a value
@@ -1049,7 +1070,11 @@ function M.collect(repos, opts)
     end
   end
   if #pending > 0 then
-    local ok, token, source = pcall(M.deps.token)
+    -- the token of the caller (a hub's, on stdin) comes before the adapter's own sources
+    local ok, token, source = true, opts.token, "the caller"
+    if not token then
+      ok, token, source = pcall(M.deps.token)
+    end
     if not ok then
       token, source = nil, tostring(token)
     end
@@ -1063,7 +1088,13 @@ function M.collect(repos, opts)
     else
       info.token_source = source
       info.token = token
-      local ctx = { token = token, state_dir = opts.state_dir, now = now, non_gating = non_gating }
+      local ctx = {
+        token = token,
+        state_dir = opts.state_dir,
+        now = now,
+        max_age = opts.max_age,
+        non_gating = non_gating,
+      }
       local next_i, open = 1, 0
       local function launch()
         while not ctx.closed and open < M.PARALLEL and next_i <= #pending do

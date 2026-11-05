@@ -41,13 +41,21 @@ M.ROOT_VAR = "TESTING_REPOS_ROOT"
 ---The most bytes of the parameters on stdin; more is a usage error, not a cut.
 M.MAX_PARAMS = 64 * 1024
 
+---The length of a token in `params.github_token`: longer than `testing.export.SECRET_MIN`, so that it is redacted.
+M.TOKEN_MIN = 20
+M.TOKEN_MAX = 512
+---The longest `params.remote_max_age`, in seconds: a day.
+M.REMOTE_MAX_AGE_MAX = 86400
+
 ---The keys of `--params`, with their type and the methods that take them.
----@type table<string, { type: "string"|"boolean"|"names", methods: table<string, true> }>
+---@type table<string, { type: "string"|"boolean"|"number"|"names", methods: table<string, true> }>
 M.PARAMS = {
   state_dir = { type = "string", methods = { fleet = true, repo = true, finding = true } },
   areas = { type = "string", methods = { fleet = true, repo = true, finding = true } },
   export = { type = "boolean", methods = { fleet = true, repo = true } },
   remote = { type = "boolean", methods = { fleet = true, repo = true } },
+  github_token = { type = "string", methods = { fleet = true, repo = true } },
+  remote_max_age = { type = "number", methods = { fleet = true, repo = true } },
   repo = { type = "string", methods = { repo = true, finding = true } },
   fp = { type = "string", methods = { finding = true } },
   include = { type = "names", methods = { fleet = true } },
@@ -76,7 +84,8 @@ M.USAGE = table.concat({
   "  --state-dir=<dir>   the state directory (default: stdpath('state'))",
   "  --params=-|<json>   the request as one JSON object (on stdin with -), alone, in place of the options:",
   "                      state_dir, areas (the areas.json of the data classes), export, remote, include, exclude",
-  "                      (fleet), repo (a key of fleet below $TESTING_REPOS_ROOT; repo, finding), fp (finding)",
+  "                      (fleet), repo (a key of fleet below $TESTING_REPOS_ROOT; repo, finding), fp (finding);",
+  "                      with remote also github_token (on stdin only) and remote_max_age (whole seconds)",
   "  $TESTING_REPOS_ROOT the repositories root of fleet when it is given none",
   "  stdout: one line of canonical JSON; runs nothing (--remote: the adapter's ETag cache)",
   "  exit: 0 printed, 2 usage or a repository not released (repo --export), 3 the document could not be built",
@@ -90,6 +99,8 @@ M.USAGE = table.concat({
 ---@field exclude string[]
 ---@field export boolean
 ---@field remote boolean
+---@field github_token? string `params.github_token`: the token of the caller, on stdin only.
+---@field remote_max_age? integer `params.remote_max_age`: seconds the adapter's stored answers are good for.
 ---@field state_dir? string
 ---@field fp? string
 ---@field help boolean
@@ -289,9 +300,27 @@ function M.apply_params(args, text)
         return nil, "fp needs 16 hex characters"
       end
       args.fp = v:lower()
+    elseif k == "github_token" then
+      -- on stdin only: an argument is readable by every process of the machine. The texts here never quote it.
+      if args.params ~= "-" then
+        return nil, "github_token is taken on stdin only (--params=-)"
+      end
+      if #v < M.TOKEN_MIN or #v > M.TOKEN_MAX or not v:match("^[%w_%-]+$") then
+        return nil, "github_token is not a GitHub token"
+      end
+      args.github_token = v
+    elseif k == "remote_max_age" then
+      if v ~= math.floor(v) or v < 1 or v > M.REMOTE_MAX_AGE_MAX then
+        return nil,
+          ("remote_max_age must be whole seconds from 1 to %d"):format(M.REMOTE_MAX_AGE_MAX)
+      end
+      args.remote_max_age = v
     else
       args[k] = v
     end
+  end
+  if (args.github_token or args.remote_max_age) and not args.remote then
+    return nil, "github_token and remote_max_age belong to remote = true"
   end
   -- the findings always ask the data classes; fleet and repo only in the export form
   if args.areas and not args.export and args.method ~= "finding" then
@@ -462,6 +491,8 @@ function M.main(argv, sv)
     form = args.export and "export" or "local",
     state_dir = state_dir,
     remote = args.remote,
+    github_token = args.github_token,
+    remote_max_age = args.remote_max_age,
     -- the data classes of the caller's `areas.json` (`params.areas`); nil: this device's own file
     classes = args.areas and { path = args.areas } or nil,
     -- a shallow clone (its key differs from a full clone's): on stderr, never in the document

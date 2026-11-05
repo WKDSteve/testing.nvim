@@ -585,6 +585,75 @@ return function(H)
     })
     eq(inline.code, 0, "--params=<json> inline: exit 0: " .. inline.err)
     eq(inline.doc.digest, want.doc.digest, "--params=<json> inline: the same document")
+
+    -- a token: only on stdin, only with `remote`, and no refusal quotes it
+    local TOKEN = "github_pat_" .. string.rep("Zq3m", 8)
+    local refused = function(request, what)
+      local b = hub("fleet", vim.json.encode(request))
+      eq(b.code, 2, what .. ": exit 2")
+      eq(#b.out, 0, what .. ": nothing on stdout")
+      eq(b.err:find(TOKEN, 1, true), nil, what .. ": the refusal does not quote the token")
+    end
+    refused({ github_token = TOKEN }, "a token without remote")
+    refused({ remote_max_age = 60 }, "a max age without remote")
+    refused({ remote = true, github_token = TOKEN .. " x" }, "a token with a space")
+    refused({ remote = true, github_token = "short" }, "a token too short to be redacted")
+    refused({ remote = true, github_token = string.rep("a", 513) }, "a token too long")
+    refused({ remote = true, github_token = 7 }, "a token that is no text")
+    refused({ remote = true, remote_max_age = 0 }, "a max age of nothing")
+    refused({ remote = true, remote_max_age = 1.5 }, "a max age that is not whole")
+    refused({ remote = true, remote_max_age = 86401 }, "a max age over a day")
+    refused({ remote = true, remote_max_age = "60" }, "a max age that is no number")
+    local argv = call(
+      { "fleet", "--params=" .. vim.json.encode({ remote = true, github_token = TOKEN }) },
+      nil,
+      nil,
+      { env = { TESTING_REPOS_ROOT = fx.root } }
+    )
+    eq(argv.code, 2, "a token as an argument: exit 2")
+    eq(argv.err:find(TOKEN, 1, true), nil, "a token as an argument: not quoted")
+    eq(call({ "fleet", "--github-token=" .. TOKEN }).code, 2, "there is no switch for it")
+    eq(
+      hub("finding", vim.json.encode({ repo = alpha, github_token = TOKEN })).code,
+      2,
+      "the findings do not ask GitHub"
+    )
+    ok(vim.tbl_contains(h.doc.capabilities, "remote_token"), "hello names remote_token")
+
+    -- on stdin the adapter gets it, with the max age, and the document does not hold it
+    local handed
+    local with_token = call(
+      { "fleet", "--params=-" },
+      {
+        after = function()
+          local real = export.deps.remote
+          export.deps.remote = function(list, opts)
+            handed = opts
+            export.deps.remote = real
+            return real(list, opts)
+          end
+        end,
+      },
+      none,
+      {
+        env = { TESTING_REPOS_ROOT = fx.root },
+        stdin = function()
+          return vim.json.encode({
+            export = true,
+            remote = true,
+            github_token = TOKEN,
+            remote_max_age = 60,
+            state_dir = fx.state,
+            areas = fx.areas,
+          })
+        end,
+      }
+    )
+    eq(with_token.code, 0, "a request with a token: exit 0: " .. with_token.err)
+    eq(handed and handed.token, TOKEN, "the adapter gets the token of the request")
+    eq(handed and handed.max_age, 60, "and the max age")
+    eq(with_token.out[1]:find(TOKEN, 1, true), nil, "the document does not hold it")
+    eq(with_token.err:find(TOKEN, 1, true), nil, "stderr does not hold it")
   end
 
   vim.fn.delete(base, "rf")
