@@ -234,6 +234,11 @@ Run it from {root}: specs that look at "this repository" read the working
 directory and the runner does not change it. `scripts/test.sh` runs this
 repository's own specs this way.
 
+                                                            *testing-command*
+`testing {args}` is the same line as a command: put the checkout's `bin/`
+folder on the PATH (`bin/testing`, `bin/testing.cmd` on Windows). It hands
+the exit code through; without `nvim` on the PATH it says so and exits 3.
+
 Subcommands: `run` (default), `list` (= `run --list`), `doctor` (resolved
 configuration and dependency report), `migrate` (plan or write the move of a
 repository to testing.nvim, see |testing-migrating|), `budget` (measure the hot

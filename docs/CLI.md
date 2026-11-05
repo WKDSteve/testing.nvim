@@ -12,6 +12,12 @@ the working directory, and the runner deliberately does not change it (it says s
 directory is not the root). `-n -i NONE -u NONE` keep the run independent of the developer's shada,
 swap files and config.
 
+`testing <args>`, as the messages and this page write it, is the command in the checkout's `bin/` folder
+(`bin/testing`, `bin/testing.cmd` on Windows; put the folder on the `PATH`). It runs exactly the line above in
+the current directory and hands the exit code through; without `nvim` on the `PATH` it prints
+`testing: nvim is not on the PATH: nothing ran` and exits with `3`, and an exit code above `3` (a crash of the
+editor) is named on stderr.
+
 For this repository `scripts/test.sh` is the same thing with an isolated state directory:
 
 ```sh

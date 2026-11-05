@@ -307,6 +307,12 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
+For the command line, put the checkout's `bin/` folder on the `PATH`: it holds the `testing` command
+(`bin/testing` for POSIX shells and Git Bash, `bin/testing.cmd` for cmd and PowerShell). `testing <args>` is
+`nvim -n -i NONE --headless -u NONE -l <checkout>/scripts/testing.lua <args>` in the current directory, with
+the exit code handed through; without `nvim` on the `PATH` it says so and exits with `3`. Messages and docs
+that name `testing ...` mean this command.
+
 ## Usage
 
 ### Command line

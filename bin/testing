@@ -1,0 +1,20 @@
+#!/bin/sh
+# bin/testing -- the `testing` command for POSIX shells (Git Bash, Linux, macOS): put this folder on the PATH.
+#
+#   testing [run|ci|status|...] [<root>] [options]   =   nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ...
+#
+# Runs in the caller's working directory (the runner reads it) and hands the exit code through:
+# 0 green, 1 failures, 2 usage/config, 3 infrastructure. Never silent: a missing nvim or an exit code
+# outside 0..3 (a crash) is named on stderr.
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 3
+if ! command -v nvim >/dev/null 2>&1; then
+  echo "testing: nvim is not on the PATH: nothing ran" >&2
+  exit 3
+fi
+nvim -n -i NONE --headless -u NONE -l "$here/../scripts/testing.lua" "$@"
+rc=$?
+case $rc in
+0 | 1 | 2 | 3) ;;
+*) echo "testing: nvim ended with exit code $rc and no verdict (crash?)" >&2 ;;
+esac
+exit "$rc"
