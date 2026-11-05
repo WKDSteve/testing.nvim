@@ -539,26 +539,7 @@ local function run_files(opts, holder)
             })
           end
         end
-        -- The file deadline stays armed once it has passed, so the hook can also raise in the few instructions between
-        -- the end of the body and `stop`. Outside a pcall that would end the whole run and lose every result. A raise
-        -- there lands in the outer pcall; the hook fires again only HOOK_COUNT instructions later, so `stop` below is
-        -- reached first.
-        local ok, err
-        local guarded, raised = pcall(function()
-          ok, err = pcall(body)
-          guard:stop()
-        end)
-        if not guarded and ok == nil then
-          ok, err = false, raised
-        end
-        local file_fired = false
-        for _ = 1, 3 do
-          local sok, fired = pcall(guard.stop, guard)
-          if sok then
-            file_fired = fired
-            break
-          end
-        end
+        local ok, err, _, file_fired = timeout.run_guarded(guard, body)
 
         if not ok then
           -- the dialect itself raised (a bug in a shim, or the timeout hook fired inside it)
@@ -783,29 +764,14 @@ function M.list(opts)
       end
     else
       local guard = timeout.start({ label = rel, file_ms = (opts.timeouts or {}).file_ms })
-      -- The file deadline stays armed once it has passed, so the hook can also raise in the few
-      -- instructions between the end of `run_file` and `stop` (same window as c919b32, run path).
-      -- The call and the stop now share an outer pcall: a raise there is caught instead of leaving
-      -- `M.list` and losing every item collected so far.
-      local ok, cases, list
-      local guarded, raised = pcall(function()
-        ok, cases, list = pcall(
-          dialect.run_file,
+      local ok, cases, list = timeout.run_guarded(guard, function()
+        return dialect.run_file(
           "busted",
           a,
           { path = entry.path, rel = rel, root = root },
           { dry = true, select = accept }
         )
-        guard:stop()
       end)
-      if not guarded and ok == nil then
-        ok, cases = false, raised
-      end
-      for _ = 1, 3 do
-        if pcall(guard.stop, guard) then
-          break
-        end
-      end
       if not ok then
         items[#items + 1] =
           { id = file_id, file = rel, dialect = "busted", note = "error: " .. tostring(cases) }

@@ -278,6 +278,40 @@ function Guard:stop()
   return self.fired_file
 end
 
+---Run `fn` and `guard:stop()` as one guarded unit. The FILE deadline stays armed once it has passed, so the
+---count hook can also raise in the few instructions between the end of `fn` and `stop`, outside whatever
+---protection `fn` gives itself (seen once on Windows: `file exceeded 300 ms` out of `inproc.lua`, escaping the
+---whole run). Wrapping both in one outer `pcall` here catches such a raise instead of losing every result `fn`
+---already produced. After that, `stop` is retried up to 3 times (idempotent, see above) in case the hook
+---interrupted `stop` itself.
+---@param guard Testing.Timeout.Guard
+---@param fn fun(): any, any A function run in its own `pcall`; returns at most two values.
+---@return boolean ok Whether `fn` returned without raising (its own `pcall`'s result).
+---@return any a The first value `fn` returned, or its error message when `ok` is false.
+---@return any b The second value `fn` returned (nil when `ok` is false).
+---@return boolean file_fired Whether the FILE deadline fired (`Guard:stop`'s own return); trailing, so a caller
+---that does not need it can simply not capture it.
+function M.run_guarded(guard, fn)
+  -- (LuaJIT has no `table.pack`; `fn` returns at most two values, see the callers)
+  local res
+  local guarded, raised = pcall(function()
+    res = { pcall(fn) }
+    guard:stop()
+  end)
+  if not guarded and res == nil then
+    res = { false, raised }
+  end
+  local file_fired = false
+  for _ = 1, 3 do
+    local sok, fired = pcall(guard.stop, guard)
+    if sok then
+      file_fired = fired
+      break
+    end
+  end
+  return res[1], res[2], res[3], file_fired
+end
+
 ---Stop every guard above `depth` (newest first) and return their labels. A run that ends with an error leaves the
 ---guard of the file it was in behind otherwise: its deadline is persistent, so it would raise "file exceeded N ms"
 ---in whatever code runs next, in a place that has nothing to do with the spec (the merge of the cache, the report).
