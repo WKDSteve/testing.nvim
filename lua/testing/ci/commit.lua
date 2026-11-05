@@ -462,6 +462,10 @@ end
 ---`TESTS/sheets_spec.lua`, a whole test sheet as one busted case, no budget smaller than `timeouts.case_ms`)
 ---turned load into a false `regression`. More attempts cost time only on the rare path a commit actually has
 ---a new finding, and a spec that is genuinely broken stays red on every one of them regardless.
+---
+---A module field so a spec can read it (as this file's own `ci_commit_spec.lua` does, to assert on the exact
+---rerun count rather than a magic number), not so one can be assigned at runtime: nothing in this file does,
+---and a test that did would change `M.confirm`'s behaviour for every other spec sharing this process.
 ---@type integer
 M.CONFIRM_ATTEMPTS = 3
 
@@ -490,14 +494,8 @@ function M.confirm(snap, root, profile, new_items, suite_args)
   for _, step in ipairs(order) do
     local extra = type(profile) == "string" and { "--profile=" .. profile } or {}
     extra[#extra + 1] = "--step=" .. step
-    local sel, seen = vim.deepcopy(suite_args), {}
-    for _, it in ipairs(by_step[step]) do
-      if not seen[it.file] then
-        seen[it.file] = true
-        vim.list_extend(sel, { "--file", it.file })
-      end
-    end
-    -- Still-red items only: an item already proven flaky by an earlier attempt needs no further run, and a
+    -- Still-red items only: an item already proven flaky by an earlier attempt needs no further run (its
+    -- file is dropped from the `--file` selection of the next attempt too, not just from `pending`), and a
     -- step whose run reports a usage problem (code outside OK/FAILED, or no doc) stops retrying altogether --
     -- that is not "red", it is the rerun itself not having worked.
     local pending = {}
@@ -507,6 +505,13 @@ function M.confirm(snap, root, profile, new_items, suite_args)
     for _ = 1, M.CONFIRM_ATTEMPTS do
       if not next(pending) then
         break
+      end
+      local sel, seen = vim.deepcopy(suite_args), {}
+      for it in pairs(pending) do
+        if not seen[it.file] then
+          seen[it.file] = true
+          vim.list_extend(sel, { "--file", it.file })
+        end
       end
       local code, doc = M.run_ci(snap, root, extra, sel)
       -- 2: the step takes no file selection (not the suite) or another usage problem: nothing is confirmed

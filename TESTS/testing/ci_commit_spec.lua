@@ -435,6 +435,90 @@ return function(H)
     vim.fn.delete(tmp, "rf")
   end
 
+  -- confirm with two pending files in the same step: one goes flaky on the first attempt, the other only on
+  -- the third -- and once the first is resolved, every later attempt's `--file` selection drops it, never
+  -- rerunning a file whose verdict is already final
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-flaky-retries-multi"
+    vim.fn.mkdir(tmp, "p")
+    local saved = {
+      create = snapshot.create,
+      remove = snapshot.remove,
+      parent = snapshot.parent,
+      changed = snapshot.changed_files,
+      run_ci = commit.run_ci,
+      runner_key = commit.runner_key,
+    }
+    snapshot.parent = function()
+      return ("b"):rep(40)
+    end
+    snapshot.changed_files = function()
+      return { "lua/x.lua" }
+    end
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = tmp .. "/" .. sha:sub(1, 1), state = tmp }
+    end
+    snapshot.remove = function()
+      return true
+    end
+    local function suite(state, findings)
+      return { profile = "full", steps = { { name = "suite", state = state, findings = findings } } }
+    end
+    local A = { file = "TESTS/a_spec.lua", line = 3, text = "a_spec.lua:3: slow" }
+    local B = { file = "TESTS/b_spec.lua", line = 5, text = "b_spec.lua:5: slow" }
+    commit.runner_key = function()
+      return "runner-1"
+    end
+    local args = commit.parse({ ("a"):rep(40), "--force" })
+    args.state_dir = tmp
+
+    -- Sorted: `pending` is keyed by item table, so the order `--file` arguments are added in is not
+    -- guaranteed by Lua's `pairs`; only the SET of still-pending files matters here.
+    local function files_of(suite_args)
+      local out = {}
+      for i, v in ipairs(suite_args) do
+        if v == "--file" then
+          out[#out + 1] = suite_args[i + 1]
+        end
+      end
+      table.sort(out)
+      return out
+    end
+
+    local confirm_calls = 0
+    local requested = {}
+    commit.run_ci = function(snap, _, _, suite_args)
+      if snap.sha:sub(1, 1) == "b" then
+        return 0, suite("green", {}), ""
+      end
+      if vim.tbl_contains(suite_args, "--file") then
+        confirm_calls = confirm_calls + 1
+        requested[confirm_calls] = files_of(suite_args)
+        -- a_spec.lua resolves on attempt 1, b_spec.lua only on attempt 3
+        if confirm_calls < 3 then
+          return 1, suite("red", { B }), ""
+        end
+        return 0, suite("green", {}), ""
+      end
+      return 1, suite("red", { A, B }), ""
+    end
+    local r = commit.check(tmp, ("a"):rep(40), args, function() end)
+    eq({ r.verdict, #r.new, #r.flaky }, { "flaky", 0, 2 }, "both files eventually flaky")
+    eq(confirm_calls, 3, "three attempts: b_spec.lua needed every one of them")
+    eq(requested[1], { "TESTS/a_spec.lua", "TESTS/b_spec.lua" }, "attempt 1 asks for both files")
+    eq(
+      requested[2],
+      { "TESTS/b_spec.lua" },
+      "attempt 2 drops a_spec.lua: its verdict (flaky) is already final"
+    )
+    eq(requested[3], { "TESTS/b_spec.lua" }, "attempt 3 still asks only for b_spec.lua")
+
+    snapshot.create, snapshot.remove = saved.create, saved.remove
+    snapshot.parent, snapshot.changed_files = saved.parent, saved.changed
+    commit.run_ci, commit.runner_key = saved.run_ci, saved.runner_key
+    vim.fn.delete(tmp, "rf")
+  end
+
   -- the base runs only the red spec files of the suite, and the commit and its base share one cache folder
   do
     local tree = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-narrow"
