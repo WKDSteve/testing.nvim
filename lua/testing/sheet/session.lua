@@ -53,9 +53,10 @@ Session.__index = Session
 ---@param step Testing.Sheet.Step
 ---@return string action, any value
 local function action_of(step)
-  for _, a in ipairs(require("testing.sheet").ACTIONS) do
+  local sheet = require("testing.sheet")
+  for _, a in ipairs(sheet.ACTIONS) do
     if step[a] ~= nil then
-      return a, step[a]
+      return a, sheet.value_text(step[a])
     end
   end
   return "?", nil
@@ -91,6 +92,8 @@ function M.open(s, opts)
     self.driver = require("testing.sheet.driver_rpc").new(s, opts, ctx)
   elseif s.engine == "browser" then
     self.driver = require("testing.sheet.browser").driver(s, opts, ctx)
+  elseif s.engine == "desktop" then
+    self.driver = require("testing.sheet.desktop").driver(s, opts, ctx)
   end
   return self
 end

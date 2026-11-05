@@ -188,7 +188,7 @@ Known limits, not hidden:
   a text grid with attribute letters, no pixels, and no value snapshots (`a.snapshot`) yet; a spec that uses them
   declares the snapshot directory for the cache by hand (`-- @cache-inputs TESTS/__snapshots__/`).
 - Test sheets ([docs/SHEETS.md](docs/SHEETS.md)) run live checks written as data through the RPC klicker and
-  `testing sheets report` lists what is left for a person; the engines are RPC and browser (no desktop window or
+  `testing sheets report` lists what is left for a person; the engines are RPC, browser and desktop windows (no
   terminal byte stream yet), and the `judge` criteria are for a person, no AI reviewer. `testing sheets step` goes
   through a sheet step by step, for a client on stdin and stdout.
 - Not implemented at all: a test UI (tree, hover), adapters for other test frameworks. Keys for

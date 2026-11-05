@@ -42,9 +42,22 @@
 local M = {}
 
 M.VERSION = 1
-M.ENGINES = { rpc = true, manual = true, browser = true }
-M.ACTIONS =
-  { "keys", "input", "lua", "settle", "wait", "expect", "screen", "open", "press", "click", "shot" }
+M.ENGINES = { rpc = true, manual = true, browser = true, desktop = true }
+M.ACTIONS = {
+  "keys",
+  "input",
+  "lua",
+  "settle",
+  "wait",
+  "expect",
+  "screen",
+  "open",
+  "press",
+  "click",
+  "shot",
+  "toggle",
+  "set",
+}
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
   rpc = {
@@ -57,6 +70,8 @@ M.ENGINE_ACTIONS = {
     screen = true,
   },
   browser = { open = true, press = true, click = true, wait = true, expect = true, shot = true },
+  -- by accessible name, `wait` and `expect` also as { name, state, value }
+  desktop = { wait = true, expect = true, toggle = true, click = true, set = true, shot = true },
 }
 M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
@@ -76,6 +91,9 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field press? string
 ---@field click? string
 ---@field shot? string
+---@field toggle? string
+---@field set? string
+---@field value? number What a `set` step sets.
 ---@field masks? (string|table)[]
 ---@field cursor? boolean
 ---@field mode? boolean
@@ -121,6 +139,9 @@ local STEP_KEYS = {
   press = "string",
   click = "string",
   shot = "string",
+  toggle = "string",
+  set = "string",
+  value = "number",
   masks = "table",
   cursor = "boolean",
   mode = "boolean",
@@ -222,10 +243,33 @@ local function check_requires(list)
   return nil
 end
 
+---What a desktop `wait` or `expect` asks of an element.
+---@param v table
+---@param at string
+---@return string|nil err
+local function check_want(v, at)
+  for k in pairs(v) do
+    if k ~= "name" and k ~= "state" and k ~= "value" then
+      return ("%s: unknown field %s"):format(at, tostring(k))
+    end
+  end
+  if type(v.name) ~= "string" or v.name == "" then
+    return at .. ".name must be a non-empty string"
+  end
+  if v.state ~= nil and v.state ~= "on" and v.state ~= "off" then
+    return at .. '.state must be "on" or "off"'
+  end
+  if v.value ~= nil and type(v.value) ~= "number" then
+    return at .. ".value must be a number"
+  end
+  return nil
+end
+
 ---@param step any
 ---@param i integer
+---@param engine string
 ---@return string|nil err
-local function check_step(step, i)
+local function check_step(step, i, engine)
   local at = ("steps[%d]"):format(i)
   if type(step) ~= "table" then
     return at .. " must be a table"
@@ -235,7 +279,12 @@ local function check_step(step, i)
     if not want then
       return ("%s: unknown field %s"):format(at, tostring(k))
     end
-    if type(v) ~= want then
+    if engine == "desktop" and (k == "wait" or k == "expect") and type(v) == "table" then
+      local werr = check_want(v, ("%s.%s"):format(at, k))
+      if werr then
+        return werr
+      end
+    elseif type(v) ~= want then
       return ("%s.%s must be a %s"):format(at, k, want)
     end
   end
@@ -273,8 +322,19 @@ local function check_step(step, i)
   if action == "shot" and not step.shot:match("^[%w][%w_%-]*$") then
     return at .. ".shot: letters, digits, '_' and '-'"
   end
-  if (action == "open" or action == "press" or action == "click") and step[action] == "" then
+  if
+    (
+      action == "open"
+      or action == "press"
+      or action == "click"
+      or action == "toggle"
+      or action == "set"
+    ) and step[action] == ""
+  then
     return ("%s.%s must not be empty"):format(at, action)
+  end
+  if (step.value ~= nil) ~= (action == "set") then
+    return at .. ": a set step takes a value, nothing else does"
   end
   return nil
 end
@@ -303,20 +363,21 @@ function M.validate(s)
   end
   s.engine = s.engine or "rpc"
   if not M.ENGINES[s.engine] then
-    return nil, "engine must be rpc, browser or manual"
+    return nil, "engine must be rpc, browser, desktop or manual"
   end
   s.steps = s.steps or {}
   if not is_list(s.steps) then
     return nil, "steps must be a list"
   end
   for i, step in ipairs(s.steps) do
-    local err = check_step(step, i)
+    local err = check_step(step, i, s.engine)
     if err then
       return nil, err
     end
   end
-  if (s.engine == "rpc" or s.engine == "browser") and #s.steps == 0 then
-    return nil, ("%s sheet needs steps"):format(s.engine == "rpc" and "an rpc" or "a browser")
+  if (s.engine == "rpc" or s.engine == "browser" or s.engine == "desktop") and #s.steps == 0 then
+    return nil,
+      ("%s sheet needs steps"):format(s.engine == "rpc" and "an rpc" or ("a " .. s.engine))
   end
   local allowed = M.ENGINE_ACTIONS[s.engine]
   for i, step in ipairs(s.steps) do
@@ -331,7 +392,10 @@ function M.validate(s)
   end
   -- a browser sheet's size is the viewport in pixels (cols = width, rows = height)
   s.sizes = s.sizes
-    or { s.engine == "browser" and { rows = 700, cols = 1000 } or { rows = 24, cols = 80 } }
+    or {
+      (s.engine == "browser" or s.engine == "desktop") and { rows = 700, cols = 1000 }
+        or { rows = 24, cols = 80 },
+    }
   if not is_list(s.sizes) or #s.sizes == 0 then
     return nil, "sizes must be a non-empty list"
   end
@@ -363,12 +427,15 @@ function M.validate(s)
     return nil, "requires belongs to an rpc sheet"
   end
   if s.app then
-    if s.engine ~= "browser" then
-      return nil, "app belongs to a browser sheet"
+    if s.engine ~= "browser" and s.engine ~= "desktop" then
+      return nil, "app belongs to a browser or desktop sheet"
     end
     if not s.app:match("^[%w][%w_.%-]*$") then
       return nil, "app: letters, digits, '_', '-', '.'"
     end
+  end
+  if s.engine == "desktop" and not s.app then
+    return nil, "a desktop sheet names its app"
   end
   return s, nil
 end
@@ -453,13 +520,30 @@ function M.spec_name(s)
   return "sheet:" .. (type(s) == "table" and s.id or s)
 end
 
+---The value of an action as one text: a desktop `wait` asks about a name, a state and a value.
+---@param v any
+---@return string|number
+function M.value_text(v)
+  if type(v) ~= "table" then
+    return v
+  end
+  local parts = { tostring(v.name) }
+  if v.state ~= nil then
+    parts[#parts + 1] = "state=" .. tostring(v.state)
+  end
+  if v.value ~= nil then
+    parts[#parts + 1] = "value=" .. tostring(v.value)
+  end
+  return table.concat(parts, " ")
+end
+
 ---@param step Testing.Sheet.Step
 ---@return string
 local function describe(step)
   for _, a in ipairs(M.ACTIONS) do
     if step[a] ~= nil then
       -- one short line: a multi-line `wait`/`lua` would push the reason off the first line
-      local value = tostring(step[a]):gsub("%s+", " ")
+      local value = tostring(M.value_text(step[a])):gsub("%s+", " ")
       -- cut by character, not byte: half a multi-byte character is invalid UTF-8 (JUnit XML)
       if vim.fn.strchars(value) > 60 then
         value = vim.fn.strcharpart(value, 0, 57) .. "..."

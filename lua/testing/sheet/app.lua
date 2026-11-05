@@ -26,6 +26,8 @@ local M = {}
 M.BUILD_MS = 600000
 M.READY_MS = 30000
 M.STOP_MS = 2000
+---How long a program with a window is watched for ending at once (a second instance that hands over).
+M.EARLY_MS = 1500
 
 ---Fill in `${name}`; an unknown name is an error, not an empty string.
 ---@param text string
@@ -69,7 +71,14 @@ function M.check(spec)
     return "must be a table"
   end
   for k in pairs(spec) do
-    if k ~= "build" and k ~= "run" and k ~= "env" and k ~= "ready" and k ~= "window" then
+    if
+      k ~= "build"
+      and k ~= "run"
+      and k ~= "env"
+      and k ~= "ready"
+      and k ~= "window"
+      and k ~= "ended_early"
+    then
       return "unknown field " .. tostring(k)
     end
   end
@@ -88,6 +97,12 @@ function M.check(spec)
         return "env must be a table of strings"
       end
     end
+  end
+  if spec.window ~= nil and (type(spec.window) ~= "string" or spec.window == "") then
+    return "window must be a part of the title"
+  end
+  if spec.ended_early ~= nil and (type(spec.ended_early) ~= "string" or spec.ended_early == "") then
+    return "ended_early must be a text"
   end
   if spec.ready ~= nil then
     local r = spec.ready
@@ -152,13 +167,15 @@ end
 
 ---@class Testing.Sheet.App
 ---@field vars table<string, string> What a sheet may fill in: `temp`, and the name of `ready.as`.
+---@field pid integer
+---@field window? string A part of the title of its window.
 ---@field stop fun() The whole process tree and the folder go away. Safe to call twice.
 
 ---Build and start an app, wait until it is ready.
 ---@param name string
 ---@param root string
 ---@param opts? { cancelled?: fun(): boolean }
----@return Testing.Sheet.App|nil app, string|nil err
+---@return Testing.Sheet.App|nil app, string|nil err, string|nil skip Why the sheet is a skip, not a failure.
 function M.start(name, root, opts)
   opts = opts or {}
   local sheets, cerr = M.config(root)
@@ -259,6 +276,30 @@ function M.start(name, root, opts)
   end
   proc = obj
 
+  -- a program that hands over to one already running ends at once with success: `ended_early` says what that means
+  local function ended_early()
+    if exit_code == 0 and spec.ended_early then
+      return spec.ended_early
+    end
+    return nil
+  end
+
+  if spec.window and not spec.ready then
+    vim.wait(M.EARLY_MS, function()
+      return exit_code ~= nil
+    end, 20)
+    if exit_code ~= nil then
+      local skip = ended_early()
+      stop()
+      return nil,
+        ("it ended (exit %d) before its window: %s"):format(
+          exit_code,
+          vim.trim(table.concat(stderr)):sub(1, 300)
+        ),
+        skip
+    end
+  end
+
   if spec.ready then
     local timeout = spec.ready.timeout_ms or M.READY_MS
     local cancelled = opts.cancelled or function()
@@ -275,6 +316,7 @@ function M.start(name, root, opts)
       return exit_code ~= nil or cancelled()
     end, 20)
     if not matched then
+      local skip = ended_early()
       local why = exit_code ~= nil
           and ("it ended (exit %d) before it was ready: %s"):format(
             exit_code,
@@ -283,13 +325,13 @@ function M.start(name, root, opts)
         or cancelled() and "aborted"
         or ("no line matched %q in %d ms"):format(spec.ready.stdout, timeout)
       stop()
-      return nil, why
+      return nil, why, skip
     end
     if spec.ready.as then
       vars[spec.ready.as] = matched
     end
   end
-  return { vars = vars, stop = stop }, nil
+  return { vars = vars, stop = stop, pid = proc.pid, window = spec.window }, nil
 end
 
 ---The steps with the `${names}` of the app filled in. Only `open` takes them.

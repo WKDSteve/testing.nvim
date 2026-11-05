@@ -340,21 +340,66 @@ return {
 * `sheets.browser`: `playwright_dir` is the folder (relative to the root) whose `node_modules` holds `playwright-core`;
   `channel` runs an installed browser (`chrome`, `msedge`) instead of Playwright's Chromium, and without it the sheet is
   a skip, not a run in another browser.
+* `window` is a part of the title of the app's window, for a desktop sheet; `ended_early` see [Desktop sheets](#desktop-sheets-enginedesktop).
 
 A repository without a Lua spec needs no suite for its sheets:
 
 ```
-testing sheets run --all [--root <dir>]... [--json <ir>] [--strict]
+testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]
 ```
 
-runs every sheet of the roots (default the current directory; trust gate and workstation rule as above) and writes
+runs every sheet of the roots, with `--engine` only those of that engine (default the current directory; trust gate and workstation rule as above) and writes
 the Result-IR `testing sheets report --from` reads. `--strict` makes a skip red, for a CI job that exists to prove
 something: without it a missing browser would leave the job green. Exit codes: 0 green, 1 a sheet is red (or a skip
 with `--strict`), 2 bad usage, refused or no sheet, 3 the IR could not be written.
 
+## Desktop sheets (`engine = "desktop"`)
+
+A sheet with `engine = "desktop"` works in the real window of a program, the way a screen reader does: by accessible
+name, through `sheet-driver` (appkit; UI Automation on Windows). What it can operate is what a screen reader can
+operate. It names its app (see [Apps](#apps-sheetsapps)), and `window` in the app's entry is a part of its title.
+
+```lua
+return {
+  id = "pult.demo-window",
+  title = "pult: the window with the demo desk",
+  engine = "desktop",
+  app = "demo-window",
+  sizes = { { cols = 1300, rows = 800 } },       -- the size of the window in pixels
+  steps = {
+    { wait = { name = "Spotify.exe mute" }, timeout = 15000, note = "the desk is there" },
+    { toggle = "Spotify.exe mute" },
+    { expect = { name = "Spotify.exe mute", state = "on" } },
+    { set = "Spotify.exe gain dB", value = -12 },
+    { expect = { name = "Spotify.exe gain dB", value = -12 } },
+    { click = "Matrix" },
+    { shot = "matrix" },
+  },
+}
+```
+
+| Step | Does | Fails when |
+|---|---|---|
+| `wait = name` or `{ name, state, value }` (`timeout` ms, default 2000) | waits until the element is there and holds what is asked; `state` is `on` or `off` | it does not in time |
+| `expect = ...` | the same, for 1 s: a window draws a change in a later frame | it does not |
+| `toggle = name` | switches a toggle | the element has no toggle |
+| `click = name` | invokes a button or selects a tab | it can do neither |
+| `set = name`, `value = n` | sets a slider | it has no settable range |
+| `shot = name` | a picture of the window, `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` | never |
+
+* A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
+* The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH. Without one, the sheet is a reported skip.
+* `ended_early` in the app's entry is the text of a skip for a program that ends at once with success, like a second
+  instance that hands over to a running one. Without it that is a failure.
+* The window does not need the focus and may be covered, but starting the program takes the focus. A minimized window or
+  one in the tray does not answer: such a step belongs on the app's control interface or to a person. An action goes around
+  the hit test of the mouse, so a covered button "works": whether it looks right is `shot` and `judge`.
+* A window on the runner is a question of its own: `testing sheets run --all --engine browser` leaves desktop sheets out of a
+  CI job (a sheet that does not load stays in, it is red in every job).
+
 ## Limits
 
-* The engines are RPC and browser; desktop windows and terminal byte streams are later engines.
+* The engines are RPC, browser and desktop; terminal byte streams are a later engine.
 * `judge` is for a person; an AI reviewer that pre-sorts the inbox does not exist yet.
 * A step's Lua is code: review a sheet like a spec.
 

@@ -19,7 +19,7 @@
 local M = {}
 
 M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]\n"
-  .. "       testing sheets run --all [--root <dir>]... [--json <ir>] [--strict]"
+  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]"
 
 ---@class Testing.SheetRun.Deps
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
@@ -154,6 +154,7 @@ function M.main(argv, sv, deps)
         ["--tasks"] = "vault",
         ["--tasks-cli"] = "cli",
         ["--json"] = "json",
+        ["--engine"] = "engine",
       })[a]
       if not key or not argv[i + 1] then
         sv.err(
@@ -176,6 +177,10 @@ function M.main(argv, sv, deps)
   end
   if o.all and (o.id or o.vault) then
     sv.err("testing sheets: --all runs every sheet of the roots, without a task\n" .. M.USAGE)
+    return 2
+  end
+  if o.engine and not o.all then
+    sv.err("testing sheets: --engine belongs to --all\n" .. M.USAGE)
     return 2
   end
   if o.all and #roots == 0 then
@@ -271,7 +276,9 @@ function M.main(argv, sv, deps)
   local mine = {}
   for _, e in ipairs(report.collect(roots, { cases = {} })) do
     local id = e.sheet and e.sheet.task or (not e.sheet and tasks.task_of_unloadable(e))
-    if o.all or id == o.id then
+    -- a sheet that does not load has no engine and stays in: it is red in every job
+    local engine_fits = not o.engine or not e.sheet or e.sheet.engine == o.engine
+    if (o.all and engine_fits) or id == o.id then
       mine[#mine + 1] = e
     end
   end
