@@ -96,6 +96,14 @@ end
     }
   end
 
+  ---A process that was killed is gone a moment later, not in the same instant.
+  local function gone(pid)
+    vim.wait(10000, function()
+      return vim.uv.kill(pid, 0) ~= 0
+    end, 50)
+    return vim.uv.kill(pid, 0) ~= 0
+  end
+
   -- 1. the shape -------------------------------------------------------------------------------------------------------
   do
     local s = desktop("window", {
@@ -185,7 +193,7 @@ end
     eq(cmds[2].step.wait, { name = "mute", state = "off" }, "a step goes as it stands")
     eq(cmds[4].step, { set = "gain", value = -12 }, "... a set with its value")
     eq(cmds[#cmds].cmd, "close", "at the end it closes")
-    ok(vim.uv.kill(cmds[1].options.pid, 0) ~= 0, "the app is gone with the sheet")
+    ok(gone(cmds[1].options.pid), "the app is gone with the sheet")
 
     -- the session shows a table as one text, the same way
     local session =

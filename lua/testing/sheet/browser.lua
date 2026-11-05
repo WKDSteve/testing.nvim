@@ -155,16 +155,22 @@ function M.run(s, opts)
   f:close()
 
   local argv = { node, runner_path(), plan_path }
-  local res
-  if opts.run then
-    res = opts.run(argv)
-  else
+  -- whatever happens to the runner, the app of the sheet must not stay behind
+  local ran, res = pcall(function()
+    if opts.run then
+      return opts.run(argv)
+    end
     local done = vim.system(argv, { text = true }):wait(120000)
-    res = { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
-  end
+    return { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
+  end)
   os.remove(plan_path)
   if app then
     app.stop()
+  end
+  if not ran then
+    result.ok, result.status = false, "fail"
+    result.failures[1] = ("the browser runner did not start: %s"):format(tostring(res))
+    return result
   end
 
   if res.code == 77 then

@@ -195,6 +195,32 @@ f:close()
     local _, e6 = app.start("unbuilt", root)
     has(e6, "build failed (exit 101)", "a build that fails")
     has(e6, "a Rust thing", "... with what it said")
+    -- a runner that cannot start is red, and the app of the sheet does not stay behind
+    local raised = sheet.run(
+      assert(sheet.validate({
+        id = "app.raise",
+        title = "T",
+        engine = "browser",
+        app = "good",
+        steps = { { open = "${link}" } },
+      })),
+      {
+        root = root,
+        node = "node",
+        playwright_dir = root,
+        run = function()
+          error("no such program")
+        end,
+      }
+    )
+    ok(not raised.ok, "a runner that raises is red")
+    has(raised.failures[1], "no such program", "... with what it said")
+    local raised_pid = last_pid()
+    vim.wait(5000, function()
+      return vim.uv.kill(raised_pid, 0) ~= 0
+    end, 50)
+    ok(vim.uv.kill(raised_pid, 0) ~= 0, "... and takes the app with it")
+
     local built = assert(app.start("built", root))
     built.stop()
     ok(vim.uv.fs_stat(root .. "/built.txt") ~= nil, "the build runs in the project root")
