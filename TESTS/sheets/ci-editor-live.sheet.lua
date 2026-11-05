@@ -18,9 +18,14 @@ return {
           local argv = vim.list_extend(vim.deepcopy(nv), extra)
           return "{ " .. table.concat(vim.tbl_map(function(a) return string.format("%q", a) end, argv), ", ") .. " }"
         end
+        -- the slow step runs until the sheet has looked at it: a fixed sleep loses to the snapshot on a loaded machine
+        vim.fn.writefile(
+          { "vim.wait(120000, function() return vim.uv.fs_stat('release') ~= nil end, 20)" },
+          root .. "/slow.lua"
+        )
         local lines = {
           "return { ci = { default = 'full', profiles = { full = { 'slow', 'broken' } }, steps = {",
-          "  slow = { run = " .. step({ "+lua vim.uv.sleep(2500)", "+qa!" }) .. " },",
+          "  slow = { run = " .. step({ "+luafile slow.lua", "+qa!" }) .. " },",
           "  broken = { run = " .. step({ "+cq" }) .. " },",
           "} } }",
         }
@@ -51,6 +56,10 @@ return {
     {
       expect = [[#vim.fn.getqflist() == 0]],
       note = "no quickfix list before the verdict",
+    },
+    {
+      lua = [[vim.fn.writefile({ "go" }, _G.sheet_root .. "/release")]],
+      note = "the slow step may end",
     },
     {
       wait = [[#vim.tbl_filter(function(m) return m:find("in the quickfix list", 1, true) ~= nil end, _G.sheet_notes) > 0]],

@@ -403,7 +403,7 @@ return {
 | `shot = name` | a picture of the window, `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` | never |
 
 * A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
-* The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH. Without one, the sheet is a reported skip.
+* The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH (`cargo install --path crates/sheet-driver` in appkit). Without one, the sheet is a reported skip.
 * `ended_early` in the app's entry is the text of a skip for a program that ends at once with success, like a second
   instance that hands over to a running one. Without it that is a failure.
 * The window does not need the focus and may be covered, but starting the program takes the focus. A minimized window or
