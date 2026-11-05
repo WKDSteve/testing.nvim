@@ -123,6 +123,33 @@ for (const need of ["fleet", "manifest", "repo:beta.nvim"]) {
   }
 }
 
+// `testing sheets step`: a transcript with every kind of event, against its schema; the driver's schema compiles too
+{
+  const load = (rel) => JSON.parse(fs.readFileSync(path.join(repo, rel), "utf8"));
+  const session = new Ajv2020({ strict: true, allErrors: true }).compile(
+    load("schemas/testing-sheet-session/1/testing-sheet-session.schema.json"),
+  );
+  const lines = fs
+    .readFileSync(path.join(repo, "TESTS/golden/testing-sheet-session-1/run.jsonl"), "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l !== "")
+    .map((l) => JSON.parse(l));
+  report(
+    lines.length > 0 && lines.every((e) => session(e)),
+    "the golden transcript is valid against testing-sheet-session/1",
+    JSON.stringify(session.errors ?? ""),
+  );
+  report(
+    !session({ schema: "testing-sheet-session/1", event: "end", status: "pass" }),
+    "refused: an end event without its fields",
+  );
+  const driver = new Ajv2020({ strict: true, allErrors: true }).compile(
+    load("schemas/testing-sheet-driver/1/testing-sheet-driver.schema.json"),
+  );
+  report(driver({ cmd: "close" }), "a driver command is valid against testing-sheet-driver/1");
+  report(!driver({ cmd: "launch" }), "refused: an unknown driver command");
+}
+
 // ---- 2. documents that break the contract are refused
 const mutate = (name, base, fn) => {
   if (!(base in docs)) {

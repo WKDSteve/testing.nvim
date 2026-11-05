@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-sheet-driver/1/testing-sheet-driver.schema.json",
+  "title": "testing-sheet-driver/1",
+  "description": "What testing.nvim says to an engine's driver process and what it answers: one JSON line per command on stdin, one per answer on stdout, a command is finished before the next one is sent. The end of stdin means close. A driver may be written in any language; a reader ignores unknown fields.",
+  "oneOf": [{ "$ref": "#/$defs/open" }, { "$ref": "#/$defs/step" }, { "$ref": "#/$defs/close" }, { "$ref": "#/$defs/answer" }],
+  "$defs": {
+    "open": {
+      "description": "Start the target for one size. Another `open` replaces the target of the size before.",
+      "type": "object",
+      "required": ["cmd", "sheet", "size", "options"],
+      "properties": {
+        "cmd": { "const": "open" },
+        "sheet": {
+          "type": "object",
+          "required": ["id", "root", "out_dir"],
+          "properties": {
+            "id": { "type": "string" },
+            "root": { "type": "string" },
+            "out_dir": { "description": "Where a `shot` step writes.", "type": "string" }
+          }
+        },
+        "size": {
+          "type": "object",
+          "required": ["rows", "cols"],
+          "properties": { "rows": { "type": "integer", "minimum": 1 }, "cols": { "type": "integer", "minimum": 1 } }
+        },
+        "options": {
+          "description": "Engine options: `headed`, and what the engine's driver needs to find (`playwright_dir`).",
+          "type": "object",
+          "properties": { "headed": { "type": "boolean" } }
+        }
+      }
+    },
+    "step": {
+      "description": "One step of the sheet, as data.",
+      "type": "object",
+      "required": ["cmd", "n", "step"],
+      "properties": {
+        "cmd": { "const": "step" },
+        "n": { "type": "integer", "minimum": 1 },
+        "step": { "type": "object" }
+      }
+    },
+    "close": {
+      "description": "Everything of the run goes away, then the process ends.",
+      "type": "object",
+      "required": ["cmd"],
+      "properties": { "cmd": { "const": "close" } }
+    },
+    "answer": {
+      "type": "object",
+      "required": ["schema", "ok"],
+      "properties": {
+        "schema": { "const": "testing-sheet-driver/1" },
+        "ok": { "type": "boolean" },
+        "reason": { "description": "Why a step failed.", "type": "string" },
+        "skip": { "description": "`open`: a prerequisite is missing, the sheet is a reported skip.", "type": "string" },
+        "error": { "description": "The command itself could not be done.", "type": "string" },
+        "shot": { "description": "`step`: the file a `shot` wrote.", "type": "string" }
+      }
+    }
+  }
+}

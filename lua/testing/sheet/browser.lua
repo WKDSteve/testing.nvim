@@ -8,6 +8,9 @@
 --- is a prerequisite that is missing (node, `playwright-core`, chromium): the sheet is a reported skip
 --- (`status = "skip"`), never a green run. `playwright-core` is looked up in `$TESTING_PLAYWRIGHT_DIR`, then
 --- `<root>`, then `<root>/../mdview.nvim` (the folder whose `node_modules` holds `playwright-core`).
+---
+--- `driver` is the same runner one step at a time, for `testing.sheet.session`: a process that takes one JSON line per
+--- command on stdin and answers one line on stdout (`testing-sheet-driver/1`, schema under `schemas/`).
 
 local M = {}
 
@@ -36,12 +39,40 @@ local function runner_path()
   return vim.fs.dirname(vim.fs.normalize(here)) .. "/browser_runner.mjs"
 end
 
+---What the engine needs: node and the folder of playwright-core; nil and the reason of the skip without them.
+---@param root string
+---@param opts Testing.Sheet.BrowserOpts
+---@return string|nil node, string pw_dir_or_reason
+local function prerequisites(root, opts)
+  local node = opts.node
+  if not node then
+    for _, row in ipairs(require("testing.tier3").tools()) do
+      if row.name == "node" then
+        node = row.path
+      end
+    end
+  end
+  if not node then
+    return nil, "node is not installed (a browser sheet runs with Playwright)"
+  end
+  local pw = opts.playwright_dir or M.playwright_dir(root)
+  if not pw then
+    return nil,
+      "playwright-core is not installed (npm install in the project, or $TESTING_PLAYWRIGHT_DIR)"
+  end
+  return node, pw
+end
+
 ---@class Testing.Sheet.BrowserOpts
 ---@field root? string
 ---@field out_dir? string Where `shot` steps write (default `<root>/TESTS/sheets/out`).
 ---@field node? string
 ---@field playwright_dir? string
 ---@field run? fun(argv: string[]): { code: integer, stdout: string, stderr: string } Injectable runner for specs.
+---@field headed? boolean A visible window (a stepped run only; the suite stays headless).
+---@field driver_argv? string[] Another driver process that speaks `testing-sheet-driver/1` (specs).
+---@field driver_margin_ms? integer How long a driver may take beyond a step's own timeout (default 60 s).
+---@field driver_stop_ms? integer How long a driver may take to end after its stdin closed (default 6 s).
 
 ---@param s Testing.Sheet
 ---@param opts? Testing.Sheet.BrowserOpts
@@ -57,22 +88,9 @@ function M.run(s, opts)
     return result
   end
 
-  local node = opts.node
+  local node, pw = prerequisites(root, opts)
   if not node then
-    for _, row in ipairs(require("testing.tier3").tools()) do
-      if row.name == "node" then
-        node = row.path
-      end
-    end
-  end
-  if not node then
-    return skip("node is not installed (a browser sheet runs with Playwright)")
-  end
-  local pw = opts.playwright_dir or M.playwright_dir(root)
-  if not pw then
-    return skip(
-      "playwright-core is not installed (npm install in the project, or $TESTING_PLAYWRIGHT_DIR)"
-    )
+    return skip(pw)
   end
 
   local plan_path = vim.fn.tempname() .. ".plan.json"
@@ -113,6 +131,175 @@ function M.run(s, opts)
     result.ok, result.status = false, "fail"
   end
   return result
+end
+
+---@param s Testing.Sheet
+---@param opts Testing.Sheet.BrowserOpts
+---@param ctx Testing.Sheet.DriverContext
+---@return table driver See `testing.sheet.driver_rpc`.
+function M.driver(s, opts, ctx)
+  local margin = opts.driver_margin_ms or 60000
+  local stop_ms = opts.driver_stop_ms or 6000
+  local proc, exit_code
+  local answers, partial, stderr = {}, "", {}
+  local pw
+
+  ---Fast context: only tables.
+  local function on_stdout(_, data)
+    if not data then
+      return
+    end
+    partial = partial .. data
+    for line in partial:gmatch("([^\n]*)\n") do
+      answers[#answers + 1] = line
+    end
+    partial = partial:match("([^\n]*)$") or ""
+  end
+
+  ---Closed stdin first: the driver takes its browser with it, a killed one may leave a window behind. Kill only what
+  ---does not listen.
+  local function stop()
+    if not proc or exit_code ~= nil then
+      return
+    end
+    pcall(proc.write, proc, nil)
+    vim.wait(stop_ms, function()
+      return exit_code ~= nil
+    end, 10)
+    if exit_code == nil then
+      pcall(proc.kill, proc, 9)
+    end
+  end
+
+  ---@return string|nil skip_reason, string|nil failure_reason
+  local function start()
+    local argv = opts.driver_argv
+    if not argv then
+      local node, dir = prerequisites(ctx.root, opts)
+      if not node then
+        return dir
+      end
+      pw = dir
+      argv = { node, runner_path(), "--driver" }
+    end
+    local ok, obj = pcall(vim.system, argv, {
+      stdin = true,
+      text = false,
+      stdout = on_stdout,
+      stderr = function(_, data)
+        if data and #stderr < 50 then
+          stderr[#stderr + 1] = data
+        end
+      end,
+    }, function(done)
+      exit_code = done.code
+    end)
+    if not ok then
+      return nil, "the browser driver did not start: " .. tostring(obj)
+    end
+    proc = obj
+    return nil
+  end
+
+  ---One command, one answer. Nil and why when there is no answer: the driver ended, is too slow, or the run was
+  ---cancelled. The last two end the driver: it may still be working on the command.
+  ---@param msg table
+  ---@param ms integer
+  ---@return table|nil answer, string|nil why
+  local function request(msg, ms)
+    if not proc then
+      return nil, "the browser driver is not running"
+    end
+    pcall(proc.write, proc, vim.json.encode(msg) .. "\n")
+    vim.wait(ms, function()
+      return #answers > 0 or exit_code ~= nil or ctx.cancelled()
+    end, 10)
+    local line = table.remove(answers, 1)
+    if line then
+      local decoded, doc = pcall(vim.json.decode, line)
+      if not decoded or type(doc) ~= "table" then
+        stop()
+        return nil, "the browser driver answered something else: " .. line:sub(1, 200)
+      end
+      return doc
+    end
+    if exit_code ~= nil then
+      local why = vim.trim(table.concat(stderr)):sub(1, 300)
+      return nil, ("the browser driver ended (exit %d): %s"):format(exit_code, why)
+    end
+    stop()
+    if ctx.cancelled() then
+      return nil, "aborted"
+    end
+    return nil, ("the browser driver did not answer in %d ms"):format(ms)
+  end
+
+  local D = {}
+
+  ---@param size { rows: integer, cols: integer }
+  ---@return { failure?: string, skip?: string }|nil
+  function D.open_size(size)
+    local tag = ("%dx%d"):format(size.cols, size.rows)
+    if not proc then
+      local skip_why, fail_why = start()
+      if skip_why then
+        return { skip = skip_why }
+      end
+      if fail_why then
+        return { failure = ("%s: %s"):format(tag, fail_why) }
+      end
+    end
+    local answer, why = request({
+      cmd = "open",
+      sheet = {
+        id = s.id,
+        root = ctx.root,
+        out_dir = opts.out_dir or (ctx.root .. "/TESTS/sheets/out"),
+      },
+      size = size,
+      options = { headed = opts.headed == true, playwright_dir = pw },
+    }, margin)
+    if not answer then
+      return { failure = ("%s: %s"):format(tag, why) }
+    end
+    if answer.skip then
+      return { skip = tostring(answer.skip) }
+    end
+    if not answer.ok then
+      return { failure = ("%s: %s"):format(tag, tostring(answer.error or answer.reason)) }
+    end
+    return nil
+  end
+
+  ---@param step Testing.Sheet.Step
+  ---@param n integer
+  ---@return { reason?: string, shot?: string }
+  function D.run(step, n)
+    local answer, why = request({ cmd = "step", n = n, step = step }, (step.timeout or 0) + margin)
+    if not answer then
+      return { reason = why }
+    end
+    if not answer.ok then
+      return { reason = tostring(answer.reason or answer.error) }
+    end
+    return { shot = answer.shot }
+  end
+
+  ---The page stays until the next size opens: a headed window still shows the last step.
+  function D.close_size() end
+
+  function D.close()
+    if not proc then
+      return
+    end
+    if exit_code == nil and not ctx.cancelled() then
+      request({ cmd = "close" }, 10000)
+    end
+    stop()
+    proc = nil
+  end
+
+  return D
 end
 
 return M

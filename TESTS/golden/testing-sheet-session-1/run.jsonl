@@ -1,0 +1,13 @@
+{"schema":"testing-sheet-session/1","event":"start","id":"ui.float","title":"The float","engine":"rpc","task":"ui.nvim/the-float","path":"E:/r/ui.nvim/TESTS/sheets/float.sheet.lua","root":"E:/r/ui.nvim","sizes":[{"rows":24,"cols":80}],"steps":[{"n":1,"action":"keys","value":":UI<CR>","note":"open"},{"n":2,"action":"settle","value":50},{"n":3,"action":"expect","value":"false"}],"headed":false,"delay_ms":0,"breaks":[3],"judge":["reads well"],"manual":[]}
+{"schema":"testing-sheet-session/1","event":"size","size":"80x24","state":"open"}
+{"schema":"testing-sheet-session/1","event":"step-before","size":"80x24","n":1,"total":3,"action":"keys","value":":UI<CR>","note":"open"}
+{"schema":"testing-sheet-session/1","event":"paused","size":"80x24","n":1,"reason":"start"}
+{"schema":"testing-sheet-session/1","event":"error","message":"unknown command: nxet"}
+{"schema":"testing-sheet-session/1","event":"step-after","size":"80x24","n":1,"status":"pass","ms":12,"screen":["hello","~"]}
+{"schema":"testing-sheet-session/1","event":"step-before","size":"80x24","n":2,"total":3,"action":"settle","value":50}
+{"schema":"testing-sheet-session/1","event":"step-after","size":"80x24","n":2,"status":"pass","ms":51}
+{"schema":"testing-sheet-session/1","event":"step-before","size":"80x24","n":3,"total":3,"action":"expect","value":"false"}
+{"schema":"testing-sheet-session/1","event":"paused","size":"80x24","n":3,"reason":"break"}
+{"schema":"testing-sheet-session/1","event":"step-after","size":"80x24","n":3,"status":"fail","ms":3,"reason":"got false","failure":"80x24 step 3, expect false: got false"}
+{"schema":"testing-sheet-session/1","event":"paused","size":"80x24","n":3,"reason":"failed"}
+{"schema":"testing-sheet-session/1","event":"end","status":"fail","ok":false,"verdict":true,"failures":["80x24 step 3, expect false: got false"],"snapshots":[],"ms":120}

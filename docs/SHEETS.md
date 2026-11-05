@@ -245,10 +245,68 @@ What the model sees is exactly the document: the task's title and body, the shee
 as written, made absolute or resolved (a link, `--vault .`), is refused (exit 2): its tasks may carry customer data,
 and nothing of them is handed to an AI.
 
+## Step by step (`testing sheets step`)
+
+```
+testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run]
+```
+
+runs one sheet the way a debugger runs a program: it stops before a step, says what the step will do, runs it when
+told to and says what came of it. `<sheet>` is a file, or an id or file name below `<root>/TESTS/sheets` (the root is
+`--root`, else the project of a file below `TESTS/sheets`, else the current directory). The workstation rule and the
+trust gate are those of `testing sheets run`.
+
+This is about the declarative steps of a sheet. Debugging the Lua code of a spec is another level: `--debug`
+(breakpoints through osv and dap.nvim).
+
+Every surface is a client of the same two streams. **stdout** has one JSON object per line
+(`testing-sheet-session/1`, [schema](../schemas/testing-sheet-session/1/testing-sheet-session.schema.json); a reader
+ignores unknown events and fields and refuses a higher schema), written as it happens:
+
+| Event | Says |
+|---|---|
+| `start` | the whole sheet: id, title, engine, sizes, every step with its number, action, value and note |
+| `size` | the target of a size is `open`, `failed` to start, or the sheet is a `skip` |
+| `step-before` | size, number, action, value, note: what is about to happen |
+| `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
+| `step-after` | `status`, `ms`, on a failure `reason` and the `failure` line of a normal run; `shot` the file of a `shot` step; `screen` the child's screen as text, one string per row (rpc sheets) |
+| `error` | a command it could not do; the run stays paused |
+| `end` | `status` (`pass`, `fail`, `skip`, `manual`, `aborted`), `ok`, `verdict`, `failures`, `snapshots`, `skipped`, `ms`. The target is gone by then |
+
+**stdin** takes one command per line:
+
+| Command | Does |
+|---|---|
+| `next` | runs this step, stops before the next one |
+| `continue` | runs on, to a `--break`, a failed step or the end |
+| `until <n>` | runs on and stops before step `n` of a size |
+| `abort` | ends the run at once |
+
+* Closed stdin is `abort`, and so is a client that dies or stops reading stdout: nothing stays behind. An abort reaches a
+  running `wait` and a running browser step at once, any other step when it returns.
+* A failed step pauses even under `continue`, before the next size or the end takes the target away, so a person can
+  look at it. The first failed step still ends its size.
+* `--break <n>` stops before step `n` of every size. `--delay <ms>` waits before each step that does not stop, to give
+  the eye a chance. `--run` starts as if `continue` had been said and reads no commands at all, not even a closed
+  stdin (`--break` is refused with it): for watching, not for a client.
+* `--headed` opens a visible window for a browser sheet, with Playwright's Chromium, else an installed Chrome or Edge;
+  an rpc sheet has none, its child editor shows up as the `screen` text of each step.
+* It **writes nothing**: no state, no task, no snapshot (a missing snapshot is a failure, as on CI). `verdict` in `end`
+  says whether the run could count as one: only a run that went through without an abort.
+* Exit codes: 0 green or a skip, 1 a step failed, 2 bad usage or refused (nothing ran, no event, the reason on stderr),
+  3 aborted.
+
+Underneath is `require("testing.sheet.session")`: `open(s, opts)`, `peek()` (the next step, starting the target of a
+size when needed), `step()`, `close()` (always), `result()` (the shape of `sheet.run`), `cancel()`. `sheet.run` of an
+rpc sheet is the loop over it. A browser sheet runs one step at a time through `browser_runner.mjs --driver`, which
+speaks `testing-sheet-driver/1` ([schema](../schemas/testing-sheet-driver/1/testing-sheet-driver.schema.json): one JSON
+line per command on stdin, `open`, `step`, `close`, one answer on stdout; the end of stdin means close). `sheet.run` of a
+browser sheet still runs the plan in one go, through the same step function: the suite has no use for a channel
+that could hang.
+
 ## Limits
 
-* Only the RPC engine exists; browser and desktop windows (Playwright, WebDriver) and terminal byte streams
-  are later engines.
+* The engines are RPC and browser; desktop windows and terminal byte streams are later engines.
 * `judge` is for a person; an AI reviewer that pre-sorts the inbox does not exist yet.
 * A step's Lua is code: review a sheet like a spec.
 

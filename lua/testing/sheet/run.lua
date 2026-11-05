@@ -63,6 +63,24 @@ function M.area_root(area, vault, getenv)
   return nil, table.concat(tried, ", ")
 end
 
+---Why a sheet must not run on this machine: the workstation, or a role that is a typo. Nil when it may.
+---@param getenv fun(name: string): string|nil
+---@return string|nil
+function M.refused(getenv)
+  -- trimmed: `set NVIM_MACHINE_ROLE=workstation ` in cmd keeps the blank (the nvim config's machine.lua trims too)
+  local role = vim.trim(getenv("NVIM_MACHINE_ROLE") or ""):lower()
+  if role ~= "" and role ~= "default" and role ~= "workstation" then
+    return ("testing sheets: NVIM_MACHINE_ROLE=%q is neither workstation nor default (a typo?): refused until it is set right"):format(
+      role
+    )
+  end
+  if role == "workstation" and getenv("TESTING_ALLOW_WORKSTATION") ~= "1" then
+    return "testing sheets: refused on the workstation (NVIM_MACHINE_ROLE=workstation): a sheet starts editors and runs "
+      .. "the project's code; set TESTING_ALLOW_WORKSTATION=1 where that is allowed"
+  end
+  return nil
+end
+
 ---`testing sheets run`: exit 0 every sheet green (or waiting for a person) and the task written, 1 a sheet is
 ---red or the task could not be written, 2 bad usage, refused (trust, workstation) or no sheet names the task, 3
 ---the engine of tasks.nvim could not be reached.
@@ -116,21 +134,9 @@ function M.main(argv, sv, deps)
     sv.err("testing sheets: --tasks-cli and --dry-run belong to --tasks <vault>\n" .. M.USAGE)
     return 2
   end
-  -- trimmed: `set NVIM_MACHINE_ROLE=workstation ` in cmd keeps the blank (the nvim config's machine.lua trims too)
-  local role = vim.trim(getenv("NVIM_MACHINE_ROLE") or ""):lower()
-  if role ~= "" and role ~= "default" and role ~= "workstation" then
-    sv.err(
-      ("testing sheets: NVIM_MACHINE_ROLE=%q is neither workstation nor default (a typo?): refused until it is set right"):format(
-        role
-      )
-    )
-    return 2
-  end
-  if role == "workstation" and getenv("TESTING_ALLOW_WORKSTATION") ~= "1" then
-    sv.err(
-      "testing sheets: refused on the workstation (NVIM_MACHINE_ROLE=workstation): a sheet starts editors and runs "
-        .. "the project's code; set TESTING_ALLOW_WORKSTATION=1 where that is allowed"
-    )
+  local refused = M.refused(getenv)
+  if refused then
+    sv.err(refused)
     return 2
   end
   local vault = o.vault and vim.fs.normalize(vim.fn.fnamemodify(o.vault, ":p")):gsub("/+$", "")

@@ -98,7 +98,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 
 ---@class Testing.Sheet.Result
 ---@field ok boolean
----@field status "pass"|"fail"|"manual"|"skip"
+---@field status "pass"|"fail"|"manual"|"skip"|"aborted" `aborted` only from a session that was cancelled.
 ---@field skipped? string Why a sheet was skipped (a browser sheet without node, Playwright or chromium).
 ---@field failures string[] One line per failed step (size, step number, what).
 ---@field snapshots string[] The messages of the screen steps (written, matched, updated).
@@ -458,165 +458,23 @@ local function describe(step)
   return "?"
 end
 
----@param v any
----@return string
-local function shown(v)
-  local s = vim.inspect(v)
-  return #s > 200 and (s:sub(1, 200) .. "...") or s
-end
-
----Run one step; returns nil or the reason it failed.
----@param child table testing.rpc handle
----@param step Testing.Sheet.Step
----@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[] }
----@return string|nil
-local function run_step(child, step, ctx)
-  if step.keys then
-    -- an error the keys caused (`E492: Not an editor command`) fails the step; feed itself never raises
-    child.lua("vim.v.errmsg = ''")
-    child.feed(step.keys)
-    local msg = child.lua_get("vim.v.errmsg")
-    if msg ~= nil and msg ~= "" and not step.ignore_errmsg then
-      return "the keys caused an error: " .. msg
-    end
-  elseif step.input then
-    child.input(step.input)
-  elseif step.lua then
-    child.lua(step.lua)
-  elseif step.settle then
-    local idle, why = child.settle(step.settle)
-    if not idle then
-      return why or "not idle"
-    end
-  elseif step.wait then
-    -- a loop of its own: every poll is an RPC call that waits with `vim.wait` itself, and a
-    -- `vim.wait` inside the condition of another one does not keep the outer deadline
-    local timeout = step.timeout or M.DEFAULT_WAIT_MS
-    local deadline = vim.uv.hrtime() + timeout * 1e6
-    local last
-    while true do
-      last = child.lua_get(step.wait)
-      if last then
-        break
-      end
-      if vim.uv.hrtime() >= deadline then
-        return ("still %s after %d ms"):format(shown(last), timeout)
-      end
-      vim.wait(20)
-    end
-  elseif step.expect then
-    local v = child.lua_get(step.expect)
-    if not v then
-      return "got " .. shown(v)
-    end
-  elseif step.screen then
-    local name = ("%s.%dx%d"):format(step.screen, ctx.size.cols, ctx.size.rows)
-    local res = require("testing.screen").compare(name, child.screen(), {
-      root = ctx.root,
-      file = ctx.sheet.path,
-      masks = step.masks,
-      cursor = step.cursor,
-      mode = step.mode,
-      update = ctx.opts.update,
-      ci = ctx.opts.ci,
-    })
-    ctx.snapshots[#ctx.snapshots + 1] = res.message
-    if not res.ok then
-      return res.message
-    end
-  end
-  return nil
-end
-
----Run a sheet: one child editor per size, the steps in order; the first failed step ends that size.
+---Run a sheet: one child editor per size, the steps in order; the first failed step ends that size. The rpc engine
+---is the loop over `testing.sheet.session`; the browser engine runs its plan in one go through the same step function
+---of its runner (the suite has no use for a command channel that could hang).
 ---@param s Testing.Sheet
 ---@param opts? { root?: string, update?: boolean, ci?: boolean, spawn?: table }
 ---@return Testing.Sheet.Result
 function M.run(s, opts)
   opts = opts or {}
-  local result = { ok = true, status = "pass", failures = {}, snapshots = {} }
-  if s.engine == "manual" then
-    result.status = "manual"
-    return result
-  end
   if s.engine == "browser" then
     return require("testing.sheet.browser").run(s, opts)
   end
-  local root =
-    vim.fs.normalize(vim.fn.fnamemodify(opts.root or vim.fn.getcwd(), ":p")):gsub("/+$", "")
-  local minit = s.minit or M.DEFAULT_MINIT
-  -- absolute: a drive (`C:/`, `C:\`), a POSIX root or a UNC path in either slash style
-  if not minit:match("^%a:[/\\]") and not minit:match("^[/\\]") then
-    minit = root .. "/" .. minit
+  local session = require("testing.sheet.session").open(s, opts)
+  while session:peek() do
+    session:step()
   end
-  local skipped
-  for _, size in ipairs(s.sizes) do
-    if skipped then
-      break
-    end
-    local tag = ("%dx%d"):format(size.cols, size.rows)
-    local spawn = vim.tbl_extend(
-      "force",
-      { root = root, minit = minit, size = size, guard = false },
-      opts.spawn or {}
-    )
-    -- a spawn that raises is a failure of this size, not an error out of `run` (expect hands the
-    -- verdict to the harness, it must not throw past it)
-    local spawned, child, err = pcall(require("testing.rpc").spawn, spawn)
-    if not spawned then
-      child, err = nil, child
-    end
-    if not child then
-      result.failures[#result.failures + 1] = ("%s: the child did not start: %s"):format(
-        tag,
-        tostring(err)
-      )
-    else
-      local ctx = { sheet = s, size = size, root = root, opts = opts, snapshots = result.snapshots }
-      local ok, perr = pcall(function()
-        -- attach the UI first: the editor lays out windows (floats too) for the size of its UI
-        child.screen()
-        for _, req in ipairs(s.requires or {}) do
-          local met, rerr = pcall(child.lua_get, req.lua)
-          if not met then
-            result.failures[#result.failures + 1] = ("%s: requires %q raised: %s"):format(
-              tag,
-              req.lua,
-              tostring(rerr)
-            )
-            return
-          end
-          if not rerr then
-            skipped = req.reason
-            return
-          end
-        end
-        for i, step in ipairs(s.steps) do
-          local why = run_step(child, step, ctx)
-          if why then
-            result.failures[#result.failures + 1] = ("%s step %d, %s: %s"):format(
-              tag,
-              i,
-              describe(step),
-              why
-            )
-            return
-          end
-        end
-      end)
-      if not ok then
-        result.failures[#result.failures + 1] = ("%s: %s"):format(tag, tostring(perr))
-      end
-      pcall(child.kill)
-    end
-  end
-  if #result.failures > 0 then
-    result.ok, result.status = false, "fail"
-  elseif skipped then
-    -- a missing prerequisite is information, never a green run
-    result.status, result.skipped = "skip", skipped
-  end
-  return result
+  session:close()
+  return session:result()
 end
 
 ---@param target string|Testing.Sheet
