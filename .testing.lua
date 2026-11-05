@@ -29,9 +29,12 @@ return {
   -- carries its full spec key.
   cache = { project_key = "testing-nvim" },
   -- The pool_run_*_spec files run real warm-pool children, about a minute each on a loaded machine (one file did
-  -- all of it and used 171 s of this deadline there; Windows is the slow system): the deadline is a safety net
-  -- against a hang, not a performance gate.
-  timeouts = { file_ms = 180000 },
+  -- all of it and used 171 s of this deadline there; Windows is the slow system); lint_spec's luals section
+  -- spawns lua-language-server, which under 12 parallel CPU burners took 125 to 158 s instead of a few seconds
+  -- (observed 2026-11-04, cause unexplained, testing-vault/testing.nvim/flaky-timeout-suspend-und-lint-luals) and
+  -- a real CI run once timed it out near the old 180 s ceiling. Raised with the same margin as back then: the
+  -- deadline is a safety net against a hang, not a performance gate.
+  timeouts = { file_ms = 300000 },
   -- Dogfood: every guard is an ERROR here. A spec of this repository that leaves an autocmd, a buffer,
   -- a stub in package.preload or a runtimepath entry behind fails its own case, named precisely.
   -- Guards are safety nets for accidents, not a sandbox (docs/GUARDS.md).
