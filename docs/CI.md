@@ -410,6 +410,8 @@ on each commit the push names: see below.
 testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--snapshot] [--root=<dir>]
 testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]
 testing ci hook remove [--root=<dir>]
+testing ci hook status [--root=<dir>]
+testing ci hook status --all --repos-root=<dir>
 ```
 
 `install --all --repos-root=<dir>` (repeatable) installs the hook in every repository below the root whose `.testing.lua` has a `ci`
@@ -446,6 +448,12 @@ there; a dirty tree always runs the snapshot). A push of tags or a deletion runs
 It runs the `--run`
 profile, which writes `ci-<run>.json`, while `verify` asks for the `--verify` profile (default `ci.default`): to make
 the second push of the same state pass at once, install with `--verify=<run>` or run the default profile once.
+
+The hook is a text that does not follow testing.nvim once it is written, so a fix to it does not reach an earlier
+install. `status` compares the installed hook with what this version writes for the same options, read from the hook,
+changes nothing, and names the `install` line that renews it: exit `0` when nothing is out of date, `1` otherwise.
+A hook that is not ours is reported and is not out of date, and neither is one installed from another checkout of
+testing.nvim: that path is only the last place the hook looks.
 
 A pre-push hook that is not ours is never overwritten or removed (exit `1`). The hook of `:MyPlugins ci hook`
 (mark `# MyPlugins ci pre-push hook`) is recognised and replaced; `remove` takes it away as well.

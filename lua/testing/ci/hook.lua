@@ -1,10 +1,12 @@
 ---@module 'testing.ci.hook'
----@brief `testing ci hook install|remove`: a `pre-push` hook that asks `testing ci verify` first and runs a profile only when needed.
+---@brief `testing ci hook install|remove|status`: a `pre-push` hook that asks `testing ci verify` first and runs a profile only when needed.
 ---@description
 --- ```
 --- testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]
 --- testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]
 --- testing ci hook remove [--root=<dir>]
+--- testing ci hook status [--root=<dir>]
+--- testing ci hook status --all --repos-root=<dir>
 --- ```
 ---
 --- The hook (`<git hooks dir>/pre-push`, wherever git keeps it: a worktree, `core.hooksPath`) does two things and
@@ -24,6 +26,11 @@
 --- `unchanged` (it was there with the same text), `replaced` (the hook of `:MyPlugins ci`) or `skipped` (a hook that
 --- is not ours, a profile the repository does not have). Exit 0 when nothing was skipped, 1 otherwise. The hook is only
 --- a file in the hooks folder: no step runs, and the first push is the hand test.
+---
+--- The hook is a text that no longer follows this file once it is written, so a fixed hook stays broken in every earlier
+--- install. `status` compares it with what this version writes for the same options (read from the hook itself), says
+--- which `install` renews it, and changes nothing: exit 0 when nothing is out of date, 1 otherwise. A hook that is not
+--- ours is not out of date.
 
 local M = {}
 
@@ -40,13 +47,15 @@ M.USAGE = table.concat({
   "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--snapshot] [--root=<dir>]",
   "       testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]",
   "       testing ci hook remove [--root=<dir>]",
+  "       testing ci hook status [--root=<dir>]   is the installed hook what this version writes? (changes nothing)",
+  "       testing ci hook status --all --repos-root=<dir>",
   "  --run=<profile>     the profile the hook runs when the state is not proven (default: fast)",
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
   "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
   "                      were made here (no merge, none from a remote): testing ci trust --pushed",
   "  --snapshot          run the profile on a snapshot of each pushed commit (testing ci --snapshot --rev) instead of the working tree",
   "  --root=<dir>        the repository (default: the current directory)",
-  "  --all               install: every repository below --repos-root=<dir> (repeatable) with a ci section",
+  "  --all               install, status: every repository below --repos-root=<dir> (repeatable) with a ci section",
   "  `git push --no-verify` skips the hook. A pre-push hook that is not ours is never touched.",
 }, "\n")
 
@@ -228,7 +237,7 @@ function M.marked(text, mark)
 end
 
 ---@class Testing.Ci.Hook.Args
----@field action "install"|"remove"|nil
+---@field action "install"|"remove"|"status"|nil
 ---@field run string
 ---@field verify? string
 ---@field auto_trust boolean
@@ -256,7 +265,7 @@ function M.parse(argv)
     local key, value = a:match("^%-%-([%w%-]+)=(.*)$")
     if a == "-h" or a == "--help" then
       args.help = true
-    elseif i == 1 and (a == "install" or a == "remove") then
+    elseif i == 1 and (a == "install" or a == "remove" or a == "status") then
       args.action = a
     elseif a == "--auto-trust" then
       args.auto_trust = true
@@ -282,10 +291,10 @@ function M.parse(argv)
     end
   end
   if not args.action and not args.help then
-    return nil, "say install or remove"
+    return nil, "say install, remove or status"
   end
-  if args.all and args.action ~= "install" then
-    return nil, "--all goes with install"
+  if args.all and args.action == "remove" then
+    return nil, "--all goes with install or status"
   end
   if args.all and #args.repos_roots == 0 then
     return nil, "--all needs --repos-root=<dir>"
@@ -355,6 +364,108 @@ function M.install(root, hooks, args, existing)
     legacy and "replaced" or "installed"
 end
 
+---The options a hook of ours was installed with, read from its text: what `M.text` writes, in this and in earlier versions.
+---@param text string
+---@return { run: string, verify?: string, auto_trust: boolean, snapshot: boolean, driver_dir?: string }
+function M.options_of(text)
+  return {
+    -- the checkout the install ran from, the last place the hook looks: another one is no older hook
+    driver_dir = text:match('"%$root/%.%./testing%.nvim" "([^"]+)"; do'),
+    run = text:match("testing_ci %-%-profile=([%w%._%-/:]+) %-%-reuse") or text:match(
+      'testing_ci %-%-profile=([%w%._%-/:]+) %-%-snapshot %-%-rev="'
+    ) or M.DEFAULT_RUN,
+    verify = text:match("testing_ci verify %-%-profile=([%w%._%-/:]+)"),
+    auto_trust = text:find("trust_pushed()", 1, true) ~= nil,
+    snapshot = text:find("--snapshot --rev=", 1, true) ~= nil,
+  }
+end
+
+---The line that writes this hook again with the options it has.
+---@param o { run: string, verify?: string, auto_trust: boolean, snapshot: boolean }
+---@param root string
+---@return string
+local function renew_line(o, root)
+  local words = { "testing ci hook install", "--run=" .. o.run }
+  if o.verify then
+    words[#words + 1] = "--verify=" .. o.verify
+  end
+  if o.auto_trust then
+    words[#words + 1] = "--auto-trust"
+  end
+  if o.snapshot then
+    words[#words + 1] = "--snapshot"
+  end
+  words[#words + 1] = "--root=" .. root
+  return table.concat(words, " ")
+end
+
+---What the hook of a checkout is, against what this version would write.
+---@param root string
+---@param existing string|nil
+---@return "none"|"foreign"|"current"|"outdated"|"legacy" state
+---@return string|nil renew The line that renews it, when it is out of date.
+function M.state_of(root, existing)
+  if not existing then
+    return "none"
+  end
+  if M.marked(existing, M.LEGACY_MARK) then
+    return "legacy", renew_line(M.options_of(existing), root)
+  end
+  if not M.marked(existing, M.MARK) then
+    return "foreign"
+  end
+  local o = M.options_of(existing)
+  local now = M.text({
+    run = o.run,
+    verify = o.verify,
+    driver_dir = o.driver_dir or plugin_root(),
+    auto_trust = o.auto_trust,
+    snapshot = o.snapshot,
+  })
+  if existing == now then
+    return "current"
+  end
+  return "outdated", renew_line(o, root)
+end
+
+local STATE_WORDS = {
+  none = "no pre-push hook",
+  foreign = "a pre-push hook that is not ours, left alone",
+  current = "up to date",
+  outdated = "out of date",
+  legacy = "the hook of :MyPlugins ci, out of date",
+}
+
+---`status --all`: every repository below the roots that has a `ci` section, one line each.
+---@param dirs string[]
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@return integer
+local function status_all(dirs, sv)
+  local stale, worst = 0, M.EXIT_OK
+  for _, dir in ipairs(dirs) do
+    local name = vim.fs.basename(dir)
+    local hooks = M.hooks_dir(dir)
+    if not hooks then
+      sv.out(("%-28s not a git checkout"):format(name))
+    else
+      local _, existing = M.resolve(dir, hooks)
+      local state, renew = M.state_of(dir, existing)
+      sv.out(("%-28s %s%s"):format(name, STATE_WORDS[state], renew and (": " .. renew) or ""))
+      if renew then
+        stale, worst = stale + 1, M.EXIT_REFUSED
+      end
+    end
+  end
+  sv.out(
+    ("testing ci hook: %d repositor%s, %d out of date"):format(
+      #dirs,
+      #dirs == 1 and "y" or "ies",
+      stale
+    )
+  )
+  return worst
+end
+
 ---`install --all`: every repository below the roots that has a `ci` section, one line each.
 ---@param args Testing.Ci.Hook.Args
 ---@param sv { out: fun(s: string), err: fun(s: string) }
@@ -373,6 +484,9 @@ local function install_all(args, sv)
   if #dirs == 0 then
     sv.err("testing ci hook: no repository with a ci section below the roots")
     return M.EXIT_USAGE
+  end
+  if args.action == "status" then
+    return status_all(dirs, sv)
   end
   local skipped, worst = 0, M.EXIT_OK
   for _, dir in ipairs(dirs) do
@@ -437,6 +551,16 @@ function M.main(argv, sv)
   local path = hooks .. "/pre-push"
   local ours = M.marked(existing, M.MARK)
   local legacy = M.marked(existing, M.LEGACY_MARK)
+
+  if args.action == "status" then
+    local state, renew = M.state_of(root, existing)
+    sv.out("testing ci hook: " .. STATE_WORDS[state])
+    if renew then
+      sv.out("  renew it: " .. renew)
+      return M.EXIT_REFUSED
+    end
+    return M.EXIT_OK
+  end
 
   if args.action == "remove" then
     if not existing then

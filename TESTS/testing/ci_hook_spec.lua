@@ -49,7 +49,7 @@ return function(H)
     has(why, "not a profile name", "args: ... is named")
     none, why = hook.parse({})
     eq(none, nil, "args: no action")
-    has(why, "install or remove", "args: ... is named")
+    has(why, "install, remove or status", "args: ... is named")
     none = hook.parse({ "remove", "--frobnicate" })
     eq(none, nil, "args: an unknown argument")
   end
@@ -439,6 +439,152 @@ return function(H)
       line("refs/heads/a", other, "refs/heads/a") .. line("refs/heads/b", other, "refs/heads/b")
     )
     eq({ code, #calls }, { 0, 1 }, "snapshot hook: one commit on two branches runs once")
+  end
+
+  -- status: the installed hook against what this version writes
+  do
+    local dir = vim.fn.tempname() .. "-hook-status"
+    vim.fn.mkdir(dir, "p")
+    vim.fn.system({ "git", "init", "-q", dir })
+    vim.fn.writefile({
+      "return { ci = { steps = { suite = {} }, profiles = { fast = { 'suite' } }, default = 'fast' } }",
+    }, dir .. "/.testing.lua")
+    local status = function(extra)
+      local out, err = {}, {}
+      local code = hook.main(vim.list_extend({ "status", "--root=" .. dir }, extra or {}), {
+        out = function(s)
+          out[#out + 1] = s
+        end,
+        err = function(s)
+          err[#err + 1] = s
+        end,
+      })
+      return code, table.concat(out, "\n"), table.concat(err, "\n")
+    end
+    local path = hook.hooks_dir(dir) .. "/pre-push"
+    local driver = hook._plugin_root()
+    local function put(body)
+      vim.fn.mkdir(vim.fs.dirname(path), "p")
+      local f = assert(io.open(path, "wb"))
+      f:write(body)
+      f:close()
+    end
+
+    local code, out = status()
+    eq(code, 0, "status: no hook: exit 0")
+    has(out, "no pre-push hook", "status: no hook is said")
+
+    -- every combination of options is read back from the text and is current
+    for _, o in ipairs({
+      { run = "fast" },
+      { run = "full", verify = "strict" },
+      { run = "fast", auto_trust = true },
+      { run = "fast", snapshot = true },
+      { run = "full", verify = "strict", auto_trust = true, snapshot = true },
+    }) do
+      local hook_text = hook.text(vim.tbl_extend("force", o, { driver_dir = driver }))
+      local back = hook.options_of(hook_text)
+      eq(
+        { back.run, back.verify, back.auto_trust, back.snapshot },
+        { o.run, o.verify, o.auto_trust == true, o.snapshot == true },
+        "status: the options are read back: " .. vim.inspect(o)
+      )
+      put(hook_text)
+      code, out = status()
+      eq(code, 0, "status: what this version writes: exit 0: " .. vim.inspect(o))
+      has(out, "up to date", "status: and is said to be up to date")
+    end
+
+    -- installed from another checkout: only the last place the hook looks differs, that is no older hook
+    put(hook.text({ run = "fast", driver_dir = "E:/elsewhere/testing-s1" }))
+    code, out = status()
+    eq(code, 0, "status: another checkout of testing.nvim: exit 0: " .. out)
+    has(out, "up to date", "status: and is not called out of date")
+
+    -- the text of an earlier version: the hook of the macOS bug, a `case` inside `$(...)`, with its options kept
+    local current = hook.text({
+      run = "full",
+      verify = "strict",
+      driver_dir = driver,
+      snapshot = true,
+      auto_trust = true,
+    })
+    local old = current
+      :gsub("pushed_commits%(%) {[^\n]*\n", "", 1)
+      :gsub("%$%(pushed_commits%)", '$(echo "$refs" | case x in x) echo y;; esac)', 1)
+    ok(old ~= current, "status: the spec made an older text")
+    put(old)
+    local before = vim.fn.readfile(path, "b")
+    local outdated
+    code, outdated = status()
+    eq(code, 1, "status: an older text: exit 1")
+    has(outdated, "out of date", "status: is said to be out of date")
+    has(
+      outdated,
+      "testing ci hook install --run=full --verify=strict --auto-trust --snapshot --root=",
+      "status: names the line that renews it, with its options"
+    )
+    eq(vim.fn.readfile(path, "b"), before, "status: changes nothing")
+
+    -- the line it names does what it says: afterwards it is current
+    code = hook.main(
+      { "install", "--run=full", "--verify=strict", "--auto-trust", "--snapshot", "--root=" .. dir },
+      {
+        out = function() end,
+        err = function() end,
+      }
+    )
+    if code == 0 then
+      local after
+      code, after = status()
+      eq(code, 0, "status: after the install it names: exit 0")
+      has(after, "up to date", "status: and up to date")
+    end
+
+    -- the hook of :MyPlugins ci is ours to replace: out of date
+    put("#!/bin/sh\n" .. hook.LEGACY_MARK .. "\nexit 0\n")
+    code, out = status()
+    eq(code, 1, "status: the old hook of :MyPlugins ci: exit 1")
+    has(out, "renew it", "status: and how")
+
+    -- a hook that is not ours is not out of date, and stays as it is
+    put("#!/bin/sh\necho mine\n")
+    code, out = status()
+    eq(code, 0, "status: a foreign hook: exit 0")
+    has(out, "not ours", "status: is said to be foreign")
+    eq(
+      table.concat(vim.fn.readfile(path), "\n"),
+      "#!/bin/sh\necho mine",
+      "status: and is left alone"
+    )
+
+    -- --all: one line per repository; one out of date is exit 1
+    local root = vim.fn.tempname() .. "-hook-all"
+    vim.fn.mkdir(root .. "/a", "p")
+    vim.fn.system({ "git", "init", "-q", root .. "/a" })
+    vim.fn.writefile({
+      "return { ci = { steps = { suite = {} }, profiles = { fast = { 'suite' } }, default = 'fast' } }",
+    }, root .. "/a/.testing.lua")
+    local all_path = hook.hooks_dir(root .. "/a") .. "/pre-push"
+    vim.fn.mkdir(vim.fs.dirname(all_path), "p")
+    local f = assert(io.open(all_path, "wb"))
+    f:write(hook.text({ run = "fast", driver_dir = driver }) .. "# an older line\n")
+    f:close()
+    local lines = {}
+    code = hook.main({ "status", "--all", "--repos-root=" .. root }, {
+      out = function(s)
+        lines[#lines + 1] = s
+      end,
+      err = function(s)
+        lines[#lines + 1] = s
+      end,
+    })
+    eq(code, 1, "status --all: one out of date: exit 1: " .. table.concat(lines, " | "))
+    has(table.concat(lines, "\n"), "1 out of date", "status --all: counts them")
+    local none = hook.parse({ "remove", "--all", "--repos-root=" .. root })
+    eq(none, nil, "--all does not go with remove")
+    vim.fn.delete(dir, "rf")
+    vim.fn.delete(root, "rf")
   end
 
   vim.env.GIT_CONFIG_GLOBAL, vim.env.GIT_CONFIG_NOSYSTEM = saved_git_env[1], saved_git_env[2]

@@ -661,6 +661,12 @@ return function(H)
     #vim.fn.globpath(run_state, "**/runs.jsonl", true, true) > 0,
     "test.sh: the run history is below the real state directory"
   )
+  -- the file the editor reads the last run from: `testing.history.dir` of the project, under the real state directory
+  local last_files = vim.fn.globpath(run_state, "**/last.json", true, true)
+  eq(#last_files, 1, "test.sh: one last.json below the real state directory")
+  local last_ok, last_doc =
+    pcall(vim.json.decode, table.concat(vim.fn.readfile(last_files[1]), "\n"))
+  ok(last_ok and type(last_doc) == "table", "test.sh: last.json is a document")
   vim.fn.delete(run_state, "rf")
   -- an `--state-dir` of the caller wins over the real one
   local own_state = vim.fn.tempname() .. "-own-state"
