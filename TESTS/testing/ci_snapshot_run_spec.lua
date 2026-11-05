@@ -123,6 +123,19 @@ return function(H)
     eq(r.code, 2, "--with .testing.lua: refused, the pipeline comes from the commit")
     has(r.err, "comes from the commit", "--with .testing.lua: said why")
 
+    -- a directory overlay without .testing.lua in it still walks and copies normally
+    local ok_tree = S.state_dir .. "/overlay-walk-ok-tree"
+    vim.fn.mkdir(ok_tree, "p")
+    local copied, apply_problem = overlay.apply(root, ok_tree, { "TESTS" })
+    eq(apply_problem, nil, "overlay.apply: a directory without .testing.lua: no problem")
+    eq(copied, 1, "overlay.apply: ... copies every file beneath it")
+    eq(
+      require("lib.nvim.fs.read")(ok_tree .. "/TESTS/a_spec.lua"),
+      require("lib.nvim.fs.read")(root .. "/TESTS/a_spec.lua"),
+      "overlay.apply: ... with the same content"
+    )
+    vim.fn.delete(ok_tree, "rf")
+
     -- a directory overlay walks into the very same .testing.lua; the walk must refuse it too, not just a path
     -- named directly, or the trust check is a bypassable formality
     local walk_tree = S.state_dir .. "/overlay-walk-tree"

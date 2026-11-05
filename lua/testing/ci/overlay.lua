@@ -11,6 +11,19 @@ local M = {}
 
 M.MAX_FILES = 2000
 
+-- the pipeline comes from the commit: the trust of the commit's `.testing.lua` does not cover another one. Named
+-- directly (M.clean) or found by walking a directory overlay into it, the refusal is the same.
+local PIPELINE_FILE = ".testing.lua"
+
+---@param path string
+---@return string|nil problem `path` quoted in the message when it is `.testing.lua`, else nil.
+local function refuse_pipeline_file(path)
+  if path:lower() == PIPELINE_FILE then
+    return ("%s: the pipeline definition comes from the commit (commit it first)"):format(path)
+  end
+  return nil
+end
+
 ---@param path string
 ---@return string|nil clean  The path as `a/b/c`, nil when it is not one this module takes.
 ---@return string|nil problem
@@ -33,9 +46,9 @@ function M.clean(path)
       return nil, ("%s: below .git"):format(path)
     end
   end
-  -- the pipeline comes from the commit: the trust of the commit's `.testing.lua` does not cover another one
-  if p:lower() == ".testing.lua" then
-    return nil, ("%s: the pipeline definition comes from the commit (commit it first)"):format(path)
+  local problem = refuse_pipeline_file(p)
+  if problem then
+    return nil, problem
   end
   return p, nil
 end
@@ -58,9 +71,9 @@ local function walk(dir, rel, out)
     elseif kind == "file" then
       -- a directory overlay (e.g. "--with=.") walks into the same `.testing.lua` M.clean refuses by name: the
       -- walk must refuse it too, or the trust check on a named path is a bypassable formality
-      if (child:gsub("^%./", "")):lower() == ".testing.lua" then
-        return false,
-          ("%s: the pipeline definition comes from the commit (commit it first)"):format(child)
+      local problem = refuse_pipeline_file(child:gsub("^%./", ""))
+      if problem then
+        return false, problem
       end
       out[#out + 1] = child
     end
