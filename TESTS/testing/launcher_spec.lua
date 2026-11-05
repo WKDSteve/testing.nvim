@@ -9,6 +9,8 @@ return function(H)
   local this = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p")
   local repo = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(this))))
   local win = vim.fn.has("win32") == 1
+  -- resolved here: vim.system looks the program up in the PATH handed to the child, and the bare one has no sh
+  local sh = win and "sh" or vim.fn.exepath("sh")
 
   ---@param path_env string the PATH the launcher sees
   ---@param bin string the folder holding the launcher
@@ -16,7 +18,7 @@ return function(H)
   ---@return vim.SystemCompleted
   local function launch(path_env, bin, ...)
     local argv = win and { "cmd.exe", "/d", "/c", bin .. "/testing.cmd", ... }
-      or { "sh", bin .. "/testing", ... }
+      or { sh, bin .. "/testing", ... }
     return vim.system(argv, { text = true, env = { PATH = path_env } }):wait(60000)
   end
 
