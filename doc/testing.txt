@@ -166,6 +166,12 @@ from |testing-surface_view|):
         Measure the performance budgets of the runner. A measured case
         without a baseline entry compared nothing: exit 2 unless
         `--allow-new`.
+                                                              *:Testing-export*
+:Testing export [{dir}] [--repos-root={dir}] [--remote=always|never|ask]
+        Write the export folder testing-web reads, in a headless child
+        (`testing export`). Runs no suite and no pipeline. {dir} defaults to
+        the setting `ci.export_dir`, the repositories to `ci.repos.roots`,
+        `--remote` to `ci.export_remote`. Choose that folder in the page.
                                                                 *:Testing-lint*
 :Testing lint [{check}...] [--file|--changed|--all] [--fix] [--root={dir}]
         Run the lint checks (stylua, luacheck, luals: the lint steps of the

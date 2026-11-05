@@ -60,6 +60,7 @@ return function(H)
     "config",
     "conformance",
     "doctor",
+    "export",
     "file",
     "health",
     "hover",

@@ -42,9 +42,12 @@
 ---@field repos Testing.CiRepos
 ---@field export_remote "always"|"never"|"ask" Whether `--export=<dir>` of `testing ci --repos` asks the CI adapter (GitHub) for `ci_remote`; "ask" = a question each time.
 
+---@field export_dir? string The folder of `:Testing export` without an argument.
+
 ---@class Testing.CiConfigOptions
 ---@field repos? { roots?: string[], include?: string[], exclude?: string[] }
 ---@field export_remote? "always"|"never"|"ask"
+---@field export_dir? string The folder of `:Testing export` without an argument.
 
 ---@class Testing.LintConfig
 ---@field on_save boolean Lint a written file in the background (the checks that may run on save) and update its diagnostics.

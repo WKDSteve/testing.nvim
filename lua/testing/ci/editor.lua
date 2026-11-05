@@ -38,12 +38,10 @@ local function key(root)
   return (vim.fs.normalize(root):gsub("/+$", ""))
 end
 
----The argument list of a child that runs `testing <args...>` in `root`.
----@param root string
----@param args string[]
+---The start of every child: a headless nvim running the driver.
 ---@return string[]
-function M.child_argv(root, args)
-  local argv = {
+local function driver_argv()
+  return {
     vim.v.progpath,
     "-n",
     "-i",
@@ -54,6 +52,14 @@ function M.child_argv(root, args)
     "-l",
     require("testing.bindings.child").driver(),
   }
+end
+
+---The argument list of a child that runs `testing <args...>` in `root`.
+---@param root string
+---@param args string[]
+---@return string[]
+function M.child_argv(root, args)
+  local argv = driver_argv()
   -- `--root` goes before a `--`: what follows it belongs to the suite
   local split = #args + 1
   for i, a in ipairs(args) do
@@ -701,6 +707,51 @@ function M.repos_args(ci_cfg, flags)
       .. (flags["export-remote"] or ci_cfg.export_remote or "always")
   end
   return args
+end
+
+---Seconds a `testing export` of the editor may take: every repository of the fleet, with the CI asked for each.
+M.EXPORT_TIMEOUT = 600
+
+---The argument list of `testing export`. It has no `--root` (`M.child_argv`): it works on repositories, not on a project.
+---`ci.repos.include` is not passed on: there it narrows the repositories, the `--include` of the export adds to them.
+---@param o { out: string, roots: string[], exclude?: string[], remote?: boolean }
+---@return string[]
+function M.export_argv(o)
+  local argv = driver_argv()
+  argv[#argv + 1] = "export"
+  argv[#argv + 1] = "--out=" .. vim.fs.normalize(o.out)
+  for _, root in ipairs(o.roots) do
+    argv[#argv + 1] = "--repos-root=" .. vim.fs.normalize(root)
+  end
+  if o.exclude and #o.exclude > 0 then
+    argv[#argv + 1] = "--exclude=" .. table.concat(o.exclude, ",")
+  end
+  if o.remote then
+    argv[#argv + 1] = "--remote"
+  end
+  return argv
+end
+
+---Start `testing export` in a child; the editor stays free, `cb` gets its answer.
+---@param argv string[] What `M.export_argv` gave.
+---@param cwd string
+---@param cb fun(res: { code: integer, stdout: string, stderr: string })
+---@return boolean started
+---@return string|nil err
+function M.run_export(argv, cwd, cb)
+  local ok, started = pcall(M.system, argv, {
+    cwd = cwd,
+    text = true,
+    timeout = M.EXPORT_TIMEOUT * 1000,
+  }, function(res)
+    vim.schedule(function()
+      cb({ code = res.code or -1, stdout = res.stdout or "", stderr = res.stderr or "" })
+    end)
+  end)
+  if not ok or not started then
+    return false, tostring(started)
+  end
+  return true
 end
 
 ---The repositories a multi-repository run (`testing ci --repos-root=...`) would work on, for the trust question

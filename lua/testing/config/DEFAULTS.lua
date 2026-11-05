@@ -25,6 +25,7 @@ local DEFAULTS = {
   -- (docs/CI.md): `roots` are directories whose sub-directories with a `ci` section count ("$VAR" is expanded),
   -- `include` / `exclude` narrow them by directory name. `export_remote`: whether `--export=<dir>` of that run asks
   -- the CI adapter (GitHub) for `ci_remote`: "always", "never" or "ask" (a question each time).
+  -- `export_dir` (no default): the folder of `:Testing export` without an argument.
   ci = { repos = { roots = {}, include = {}, exclude = {} }, export_remote = "always" },
   -- `:Testing lint` (docs/CI.md). `on_save = true`: a written file is linted in the background (only the checks
   -- that may run on save, never luals) and its diagnostics are updated.

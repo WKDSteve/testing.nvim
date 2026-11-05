@@ -168,6 +168,19 @@ function M.validate(opts)
       value = vim.tbl_extend("force", {}, value)
       value.export_remote = nil
     end
+    if
+      key == "ci"
+      and type(value) == "table"
+      and value.export_dir ~= nil
+      and (type(value.export_dir) ~= "string" or value.export_dir == "")
+    then
+      -- the same for the folder of `:Testing export`: without it the command asks for a folder
+      problems[#problems + 1] = ("option 'ci.export_dir' must be a folder, got %s; ignored"):format(
+        vim.inspect(value.export_dir)
+      )
+      value = vim.tbl_extend("force", {}, value)
+      value.export_dir = nil
+    end
     if not check then
       problems[#problems + 1] = ("unknown option '%s'"):format(tostring(key))
     elseif check(value) then

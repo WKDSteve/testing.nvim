@@ -378,6 +378,7 @@ summary: 1 pass, 1 fail, 1 skip (3 case(s)) in 0.00 s
 :Testing terminal     " the same run as a terminal.nvim terminal (output to scroll and copy)
 :Testing health       " same as :checkhealth testing
 :Testing conformance  " the conformance checks of the current project
+:Testing export [dir] " the export folder of testing-web, in a child; runs nothing
 :Testing lint         " stylua, luacheck, luals on the changed files: quickfix and diagnostics (--file, --all, --fix)
 :Testing cache clear  " delete the result cache of the project
 ```

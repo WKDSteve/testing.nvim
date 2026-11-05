@@ -14,6 +14,7 @@
 ---   :Testing budget [<root>] [--update] [--allow-new] [--factor=<x>]   measure the performance budgets
 ---   :Testing ci [<profile>] [--step=a,b] [--keep-going] [--reuse]   the pipeline of the ci section: live view, quickfix on red (docs/CI.md)
 ---   :Testing ci status | verify | hook install | hook remove   the last result, the proof of this state, the pre-push hook
+---   :Testing export [<dir>] [--repos-root=<dir>] [--remote=always|never|ask]   write the export folder of testing-web in a child (docs/BINDINGS.md)
 ---   :Testing lint [<check>...] [--file|--changed|--all] [--fix]   stylua, luacheck, luals on the changed files (or the
 ---                                current file, or everything): quickfix and diagnostics (docs/CI.md)
 ---   :Testing cache stats | clear [<root>]   the result cache of the project
@@ -438,6 +439,83 @@ function M.ci_repos(ctx)
       launch(vim.tbl_extend("force", {}, ctx.flags, {
         ["export-remote"] = index == 2 and "always" or "never",
       }))
+    end
+  )
+end
+
+---What `testing export` answered: its summary as a message, every warning in a viewer.
+---@param res { code: integer, stdout: string, stderr: string }
+local function export_report(res)
+  local notify = require("testing.notify").get()
+  local out, err = vim.trim(res.stdout), vim.trim(res.stderr)
+  local lines = err ~= "" and vim.split(err, "\n", { plain = true }) or {}
+  if res.code ~= 0 then
+    notify.error(lines[1] or ("testing export: exit " .. tostring(res.code)))
+    if #lines < 2 then
+      return
+    end
+  elseif out:find("^export: 0 repositories") then
+    -- valid, and it replaced what the folder held: the one result that must not read like a success
+    notify.warn(out .. "; nothing is released, see areas.json of tasks-desktop")
+  else
+    notify.info(out ~= "" and out or "testing export: done")
+  end
+  if #lines > 0 then
+    local prefix = require("testing.config").get().notify_prefix
+    require("lib.nvim.output").create(prefix).dump(lines, "testing export")
+  end
+end
+
+---`:Testing export [<dir>]`: the export folder testing-web reads, written in a child. Nothing runs (no suite, no
+---pipeline): `:Testing ci repos --export=<dir>` is the way to run them first.
+---@param ctx { args: table<string, any>, flags: table<string, any> }
+function M.export_run(ctx)
+  local notify = require("testing.notify").get()
+  local cfg = require("testing.config").get().ci
+  local dir = ctx.args.dir or cfg.export_dir
+  if not dir then
+    notify.error("testing export: name the folder (:Testing export <dir>) or set ci.export_dir")
+    return
+  end
+  local roots = ctx.flags["repos-root"] and { ctx.flags["repos-root"] } or cfg.repos.roots
+  if #roots == 0 then
+    notify.error("testing export: set ci.repos.roots in setup() (or pass --repos-root=<dir>)")
+    return
+  end
+  local mode = ctx.flags.remote or cfg.export_remote or "always"
+  if not require("testing.config").EXPORT_REMOTE[mode] then
+    notify.error("testing export: --remote must be always, never or ask")
+    return
+  end
+  local function launch(remote)
+    local editor = require("testing.ci.editor")
+    -- the child runs in the project root of the buffer: a relative folder would land somewhere else than named here
+    local argv = editor.export_argv({
+      out = abs(vim.fs.normalize(dir)),
+      roots = roots,
+      exclude = cfg.repos.exclude,
+      remote = remote,
+    })
+    local cwd = M.resolve_root(nil, vim.api.nvim_buf_get_name(0))
+    local started, err = editor.run_export(argv, cwd, export_report)
+    if not started then
+      notify.error("testing export: " .. tostring(err))
+      return
+    end
+    notify.info("testing export: started")
+  end
+  if mode ~= "ask" then
+    return launch(mode == "always")
+  end
+  M.ask(
+    "testing export: ask GitHub for the CI state of the exported repositories (ci_remote)?",
+    { "Do not ask GitHub", "Ask GitHub" },
+    function(index, dismissed)
+      if dismissed then
+        notify.info("testing export: cancelled, nothing started")
+        return
+      end
+      launch(index == 2)
     end
   )
 end
@@ -1135,6 +1213,26 @@ function M.routes()
       },
       run = function(ctx)
         M.lint_run(ctx)
+      end,
+    },
+    {
+      path = { "export" },
+      desc = "Write the export folder testing-web reads (runs nothing; default folder: ci.export_dir)",
+      args = { { name = "dir", type = "DIR", optional = true } },
+      flags = {
+        {
+          name = "repos-root",
+          type = "DIR",
+          desc = "The repositories below this folder (default: ci.repos.roots)",
+        },
+        {
+          name = "remote",
+          type = "STRING",
+          desc = "Ask GitHub for the CI state: always, never or ask (default: ci.export_remote)",
+        },
+      },
+      run = function(ctx)
+        M.export_run(ctx)
       end,
     },
     {
