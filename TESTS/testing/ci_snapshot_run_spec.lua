@@ -122,6 +122,19 @@ return function(H)
     r = ci(unpack(with("--snapshot", "--profile=full", "--with=.testing.lua")))
     eq(r.code, 2, "--with .testing.lua: refused, the pipeline comes from the commit")
     has(r.err, "comes from the commit", "--with .testing.lua: said why")
+
+    -- a directory overlay walks into the very same .testing.lua; the walk must refuse it too, not just a path
+    -- named directly, or the trust check is a bypassable formality
+    local walk_tree = S.state_dir .. "/overlay-walk-tree"
+    vim.fn.mkdir(walk_tree, "p")
+    local walked, walk_problem = overlay.apply(root, walk_tree, { "." })
+    eq(walked, nil, "overlay.apply: a directory overlay still refuses .testing.lua")
+    has(walk_problem, "comes from the commit", "overlay.apply: ... said why")
+    ok(
+      vim.uv.fs_stat(walk_tree .. "/.testing.lua") == nil,
+      "overlay.apply: ... and never wrote it into the tree"
+    )
+    vim.fn.delete(walk_tree, "rf")
   end
 
   r = ci("verify", unpack(with("--profile=full")))

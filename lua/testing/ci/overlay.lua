@@ -43,20 +43,32 @@ end
 ---@param dir string
 ---@param out string[]
 ---@param rel string
+---@return boolean ok
+---@return string|nil problem
 local function walk(dir, rel, out)
   for name, kind in vim.fs.dir(dir) do
     local child = rel .. "/" .. name
     if kind == "directory" then
       if name:lower() ~= ".git" then
-        walk(dir .. "/" .. name, child, out)
+        local ok, problem = walk(dir .. "/" .. name, child, out)
+        if not ok then
+          return false, problem
+        end
       end
     elseif kind == "file" then
+      -- a directory overlay (e.g. "--with=.") walks into the same `.testing.lua` M.clean refuses by name: the
+      -- walk must refuse it too, or the trust check on a named path is a bypassable formality
+      if (child:gsub("^%./", "")):lower() == ".testing.lua" then
+        return false,
+          ("%s: the pipeline definition comes from the commit (commit it first)"):format(child)
+      end
       out[#out + 1] = child
     end
     if #out > M.MAX_FILES then
-      return
+      return true
     end
   end
+  return true
 end
 
 ---Lay the named paths of `root` over `tree`.
@@ -74,7 +86,10 @@ function M.apply(root, tree, paths)
     end
     local st = vim.uv.fs_lstat(root .. "/" .. p)
     if st and st.type == "directory" then
-      walk(root .. "/" .. p, p, files)
+      local ok, walk_problem = walk(root .. "/" .. p, p, files)
+      if not ok then
+        return nil, walk_problem
+      end
     else
       files[#files + 1] = p
     end
