@@ -432,6 +432,16 @@ return function(H)
     eq(#repos["o/r"].shas, 1, "revoke: one left")
     eq(repos["o/r"].shas[1].sha, SHA2, "revoke: the right one")
 
+    -- no arguments at all: this used to fall through to trusting the default branch tip of
+    -- whatever repository the cwd happened to name, silently and without asking
+    o = sink()
+    local calls_before = #calls
+    eq(guard.trust_main({}, o.sv, ctx), 2, "args: no arguments refuses instead of guessing")
+    has(joined(o), "usage:", "args: ... and shows the usage")
+    eq(#calls, calls_before, "args: ... without calling the GitHub API")
+    repos = guard.read(guard.store_path(root))
+    eq(#repos["o/r"].shas, 1, "args: ... and the list is unchanged")
+
     -- arguments
     o = sink()
     eq(guard.trust_main({ "--frobnicate" }, o.sv, ctx), 2, "args: unknown option")

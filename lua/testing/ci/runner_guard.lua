@@ -852,6 +852,14 @@ function M.trust_main(argv, sv, ctx)
     sv.err(M.USAGE)
     return 2
   end
+  if #argv == 0 then
+    -- no repository, no sha, no flag: silently trusting the default branch tip of whatever
+    -- repository the cwd happens to name is the trap that wrote two unwanted entries (see the
+    -- vault task); refuse instead of guessing.
+    sv.err("testing ci trust: no arguments: this would trust the default branch tip, unasked")
+    sv.err(M.USAGE)
+    return 2
+  end
   if a.pushed then
     return M.trust_pushed(io.read("*a"), sv, ctx)
   end
