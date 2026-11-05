@@ -636,6 +636,10 @@ local function execute(argv, sv)
   if argv[1] == "export" then
     return require("testing.export.folder").main(vim.list_slice(argv, 2), sv)
   end
+  -- `testing history`: what ran when with which result, and what can be said about it (never part of a verdict)
+  if argv[1] == "history" then
+    return require("testing.runlog").main(vim.list_slice(argv, 2), sv)
+  end
   -- `testing lint`: the lint checks of the pipeline on the changed files, named files or everything (docs/CI.md)
   if argv[1] == "lint" then
     return require("testing.lint").main(vim.list_slice(argv, 2), sv)

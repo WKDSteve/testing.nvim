@@ -8,7 +8,7 @@
   "cases": [],
   "cases_omitted": 0,
   "cases_red": 0,
-  "digest": "sha256:2816e5e5086534e5",
+  "digest": "sha256:19d957190903c85e",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -16,6 +16,27 @@
   },
   "form": "export",
   "generated_at": "2026-10-31T12:00:00Z",
+  "history": {
+    "runs": [],
+    "runs_omitted": 0,
+    "stats": {
+      "days": [],
+      "flaky": [],
+      "green": 0,
+      "ms_median": null,
+      "ms_p90": null,
+      "n": 0,
+      "period_days": 30,
+      "previous": {
+        "green": 0,
+        "n": 0,
+        "red": 0
+      },
+      "red": 0,
+      "red_since": null,
+      "red_top": []
+    }
+  },
   "kind": "repo",
   "local_read": true,
   "notes": [],
@@ -47,6 +68,6 @@
     "local": null,
     "name": "gamma.nvim"
   },
-  "rev": "rev:811d73",
+  "rev": "rev:5fe198",
   "schema": "testing-export/1"
 }

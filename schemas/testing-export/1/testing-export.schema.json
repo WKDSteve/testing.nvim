@@ -376,9 +376,91 @@
       },
       "additionalProperties": false
     },
+    "history": {
+      "type": "object",
+      "required": ["runs", "runs_omitted", "stats"],
+      "properties": {
+        "runs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/history_run" }
+        },
+        "runs_omitted": { "description": "Runs in the log that are not listed.", "$ref": "#/$defs/count" },
+        "stats": { "$ref": "#/$defs/history_stats" }
+      },
+      "additionalProperties": false
+    },
+    "history_run": {
+      "type": "object",
+      "required": ["ts", "run", "kind", "scope", "verdict", "ms", "sha", "dirty", "profile", "red", "red_more"],
+      "properties": {
+        "ts": { "$ref": "#/$defs/time" },
+        "run": { "type": "string" },
+        "kind": { "description": "run: testing run, scripts/test.sh. ci: testing ci.", "enum": ["run", "ci"] },
+        "scope": { "description": "partial: a selection, no statement about the whole suite.", "enum": ["full", "partial"] },
+        "verdict": { "type": "string" },
+        "ms": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "sha": { "$ref": "#/$defs/text_or_null" },
+        "dirty": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+        "profile": { "$ref": "#/$defs/text_or_null" },
+        "red": { "description": "Ids of the red cases, at most 20.", "type": "array", "items": { "type": "string" } },
+        "red_more": { "description": "Red cases not named.", "$ref": "#/$defs/count" }
+      },
+      "additionalProperties": false
+    },
+    "history_stats": {
+      "description": "The whole runs of the suite (scope full, kind run) of the period that ends at the last run, against the period before it. flaky: red in one whole run of a commit and not in another of the same commit.",
+      "type": "object",
+      "required": ["period_days", "n", "green", "red", "previous", "ms_median", "ms_p90", "days", "flaky", "red_top", "red_since"],
+      "properties": {
+        "period_days": { "$ref": "#/$defs/count" },
+        "n": { "$ref": "#/$defs/count" },
+        "green": { "$ref": "#/$defs/count" },
+        "red": { "$ref": "#/$defs/count" },
+        "previous": {
+          "type": "object",
+          "required": ["n", "green", "red"],
+          "properties": {
+            "n": { "$ref": "#/$defs/count" },
+            "green": { "$ref": "#/$defs/count" },
+            "red": { "$ref": "#/$defs/count" }
+          },
+          "additionalProperties": false
+        },
+        "ms_median": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "ms_p90": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] },
+        "days": {
+          "description": "The days of the period that have a run, oldest first; all runs, also partial ones.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["day", "n", "green", "red"],
+            "properties": {
+              "day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "n": { "$ref": "#/$defs/count" },
+              "green": { "$ref": "#/$defs/count" },
+              "red": { "$ref": "#/$defs/count" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "flaky": { "type": "array", "items": { "type": "string" } },
+        "red_top": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "n"],
+            "properties": { "id": { "type": "string" }, "n": { "$ref": "#/$defs/count" } },
+            "additionalProperties": false
+          }
+        },
+        "red_since": { "$ref": "#/$defs/time_or_null" }
+      },
+      "additionalProperties": false
+    },
     "repo_doc": {
       "type": "object",
-      "required": ["schema", "plugin", "kind", "form", "generated_at", "engine", "rev", "digest", "capabilities", "repo", "cases", "cases_red", "cases_omitted", "notes", "remote"],
+      "required": ["schema", "plugin", "kind", "form", "generated_at", "engine", "rev", "digest", "capabilities", "repo", "cases", "cases_red", "cases_omitted", "notes", "remote", "history"],
       "properties": {
         "schema": { "$ref": "#/$defs/schema" },
         "plugin": { "$ref": "#/$defs/plugin" },
@@ -403,6 +485,10 @@
         "cases_omitted": {
           "description": "Red cases not listed because of the size limit (0 when the local results were not read).",
           "$ref": "#/$defs/count"
+        },
+        "history": {
+          "description": "The log of the runs of this repository (`testing history`), newest first: what ran when with which result. The statistics end at the last run, so an export without a new run stays the same. null: the local results were not read (the workstation).",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/history" }]
         },
         "notes": {
           "description": "Why a source of the state could not be used (redacted).",

@@ -646,6 +646,13 @@ return function(H)
     #vim.fn.globpath(real_state, "**/ci.json", true, true) > 0,
     "test.sh ci: the document is below the real state directory"
   )
+  local ci_logs = vim.fn.globpath(real_state, "**/runlog.jsonl", true, true)
+  eq(#ci_logs, 1, "test.sh ci: the log of the runs is below the real state directory")
+  local ci_kinds = {}
+  for _, e in ipairs((require("testing.runlog").read(ci_logs[1]))) do
+    ci_kinds[e.kind] = true
+  end
+  ok(ci_kinds.ci, "test.sh ci: the run of the pipeline is in the log")
   vim.fn.delete(real_state, "rf")
 
   -- the plain run's history lands in the developer's real state directory too: the spec process gets a throwaway one,
@@ -667,6 +674,31 @@ return function(H)
   local last_ok, last_doc =
     pcall(vim.json.decode, table.concat(vim.fn.readfile(last_files[1]), "\n"))
   ok(last_ok and type(last_doc) == "table", "test.sh: last.json is a document")
+  -- and the log of the runs, for `testing history`
+  local logs = vim.fn.globpath(run_state, "**/runlog.jsonl", true, true)
+  eq(#logs, 1, "test.sh: the log of the runs is below the real state directory")
+  local logged = require("testing.runlog").read(logs[1])
+  eq(#logged, 1, "test.sh: one line per run")
+  eq(
+    { logged[1].kind, logged[1].scope, logged[1].verdict },
+    { "run", "full", "green" },
+    "test.sh: what ran"
+  )
+  -- a run of a part of the suite says so: the statistics count whole runs only
+  local part_state = vim.fn.tempname() .. "-part-state"
+  local part_spec = run_proj .. "/TESTS/second_spec.lua"
+  vim.fn.writefile({ "return function(H) H.ok(true, 'second') end" }, part_spec)
+  local part_run = run(
+    { bash, "scripts/test.sh", "--file", "second_spec" },
+    run_proj,
+    vim.tbl_extend("force", deps_env, { XDG_STATE_HOME = part_state })
+  )
+  vim.fn.delete(part_spec)
+  eq(part_run.code, 0, "test.sh --file: green: " .. part_run.stdout .. part_run.stderr)
+  local part_log =
+    require("testing.runlog").read(vim.fn.globpath(part_state, "**/runlog.jsonl", true, true)[1])
+  eq(part_log[1].scope, "partial", "test.sh --file: the log says it was a part of the suite")
+  vim.fn.delete(part_state, "rf")
   vim.fn.delete(run_state, "rf")
   -- an `--state-dir` of the caller wins over the real one
   local own_state = vim.fn.tempname() .. "-own-state"

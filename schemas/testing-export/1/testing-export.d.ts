@@ -215,6 +215,10 @@ export interface RepoDoc {
    */
   cases_omitted: number;
   /**
+   * The log of the runs of this repository (`testing history`), newest first: what ran when with which result. The statistics end at the last run, so an export without a new run stays the same. null: the local results were not read (the workstation).
+   */
+  history: null | History;
+  /**
    * Why a source of the state could not be used (redacted).
    */
   notes: string[];
@@ -239,6 +243,73 @@ export interface Case {
 export interface Fail {
   line: number | null;
   msg: TextOrNull;
+}
+export interface History {
+  /**
+   * @maxItems 100
+   */
+  runs: HistoryRun[];
+  /**
+   * Runs in the log that are not listed.
+   */
+  runs_omitted: number;
+  stats: HistoryStats;
+}
+export interface HistoryRun {
+  ts: Time;
+  run: string;
+  /**
+   * run: testing run, scripts/test.sh. ci: testing ci.
+   */
+  kind: "run" | "ci";
+  /**
+   * partial: a selection, no statement about the whole suite.
+   */
+  scope: "full" | "partial";
+  verdict: string;
+  ms: null | number;
+  sha: TextOrNull;
+  dirty: null | boolean;
+  profile: TextOrNull;
+  /**
+   * Ids of the red cases, at most 20.
+   */
+  red: string[];
+  /**
+   * Red cases not named.
+   */
+  red_more: number;
+}
+/**
+ * The whole runs of the suite (scope full, kind run) of the period that ends at the last run, against the period before it. flaky: red in one whole run of a commit and not in another of the same commit.
+ */
+export interface HistoryStats {
+  period_days: Count;
+  n: Count;
+  green: Count;
+  red: Count;
+  previous: {
+    n: Count;
+    green: Count;
+    red: Count;
+  };
+  ms_median: null | number;
+  ms_p90: null | number;
+  /**
+   * The days of the period that have a run, oldest first; all runs, also partial ones.
+   */
+  days: {
+    day: string;
+    n: Count;
+    green: Count;
+    red: Count;
+  }[];
+  flaky: string[];
+  red_top: {
+    id: string;
+    n: Count;
+  }[];
+  red_since: TimeOrNull;
 }
 export interface Manifest {
   schema: Schema;

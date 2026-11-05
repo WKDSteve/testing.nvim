@@ -1287,6 +1287,75 @@ local function case_of(c, dir, state_dir)
   }
 end
 
+---Runs of a repository a document lists, newest first; `history.runs_omitted` counts the others.
+M.MAX_HISTORY = 100
+
+---The part `history` of a repository: its log (`testing.runlog`) as a document holds it. The statistics end at the last
+---run, not at the clock: an export without a new run stays the same bytes (no commit in a results repository).
+---@param dir string
+---@param opts Testing.Export.Opts
+---@return table|vim.NIL history NIL: the local results were not read (the workstation).
+---@return string line What the `rev` of the document follows.
+local function history_of(dir, opts)
+  if opts.no_local == true then
+    return NIL, "history:off"
+  end
+  local runlog = require("testing.runlog")
+  local base = opts.state_dir and { state_dir = opts.state_dir } or nil
+  local entries, days = runlog.read(runlog.path(dir, base))
+  local last = entries[#entries]
+  local clean = function(id)
+    return M.clean(id, dir, opts.state_dir) or ""
+  end
+  local runs = {}
+  for i = #entries, math.max(1, #entries - M.MAX_HISTORY + 1), -1 do
+    local e = entries[i]
+    local red = {}
+    for j, id in ipairs(e.red) do
+      red[j] = clean(id)
+    end
+    runs[#runs + 1] = {
+      ts = os.date("!%Y-%m-%dT%H:%M:%SZ", e.ts),
+      run = clean(e.run),
+      kind = e.kind,
+      scope = e.scope,
+      verdict = e.verdict,
+      ms = nn(e.ms),
+      sha = nn(e.sha),
+      dirty = e.dirty == nil and NIL or e.dirty,
+      profile = nn(e.profile),
+      red = red,
+      red_more = e.red_more or 0,
+    }
+  end
+  local s = runlog.stats(entries, days, last and last.ts or 0)
+  local flaky, red_top = {}, {}
+  for i, id in ipairs(s.flaky) do
+    flaky[i] = clean(id)
+  end
+  for i, r in ipairs(s.red_top) do
+    red_top[i] = { id = clean(r.id), n = r.n }
+  end
+  return {
+    runs = runs,
+    runs_omitted = math.max(0, #entries - #runs),
+    stats = {
+      period_days = s.period_days,
+      n = s.n,
+      green = s.green,
+      red = s.red,
+      previous = s.previous,
+      ms_median = nn(s.ms_median),
+      ms_p90 = nn(s.ms_p90),
+      days = s.days,
+      flaky = flaky,
+      red_top = red_top,
+      red_since = s.red_since and os.date("!%Y-%m-%dT%H:%M:%SZ", s.red_since) or NIL,
+    },
+  },
+    ("history:%d:%s"):format(#entries, last and last.run or "-")
+end
+
 ---@param dir string
 ---@param row table
 ---@param src Testing.Export.Sources
@@ -1314,7 +1383,9 @@ local function build_repo(dir, row, src, opts, remote_info)
   doc.notes = notes
   doc.local_read = opts.no_local ~= true
   doc.remote = remote_info
-  return seal(doc, { src.rev })
+  local history, history_line = history_of(dir, opts)
+  doc.history = history
+  return seal(doc, { src.rev, history_line })
 end
 
 ---Run `fn` with the secrets of the environment read once; an error becomes `nil, message`.

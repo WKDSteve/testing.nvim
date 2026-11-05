@@ -8,7 +8,7 @@
   "cases": [],
   "cases_omitted": 0,
   "cases_red": 0,
-  "digest": "sha256:e2ee0c43649c2c34",
+  "digest": "sha256:4e12d75848c554cc",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -16,6 +16,27 @@
   },
   "form": "export",
   "generated_at": "2026-10-31T12:00:00Z",
+  "history": {
+    "runs": [],
+    "runs_omitted": 0,
+    "stats": {
+      "days": [],
+      "flaky": [],
+      "green": 0,
+      "ms_median": null,
+      "ms_p90": null,
+      "n": 0,
+      "period_days": 30,
+      "previous": {
+        "green": 0,
+        "n": 0,
+        "red": 0
+      },
+      "red": 0,
+      "red_since": null,
+      "red_top": []
+    }
+  },
   "kind": "repo",
   "local_read": true,
   "notes": [],
@@ -107,6 +128,6 @@
     },
     "name": "alpha.nvim"
   },
-  "rev": "rev:1249ab",
+  "rev": "rev:a9936d",
   "schema": "testing-export/1"
 }

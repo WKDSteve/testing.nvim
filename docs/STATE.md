@@ -67,3 +67,14 @@ usable (not JSON, an array, an unknown version, a directory) is ignored with a n
 their control characters and are cut (`MAX_TEXT`), so a terminal sequence in a test title does not reach a
 window. Nothing from the file is used as a path. It is written atomically under the lock of
 `testing.statelock`, bounded in bytes, cases and string lengths.
+
+## The log of the runs
+
+`runlog.jsonl` next to `last.json` has one line per run: time, `kind` (`run`, `ci`), `scope` (`full`, or `partial` for a
+selection), `verdict`, duration, commit, whether the tree was dirty, the counters and up to 20 ids of red cases. `testing
+history` reads it, and the export puts the newest 100 runs and the statistics into each `repos/<key>.json` (`history`).
+
+It is appended under a lock, so a run does not get slower as the log grows. A line older than 90 days moves into
+`runlog-days.json`, as counts of its day, and so does the oldest part of a file past 4 MiB. Like the other stores it is
+a convenience, never part of a verdict, and it is untrusted when read back: a size cap, every line checked, a line that
+fails is dropped and counted in a note.

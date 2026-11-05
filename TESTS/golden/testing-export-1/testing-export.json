@@ -5,7 +5,7 @@
     "manifest",
     "repo"
   ],
-  "digest": "sha256:2c81dacb41ba0e34",
+  "digest": "sha256:4e39a4b8684719fe",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -18,25 +18,25 @@
       "sha256": "187a64c8d46c9482fee2013989f20347376070f472ebb6b5352772294bed6992"
     },
     {
-      "bytes": 2729,
+      "bytes": 3093,
       "path": "repos/alpha.nvim-356bf237c7fc.json",
-      "sha256": "69be906ab4e9824399f53707d9f4801b4732d6d09224e73ed746be5458f50a9d"
+      "sha256": "04442599d749bd727f8deea5b481b0307bdf542788b269b7c2105c75b5c12803"
     },
     {
-      "bytes": 3484,
+      "bytes": 5218,
       "path": "repos/beta.nvim-ac6d3a4ece7f.json",
-      "sha256": "f077d30ec2f03b15dcd2e2a33db40734ca7083c124d27e80bfbe5d3a6c0adc96"
+      "sha256": "a811da1ae31dda7462596709a6a00fc80a34b23da768b36068ebbc103a54c1a5"
     },
     {
-      "bytes": 997,
+      "bytes": 1361,
       "path": "repos/gamma.nvim-bed2b5150df9.json",
-      "sha256": "7cab87e0ba06db2ac88c9e4e4b7ee78ecbda537938659ab98e65f7c8349f939f"
+      "sha256": "8887b08468aa5d80f5a1f98533e62ac203373b07a3b2c8694d66cfd58578f127"
     }
   ],
   "form": "export",
   "generated_at": "2026-10-31T12:00:00Z",
   "kind": "manifest",
   "plugin": "testing.nvim",
-  "rev": "rev:773053",
+  "rev": "rev:6415b6",
   "schema": "testing-export/1"
 }

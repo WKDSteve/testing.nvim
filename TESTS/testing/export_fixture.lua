@@ -102,6 +102,44 @@ function M.build(base)
     return require("testing.history").dir(dir, { state_dir = state })
   end
 
+  -- beta: its log: a whole run that was red and one that was green at the same commit (a flaky case), a selection
+  M.write(sdir(beta) .. "/runlog.jsonl", table.concat({
+    json.encode({
+      v = 1,
+      ts = M.TS - 7200,
+      run = "2026-10-31T10:00:00Z-b001",
+      kind = "run",
+      scope = "full",
+      verdict = "red",
+      ms = 2000,
+      sha = string.rep("2", 40),
+      dirty = false,
+      red = { "TESTS/x_spec.lua::x::reads a file" },
+    }),
+    json.encode({
+      v = 1,
+      ts = M.TS - 3600,
+      run = "2026-10-31T11:00:00Z-b002",
+      kind = "run",
+      scope = "full",
+      verdict = "green",
+      ms = 1000,
+      sha = string.rep("2", 40),
+      dirty = false,
+      red = {},
+    }),
+    json.encode({
+      v = 1,
+      ts = M.TS - 1800,
+      run = "2026-10-31T11:30:00Z-bbbb",
+      kind = "run",
+      scope = "partial",
+      verdict = "red",
+      ms = 500,
+      red = { "TESTS/x_spec.lua::x::reads a file" },
+    }),
+  }, "\n") .. "\n")
+
   -- alpha: green, the last green run is this run (its commit is known)
   local run_a = "2026-10-31T11:00:00Z-aaaa"
   M.write(

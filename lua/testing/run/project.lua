@@ -729,6 +729,22 @@ local function record_run_state(ctx)
   if not sok then
     err("testing: note: result not stored: " .. tostring(serr))
   end
+  -- the log of what ran when (`testing history`), also a run that stopped or broke: that it happened is what it is for
+  local lok, lerr, lwhy = pcall(function()
+    local runlog = require("testing.runlog")
+    return runlog.append(
+      root,
+      -- a whole run of the suite: `--file` and a path narrow what is discovered, not the selector, so ask the verdict
+      runlog.entry_of_run(res, {
+        verdict = verdict.kind,
+        full = full and verdict.files ~= nil and verdict.files.selected >= verdict.files.total,
+      }),
+      { state_dir = sv.state_dir }
+    )
+  end)
+  if not lok or not lerr then
+    err("testing: note: run log not updated: " .. tostring(lok and lwhy or lerr))
+  end
   -- what `--order priority` and a red verdict need next time: when each file ran, how long it took, the last full green run
   if not infra_failed then
     local state_ok, state_err = pcall(function()

@@ -1505,6 +1505,30 @@ function M.main(argv, sv)
       notes[#notes + 1] = ("cannot write %s: %s"):format(args.junit, tostring(werr))
     end
   end
+  -- the log of what ran when (`testing history`): a note when it fails, never the verdict
+  do
+    local lok, lres, lwhy = pcall(function()
+      local ms = 0
+      for _, step in ipairs(steps_doc) do
+        ms = ms + (type(step.ms) == "number" and step.ms or 0)
+      end
+      return require("testing.runlog").append(root, {
+        ts = os.time(),
+        run = "ci-" .. doc.time,
+        kind = "ci",
+        scope = (partial or head_moved or tree_changed) and "partial" or "full",
+        verdict = doc.verdict,
+        ms = ms,
+        sha = type(doc.commit) == "string" and doc.commit or nil,
+        dirty = type(doc.dirty) == "boolean" and doc.dirty or nil,
+        profile = type(profile) == "string" and profile or nil,
+        red = {},
+      }, { state_dir = state_dir })
+    end)
+    if not lok or not lres then
+      notes[#notes + 1] = "run log not updated: " .. tostring(lok and lwhy or lres)
+    end
+  end
   vim.list_extend(notes, write_doc(doc, root, args.json, state_dir, facts.legacy_ignored))
   if #notes > 0 then
     doc.exit, doc.verdict, doc.write_errors = M.EXIT_INFRA, "infra", notes

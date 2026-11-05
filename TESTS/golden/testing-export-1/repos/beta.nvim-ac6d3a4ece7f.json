@@ -48,7 +48,7 @@
   ],
   "cases_omitted": 0,
   "cases_red": 2,
-  "digest": "sha256:83f9e002d7020270",
+  "digest": "sha256:f596fe2b65102823",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -56,6 +56,85 @@
   },
   "form": "export",
   "generated_at": "2026-10-31T12:00:00Z",
+  "history": {
+    "runs": [
+      {
+        "dirty": null,
+        "kind": "run",
+        "ms": 500,
+        "profile": null,
+        "red": [
+          "TESTS/x_spec.lua::x::reads a file"
+        ],
+        "red_more": 0,
+        "run": "2026-10-31T11:30:00Z-bbbb",
+        "scope": "partial",
+        "sha": null,
+        "ts": "2026-10-31T11:30:00Z",
+        "verdict": "red"
+      },
+      {
+        "dirty": false,
+        "kind": "run",
+        "ms": 1000,
+        "profile": null,
+        "red": [],
+        "red_more": 0,
+        "run": "2026-10-31T11:00:00Z-b002",
+        "scope": "full",
+        "sha": "2222222222222222222222222222222222222222",
+        "ts": "2026-10-31T11:00:00Z",
+        "verdict": "green"
+      },
+      {
+        "dirty": false,
+        "kind": "run",
+        "ms": 2000,
+        "profile": null,
+        "red": [
+          "TESTS/x_spec.lua::x::reads a file"
+        ],
+        "red_more": 0,
+        "run": "2026-10-31T10:00:00Z-b001",
+        "scope": "full",
+        "sha": "2222222222222222222222222222222222222222",
+        "ts": "2026-10-31T10:00:00Z",
+        "verdict": "red"
+      }
+    ],
+    "runs_omitted": 0,
+    "stats": {
+      "days": [
+        {
+          "day": "2026-10-31",
+          "green": 1,
+          "n": 3,
+          "red": 2
+        }
+      ],
+      "flaky": [
+        "TESTS/x_spec.lua::x::reads a file"
+      ],
+      "green": 1,
+      "ms_median": 1000,
+      "ms_p90": 2000,
+      "n": 2,
+      "period_days": 30,
+      "previous": {
+        "green": 0,
+        "n": 0,
+        "red": 0
+      },
+      "red": 1,
+      "red_since": null,
+      "red_top": [
+        {
+          "id": "TESTS/x_spec.lua::x::reads a file",
+          "n": 2
+        }
+      ]
+    }
+  },
   "kind": "repo",
   "local_read": true,
   "notes": [],
@@ -139,6 +218,6 @@
     },
     "name": "beta.nvim"
   },
-  "rev": "rev:27d1fc",
+  "rev": "rev:b6f5e2",
   "schema": "testing-export/1"
 }
