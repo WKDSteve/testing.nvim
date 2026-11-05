@@ -57,6 +57,7 @@ M.ACTIONS = {
   "shot",
   "toggle",
   "set",
+  "ask",
 }
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
@@ -68,10 +69,27 @@ M.ENGINE_ACTIONS = {
     wait = true,
     expect = true,
     screen = true,
+    ask = true,
   },
-  browser = { open = true, press = true, click = true, wait = true, expect = true, shot = true },
+  browser = {
+    open = true,
+    press = true,
+    click = true,
+    wait = true,
+    expect = true,
+    shot = true,
+    ask = true,
+  },
   -- by accessible name, `wait` and `expect` also as { name, state, value }
-  desktop = { wait = true, expect = true, toggle = true, click = true, set = true, shot = true },
+  desktop = {
+    wait = true,
+    expect = true,
+    toggle = true,
+    click = true,
+    set = true,
+    shot = true,
+    ask = true,
+  },
 }
 M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
@@ -94,6 +112,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field toggle? string
 ---@field set? string
 ---@field value? number What a `set` step sets.
+---@field ask? string A question to a person: asked in a stepped run, a `judge` criterion in any other.
 ---@field masks? (string|table)[]
 ---@field cursor? boolean
 ---@field mode? boolean
@@ -142,6 +161,7 @@ local STEP_KEYS = {
   toggle = "string",
   set = "string",
   value = "number",
+  ask = "string",
   masks = "table",
   cursor = "boolean",
   mode = "boolean",
@@ -329,6 +349,7 @@ local function check_step(step, i, engine)
       or action == "click"
       or action == "toggle"
       or action == "set"
+      or action == "ask"
     ) and step[action] == ""
   then
     return ("%s.%s must not be empty"):format(at, action)
@@ -387,8 +408,12 @@ function M.validate(s)
       end
     end
   end
-  if s.engine == "manual" and #s.steps > 0 then
-    return nil, "a manual sheet has no steps (manual = { ... } instead)"
+  if s.engine == "manual" then
+    for _, step in ipairs(s.steps) do
+      if not step.ask then
+        return nil, "a manual sheet has no steps but questions (manual = { ... } instead)"
+      end
+    end
   end
   -- a browser sheet's size is the viewport in pixels (cols = width, rows = height)
   s.sizes = s.sizes
@@ -416,7 +441,13 @@ function M.validate(s)
     end
     s[f] = s[f] or {}
   end
-  if s.engine == "manual" and #s.manual == 0 then
+  -- what nobody can answer now waits for a person like any other criterion: the same line in the task, the same inbox
+  for _, step in ipairs(s.steps) do
+    if step.ask and not vim.tbl_contains(s.judge, step.ask) then
+      s.judge[#s.judge + 1] = step.ask
+    end
+  end
+  if s.engine == "manual" and #s.manual == 0 and #s.steps == 0 then
     return nil, "a manual sheet lists its manual steps"
   end
   local rerr = check_requires(s.requires)
@@ -564,6 +595,7 @@ end
 ---@return Testing.Sheet.Result
 function M.run(s, opts)
   opts = opts or {}
+  -- (a question has no answer here: the plan and the loop pass over it, `judge` keeps it)
   if s.engine == "browser" then
     return require("testing.sheet.browser").run(s, opts)
   end

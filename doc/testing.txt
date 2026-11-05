@@ -567,7 +567,7 @@ sheet of the roots; `--json` writes the Result-IR, `--strict` makes a skip red.
 See docs/SHEETS.md, "Step by step".
 
 `:Testing sheet step [{sheet}]` is the same in a buffer: n next, c continue,
-u until the cursor, b breakpoint, a abort, q close.
+u until the cursor, b breakpoint, a abort, q close, y or n to a question.
 
 `testing sheets prompt draft --from-task {id}` / `prompt explain --task {id}`:
 a Markdown hand-over for an AI (draft a sheet from the task; explain a red

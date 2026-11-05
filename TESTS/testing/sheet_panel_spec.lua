@@ -51,6 +51,14 @@ return function(H)
     end)
   end
 
+  ---A process that was killed is gone a moment later, not in the same instant.
+  local function gone(pid)
+    vim.wait(10000, function()
+      return vim.uv.kill(pid, 0) ~= 0
+    end, 50)
+    return vim.uv.kill(pid, 0) ~= 0
+  end
+
   local p = panel.open(root, "walk", { env = env })
   ok(vim.bo[p.buf].filetype == "testing-sheet", "its filetype")
   ok(not vim.bo[p.buf].modifiable, "the buffer is for reading")
@@ -106,7 +114,7 @@ return function(H)
     "failed: 80x24 step 5, this one fails (expect false): got false",
     "the failure line"
   )
-  ok(vim.uv.kill(pid, 0) ~= 0, "after the end no child editor is left")
+  ok(gone(pid), "after the end no child editor is left")
   wait("the process ends", function()
     return p.proc == nil
   end)
@@ -123,7 +131,7 @@ return function(H)
   vim.api.nvim_buf_delete(q.buf, { force = true })
   local done = proc:wait(30000)
   ok(done.code == 3, "closing the buffer is an abort: exit " .. tostring(done.code))
-  ok(vim.uv.kill(qpid, 0) ~= 0, "... and leaves no child editor")
+  ok(gone(qpid), "... and leaves no child editor")
 
   -- a command that cannot run: the reason in the buffer
   local bad = panel.open(root, "no.such.sheet", { env = env })
@@ -133,6 +141,26 @@ return function(H)
   has(lines_of(bad), "ended without a result: exit 2", "the exit code")
   has(lines_of(bad), "no sheet no.such.sheet", "and what it said")
   vim.api.nvim_buf_delete(bad.buf, { force = true })
+
+  -- trusted after the question: the run starts, and the refusal of the first start is gone from the buffer
+  do
+    local gate = require("testing.bindings.trust_prompt")
+    local real_ask = gate.ask
+    local tenv = { TESTING_AGENT = "0", TESTING_TRUST = "0", CI = "" }
+    local asked
+    gate.ask = function(_, answer)
+      asked = true
+      tenv.TESTING_TRUST = "1"
+      answer(true)
+    end
+    local t = panel.open(root, "walk", { env = tenv })
+    paused_at(t, 1)
+    gate.ask = real_ask
+    if asked then
+      ok(t.problem == nil, "after the question nothing is left of the refusal")
+    end
+    vim.api.nvim_buf_delete(t.buf, { force = true })
+  end
 
   -- a newer schema is refused, an unknown event is not
   local f = { target = "x", marks = {}, breaks = {}, stderr = {}, running = false }

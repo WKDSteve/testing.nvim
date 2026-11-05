@@ -248,7 +248,7 @@ and nothing of them is handed to an AI.
 ## Step by step (`testing sheets step`)
 
 ```
-testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run]
+testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run] [--tasks <vault> [--tasks-cli <tasks.lua>]]
 ```
 
 runs one sheet the way a debugger runs a program: it stops before a step, says what the step will do, runs it when
@@ -270,6 +270,8 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `step-before` | size, number, action, value, note: what is about to happen |
 | `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
 | `step-after` | `status`, `ms`, on a failure `reason` and the `failure` line of a normal run; `shot` the file of a `shot` step; `screen` the child's screen as text, one string per row (rpc sheets) |
+| `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
+| `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
 | `error` | a command it could not do; the run stays paused |
 | `end` | `status` (`pass`, `fail`, `skip`, `manual`, `aborted`), `ok`, `verdict`, `failures`, `snapshots`, `skipped`, `ms`. The target is gone by then |
 
@@ -280,6 +282,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `next` | runs this step, stops before the next one |
 | `continue` | runs on, to a `--break`, a failed step or the end |
 | `until <n>` | runs on and stops before step `n` of a size |
+| `answer yes\|no [text]` | answers a question; a no fails the step, with the text as its reason |
 | `abort` | ends the run at once |
 
 * Closed stdin is `abort`, and so is a client that dies or stops reading stdout: nothing stays behind. An abort reaches a
@@ -291,8 +294,10 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
   stdin (`--break` is refused with it): for watching, not for a client.
 * `--headed` opens a visible window for a browser sheet, with Playwright's Chromium, else an installed Chrome or Edge;
   an rpc sheet has none, its child editor shows up as the `screen` text of each step.
-* It **writes nothing**: no state, no task, no snapshot (a missing snapshot is a failure, as on CI). `verdict` in `end`
-  says whether the run could count as one: only a run that went through without an abort.
+* It writes no state and no snapshot (a missing snapshot is a failure, as on CI). `verdict` in `end` says whether the run
+  counts as one: only a run that went through without an abort. Only such a run writes anything: with `--tasks <vault>`
+  its state goes into the task's block and a question answered yes ticks its box (a no leaves it, and the sheet is red).
+  The block is written whole, so a task with another sheet is refused before anything runs (`testing sheets run --task`).
 * Exit codes: 0 green or a skip, 1 a step failed, 2 bad usage or refused (nothing ran, no event, the reason on stderr),
   3 aborted.
 
@@ -306,6 +311,16 @@ speaks `testing-sheet-driver/1` ([schema](../schemas/testing-sheet-driver/1/test
 line per command on stdin, `open`, `step`, `close`, one answer on stdout; the end of stdin means close). `sheet.run` of a
 browser sheet still runs the plan in one go, through the same step function: the suite has no use for a channel
 that could hang.
+
+## Questions (`ask`)
+
+`ask = "text"` is a step in every engine: what only a person can judge, at the place where it can be judged.
+
+* In a stepped run it stops and asks, under `continue` too. Yes goes on; no fails the step, and the note of the answer is
+  the reason.
+* In any other run (the suite, `sheets run`, `--run`) nobody can answer: the step passes over and the text is a `judge`
+  criterion of the sheet, with the same line in the task and the same inbox.
+* A sheet with `engine = "manual"` can hold questions and nothing else: a guided walk through what no machine can do.
 
 ## Apps (`sheets.apps`)
 

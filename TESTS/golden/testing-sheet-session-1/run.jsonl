@@ -10,4 +10,6 @@
 {"schema":"testing-sheet-session/1","event":"paused","size":"80x24","n":3,"reason":"break"}
 {"schema":"testing-sheet-session/1","event":"step-after","size":"80x24","n":3,"status":"fail","ms":3,"reason":"got false","failure":"80x24 step 3, expect false: got false"}
 {"schema":"testing-sheet-session/1","event":"paused","size":"80x24","n":3,"reason":"failed"}
-{"schema":"testing-sheet-session/1","event":"end","status":"fail","ok":false,"verdict":true,"failures":["80x24 step 3, expect false: got false"],"snapshots":[],"ms":120}
+{"schema":"testing-sheet-session/1","event":"ask","size":"80x24","n":2,"text":"Does it read well?"}
+{"schema":"testing-sheet-session/1","event":"task","id":"ui.nvim/the-float","outcome":"changed"}
+{"schema":"testing-sheet-session/1","event":"end","status":"fail","ok":false,"verdict":true,"failures":["80x24 step 3, expect false: got false"],"snapshots":[],"ms":120,"answers":[{"size":"80x24","n":2,"text":"Does it read well?","answer":"yes","note":"it does"}]}

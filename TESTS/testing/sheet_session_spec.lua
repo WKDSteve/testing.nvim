@@ -69,6 +69,8 @@ return function(H)
       "step-before",
       "step-after",
       "paused",
+      "ask",
+      "task",
       "error",
       "end",
     }) do
@@ -233,7 +235,8 @@ end
       local logfile = root .. "/driver-" .. mode .. ".log"
       return vim.tbl_extend("force", run_opts, {
         driver_argv = { vim.v.progpath, "--headless", "-u", "NONE", "-l", fake, mode, logfile },
-        driver_margin_ms = 1500,
+        -- a started editor takes seconds on a hosted runner; only the hang waits for this to run out
+        driver_margin_ms = mode == "hang" and 5000 or 60000,
         driver_stop_ms = 500,
       }),
         logfile

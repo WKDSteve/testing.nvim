@@ -6,7 +6,7 @@
 --- listed with their state; below them what the step under the cursor did, for an rpc sheet with the child's screen as
 --- text (the child runs unseen, a browser or an app has its own window next to the editor).
 ---
----   n next   c continue   u until the cursor   b breakpoint   a abort   q close
+---   n next   c continue   u until the cursor   b breakpoint   a abort   q close   y / n answer a question
 ---
 --- Breakpoints live here: `c` goes to the next one with `until`. They count for the size that runs. Closing the buffer
 --- aborts the run: its child sees its stdin close and cleans up.
@@ -36,6 +36,7 @@ local counter = 0
 ---@field at? integer The step that runs or runs next.
 ---@field running boolean
 ---@field paused? string Why it waits for a command.
+---@field question? string What the run asks.
 ---@field pending_pause? string The pause a command ended, for when the command is refused.
 ---@field breaks table<integer, true>
 ---@field finished? table The `end` event.
@@ -68,6 +69,9 @@ local function status_line(p)
   end
   if p.problem then
     return "ended without a result: " .. p.problem
+  end
+  if p.question then
+    return "asks: " .. one_line(p.question, 110) .. "   (y yes, n no)"
   end
   if p.paused then
     local what = p.paused == "failed" and ("step %d failed"):format(p.at or 0)
@@ -218,7 +222,10 @@ function M.on_event(p, ev)
     p.size, p.at, p.paused, p.running = ev.size, ev.n, nil, true
   elseif ev.event == "paused" then
     p.size, p.at, p.paused, p.running = ev.size, ev.n, ev.reason, false
+  elseif ev.event == "ask" then
+    p.size, p.at, p.paused, p.running, p.question = ev.size, ev.n, "ask", false, ev.text
   elseif ev.event == "step-after" then
+    p.question = nil
     p.marks[ev.size] = p.marks[ev.size] or {}
     p.marks[ev.size][ev.n] = ev
     p.running = false
@@ -257,11 +264,18 @@ local function send(p, cmd)
   return true
 end
 
----Run this step.
+---Run this step; to a question this is a no.
 ---@param p Testing.Sheet.Panel
 ---@return boolean sent
 function M.next(p)
-  return send(p, "next")
+  return send(p, p.question and "answer no" or "next")
+end
+
+---Yes to the question.
+---@param p Testing.Sheet.Panel
+---@return boolean sent
+function M.yes(p)
+  return p.question ~= nil and send(p, "answer yes")
 end
 
 ---Run on: to the next breakpoint of this size, else to the end.
@@ -321,6 +335,9 @@ local function map_keys(p)
   map("n", function()
     M.next(p)
   end, "run this step")
+  map("y", function()
+    M.yes(p)
+  end, "answer yes")
   map("c", function()
     M.continue(p)
   end, "run to the next breakpoint or the end")
@@ -362,7 +379,7 @@ local function start_process(p)
   if p.opts.delay then
     vim.list_extend(argv, { "--delay", tostring(p.opts.delay) })
   end
-  p.stderr = {}
+  p.stderr, p.problem = {}, nil
   local partial = ""
   local on_stdout = vim.schedule_wrap(function(_, data)
     if not data then
@@ -381,18 +398,18 @@ local function start_process(p)
   local on_exit = vim.schedule_wrap(function(done)
     p.proc = nil
     p.running, p.paused = false, nil
-    local stderr = table.concat(p.stderr)
+    if not p.finished then
+      p.problem = ("exit %d"):format(done.code)
+      redraw(p)
+    end
+    -- the question last: a yes starts the run again, and that run owns the state from then on
     local gate = require("testing.bindings.trust_prompt")
-    if gate.refused(done.code, stderr) then
+    if gate.refused(done.code, table.concat(p.stderr)) then
       gate.ask(p.root, function(trusted)
         if trusted and vim.api.nvim_buf_is_valid(p.buf) then
           start_process(p)
         end
       end)
-    end
-    if not p.finished then
-      p.problem = ("exit %d"):format(done.code)
-      redraw(p)
     end
   end)
   local ok, proc = pcall(vim.system, argv, {

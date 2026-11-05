@@ -456,7 +456,14 @@ function M.sync(entries, opts)
     else
       -- set_body refuses a carriage return; the engine keeps the line ending of the file itself
       local body = tostring(item.body or ""):gsub("\r\n?", "\n")
-      local block = M.render_block(by_task[id], { ticked = M.ticked((M.extract(body))) })
+      local ticked = M.ticked((M.extract(body)))
+      -- a question answered yes in a stepped run ticks its box; a no leaves it and makes the sheet red
+      for _, e in ipairs(by_task[id]) do
+        for _, text in ipairs(e.answered or {}) do
+          ticked[one_line(text)] = true
+        end
+      end
+      local block = M.render_block(by_task[id], { ticked = ticked })
       local new, aerr = M.apply(body, block)
       if not new then
         results[#results + 1] = { id = id, outcome = "failed", message = aerr }

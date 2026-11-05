@@ -94,6 +94,10 @@ function M.open(s, opts)
     self.driver = require("testing.sheet.browser").driver(s, opts, ctx)
   elseif s.engine == "desktop" then
     self.driver = require("testing.sheet.desktop").driver(s, opts, ctx)
+  elseif #s.steps > 0 then
+    -- a manual sheet with questions: nothing to start, a person answers
+    self.driver =
+      { open_size = function() end, close_size = function() end, close = function() end }
   end
   return self
 end
@@ -156,9 +160,10 @@ function Session:peek()
   end
 end
 
----Run the step `peek` names.
+---Run the step `peek` names. A question takes its answer here; without one it is passed over and stays with `judge`.
+---@param answer? { yes: boolean, note?: string }
 ---@return Testing.Sheet.StepResult|nil
-function Session:step()
+function Session:step(answer)
   local next_step = self:peek()
   if not next_step then
     return nil
@@ -167,7 +172,15 @@ function Session:step()
   local sheet = require("testing.sheet")
   local step = self.sheet.steps[next_step.n]
   local started = vim.uv.hrtime()
-  local out = self.driver.run(step, next_step.n)
+  local out
+  if step.ask then
+    out = {}
+    if answer and not answer.yes then
+      out.reason = "answered no" .. (answer.note and (": " .. answer.note) or "")
+    end
+  else
+    out = self.driver.run(step, next_step.n)
+  end
   next_step.ms = math.floor((vim.uv.hrtime() - started) / 1e6)
   next_step.status = "pass"
   next_step.screen, next_step.shot = out.screen, out.shot
@@ -208,9 +221,7 @@ end
 function Session:result()
   local result =
     { ok = true, status = "pass", failures = self.failures, snapshots = self.snapshots }
-  if self.sheet.engine == "manual" then
-    result.status = "manual"
-  elseif self.aborted then
+  if self.aborted then
     -- nothing is proved by half a run, whatever its steps did so far
     result.ok, result.status = false, "aborted"
   elseif #self.failures > 0 then
@@ -218,6 +229,8 @@ function Session:result()
   elseif self.skipped then
     -- a missing prerequisite is information, never a green run
     result.status, result.skipped = "skip", self.skipped
+  elseif self.sheet.engine == "manual" then
+    result.status = "manual"
   end
   return result
 end

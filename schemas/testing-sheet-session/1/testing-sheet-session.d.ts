@@ -5,11 +5,18 @@ export type TestingSheetSessionEvent =
   | StepBefore
   | StepAfter
   | Paused
+  | Ask
+  | Task
   | CommandError
   | End;
 
 /** One line on stdin of `testing sheets step`. Closed stdin is `abort`. */
-export type TestingSheetSessionCommand = "next" | "continue" | `until ${number}` | "abort";
+export type TestingSheetSessionCommand =
+  | "next"
+  | "continue"
+  | `until ${number}`
+  | `answer ${"yes" | "no"}${string}`
+  | "abort";
 
 interface Base {
   schema: "testing-sheet-session/1";
@@ -76,6 +83,22 @@ export interface Paused extends Base {
   reason: "start" | "step" | "break" | "until" | "failed";
 }
 
+/** A question to a person: the run waits for `answer yes|no [text]`. A no fails the step. */
+export interface Ask extends Base {
+  event: "ask";
+  size: string;
+  n: number;
+  text: string;
+}
+
+/** With --tasks: what became of the task's block, after a run that counts as a verdict. */
+export interface Task extends Base {
+  event: "task";
+  id: string;
+  outcome: string;
+  message?: string;
+}
+
 export interface CommandError extends Base {
   event: "error";
   message: string;
@@ -91,4 +114,5 @@ export interface End extends Base {
   snapshots: string[];
   skipped?: string;
   ms: number;
+  answers?: { size: string; n: number; text: string; answer: "yes" | "no"; note?: string }[];
 }

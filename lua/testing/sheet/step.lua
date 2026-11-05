@@ -6,15 +6,19 @@
 --- reads events (`testing-sheet-session/1`, one JSON line each) and writes commands (`next`, `continue`, `until <n>`,
 --- `abort`). Closed stdin is `abort`, so a client that dies leaves no editor or browser behind.
 ---
---- It writes nothing: no state, no task, no snapshot (as on CI, a missing snapshot is a failure). Whether a run may
---- count as a verdict is what the `verdict` field of `end` says: only a run that went through without an abort.
+--- A question of a sheet (`ask`) stops the run for `answer yes|no [text]`. With `--run` nobody can answer: it is passed
+--- over and stays a `judge` criterion.
+---
+--- It writes no state and no snapshot (as on CI, a missing snapshot is a failure). Whether a run counts as a verdict is
+--- what the `verdict` field of `end` says: only a run that went through without an abort. Only such a run writes
+--- anything: with `--tasks <vault>` its state goes into the task's block, and a question answered yes ticks its box.
 --- Same gates as `testing sheets run`: the workstation rule and the trust of the root.
 
 local M = {}
 
 M.SCHEMA = "testing-sheet-session/1"
 M.USAGE =
-  "usage: testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run]"
+  "usage: testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run] [--tasks <vault> [--tasks-cli <tasks.lua>]]"
 
 ---@class Testing.SheetStep.Reader
 ---@field start fun(on_abort: fun()) Begin reading; `on_abort` fires as soon as `abort` or the end of stdin arrives.
@@ -27,6 +31,7 @@ M.USAGE =
 ---@field getenv? fun(name: string): string|nil
 ---@field trust_check? fun(root: string): string|nil
 ---@field session_opts? table Merged into the options of the session (specs: `spawn`, `node`, ...).
+---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
 
 ---The commands from stdin, read without blocking the loop: an abort reaches a running step.
 ---@return Testing.SheetStep.Reader
@@ -115,6 +120,12 @@ local function parse(argv)
     elseif a == "--run" then
       o.run = true
       i = i + 1
+    elseif a == "--tasks" or a == "--tasks-cli" then
+      if not argv[i + 1] then
+        return nil, a .. " needs a value"
+      end
+      o[a == "--tasks" and "vault" or "cli"] = argv[i + 1]
+      i = i + 2
     elseif a == "--root" or a == "--delay" or a == "--break" then
       local v = argv[i + 1]
       if not v then
@@ -150,6 +161,9 @@ local function parse(argv)
   end
   if o.run and #o.break_list > 0 then
     return nil, "--run reads no commands, nothing could go on after a --break"
+  end
+  if o.cli and not o.vault then
+    return nil, "--tasks-cli belongs to --tasks <vault>"
   end
   return o, nil
 end
@@ -193,6 +207,17 @@ local function find_sheet(o)
     return nil, tostring(err)
   end
   return s, root
+end
+
+---`answer yes|no [text]`.
+---@param cmd string
+---@return { yes: boolean, note?: string }|nil
+local function parse_answer(cmd)
+  local word, note = cmd:match("^answer%s+(%a+)%s*(.-)%s*$")
+  if word ~= "yes" and word ~= "no" then
+    return nil
+  end
+  return { yes = word == "yes", note = note ~= "" and note or nil }
 end
 
 ---@param cmd string
@@ -251,6 +276,37 @@ function M.main(argv, sv, deps)
     return 2
   end
 
+  -- the block is written whole: the state of another sheet of the task would be lost, so that is said before anything runs
+  local call = deps.call
+  if o.vault then
+    if not s.task then
+      sv.err("testing sheets: --tasks: the sheet names no task")
+      return 2
+    end
+    local entries = require("testing.sheet.report").collect({ root }, { cases = {} })
+    for _, e in ipairs(entries) do
+      if e.sheet and e.sheet.task == s.task and e.sheet.id ~= s.id then
+        sv.err(
+          ("testing sheets: --tasks: %s also has the sheet %s, whose state this run would lose: use `testing sheets run --task`"):format(
+            s.task,
+            e.sheet.id
+          )
+        )
+        return 2
+      end
+    end
+    if not call then
+      local tasks = require("testing.sheet.tasks")
+      local vault = vim.fs.normalize(vim.fn.fnamemodify(o.vault, ":p")):gsub("/+$", "")
+      local cli, lerr = tasks.locate(vault, { cli = o.cli })
+      if not cli then
+        sv.err("testing sheets: " .. tostring(lerr))
+        return 3
+      end
+      call = tasks.caller(cli, vault)
+    end
+  end
+
   local session
   local write = deps.emit
     or function(line)
@@ -305,6 +361,38 @@ function M.main(argv, sv, deps)
 
   local mode, until_n = o.run and "continue" or "step", nil
   local stopped_once = false
+  local answers, answered = {}, {}
+
+  ---A question: waits for its answer. Nil when the run is to end.
+  ---@param at Testing.Sheet.NextStep
+  ---@return { yes: boolean, note?: string }|nil
+  local function ask(at)
+    ---@cast reader -nil
+    emit("ask", { size = at.size, n = at.n, text = at.value })
+    while not session.aborted do
+      local cmd = reader.next()
+      if not cmd or cmd == "abort" then
+        session:cancel()
+        return nil
+      end
+      local answer = parse_answer(cmd)
+      if answer then
+        answers[#answers + 1] = {
+          size = at.size,
+          n = at.n,
+          text = at.value,
+          answer = answer.yes and "yes" or "no",
+          note = answer.note,
+        }
+        if answer.yes then
+          answered[#answered + 1] = at.value
+        end
+        return answer
+      end
+      emit("error", { message = "this step waits for: answer yes|no [text]" })
+    end
+    return nil
+  end
 
   ---Paused until a command says how to go on; false when the run is to end.
   ---@param reason string
@@ -357,7 +445,15 @@ function M.main(argv, sv, deps)
         note = at.note,
       })
       local reason
-      if mode == "step" then
+      local answer
+      if at.action == "ask" and reader then
+        -- the question is its own stop, under `continue` too
+        stopped_once = true
+        answer = ask(at)
+        if not answer then
+          return
+        end
+      elseif mode == "step" then
         reason = stopped_once and "step" or "start"
       elseif mode == "until" and until_n == at.n then
         reason = "until"
@@ -377,7 +473,7 @@ function M.main(argv, sv, deps)
           return
         end
       end
-      local res = session:step()
+      local res = session:step(answer)
       if not res then
         return
       end
@@ -400,6 +496,7 @@ function M.main(argv, sv, deps)
     end
   end
 
+  local task_failed = false
   local ok, err = xpcall(loop, debug.traceback)
   if reader then
     reader.stop()
@@ -411,10 +508,39 @@ function M.main(argv, sv, deps)
     sv.err("testing sheets: " .. tostring(err))
   end
   local res = session:result()
+  local verdict = res.status == "pass" or res.status == "fail" or res.status == "manual"
+  if verdict and o.vault then
+    local tasks = require("testing.sheet.tasks")
+    local entries = require("testing.sheet.report").collect({ root }, { cases = {} })
+    entries = vim.tbl_filter(function(e)
+      return e.sheet and e.sheet.id == s.id
+    end, entries)
+    for _, e in ipairs(entries) do
+      e.result = res
+      e.answered = answered
+      e.case = {
+        name = require("testing.sheet").spec_name(s),
+        status = res.status == "fail" and "fail" or "pass",
+        file = "TESTS/sheets_spec.lua",
+        message = res.status == "fail" and require("testing.sheet.run").first_failure(res) or nil,
+        duration_ms = math.floor((vim.uv.hrtime() - started) / 1e6),
+      }
+    end
+    local results, serr = tasks.sync(entries, { call = call })
+    if not results then
+      sv.err("testing sheets: " .. tostring(serr))
+    end
+    for _, r in ipairs(results or {}) do
+      emit("task", { id = r.id, outcome = r.outcome, message = r.message })
+      task_failed = task_failed or not (r.outcome == "changed" or r.outcome == "unchanged")
+    end
+    task_failed = task_failed or not results
+  end
   emit("end", {
     status = res.status,
     ok = res.ok,
-    verdict = res.status == "pass" or res.status == "fail",
+    verdict = verdict,
+    answers = answers,
     failures = res.failures,
     snapshots = res.snapshots,
     skipped = res.skipped,
@@ -423,7 +549,7 @@ function M.main(argv, sv, deps)
   if res.status == "aborted" then
     return 3
   end
-  return res.status == "fail" and 1 or 0
+  return (res.status == "fail" or task_failed) and 1 or 0
 end
 
 return M
