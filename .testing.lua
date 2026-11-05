@@ -31,7 +31,7 @@ return {
   -- The pool_run_*_spec files run real warm-pool children, about a minute each on a loaded machine (one file did
   -- all of it and used 171 s of this deadline there; Windows is the slow system); lint_spec's luals section
   -- spawns lua-language-server, which under 12 parallel CPU burners took 125 to 158 s instead of a few seconds
-  -- (observed 2026-11-04, cause unexplained, testing-vault/testing.nvim/flaky-timeout-suspend-und-lint-luals) and
+  -- (observed 2026-11-04, cause unexplained; tasks-vault: testing.nvim/flaky-timeout-suspend-und-lint-luals) and
   -- a real CI run once timed it out near the old 180 s ceiling. Raised with the same margin as back then: the
   -- deadline is a safety net against a hang, not a performance gate.
   timeouts = { file_ms = 300000 },
