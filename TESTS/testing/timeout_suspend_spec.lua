@@ -7,13 +7,16 @@ return function(H)
 
   local function busy()
     local x = 0
-    for i = 1, 400000 do
+    for i = 1, 20000 do
       x = x + i
     end
     return x
   end
 
-  -- a clock of our own: the deadline passes when WE say so, not when a loaded machine stalls the spec for 30 ms
+  -- A clock of our own: the deadline passes when WE say so, not when a loaded machine stalls the spec for 30 ms.
+  -- Time has passed only INSIDE a suspend or a pcall. Outside of them the count hook may fire at any instruction,
+  -- and a deadline that has passed there kills the spec itself, with this guard still running ("a timeout guard
+  -- outlived the run"). Where the hook falls depends on what ran before, so that was a failure of full runs only.
   local now = 0
   local g = timeout.start({
     label = "suspend",
@@ -22,22 +25,38 @@ return function(H)
       return now
     end,
   })
-  now = 80 -- the deadline has passed
+  -- the hook on every instruction: any spot the deadline is passed unprotected fails every run, not one in a hundred
+  local hook, mask, count = debug.gethook()
+  debug.sethook(hook, mask, 1)
 
   local worked, a, b = pcall(g.suspend, g, function()
-    return busy(), "second"
+    now = 80 -- the deadline has passed
+    local result = busy()
+    now = 0
+    return result, "second"
   end)
-  ok(worked, "suspended work is not stopped by the passed deadline: " .. tostring(a))
-  ok(type(a) == "number" and b == "second", "suspend returns the results of the function")
 
   local failed, err = pcall(g.suspend, g, function()
+    now = 80
+    now = 0
     error("boom", 0)
   end)
-  ok(not failed and err == "boom", "an error of the function is raised again")
 
   -- the deadline is persistent: the spec is stopped again as soon as the bookkeeping is over
-  local raised, message = pcall(busy)
-  ok(not raised, "the deadline stops the spec again after suspend")
+  local stopped_it, message = xpcall(function()
+    now = 80
+    busy()
+  end, function(e)
+    now = 0 -- back to before the deadline, in the handler: no hook can fire between the raise and here
+    return e
+  end)
+
+  debug.sethook(hook, mask, count)
+
+  ok(worked, "suspended work is not stopped by the passed deadline: " .. tostring(a))
+  ok(type(a) == "number" and b == "second", "suspend returns the results of the function")
+  ok(not failed and err == "boom", "an error of the function is raised again")
+  ok(not stopped_it, "the deadline stops the spec again after suspend")
   ok(timeout.is_timeout(message), "...with the timeout error: " .. tostring(message))
   eq(g:stop(), true, "the file deadline is reported as fired")
   eq(g:stop(), true, "stop is idempotent")
