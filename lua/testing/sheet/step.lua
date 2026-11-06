@@ -338,11 +338,18 @@ function M.main(argv, sv, deps)
     local action, value = action_of(step)
     steps[n] = { n = n, action = action, value = value, note = step.note }
   end
+  -- One folder per sheet, emptied here: what a person looks at is the last run.
+  local evidence_dir = ("%s/testing/sheet-evidence/%s"):format(
+    vim.fn.stdpath("cache"),
+    (s.id:gsub("[^%w._-]", "_"))
+  )
+  vim.fn.delete(evidence_dir, "rf")
   local opts = vim.tbl_extend("force", {
     root = root,
     ci = true,
     capture_screen = true,
     headed = o.headed,
+    evidence_dir = evidence_dir,
     on_size = function(tag, state, reason)
       emit("size", { size = tag, state = state, reason = reason })
     end,
@@ -496,6 +503,7 @@ function M.main(argv, sv, deps)
         reason = res.reason,
         failure = res.failure,
         shot = res.shot,
+        image = res.image,
         screen = res.screen,
       })
       -- a failure is where a person wants to look, before the next size or the end takes the target away

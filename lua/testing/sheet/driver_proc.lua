@@ -182,6 +182,27 @@ function M.new(s, opts, ctx, how)
     return { shot = answer.shot }
   end
 
+  ---The picture of the target after a step, moved out of the project's shots into `dir`. Nil when there is none.
+  ---@param n integer
+  ---@param tag string The size.
+  ---@param dir string
+  ---@return string|nil
+  function D.evidence(n, tag, dir)
+    local name = ("step-%03d"):format(n)
+    local answer = request({ cmd = "step", n = n, step = { shot = name } }, margin)
+    if not answer or not answer.ok or type(answer.shot) ~= "string" then
+      return nil
+    end
+    vim.fn.mkdir(dir, "p")
+    local to = ("%s/%s-%s.png"):format(dir, tag, name)
+    os.remove(to)
+    if os.rename(answer.shot, to) then
+      return to
+    end
+    os.remove(answer.shot)
+    return nil
+  end
+
   ---The target stays until the next size opens: a window still shows the last step.
   function D.close_size() end
 

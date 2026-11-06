@@ -30,6 +30,7 @@ local M = {}
 ---@field reason? string Why the step failed.
 ---@field failure? string The failure line, as in `Testing.Sheet.Result.failures`.
 ---@field shot? string The file of a `shot` step.
+---@field image? string A stepped run: the picture of the target after this step, in a folder of the run.
 ---@field screen? string[] The child's screen after the step (`capture_screen`).
 
 ---@class Testing.Sheet.Session
@@ -184,6 +185,10 @@ function Session:step(answer)
   next_step.ms = math.floor((vim.uv.hrtime() - started) / 1e6)
   next_step.status = "pass"
   next_step.screen, next_step.shot = out.screen, out.shot
+  -- only a stepped run asks for it, `sheet.run` pays nothing; a picture that cannot be had fails no step
+  if self.opts.evidence_dir and self.driver.evidence and not out.raised then
+    next_step.image = self.driver.evidence(next_step.n, self.tag, self.opts.evidence_dir)
+  end
   if out.shot then
     self.snapshots[#self.snapshots + 1] = "screenshot " .. out.shot
   end

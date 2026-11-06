@@ -73,6 +73,8 @@ export interface StepAfter extends Base {
   failure?: string;
   /** The file of a `shot` step. */
   shot?: string;
+  /** browser and desktop engine: the picture of the target after this step, in a folder of the run. */
+  image?: string;
   /** rpc engine: the child's screen after the step, one string per row. */
   screen?: string[];
 }

@@ -101,6 +101,7 @@
         "reason": { "description": "Why it failed.", "type": "string" },
         "failure": { "description": "The failure line as a normal run writes it.", "type": "string" },
         "shot": { "description": "The file of a `shot` step.", "type": "string" },
+        "image": { "description": "browser and desktop engine: the picture of the target after this step, in a folder of the run.", "type": "string" },
         "screen": { "description": "rpc engine: the child's screen after the step, one string per row.", "$ref": "#/$defs/strings" }
       }
     },

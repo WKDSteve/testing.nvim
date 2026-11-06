@@ -269,7 +269,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `size` | the target of a size is `open`, `failed` to start, or the sheet is a `skip` |
 | `step-before` | size, number, action, value, note: what is about to happen |
 | `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
-| `step-after` | `status`, `ms`, on a failure `reason` and the `failure` line of a normal run; `shot` the file of a `shot` step; `screen` the child's screen as text, one string per row (rpc sheets) |
+| `step-after` | `status`, `ms`, on a failure `reason` and the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser and desktop sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
 | `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
 | `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
 | `error` | a command it could not do; the run stays paused |

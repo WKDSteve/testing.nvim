@@ -164,6 +164,9 @@ function M.render(p, selected)
     if mark.shot then
       lines[#lines + 1] = "screenshot: " .. tostring(mark.shot)
     end
+    if mark.image then
+      lines[#lines + 1] = "picture: " .. tostring(mark.image)
+    end
     if type(mark.screen) == "table" then
       lines[#lines + 1] = "screen:"
       local rows = vim.tbl_map(function(row)

@@ -515,6 +515,68 @@ end
     has(errors[2].message, "later step", "until to an earlier step")
     eq(bad[#bad].status, "pass", "the run goes on after them")
 
+    -- a stepped run keeps a picture of every step, in a folder of the run; only a driver's run does
+    local shooter = write(
+      "shooting_driver.lua",
+      [[
+local out_dir
+while true do
+  local line = io.stdin:read("*l")
+  if not line then break end
+  local cmd = vim.json.decode(line)
+  local answer = { schema = "testing-sheet-driver/1", ok = true }
+  if cmd.cmd == "open" then
+    out_dir = cmd.sheet.out_dir
+  elseif cmd.cmd == "step" and cmd.step.shot then
+    vim.fn.mkdir(out_dir, "p")
+    answer.shot = out_dir .. "/" .. cmd.step.shot .. ".png"
+    vim.fn.writefile({ "png" }, answer.shot)
+  elseif cmd.cmd == "close" then
+    io.stdout:write(vim.json.encode(answer), "\n")
+    io.stdout:flush()
+    break
+  end
+  io.stdout:write(vim.json.encode(answer), "\n")
+  io.stdout:flush()
+end
+]]
+    )
+    write(
+      "TESTS/sheets/shots.sheet.lua",
+      [[return {
+  id = "cli.shots",
+  title = "Pictures",
+  engine = "browser",
+  sizes = { { rows = 7, cols = 9 } },
+  steps = { { press = "a" }, { shot = "mine" } },
+}
+]]
+    )
+    local shot_deps = {
+      session_opts = {
+        driver_argv = { vim.v.progpath, "--headless", "-u", "NONE", "-l", shooter },
+        driver_margin_ms = 60000,
+        driver_stop_ms = 500,
+      },
+    }
+    local _, shots = step_run({ "cli.shots", "--root", root, "--run" }, {}, shot_deps)
+    local afters = vim.tbl_filter(function(e)
+      return e.event == "step-after"
+    end, shots)
+    eq(#afters, 2, "both steps ran")
+    for i, shown in ipairs(afters) do
+      ok(shown.image ~= nil, "step-after names the picture of step " .. i)
+      eq(vim.fn.filereadable(shown.image), 1, "and it is there")
+      ok(not shown.image:find("TESTS/sheets/out", 1, true), "not among the shots of the project")
+    end
+    has(afters[2].shot, "mine", "a shot step keeps its own file")
+    eq(vim.fn.filereadable(afters[2].shot), 1, "in its own place")
+    eq(
+      #vim.fn.glob(root .. "/TESTS/sheets/out/*step-*", false, true),
+      0,
+      "no picture of a step is left among the shots"
+    )
+
     -- a breakpoint set while paused holds in every size, and goes away again
     local _, broke = step_run(
       { "cli.sizes", "--root", root },
