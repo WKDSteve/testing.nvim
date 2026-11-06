@@ -361,6 +361,16 @@ end
 ]]
   )
   write(
+    "TESTS/sheets/sizes.sheet.lua",
+    [[return {
+  id = "cli.sizes",
+  title = "Two sizes",
+  sizes = { { rows = 24, cols = 80 }, { rows = 30, cols = 100 } },
+  steps = { { settle = 50 }, { settle = 50 }, { settle = 50 } },
+}
+]]
+  )
+  write(
     "TESTS/sheets/red.sheet.lua",
     [[return {
   id = "cli.red",
@@ -504,6 +514,26 @@ end
     has(errors[1].message, "unknown command", "the first")
     has(errors[2].message, "later step", "until to an earlier step")
     eq(bad[#bad].status, "pass", "the run goes on after them")
+
+    -- a breakpoint set while paused holds in every size, and goes away again
+    local _, broke = step_run(
+      { "cli.sizes", "--root", root },
+      { "break 3", "clear 3", "break 2", "break 0", "clear 9", "continue", "continue", "continue" }
+    )
+    local stops = vim.tbl_filter(function(name)
+      return name:find("paused:", 1, true) == 1
+    end, names(broke))
+    eq(
+      stops,
+      { "paused:start:1", "paused:break:2", "paused:break:2" },
+      "in both sizes, not at the cleared one"
+    )
+    local refused = vim.tbl_filter(function(e)
+      return e.event == "error"
+    end, broke)
+    eq(#refused, 2, "a step the sheet does not have is refused")
+    has(refused[1].message, "1 to 3", "and says which there are")
+    eq(broke[#broke].status, "pass", "the run goes on")
 
     -- the end of stdin and abort
     local c1, eof, _, reads = step_run({ "cli.green", "--root", root }, { "next" })

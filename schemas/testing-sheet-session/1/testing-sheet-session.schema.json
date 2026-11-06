@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-sheet-session/1/testing-sheet-session.schema.json",
   "title": "testing-sheet-session/1",
-  "description": "One line on stdout of `testing sheets step`: an event of a test sheet run step by step. The commands go the other way, one line each on stdin: `next`, `continue`, `until <n>`, `answer yes|no [text]`, `abort`; closed stdin is `abort`. A reader ignores unknown events and fields and refuses a higher schema.",
+  "description": "One line on stdout of `testing sheets step`: an event of a test sheet run step by step. The commands go the other way, one line each on stdin: `next`, `continue`, `until <n>`, `break <n>`, `clear <n>`, `answer yes|no [text]`, `abort`; closed stdin is `abort`. A reader ignores unknown events and fields and refuses a higher schema.",
   "type": "object",
   "required": ["schema", "event"],
   "properties": {

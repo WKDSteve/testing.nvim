@@ -121,6 +121,33 @@ return function(H)
   ok(not panel.next(p), "after the end nothing goes")
   vim.api.nvim_buf_delete(p.buf, { force = true })
 
+  -- a breakpoint of the panel holds in the next size too, which the child only knows if it was told
+  write(
+    "TESTS/sheets/sizes.sheet.lua",
+    [[return {
+  id = "panel.sizes",
+  title = "Two sizes",
+  sizes = { { rows = 24, cols = 80 }, { rows = 30, cols = 100 } },
+  steps = { { settle = 50 }, { settle = 50 } },
+}
+]]
+  )
+  local s = panel.open(root, "sizes", { env = env })
+  paused_at(s, 1)
+  panel.toggle_break(s, 2)
+  ok(panel.continue(s), "on to the breakpoint")
+  paused_at(s, 2)
+  ok(panel.continue(s), "on to the same step of the next size")
+  wait("the next size", function()
+    return s.paused ~= nil and s.at == 2 and s.size == "100x30"
+  end)
+  panel.toggle_break(s, 2)
+  ok(panel.continue(s), "a breakpoint taken away")
+  wait("the end", function()
+    return s.finished ~= nil
+  end)
+  vim.api.nvim_buf_delete(s.buf, { force = true })
+
   -- closing the buffer aborts
   local q = panel.open(root, "walk", { env = env })
   paused_at(q, 1)

@@ -15,6 +15,8 @@ export type TestingSheetSessionCommand =
   | "next"
   | "continue"
   | `until ${number}`
+  | `break ${number}`
+  | `clear ${number}`
   | `answer ${"yes" | "no"}${string}`
   | "abort";
 

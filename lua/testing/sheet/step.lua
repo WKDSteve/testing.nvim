@@ -222,7 +222,7 @@ end
 
 ---@param cmd string
 ---@param at Testing.Sheet.NextStep|nil The step that is next; nil when nothing is left in this size.
----@return { mode?: string, until_n?: integer, abort?: boolean }|nil plan, string|nil err
+---@return { mode?: string, until_n?: integer, abort?: boolean, break_n?: integer, clear?: boolean }|nil plan, string|nil err
 local function parse_command(cmd, at)
   if cmd == "next" then
     return { mode = "step" }
@@ -230,6 +230,14 @@ local function parse_command(cmd, at)
     return { mode = "continue" }
   elseif cmd == "abort" then
     return { abort = true }
+  end
+  local word, step = cmd:match("^(%a+)%s+(%d+)$")
+  if word == "break" or word == "clear" then
+    local b = tonumber(step)
+    if at and (b < 1 or b > at.total) then
+      return nil, ("%s needs a step of the sheet, 1 to %d"):format(word, at.total)
+    end
+    return { break_n = b, clear = word == "clear" }
   end
   local n = tonumber(cmd:match("^until%s+(%d+)$"))
   if n then
@@ -418,6 +426,9 @@ function M.main(argv, sv, deps)
       elseif plan.abort then
         session:cancel()
         return false
+      elseif plan.break_n then
+        -- holds in every size, from now on; the run stays paused
+        o.breaks[plan.break_n] = not plan.clear or nil
       else
         mode, until_n = plan.mode, plan.until_n
         return true

@@ -282,6 +282,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `next` | runs this step, stops before the next one |
 | `continue` | runs on, to a `--break`, a failed step or the end |
 | `until <n>` | runs on and stops before step `n` of a size |
+| `break <n>`, `clear <n>` | sets or removes a breakpoint, as `--break` does, in every size; the run stays paused |
 | `answer yes\|no [text]` | answers a question; a no fails the step, with the text as its reason |
 | `abort` | ends the run at once |
 

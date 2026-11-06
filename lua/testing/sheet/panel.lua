@@ -278,17 +278,11 @@ function M.yes(p)
   return p.question ~= nil and send(p, "answer yes")
 end
 
----Run on: to the next breakpoint of this size, else to the end.
+---Run on: to the next breakpoint, in this size or a later one, else to the end.
 ---@param p Testing.Sheet.Panel
 ---@return boolean sent
 function M.continue(p)
-  local nearest
-  for n in pairs(p.breaks) do
-    if n > (p.at or 0) and (not nearest or n < nearest) then
-      nearest = n
-    end
-  end
-  return send(p, nearest and ("until %d"):format(nearest) or "continue")
+  return send(p, "continue")
 end
 
 ---Run on up to the step under the cursor.
@@ -310,6 +304,10 @@ function M.toggle_break(p, n)
   n = n or cursor_step(p)
   if n then
     p.breaks[n] = not p.breaks[n] and true or nil
+    -- The run keeps them: it reads this at its next stop, and they hold in every size.
+    if p.proc then
+      pcall(p.proc.write, p.proc, ("%s %d\n"):format(p.breaks[n] and "break" or "clear", n))
+    end
     redraw(p)
   end
 end
