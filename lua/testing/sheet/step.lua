@@ -390,8 +390,12 @@ function M.main(argv, sv, deps)
         session:cancel()
         return nil
       end
+      local plan = parse_command(cmd, at)
       local answer = parse_answer(cmd)
-      if answer then
+      if plan and plan.break_n then
+        -- the panel does not wait for a stop to send a breakpoint: no error, and the question still stands
+        o.breaks[plan.break_n] = not plan.clear or nil
+      elseif answer then
         answers[#answers + 1] = {
           size = at.size,
           n = at.n,
@@ -403,8 +407,9 @@ function M.main(argv, sv, deps)
           answered[#answered + 1] = at.value
         end
         return answer
+      else
+        emit("error", { message = "this step waits for: answer yes|no [text]" })
       end
-      emit("error", { message = "this step waits for: answer yes|no [text]" })
     end
     return nil
   end

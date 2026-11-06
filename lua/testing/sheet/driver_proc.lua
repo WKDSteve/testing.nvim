@@ -195,12 +195,10 @@ function M.new(s, opts, ctx, how)
     end
     vim.fn.mkdir(dir, "p")
     local to = ("%s/%s-%s.png"):format(dir, tag, name)
-    os.remove(to)
-    if os.rename(answer.shot, to) then
-      return to
-    end
+    -- A copy, not a rename: the project and the cache folder can lie on different drives.
+    local copied = vim.uv.fs_copyfile(answer.shot, to)
     os.remove(answer.shot)
-    return nil
+    return copied and to or nil
   end
 
   ---The target stays until the next size opens: a window still shows the last step.

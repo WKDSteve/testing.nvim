@@ -577,6 +577,25 @@ end
       "no picture of a step is left among the shots"
     )
 
+    -- a breakpoint sent while a question waits is taken, and the question still waits
+    write(
+      "TESTS/sheets/asking.sheet.lua",
+      [[return {
+  id = "cli.asking",
+  title = "A question",
+  steps = { { ask = "fine?" }, { settle = 50 }, { settle = 50 } },
+}
+]]
+    )
+    local _, asked = step_run(
+      { "cli.asking", "--root", root },
+      { "break 3", "answer yes", "continue", "continue" }
+    )
+    eq(#vim.tbl_filter(function(e)
+      return e.event == "error"
+    end, asked), 0, "no error for the breakpoint")
+    ok(vim.tbl_contains(names(asked), "paused:break:3"), "and it holds after the answer")
+
     -- a breakpoint set while paused holds in every size, and goes away again
     local _, broke = step_run(
       { "cli.sizes", "--root", root },
