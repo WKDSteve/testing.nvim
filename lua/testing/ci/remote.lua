@@ -883,7 +883,9 @@ end
 
 ---Two checkouts of the same GitHub repository (`owner/repo` of `origin`) are one repository: the CI is asked once.
 ---The checkout whose `origin/<branch>` commit is newer wins (a stale second clone shows an old state); on a tie one
----that was named on the command line (not found below a `--repos-root`), then the first directory in byte order.
+---that was named on the command line (not found below a `--repos-root`), then the one named like the repository (a
+---worktree always ties with its checkout, and the row carries the name of what is kept, which is also what its data
+---class is looked up by), then the first directory in byte order.
 ---A checkout whose origin cannot be read, or is not on GitHub, is never merged.
 ---@param repos { dir: string, from_root: boolean }[]
 ---@return { dir: string, from_root: boolean }[] kept
@@ -925,7 +927,12 @@ function M.dedupe_clones(repos)
       order[#order + 1] = key
     end
     local g = groups[key]
-    g[#g + 1] = { r = r, ts = 0, i = i }
+    g[#g + 1] = {
+      r = r,
+      ts = 0,
+      i = i,
+      named_like_repo = repo ~= nil and vim.fs.basename(r.dir):lower() == repo:lower(),
+    }
   end
   -- 2. the commit time of `origin/<branch>` only where two checkouts share a repository: the others have nothing to
   -- be compared with
@@ -962,6 +969,9 @@ function M.dedupe_clones(repos)
       end
       if a.r.from_root ~= b.r.from_root then
         return not a.r.from_root
+      end
+      if a.named_like_repo ~= b.named_like_repo then
+        return a.named_like_repo
       end
       return a.r.dir < b.r.dir
     end)

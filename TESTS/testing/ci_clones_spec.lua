@@ -60,6 +60,21 @@ return function(H)
   eq(base, { "alpha-new", "beta" }, "the export list holds the repository once")
   eq(info.merged, { "alpha-old" }, "and names the checkout that was merged")
 
+  -- A worktree shares `origin/main` with its checkout, so the two always tie, and `-` sorts before `.`: the checkout
+  -- named like the repository must win, or the row carries the name of the worktree (and its data class: none).
+  local named = repo("gamma.nvim", "https://github.com/acme/gamma.nvim.git", "2026-04-01T00:00:00Z")
+  local wt = tmp .. "/gamma-worktree"
+  git(named, { "worktree", "add", "-q", "--detach", wt })
+  local dirs_wt, info_wt = export.resolve({ roots = { wt, named } })
+  eq(
+    vim.tbl_map(vim.fs.basename, dirs_wt),
+    { "gamma.nvim" },
+    "on a tie the checkout named like the repository is kept, not a worktree of it"
+  )
+  eq(info_wt.merged, { "gamma-worktree" }, "and the worktree is what was merged")
+  local rows_wt = overview.collect({ wt, named }, { no_remote = true, now = os.time() }, {})
+  eq(rows_wt[1].repo, "gamma.nvim", "the overview names the same one")
+
   -- an origin that cannot be read is never merged
   local lone = tmp .. "/lone"
   vim.fn.mkdir(lone, "p")
