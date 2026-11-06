@@ -25,6 +25,9 @@
 ![Status](https://img.shields.io/badge/status-pre--alpha-red)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 [![CI](https://github.com/WKDSteve/testing.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/WKDSteve/testing.nvim/actions/workflows/ci.yml)
+[![wkd](https://img.shields.io/badge/wkd-family-c6ff3d)](https://wkdsteve.github.io/wkd/p/testing/)
+
+> Part of the [wkd](https://wkdsteve.github.io/wkd/) family — see this plugin's [page](https://wkdsteve.github.io/wkd/p/testing/) on the site.
 
 > Sister plugin: [runtime-analysis.nvim](https://github.com/WKDSteve/runtime-analysis.nvim) —
 > runtime truth for plugins (telemetry, live module inspection), the counterpart to what a test
