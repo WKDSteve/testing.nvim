@@ -63,10 +63,29 @@ runner (`-NoGuard` leaves it out).
 
 ## Releasing a commit
 
-A refused push run says so in its log ("Set up job") and names the command. `testing` is usually not on the PATH, so the
-log prints the call that works from anywhere (`"<nvim>" -n -i NONE --headless -u NONE -l "<checkout>/scripts/testing.lua"
-ci trust <repo> <sha>`); the examples below write it short as `testing`, put the call in an alias or a wrapper script of
-your own:
+A refused push run says so in its log ("Set up job") and names the command: first the short one,
+`testing ci release <repo> <sha>` (`testing.nvim/bin` on the PATH, which `setup-claude-code.ps1` sets), then the call that
+works from anywhere (`"<nvim>" -n -i NONE --headless -u NONE -l "<checkout>/scripts/testing.lua" ci release <repo> <sha>`).
+
+**The short way: `testing ci release`.** One word for the whole way, a small wizard in a terminal:
+
+```sh
+testing ci release                                  # asks: which repository, which commit, then shows, asks, releases
+testing ci release WKDSteve/tasks.nvim              # asks only for the commit
+testing ci release WKDSteve/tasks.nvim <sha> --yes  # nothing to ask (a script: all three are needed)
+```
+
+1. The repository: the one given, else a choice of the `origin` of the current folder and the repositories on the list
+   of reviewed commits (Enter takes the first, or type `owner/name`).
+2. The commit: the one given, else a choice of the last `--count` (10) commits of the default branch, each with its
+   title, author and date; the ones already released are marked `(released)` (Enter takes the newest, or type an id).
+3. What changed since the last reviewed commit (the review aid of `--show`, below).
+4. One question, `release <repo> <sha>? [y/N]` (`--yes` skips it; anything but y/yes/j/ja releases nothing, exit 1).
+5. The release, then `gh run rerun <id> --failed` for every failed or cancelled run of that commit.
+
+Without a terminal nothing is asked: then the repository, the commit and `--yes` must all be given, so a script never
+releases a commit it did not name. A bare `testing ci trust` without any argument stays refused (it would release the
+head of whatever the current folder names, unasked); `testing ci release` is the short way. The single steps:
 
 ```sh
 testing ci trust WKDSteve/tasks.nvim --show        # what changed since the last reviewed commit; records nothing

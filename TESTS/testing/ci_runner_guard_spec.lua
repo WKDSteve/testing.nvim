@@ -290,12 +290,12 @@ return function(H)
     has(text, "JOB REFUSED", "check: ... loudly")
     has(
       text,
-      "review it, then: testing ci trust WKDSteve/tasks.nvim " .. SHA,
+      "review and release it: testing ci release WKDSteve/tasks.nvim " .. SHA,
       "check: ... the short form"
     )
     has(
       text,
-      "/x/nvim -n -i NONE --headless -u NONE -l /x/scripts/testing.lua ci trust WKDSteve/tasks.nvim "
+      "/x/nvim -n -i NONE --headless -u NONE -l /x/scripts/testing.lua ci release WKDSteve/tasks.nvim "
         .. SHA,
       "check: ... with the command to release it (the real call, `testing` is not on the PATH)"
     )
@@ -812,7 +812,7 @@ return function(H)
       code, text = check()
       eq(code, 1, "signed: one unsigned commit in the range refuses")
       has(text, "commit " .. SHA3:sub(1, 12) .. " has no SSH signature", "signed: ... and names it")
-      has(text, "ci trust WKDSteve/tasks.nvim", "signed: ... and still offers the manual release")
+      has(text, "ci release WKDSteve/tasks.nvim", "signed: ... and still offers the manual release")
       eq(
         #guard.read(guard.store_path(root))["wkdsteve/tasks.nvim"].shas,
         1,
@@ -952,7 +952,7 @@ return function(H)
     store = tmp()
     out, repos = push(line(on_foreign))
     has(out, "came from a remote", "pushed: a fetched foreign commit is not released")
-    has(out, "testing ci trust", "pushed: ... the review is named")
+    has(out, "testing ci release", "pushed: ... the review is named")
     eq(repos["wkdsteve/pushed-spec"], nil, "pushed: ... and nothing is on the list")
 
     -- a merge commit: not released

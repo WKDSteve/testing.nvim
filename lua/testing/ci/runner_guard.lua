@@ -548,13 +548,13 @@ local function check(sv, ctx)
     end
     local quoted = nvim:find("[%s]") ~= nil
     sv.err(
-      ("runner-guard: review it, then: testing ci trust %s %s   (and re-run the job)"):format(
+      ("runner-guard: review and release it: testing ci release %s %s   (shows, asks, re-runs the job)"):format(
         repo,
         facts.sha
       )
     )
     sv.err(
-      ("runner-guard: without `testing` on the PATH: %s%s -n -i NONE --headless -u NONE -l %s ci trust %s %s   (and re-run the job)%s"):format(
+      ("runner-guard: without `testing` on the PATH: %s%s -n -i NONE --headless -u NONE -l %s ci release %s %s%s"):format(
         quoted and "& " or "",
         arg(nvim),
         arg(script),
@@ -815,7 +815,7 @@ function M.trust_pushed(stdin, sv, ctx)
       local good, why = made_here(cwd, lsha, rsha)
       if not good then
         sv.out(
-          ("not released (%s): %s; after a review: testing ci trust %s %s"):format(
+          ("not released (%s): %s; after a review: testing ci release %s %s"):format(
             lref,
             why,
             repo,
@@ -1268,5 +1268,11 @@ function M.main(argv, sv, ctx)
   sv.err(M.USAGE)
   return 2
 end
+
+-- the pieces `testing ci release` (testing.ci.release) builds on
+M.call_gh = gh
+M.repo_of_cwd = repo_of_cwd
+M.repo_key = repo_key
+M.is_sha = is_sha
 
 return M
