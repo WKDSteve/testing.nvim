@@ -540,8 +540,8 @@ local function check(sv, ctx)
     and facts.event ~= "pull_request"
     and facts.event ~= "pull_request_target"
   then
-    -- `testing` is not on the PATH: name the call that works from anywhere. A path with a blank is quoted;
-    -- PowerShell then needs a leading `&` before the quoted program, said in the line.
+    -- the short form first; then, for a machine without `testing` on the PATH, the call that works from anywhere.
+    -- A path with a blank is quoted; PowerShell then needs a leading `&` before the quoted program, said in the line.
     local nvim, script = tools(ctx)
     local function arg(p)
       return p:find("[%s]") and ('"%s"'):format(p) or p
