@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-ci-release/1/testing-ci-release.schema.json",
+  "title": "testing-ci-release/1",
+  "description": "One step of `testing ci release --json` (docs/RUNNER-GUARD.md): the repositories, the commits, what changed since the last reviewed commit, or the release with its re-runs. Free text from GitHub carries no control characters. A reader ignores unknown fields and refuses a higher schema.",
+  "type": "object",
+  "required": ["schema", "step", "exit"],
+  "properties": {
+    "schema": { "const": "testing-ci-release/1" },
+    "step": { "enum": ["usage", "repos", "commits", "show", "release"] },
+    "exit": { "enum": [0, 1, 2, 3] },
+    "problem": { "type": ["string", "null"], "description": "Why the step failed (exit 2 or 3)." },
+    "repo": { "type": ["string", "null"], "description": "owner/name, as given." },
+    "sha": { "$ref": "#/$defs/sha" },
+    "repos": { "type": "array", "items": { "$ref": "#/$defs/repo" } },
+    "commits": { "type": "array", "items": { "$ref": "#/$defs/commit" } },
+    "show": { "$ref": "#/$defs/show" },
+    "release": { "$ref": "#/$defs/release" }
+  },
+  "allOf": [
+    { "if": { "properties": { "step": { "const": "repos" }, "exit": { "const": 0 } } }, "then": { "required": ["repos"] } },
+    { "if": { "properties": { "step": { "const": "commits" }, "exit": { "const": 0 } } }, "then": { "required": ["repo", "commits"] } },
+    { "if": { "properties": { "step": { "const": "show" }, "exit": { "const": 0 } } }, "then": { "required": ["repo", "sha", "show"] } },
+    { "if": { "properties": { "step": { "const": "release" }, "exit": { "const": 0 } } }, "then": { "required": ["repo", "sha", "release"] } },
+    { "if": { "properties": { "exit": { "enum": [2, 3] } } }, "then": { "required": ["problem"] } }
+  ],
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "repo": {
+      "type": "object",
+      "required": ["name", "here", "reviewed"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "here": { "type": "boolean", "description": "The repository of the current folder (listed first)." },
+        "mode": { "enum": ["auto", "always", "off", null], "description": "The guard mode on the list; absent: not on it." },
+        "reviewed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "commit": {
+      "type": "object",
+      "required": ["sha", "title", "author", "date", "released"],
+      "properties": {
+        "sha": { "$ref": "#/$defs/sha" },
+        "title": { "type": "string", "maxLength": 200 },
+        "author": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "description": "As GitHub gives it (ISO 8601)." },
+        "released": { "type": "boolean", "description": "Already on the list of reviewed commits." }
+      }
+    },
+    "show": {
+      "type": "object",
+      "required": ["sha", "already", "compared", "commits", "files", "files_total", "truncated"],
+      "properties": {
+        "sha": { "$ref": "#/$defs/sha" },
+        "already": { "type": "boolean", "description": "The commit is on the list already; nothing was compared." },
+        "prev": { "type": ["string", "null"], "description": "The last reviewed commit; absent: none, review the whole tree." },
+        "compared": { "type": "boolean" },
+        "problem": { "type": ["string", "null"], "description": "Why GitHub could not compare." },
+        "status": { "type": ["string", "null"], "description": "ahead, behind, diverged, identical; anything but ahead means history was rewritten or the commit is on another branch." },
+        "total_commits": { "type": ["integer", "null"], "minimum": 0 },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sha", "author", "title"],
+            "properties": {
+              "sha": { "type": "string" },
+              "author": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "status"],
+            "properties": {
+              "path": { "type": "string" },
+              "previous": { "type": ["string", "null"] },
+              "status": { "type": "string" },
+              "flag": { "type": ["string", "null"], "description": "Why the file deserves a close look (.github, scripts, lockfile, ...)." }
+            }
+          }
+        },
+        "files_total": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean", "description": "GitHub lists at most 300 files." }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["already", "recorded", "reruns"],
+      "properties": {
+        "already": { "type": "boolean" },
+        "recorded": { "type": "boolean" },
+        "reruns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "was", "ok"],
+            "properties": {
+              "id": { "type": "integer" },
+              "name": { "type": "string" },
+              "was": { "enum": ["failure", "cancelled", "startup_failure", "timed_out"] },
+              "ok": { "type": "boolean" },
+              "problem": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

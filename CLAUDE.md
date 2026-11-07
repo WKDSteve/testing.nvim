@@ -1,6 +1,6 @@
 # testing.nvim (Test-Runner, CI-Pipeline, Cache)
 
-Lua-Plugin für Neovim; zusätzlich die Verträge `testing-export/1`, `testing-ci/1`, `testing-ci-commit/1`,
+Lua-Plugin für Neovim; zusätzlich die Verträge `testing-export/1`, `testing-ci/1`, `testing-ci-commit/1`, `testing-ci-release/1`,
 `testing-sheet-session/1` und `testing-sheet-driver/1` (`schemas/`). Konventionen wie in der Vorlage `nvim-plugin`.
 
 ## Vor jedem Commit (alles muss grün sein)

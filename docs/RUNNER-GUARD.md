@@ -85,7 +85,27 @@ testing ci release WKDSteve/tasks.nvim <sha> --yes  # nothing to ask (a script: 
 
 Without a terminal nothing is asked: then the repository, the commit and `--yes` must all be given, so a script never
 releases a commit it did not name. A bare `testing ci trust` without any argument stays refused (it would release the
-head of whatever the current folder names, unasked); `testing ci release` is the short way. The single steps:
+head of whatever the current folder names, unasked); `testing ci release` is the short way.
+
+**The steps one by one, as data (`--json`).** For the editor and testing-desktop each step of the wizard can be called
+on its own; `--json` prints one line, a document of `testing-ci-release/1` (`schemas/testing-ci-release/1/`, with a
+`.d.ts`), and never asks:
+
+```sh
+testing ci release --repos --json                          # step 1: the repositories (this folder first) with mode and count
+testing ci release WKDSteve/tasks.nvim --commits --json    # step 2: the last --count commits, `released` marked
+testing ci release WKDSteve/tasks.nvim <sha> --show --json # step 3: what changed, each file with its `flag`; records nothing
+testing ci release WKDSteve/tasks.nvim <sha> --yes --json  # step 5: the release and the re-runs (`release.reruns`)
+```
+
+Every document has `schema`, `step` (`repos`, `commits`, `show`, `release`, or `usage` for refused arguments), `exit`
+and, on exit 2 or 3, `problem`. `show` carries `already` (on the list, nothing compared), `prev`, `status` (anything but
+`ahead`: history rewritten or another branch), `commits`, and `files` with `flag` (`.github`, `scripts`, `lockfile`,
+...) and `truncated` (GitHub lists at most 300 files). Titles, authors and file names from GitHub reach the document
+without control characters. Without `--json` the same steps print text (`--repos`, `--commits`, `--show`). The release
+stays its own call with the full id the page showed: a UI never releases "the head", which may have moved.
+
+The single steps of the guard itself:
 
 ```sh
 testing ci trust WKDSteve/tasks.nvim --show        # what changed since the last reviewed commit; records nothing

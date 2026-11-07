@@ -664,12 +664,85 @@ local function repo_of_cwd(ctx, cwd)
   return o and n and (o .. "/" .. n) or nil
 end
 
+---Free text from GitHub (titles, names, file names) without control characters, at most `max` bytes.
+---@param v any
+---@param max integer
+---@return string
+local function clean(v, max)
+  local s = (type(v) == "string" or type(v) == "number") and tostring(v) or ""
+  return (s:gsub("%c", " "):sub(1, max))
+end
+M.clean = clean
+
+---@class Testing.RunnerGuard.Compare
+---@field prev string|nil The last reviewed commit (nil: none, review the whole tree).
+---@field compared boolean GitHub answered the comparison.
+---@field problem string|nil Why it did not.
+---@field status string|nil `ahead`, `behind`, `diverged`, `identical`.
+---@field total_commits integer|nil
+---@field commits { sha: string, author: string, title: string }[]
+---@field files { path: string, previous: string|nil, status: string, flag: string|nil }[]
+---@field files_total integer
+---@field truncated boolean The API lists at most 300 files.
+
+---What changed between the last reviewed commit and `sha`, as data (`summary` prints it).
+---@param repo string
+---@param prev string|nil
+---@param sha string
+---@param ctx? Testing.RunnerGuard.Ctx
+---@return Testing.RunnerGuard.Compare
+function M.compare(repo, prev, sha, ctx)
+  ---@type Testing.RunnerGuard.Compare
+  local r =
+    { prev = prev, compared = false, commits = {}, files = {}, files_total = 0, truncated = false }
+  if not prev then
+    return r
+  end
+  local text, err = gh(ctx, { "api", ("repos/%s/compare/%s...%s"):format(repo, prev, sha) })
+  local ok, doc = pcall(vim.json.decode, text or "")
+  if not text or not ok or type(doc) ~= "table" then
+    r.problem = clean(err or "not JSON", 300)
+    return r
+  end
+  r.compared = true
+  r.status = type(doc.status) == "string" and clean(doc.status, 20) or nil
+  r.total_commits = type(doc.total_commits) == "number" and doc.total_commits or nil
+  for _, c in ipairs(type(doc.commits) == "table" and doc.commits or {}) do
+    if type(c) == "table" then
+      local info = type(c.commit) == "table" and c.commit or {}
+      local author = type(info.author) == "table" and info.author or {}
+      r.commits[#r.commits + 1] = {
+        sha = clean(c.sha, 64),
+        author = clean(author.name or "?", 100),
+        title = clean(tostring(info.message or ""):match("^[^\n]*"), 200),
+      }
+    end
+  end
+  r.total_commits = r.total_commits or #r.commits
+  for _, f in ipairs(type(doc.files) == "table" and doc.files or {}) do
+    if type(f) == "table" then
+      local path = clean(f.filename, 500)
+      local previous = f.previous_filename and clean(f.previous_filename, 500) or nil
+      r.files[#r.files + 1] = {
+        path = path,
+        previous = previous,
+        status = clean(f.status, 20),
+        flag = M.flag(path) or (previous and M.flag(previous)) or nil,
+      }
+    end
+  end
+  r.files_total = #r.files
+  r.truncated = r.files_total >= 300
+  return r
+end
+
 ---@param sv table
 ---@param repo string
 ---@param prev string|nil
 ---@param sha string
 ---@param ctx? Testing.RunnerGuard.Ctx
 local function summary(sv, repo, prev, sha, ctx)
+  local r = M.compare(repo, prev, sha, ctx)
   if not prev then
     sv.out(
       ("no earlier reviewed commit of %s on the list: review the whole tree at %s"):format(
@@ -679,14 +752,12 @@ local function summary(sv, repo, prev, sha, ctx)
     )
     return
   end
-  local text, err = gh(ctx, { "api", ("repos/%s/compare/%s...%s"):format(repo, prev, sha) })
-  local ok, doc = pcall(vim.json.decode, text or "")
-  if not text or not ok or type(doc) ~= "table" then
+  if not r.compared then
     sv.out(
       ("cannot compare %s...%s (%s): review the tree yourself"):format(
         prev:sub(1, 12),
         sha:sub(1, 12),
-        tostring(err)
+        tostring(r.problem)
       )
     )
     return
@@ -694,39 +765,30 @@ local function summary(sv, repo, prev, sha, ctx)
   sv.out(
     ("since %s: %s commit(s), status %s"):format(
       prev:sub(1, 12),
-      tostring(doc.total_commits or #(doc.commits or {})),
-      tostring(doc.status)
+      tostring(r.total_commits),
+      tostring(r.status)
     )
   )
-  if doc.status ~= "ahead" then
+  if r.status ~= "ahead" then
     sv.out(
       "  note: the new commit is not a plain successor of the last reviewed one (history rewritten or other branch)"
     )
   end
-  for _, c in ipairs(doc.commits or {}) do
-    local msg = (c.commit and c.commit.message or ""):match("^[^\n]*"):gsub("%c", " "):sub(1, 70)
-    local who = c.commit and c.commit.author and c.commit.author.name or "?"
+  for _, c in ipairs(r.commits) do
     sv.out(
-      ("  commit %s  %-20s %s"):format(tostring(c.sha):sub(1, 10), tostring(who):sub(1, 20), msg)
+      ("  commit %s  %-20s %s"):format(c.sha:sub(1, 10), c.author:sub(1, 20), c.title:sub(1, 70))
     )
   end
-  local flagged, total = {}, 0
-  for _, f in ipairs(doc.files or {}) do
-    total = total + 1
-    local why = M.flag(tostring(f.filename)) or M.flag(tostring(f.previous_filename or ""))
-    if why then
-      flagged[#flagged + 1] = ("  look closely [%s] %s (%s)"):format(
-        why,
-        tostring(f.filename):gsub("%c", "?"),
-        tostring(f.status)
-      )
-    end
-  end
   sv.out(
-    ("  %d file(s) changed%s"):format(total, total >= 300 and " (the API lists at most 300)" or "")
+    ("  %d file(s) changed%s"):format(
+      r.files_total,
+      r.truncated and " (the API lists at most 300)" or ""
+    )
   )
-  for _, l in ipairs(flagged) do
-    sv.out(l)
+  for _, f in ipairs(r.files) do
+    if f.flag then
+      sv.out(("  look closely [%s] %s (%s)"):format(f.flag, f.path, f.status))
+    end
   end
 end
 
