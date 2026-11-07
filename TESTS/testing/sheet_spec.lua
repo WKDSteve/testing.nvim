@@ -565,6 +565,14 @@ return function(H)
               duration_ms = 0,
               notes = { "oil.nvim is not installed here" },
             },
+            {
+              id = "TESTS/s_spec.lua::sheet:silent",
+              file = "TESTS/s_spec.lua",
+              name = "sheet:silent",
+              status = "timeout",
+              duration_ms = 30000,
+              notes = { "state: leaks are not measured" },
+            },
           },
         })
       )
@@ -578,6 +586,11 @@ return function(H)
         cases["sheet:skipped"].message,
         "oil.nvim is not installed here",
         "a skip carries its reason from the notes of the IR (sheets run --all writes it there)"
+      )
+      eq(
+        cases["sheet:silent"].message,
+        nil,
+        "the note of a case that is not a skip is a side remark, never its reason"
       )
       local from_entries = report.collect({ root2 }, { cases = cases })
       eq(
