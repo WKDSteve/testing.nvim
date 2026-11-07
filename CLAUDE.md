@@ -48,3 +48,8 @@ Bericht steht das Urteil je Commit. Ein schon geprüfter Commit kommt sofort aus
 `--force` nur, wenn sich Werkzeuge oder Abhängigkeiten geändert haben. `--json=<datei>` liefert das Dokument
 `testing-ci-commit/1`, `--keep` lässt die Worktrees zum Nachstellen stehen (die `rerun`-Zeile nennt den Befehl).
 Mit `-- --cached` teilen Commit und Basis einen Cache und laufen schneller. Auf der Workstation läuft es nicht (wie jeder Lauf).
+
+**Sofort prüfen, nicht am Ende.** Jeden Commit gleich nach dem Erstellen mit `scripts/test.sh ci commit <sha>` im
+Hintergrund prüfen und währenddessen weiterarbeiten (immer nur ein `ci commit` zur Zeit); das Urteil vor dem Push und
+im Review lesen. Am Ende alle auf einmal (`--range`) kostet je Commit einen vollen Lauf plus den der Basis, mehrere
+am Stück dauern schnell 40 Minuten. Ein umgeschriebener Commit (Rebase, Amend) mit gleichem Baum behält sein Urteil.
