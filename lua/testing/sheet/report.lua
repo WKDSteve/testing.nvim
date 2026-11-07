@@ -83,6 +83,10 @@ function M.cases_from_ir(path)
       if not msg and type(c.error) == "table" and type(c.error.message) == "string" then
         msg = c.error.message
       end
+      -- a skip has no failure: its reason (the `requires` text of a sheet) is the first note
+      if not msg and type(c.notes) == "table" and type(c.notes[1]) == "string" then
+        msg = c.notes[1]
+      end
       out[c.name] = {
         id = tostring(c.id),
         file = tostring(c.file),

@@ -557,6 +557,14 @@ return function(H)
               duration_ms = 5,
               assertions = { { ok = false, msg = "boom\nsecond line" } },
             },
+            {
+              id = "TESTS/s_spec.lua::sheet:skipped",
+              file = "TESTS/s_spec.lua",
+              name = "sheet:skipped",
+              status = "skip",
+              duration_ms = 0,
+              notes = { "oil.nvim is not installed here" },
+            },
           },
         })
       )
@@ -565,6 +573,11 @@ return function(H)
         { cases["sheet:auto"].status, cases["sheet:red"].message },
         { "pass", "boom" },
         "IR cases by name, first line of the first failure"
+      )
+      eq(
+        cases["sheet:skipped"].message,
+        "oil.nvim is not installed here",
+        "a skip carries its reason from the notes of the IR (sheets run --all writes it there)"
       )
       local from_entries = report.collect({ root2 }, { cases = cases })
       eq(
