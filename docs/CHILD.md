@@ -394,6 +394,31 @@ Options: `--pool-size <n>` (default `min(--jobs, 4)`, never more than `--jobs`),
 `--no-pool-reuse`, `.testing.lua` `pool = { size, reuse }`. `testing doctor` and `:checkhealth testing`
 show what is in effect.
 
+## Stand-ins for platform programs (`testing.fake_programs`)
+
+A feature that runs `open -R`, `osascript`, `trash` or `xdg-open` can be checked for the command it would build without
+a Mac or a desktop: a folder of stand-ins goes first on the `PATH`, every call is recorded (argv, working directory,
+optionally stdin), and `as("macos")` makes `testing.platform` answer for another system.
+
+```lua
+local fake = require("testing.fake_programs").new({ "open", osascript = { stdout = "picked", exit_code = 3 } })
+fake:as("macos", function()
+  fake:with_path(function()
+    feature.reveal("/tmp/a.txt")          -- runs `open -R /tmp/a.txt`
+  end)
+end)
+-- fake:calls("open")[1].argv  == { "-R", "/tmp/a.txt" }
+fake:close()
+```
+
+* `fake:path()` is the value for the `PATH` of a child editor (`env` of the child); `fake:with_path(fn)` does it for
+  this process and puts the old `PATH` back.
+* A stand-in is a `.cmd` on Windows and an `sh` script elsewhere. A program can be given `exit_code`, `stdout`, `stderr`;
+  `stdin = true` records standard input (POSIX only; off by default, because reading an inherited terminal blocks).
+* It proves what would be called, never what the system does with it. On Windows a bare name is found only through
+  `exepath` (a `.cmd` is not found by `vim.system({ "open" })`), and an empty argument ends the argument list.
+* The guard (`process_net`) must allow the program names: list them in `allow_exec` or tag the case `@spawn`.
+
 ## Limits (honest)
 
 * `settle` is a heuristic (above). `screen()` attributes are not highlight groups.
