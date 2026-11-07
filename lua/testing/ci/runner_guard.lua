@@ -548,7 +548,13 @@ local function check(sv, ctx)
     end
     local quoted = nvim:find("[%s]") ~= nil
     sv.err(
-      ("runner-guard: review it, then: %s%s -n -i NONE --headless -u NONE -l %s ci trust %s %s   (and re-run the job)%s"):format(
+      ("runner-guard: review it, then: testing ci trust %s %s   (and re-run the job)"):format(
+        repo,
+        facts.sha
+      )
+    )
+    sv.err(
+      ("runner-guard: without `testing` on the PATH: %s%s -n -i NONE --headless -u NONE -l %s ci trust %s %s   (and re-run the job)%s"):format(
         quoted and "& " or "",
         arg(nvim),
         arg(script),
@@ -953,7 +959,22 @@ function M.trust_main(argv, sv, ctx)
   local repos = M.read(path)
   local entry = repos[key]
   local prev = entry and entry.shas[#entry.shas] and entry.shas[#entry.shas].sha or nil
-  summary(sv, repo, prev ~= full and prev or nil, full, ctx)
+  local already = false
+  for _, s in ipairs(entry and entry.shas or {}) do
+    already = already or s.sha == full
+  end
+  if already then
+    -- say it as it is: a "no earlier reviewed commit" line for a commit that IS on the list misleads
+    sv.out(
+      ("%s: commit %s is already on the list of reviewed commits"):format(repo, full:sub(1, 12))
+    )
+    if a.show then
+      sv.out("(--show: nothing recorded)")
+      return 0
+    end
+  else
+    summary(sv, repo, prev, full, ctx)
+  end
   if a.show then
     sv.out("(--show: nothing recorded)")
     return 0

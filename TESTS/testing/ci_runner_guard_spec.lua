@@ -290,6 +290,11 @@ return function(H)
     has(text, "JOB REFUSED", "check: ... loudly")
     has(
       text,
+      "review it, then: testing ci trust WKDSteve/tasks.nvim " .. SHA,
+      "check: ... the short form"
+    )
+    has(
+      text,
       "/x/nvim -n -i NONE --headless -u NONE -l /x/scripts/testing.lua ci trust WKDSteve/tasks.nvim "
         .. SHA,
       "check: ... with the command to release it (the real call, `testing` is not on the PATH)"
@@ -411,6 +416,12 @@ return function(H)
     has(text, "nothing recorded", "show: records nothing")
     local repos = guard.read(guard.store_path(root))
     eq(#repos["o/r"].shas, 1, "show: the list is unchanged")
+
+    o = sink()
+    eq(guard.trust_main({ "o/r", SHA, "--show" }, o.sv, ctx), 0, "show: a released commit")
+    text = joined(o)
+    has(text, "already on the list of reviewed commits", "show: a released commit says so")
+    lacks(text, "no earlier reviewed commit", "show: ... not the misleading 'no earlier' line")
 
     o = sink()
     eq(
