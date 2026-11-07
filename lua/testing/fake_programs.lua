@@ -39,9 +39,14 @@ Fake.__index = Fake
 
 local M = {}
 
+---The system the stand-ins run on, fixed when this module loads: `Fake:as()` changes what `testing.platform` answers
+---for the feature under test, and the stand-ins (`.cmd` or `sh`, `;` or `:` in the PATH) must not follow it. An
+---`as()` needs an instance, so the module is always loaded before one is active.
+local HOST_WINDOWS = require("testing.platform").is_windows()
+
 ---@return boolean
 local function windows()
-  return require("testing.platform").is_windows()
+  return HOST_WINDOWS
 end
 
 local function sep()
