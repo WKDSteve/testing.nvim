@@ -26,8 +26,11 @@
 ---     updated   it differs and updating is on: the file is rewritten          ok (the message says so)
 ---     missing   no file on CI (`CI` set): never written there                 fail
 ---     differ    it differs: the message shows the first differing rows        fail
----     error     the file could not be read or written                        fail
+---     error     the file could not be read or written, or was refused        fail
 ---
+---   The file is read as untrusted (a pull request can write it, SEC-33): only a plain file (no link, no
+---   folder) inside the project (links of the folders resolved; a new file is not written through a linked
+---   folder either), at most `MAX_BYTES` (1 MiB); control characters in the diff are shown as `\xNN`.
 ---   Updating is on with `opts.update = true` or `TESTING_UPDATE_SNAPSHOTS=1` (what
 ---   `testing run --update-snapshots` sets; the variable reaches child editors).
 --- * `expect(ok_fn, name, shot, opts)` hands the verdict to the harness (`H.ok`, a collecting
@@ -472,6 +475,90 @@ local function write(path, text)
   return true
 end
 
+-- ---------------------------------------------------------------------------------------------- untrusted files
+
+---A snapshot is a file of the repository, so a pull request can write it: it is read as untrusted (SEC-33).
+M.MAX_BYTES = 1024 * 1024
+
+---@param a string
+---@param b string
+---@return boolean
+local function same_path(a, b)
+  if require("testing.platform").is_windows() then
+    return a:lower() == b:lower()
+  end
+  return a == b
+end
+
+---`path` resolved (links followed) lies in `root` resolved. A path that is not there yet is judged by the
+---nearest folder above it that is.
+---@param path string
+---@param root string
+---@return boolean
+local function inside_root(path, root)
+  local uv = vim.uv or vim.loop
+  local real_root = uv.fs_realpath(root)
+  if not real_root then
+    return false
+  end
+  real_root = norm_path(real_root)
+  local p = path
+  local real = uv.fs_realpath(p)
+  while not real do
+    local parent = vim.fs.dirname(p)
+    if not parent or parent == p then
+      return false
+    end
+    p = parent
+    real = uv.fs_realpath(p)
+  end
+  real = norm_path(real)
+  return same_path(real, real_root) or same_path(real:sub(1, #real_root + 1), real_root .. "/")
+end
+
+---Control characters of an untrusted file shown as `\xNN` (a tab stays): nothing reaches the terminal raw.
+---@param s string
+---@return string
+local function visible(s)
+  return (
+    s:gsub("[%c\127]", function(c)
+      return c == "\t" and c or ("\\x%02x"):format(c:byte())
+    end)
+  )
+end
+
+---Read a snapshot as untrusted: a plain file (no link, no folder), inside the project, at most `M.MAX_BYTES`.
+---@param path string
+---@param root string
+---@return string|nil text, string|nil problem (both nil: there is no file)
+local function read_untrusted(path, root)
+  local uv = vim.uv or vim.loop
+  local st = uv.fs_lstat(path)
+  if not st then
+    return nil, nil
+  end
+  if st.type ~= "file" then
+    return nil,
+      ("is a %s, not a plain file: refused (a snapshot is read as untrusted)"):format(st.type)
+  end
+  if st.size > M.MAX_BYTES then
+    return nil, ("has %d bytes, more than %d: refused"):format(st.size, M.MAX_BYTES)
+  end
+  if not inside_root(path, root) then
+    return nil, "leads out of the project (a linked folder): refused"
+  end
+  local f, err = io.open(path, "rb")
+  if not f then
+    return nil, "cannot be read: " .. tostring(err)
+  end
+  local text = f:read(M.MAX_BYTES + 1) or ""
+  f:close()
+  if #text > M.MAX_BYTES then
+    return nil, ("has more than %d bytes: refused"):format(M.MAX_BYTES)
+  end
+  return text
+end
+
 ---Compare a screen with its snapshot file (see the module header for the outcomes).
 ---@param name string
 ---@param shot Testing.Screen.Shot
@@ -493,9 +580,21 @@ function M.compare(name, shot, opts)
     ci = truthy(os.getenv("CI"))
   end
   local res = { path = path, rel = rel, actual = actual }
+  local root = path:sub(1, #path - #rel - 1)
+  local function refuse(problem)
+    res.ok, res.status = false, "error"
+    res.message = ("screen snapshot %s %s"):format(rel, problem)
+    return res
+  end
 
-  local f = io.open(path, "rb")
-  if not f then
+  local expected, problem = read_untrusted(path, root)
+  if problem then
+    return refuse(problem)
+  end
+  if not expected then
+    if not inside_root(path, root) then
+      return refuse("would be written out of the project (a linked folder): refused")
+    end
     if ci and not update then
       res.ok, res.status = false, "missing"
       res.message = ("screen snapshot %s is missing (CI writes none): run the spec locally and commit the file"):format(
@@ -510,14 +609,14 @@ function M.compare(name, shot, opts)
       or ("screen snapshot %s could not be written: %s"):format(rel, err)
     return res
   end
-  local expected = (f:read("*a") or ""):gsub("\r\n", "\n")
-  f:close()
+  expected = expected:gsub("\r\n", "\n")
   if expected == actual then
     res.ok, res.status = true, "match"
     res.message = ("screen snapshot %s matches"):format(rel)
     return res
   end
   local diff, count = diff_rows(expected, actual)
+  diff = table.concat(vim.tbl_map(visible, vim.split(diff, "\n", { plain = true })), "\n")
   if update then
     local wrote, err = write(path, actual)
     res.ok = wrote

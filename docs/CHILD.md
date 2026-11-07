@@ -196,6 +196,12 @@ Trailing blanks are cut in both blocks, line endings are LF (a CRLF checkout sti
 | no file, `CI` set | **fail**: CI never writes a snapshot |
 | it differs | **fail**, the message shows the first 12 differing lines (`-` file, `+` screen) |
 | it differs, `--update-snapshots` (or `opts.update`, `TESTING_UPDATE_SNAPSHOTS=1`) | the file is rewritten, pass |
+| the file is a link, a folder, larger than 1 MiB, or lies behind a linked folder outside the project | **fail**, nothing is shown or written |
+
+**A snapshot is untrusted input** (SEC-33, like the cache entries): a pull request can write it, and CI prints the
+diff into its log. So only a plain file inside the project is read (links of the folders on the way resolved; a
+new file is not written through a linked folder either), at most `screen.MAX_BYTES` (1 MiB), and a control
+character of the file reaches the message only as `\xNN` (no escape sequence reaches a terminal or a log viewer).
 
 **Masks** hide what changes between runs. A string is a Lua pattern (`"%d%d:%d%d"`), `{ text = "..." }` a
 literal, `{ row = 24 }` a whole row, `{ row = 1, col = 70, cols = 11, rows = 1 }` a rectangle of screen cells

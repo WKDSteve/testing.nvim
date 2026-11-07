@@ -17,6 +17,12 @@ return function(H)
       msg .. " (got " .. tostring(haystack):sub(1, 600) .. ")"
     )
   end
+  local function lacks(haystack, needle, msg)
+    return ok(
+      type(haystack) == "string" and haystack:find(needle, 1, true) == nil,
+      msg .. " (found " .. vim.inspect(needle) .. ")"
+    )
+  end
   local screen = require("testing.screen")
   local root = vim.fs.normalize(vim.fn.tempname()) .. "-screen"
   vim.fn.mkdir(root .. "/TESTS/sub", "p")
@@ -282,6 +288,72 @@ return function(H)
 
       local bad = screen.compare("a/b", s1, o())
       eq({ bad.ok, bad.status }, { false, "error" }, "a bad name is an error, not a crash")
+    end
+
+    -- the file is read as untrusted (SEC-33): a pull request can write it
+    do
+      local uv = vim.uv or vim.loop
+      local dir = vim.fs.dirname(screen.path("one", { root = root, file = spec }))
+      local function put(name, text)
+        local f = assert(io.open(dir .. "/" .. name .. ".snap", "wb"))
+        f:write(text)
+        f:close()
+      end
+
+      -- control characters of the file reach the message only as \xNN
+      put("esc", "testing.nvim screen v1\n\27]0;owned\7\27[31mred\n")
+      local e = screen.compare("esc", s1, o())
+      eq(e.status, "differ", "a hostile file differs")
+      lacks(e.message, "\27", "no escape character reaches the terminal")
+      lacks(e.message, "\7", "no bell either")
+      has(e.message, "\\x1b[31mred", "it is shown as \\x1b")
+
+      -- too large
+      local max = screen.MAX_BYTES
+      screen.MAX_BYTES = 64
+      put("big", ("x"):rep(65))
+      local b = screen.compare("big", s1, o({ update = true }))
+      screen.MAX_BYTES = max
+      eq({ b.ok, b.status }, { false, "error" }, "a file above MAX_BYTES is refused")
+      has(b.message, "more than 64", "the message says why")
+      eq(#slurp(b.path), 65, "and an update does not overwrite it")
+
+      -- a folder where the file should be
+      vim.fn.mkdir(dir .. "/folder.snap", "p")
+      local fo = screen.compare("folder", s1, o())
+      eq({ fo.ok, fo.status }, { false, "error" }, "a folder is refused")
+      has(fo.message, "not a plain file", "the message says why")
+
+      -- a linked snapshot folder that leads out of the project: nothing read, nothing written
+      local outside = vim.fs.normalize(vim.fn.tempname())
+      vim.fn.mkdir(outside, "p")
+      local sf = assert(io.open(outside .. "/x.snap", "wb"))
+      sf:write("SECRET-TOKEN\n")
+      sf:close()
+      local lspec = root .. "/TESTS/sub/linked_spec.lua"
+      local ldir = vim.fs.dirname(screen.path("x", { root = root, file = lspec }))
+      vim.fn.mkdir(vim.fs.dirname(ldir), "p")
+      local linked = uv.fs_symlink(outside, ldir, { junction = true, dir = true })
+      ok(linked, "setup: a linked folder (junction on Windows)")
+      if linked then
+        local lo = vim.tbl_extend("force", base, { file = lspec })
+        local r = screen.compare("x", s1, lo)
+        eq({ r.ok, r.status }, { false, "error" }, "a file behind a linked folder is refused")
+        has(r.message, "leads out of the project", "the message says why")
+        lacks(r.message, "SECRET", "its content is not shown")
+        local n = screen.compare("new", s1, lo)
+        eq({ n.ok, n.status }, { false, "error" }, "a new file is not written through the link")
+        eq(slurp(outside .. "/new.snap"), nil, "nothing landed outside the project")
+      end
+
+      -- a snapshot that is a link to a file elsewhere (needs the right to create links on Windows)
+      local fl = uv.fs_symlink(outside .. "/x.snap", dir .. "/flink.snap")
+      if fl then
+        local r = screen.compare("flink", s1, o())
+        eq({ r.ok, r.status }, { false, "error" }, "a linked file is refused")
+        lacks(r.message, "SECRET", "its content is not shown")
+      end
+      vim.fn.delete(outside, "rf")
     end
 
     -- expect hands the verdict to the harness; check raises
