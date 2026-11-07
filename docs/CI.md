@@ -653,6 +653,24 @@ never the token) or `token_error`, `workflow` (the `--workflow`), and `repos`, s
 `event`, `attempt`), `os` (per cell `state`, `url` and `job`: the job that decided it), `non_gating`, `note`, `error`
 and `config_error`. Keys are sorted and the same answers give the same bytes.
 
+**History: `--history[=N]`.** `testing ci remote --history[=N]` (default 30, at most 100) looks at the last N completed
+push runs of the workflow on the branch instead of the head commit only, and counts the jobs per system as
+`ok/red/cancelled` (a run still under way is counted apart). Its point is the line `MACOS RED: ONLY/ALSO/NO PEER`: every
+red macOS job is compared with the same job on the other systems of the same run. *Same job* means the job name without
+the system words (`ubuntu`, `windows`, `macos`, `linux`, an image version, `latest`): `suite (macos-latest)` and
+`suite (ubuntu-latest)` are one job. `ONLY`: not red on any other system, so macOS is the problem. `ALSO`: red there too,
+so it is not. `NO PEER`: no such job on another system, no comparison, counted apart. Only `failure` is red (a job
+cancelled by a newer push says nothing), jobs of `ci_remote.non_gating` names are left out. The same breakdown exists for
+ubuntu and windows in `--json`: the document `testing-ci-remote-history/1` has `schema`, `generated_at`, `n`, `workflow`,
+`token_source` or `token_error`, and per repository `repo`, `owner`, `dir`, `branch`, `workflow`, `runs` (`considered`,
+`completed`, `pending`), `systems` (per system the job counts `success`, `failure`, `cancelled`, `skipped`, `other`),
+`red` (per system `total`, `only`, `also`, `no_peer` and `only_runs`, the run ids where that system was red alone),
+`note` and `error`. The cost is one request for the run list (conditional) and one per completed run for its jobs; the
+jobs of a completed run never change, so they are stored (`history_<owner>_<repo>_<dir hash>.json` next to the other
+cache files) and asked for once. The run list answers one page of 100 runs of the branch, other workflows among them:
+with fewer than N runs of the workflow the record says so. Exit code `0`, or `3` when a repository could not be read
+(the history reports, it does not gate).
+
 **Which repositories.** The roots named on the command line (default: the current directory), and with
 `--repos-root=<dir>` (repeatable) every directory directly below `<dir>` that has a `.github/workflows` directory and a
 GitHub origin; a name containing `vault` is left out (notes, tasks, rules: no code). lib.nvim counts, it has workflows

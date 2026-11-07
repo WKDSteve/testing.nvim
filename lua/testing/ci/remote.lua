@@ -81,13 +81,15 @@ end
 local RED = { failure = true, rejected = true, cancelled = true, no_runner = true }
 
 M.USAGE = table.concat({
-  "usage: testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]",
+  "usage: testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>] [--history[=N]]",
   "  <root>              a repository (default: the current directory)",
   "  --repos-root=<dir>  every directory directly below <dir> with a GitHub origin and .github/workflows",
   '                      (names containing "vault" are left out; repeatable)',
   "  --json              print the document testing-ci-remote/1 instead of the table",
   '  --workflow=<name>   the workflow of every repository (default: ci_remote.workflow, "CI")',
   "  --state-dir=<dir>   where the ETag cache lives (default: stdpath('state'))",
+  "  --history[=N]       the last N push runs (default 30, at most 100) per repository and system instead of the head",
+  "                      commit only, and how often macOS (or another system) was red ALONE (docs/CI.md)",
   "  token: $" .. M.TOKEN_ENV .. " (read-only), else `gh auth token`; never GITHUB_TOKEN",
   "  exit: 0 nothing red, 1 failure/rejected/cancelled/no_runner, 2 usage, 3 a repository could not be fetched",
 }, "\n")
@@ -143,6 +145,7 @@ M.deps = {
 ---@field roots string[]
 ---@field repos_roots string[]
 ---@field json boolean
+---@field history? integer
 ---@field workflow? string
 ---@field state_dir? string
 ---@field help boolean
@@ -164,6 +167,14 @@ function M.parse(argv)
       args.help = true
     elseif key == "json" and value == nil then
       args.json = true
+    elseif key == "history" then
+      local n = value == nil and require("testing.ci.remote_history").DEFAULT or tonumber(value)
+      local max = require("testing.ci.remote_history").MAX
+      if not n or n ~= math.floor(n) or n < 1 or n > max then
+        return nil,
+          ("--history takes a whole number from 1 to %d (got %s)"):format(max, tostring(value))
+      end
+      args.history = n
     elseif key and VALUED[key] then
       if value == nil then
         i = i + 1
@@ -1150,6 +1161,8 @@ function M.collect(repos, opts)
 end
 
 ---The document `testing-ci-remote/1`.
+M.repo_config = repo_config
+
 ---@param records table[]
 ---@param info table
 ---@param opts { workflow?: string, state_dir?: string }
@@ -1291,6 +1304,38 @@ function M.render(records)
   return lines
 end
 
+---`testing ci remote --history[=N]` for the resolved `repos`.
+---@param args Testing.Ci.Remote.Args
+---@param repos table[]
+---@param state_dir string
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@return integer exit_code
+function M.history_main(args, repos, state_dir, sv)
+  local history = require("testing.ci.remote_history")
+  local opts = { n = args.history, workflow = args.workflow, state_dir = state_dir }
+  local records, info = history.collect(repos, opts)
+  if #records == 0 then
+    sv.err("testing ci remote: no repository with a GitHub origin and .github/workflows found")
+    return M.EXIT_USAGE
+  end
+  if args.json then
+    sv.out(require("lib.nvim.json.canonical").encode(history.document(records, info, opts)))
+  else
+    for _, line in ipairs(history.render(records)) do
+      sv.out(line)
+    end
+  end
+  if info.token_error then
+    sv.err(
+      ("testing ci remote: no GitHub token (%s); set $%s (read-only) or run `gh auth login`"):format(
+        info.token_error,
+        M.TOKEN_ENV
+      )
+    )
+  end
+  return history.exit_code(records)
+end
+
 ---`testing ci remote ...`.
 ---@param argv string[] The arguments after `remote`.
 ---@param sv { out: fun(s: string), err: fun(s: string), state_dir?: string }
@@ -1316,6 +1361,9 @@ function M.main(argv, sv)
     return M.EXIT_USAGE
   end
   local state_dir = args.state_dir or sv.state_dir or vim.fn.stdpath("state")
+  if args.history then
+    return M.history_main(args, repos, state_dir, sv)
+  end
   local records, info = M.collect(repos, { workflow = args.workflow, state_dir = state_dir })
   if #records == 0 then
     sv.err("testing ci remote: no repository with a GitHub origin and .github/workflows found")
