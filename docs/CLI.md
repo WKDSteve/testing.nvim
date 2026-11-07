@@ -18,6 +18,13 @@ the current directory and hands the exit code through; without `nvim` on the `PA
 `testing: nvim is not on the PATH: nothing ran` and exits with `3`, and an exit code above `3` (a crash of the
 editor) is named on stderr.
 
+In PowerShell a `.cmd` file has one flaw: after Ctrl-C, cmd.exe asks "Terminate batch job (Y/N)?". A function
+`testing` in the PowerShell profile avoids it: it finds `testing.cmd` on the `PATH` and runs the same `nvim` line
+directly (a function wins over a program of the same name). PowerShell keeps the `--` of a function call for itself
+(`testing ci commit <sha> -- --cached`), so the function puts it back from the parsed call, and refuses (exit `2`)
+when it cannot place it (a `@splat` before the `--`). The author's profile carries it (repository `Configs`,
+`shells/pwsh/Microsoft.PowerShell_profile.ps1`, section 11); copy it from there.
+
 For this repository `scripts/test.sh` is the same thing with an isolated state directory:
 
 ```sh
