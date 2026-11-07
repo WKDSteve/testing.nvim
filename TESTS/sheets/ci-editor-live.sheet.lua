@@ -44,13 +44,13 @@ return {
       note = "the live buffer opens",
     },
     {
-      wait = [[(function() for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.bo[b].filetype == "testing-ci" then return table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "\n"):find("== slow", 1, true) ~= nil end end end)()]],
+      wait = [[(function() for _, b in ipairs(vim.api.nvim_list_bufs()) do if vim.bo[b].filetype == "testing-ci" then local t = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "\n") return t:find("== slow", 1, true) ~= nil and t:find("\n   ... ", 1, true) ~= nil end end end)()]],
       timeout = 20000,
-      note = "progress: the slow step shows up in the buffer while the run is going",
+      note = "progress: the slow step and the status line below it are in the buffer (the state, not a time: the first tick of the status line comes before or after the step's header, depending on the load)",
     },
     {
       screen = "live",
-      masks = { { row = 11 }, { row = 12 }, { row = 23 } }, -- the step's command line (path of nvim) and the buffer name (temp dir)
+      masks = { { row = 11 }, { row = 12 }, { row = 13 }, { row = 23 } }, -- the step's command line (path of nvim), the status line (its clock) and the buffer name (temp dir)
       note = "the live view while the slow step runs",
     },
     {

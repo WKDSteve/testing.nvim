@@ -578,7 +578,21 @@ function M.open_view(root)
         local n = vim.api.nvim_buf_line_count(buf)
         vim.api.nvim_buf_set_lines(buf, n - 1, n, false, text and { text } or {})
       elseif text then
+        -- a cursor at the end of the output stays at the end when the status line is added below it: whether the
+        -- first tick comes before or after the first output line must not decide where the cursor ends up
+        local at_end = {}
+        local count = vim.api.nvim_buf_line_count(buf)
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          if
+            vim.api.nvim_win_get_buf(win) == buf and vim.api.nvim_win_get_cursor(win)[1] == count
+          then
+            at_end[#at_end + 1] = win
+          end
+        end
         vim.api.nvim_buf_set_lines(buf, pristine() and 0 or -1, -1, false, { text })
+        for _, win in ipairs(at_end) do
+          pcall(vim.api.nvim_win_set_cursor, win, { vim.api.nvim_buf_line_count(buf), 0 })
+        end
       end
       status_on = text ~= nil
       vim.bo[buf].modifiable = false
