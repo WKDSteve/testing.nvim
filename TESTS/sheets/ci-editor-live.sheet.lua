@@ -49,8 +49,12 @@ return {
       note = "progress: the slow step and the status line below it are in the buffer (the state, not a time: the first tick of the status line comes before or after the step's header, depending on the load)",
     },
     {
+      lua = [[for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "testing-ci" then vim.wo[w].wrap = false end end]],
+      note = "the header line holds the path of nvim, longer on some machines: without wrapping it is one row everywhere, so the status line and the cursor sit in the same row on every machine",
+    },
+    {
       screen = "live",
-      masks = { { row = 11 }, { row = 12 }, { row = 13 }, { row = 23 } }, -- the step's command line (path of nvim), the status line (its clock) and the buffer name (temp dir)
+      masks = { { row = 11 }, { row = 12 }, { row = 23 } }, -- the step's command line (path of nvim), the status line (its clock) and the buffer name (temp dir)
       note = "the live view while the slow step runs",
     },
     {
