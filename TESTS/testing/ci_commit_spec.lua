@@ -545,6 +545,21 @@ return function(H)
       { { "--file", "TESTS/a_spec.lua" }, true },
       "base: a backslash path is the same file"
     )
+    -- the finding of a spec whose assertion sits in a helper: the base runs the spec file, not the helper
+    -- (`--file lua/testing/sheet/init.lua` selects no spec, the base ended with exit 2 and the verdict was unclassified)
+    out, narrowed = commit.base_suite_args({
+      {
+        step = "suite",
+        file = "lua/testing/sheet/init.lua",
+        spec = "TESTS/b_spec.lua",
+        text = "boom",
+      },
+    }, {}, tree)
+    eq(
+      { out, narrowed },
+      { { "--file", "TESTS/b_spec.lua" }, true },
+      "base: the spec file of a finding in a helper"
+    )
     out, narrowed = commit.base_suite_args(
       { red("TESTS/a_spec.lua"), red("TESTS/renamed_spec.lua") },
       {},

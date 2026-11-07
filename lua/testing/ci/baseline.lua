@@ -18,6 +18,7 @@ local M = {}
 ---@class Testing.Ci.Baseline.Item
 ---@field step string
 ---@field file? string
+---@field spec? string The spec file that reruns a suite finding (`file` can be a helper the assertion sits in).
 ---@field line? integer
 ---@field col? integer
 ---@field text string
@@ -66,6 +67,7 @@ local function items_of(step)
     items[#items + 1] = {
       step = step.name,
       file = nonnil(f.file),
+      spec = nonnil(f.spec),
       line = nonnil(f.line),
       col = nonnil(f.col),
       text = tostring(nonnil(f.text) or ""),

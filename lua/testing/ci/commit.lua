@@ -508,9 +508,10 @@ function M.confirm(snap, root, profile, new_items, suite_args)
       end
       local sel, seen = vim.deepcopy(suite_args), {}
       for it in pairs(pending) do
-        if not seen[it.file] then
-          seen[it.file] = true
-          vim.list_extend(sel, { "--file", it.file })
+        local spec = it.spec or it.file
+        if not seen[spec] then
+          seen[spec] = true
+          vim.list_extend(sel, { "--file", spec })
         end
       end
       local code, doc = M.run_ci(snap, root, extra, sel)
@@ -524,12 +525,12 @@ function M.confirm(snap, root, profile, new_items, suite_args)
         if s.name == step and baseline.is_red(s) then
           red_whole = red_whole or #(s.findings or {}) == 0
           for _, f in ipairs(s.findings or {}) do
-            red_files[tostring(f.file or ""):gsub("\\", "/")] = true
+            red_files[tostring(f.spec or f.file or ""):gsub("\\", "/")] = true
           end
         end
       end
       for it in pairs(pending) do
-        if not red_whole and not red_files[it.file:gsub("\\", "/")] then
+        if not red_whole and not red_files[(it.spec or it.file):gsub("\\", "/")] then
           flaky_set[it] = true
           pending[it] = nil
         end
@@ -576,7 +577,7 @@ function M.base_suite_args(items, suite_args, base_tree)
       if it.whole or not it.file or it.file == "" then
         return suite_args, false
       end
-      local rel = it.file:gsub("\\", "/")
+      local rel = (it.spec or it.file):gsub("\\", "/")
       if not seen[rel] then
         seen[rel] = true
         if not vim.uv.fs_stat(base_tree .. "/" .. rel) then

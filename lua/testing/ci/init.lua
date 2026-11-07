@@ -1447,8 +1447,13 @@ function M.main(argv, sv)
   for _, r in ipairs(results) do
     local findings = {}
     for _, f in ipairs(r.findings or {}) do
-      findings[#findings + 1] =
-        { file = f.file, line = f.line or vim.NIL, col = f.col or vim.NIL, text = f.text }
+      findings[#findings + 1] = {
+        file = f.file,
+        spec = f.spec,
+        line = f.line or vim.NIL,
+        col = f.col or vim.NIL,
+        text = f.text,
+      }
     end
     steps_doc[#steps_doc + 1] = {
       name = r.name,

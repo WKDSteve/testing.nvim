@@ -26,6 +26,7 @@ M.MAX_FINDINGS = 200
 
 ---@class Testing.Ci.Finding
 ---@field file string
+---@field spec? string The spec file of a suite finding (the file `--file` reruns); `file` is where it failed.
 ---@field line? integer
 ---@field col? integer
 ---@field text string
@@ -229,8 +230,12 @@ function M.ir_findings(ir)
         local name = case.name or case.id or "?"
         -- the IR normalizes the repository to `<REPO>`; a finding is relative to the root
         local file = tostring(failed and failed.file or case.file or "?"):gsub("^<REPO>[/\\]", "")
+        -- the spec file of the case: the failed assertion can sit in a helper (`lua/testing/sheet/init.lua`), and
+        -- what reruns the case (`--file`) is the spec file, never the helper
+        local spec = type(case.file) == "string" and (case.file:gsub("^<REPO>[/\\]", "")) or nil
         list[#list + 1] = {
           file = file,
+          spec = spec,
           line = failed and failed.line or case.line,
           text = ("%s %s: %s"):format(case.status, name, (tostring(why):match("[^\n]*"))),
         }

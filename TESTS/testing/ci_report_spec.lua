@@ -89,15 +89,41 @@ return function(H)
       },
     })
     eq(ir_n, 2, "ir: the two red cases")
+    eq(ir_f[1], {
+      file = "TESTS/a_spec.lua",
+      spec = "TESTS/a_spec.lua",
+      line = 9,
+      text = "fail bad: values differ",
+    }, "ir: at the failed assertion, its first line")
+    eq(ir_f[2], {
+      file = "TESTS/b_spec.lua",
+      spec = "TESTS/b_spec.lua",
+      line = 2,
+      text = "error b::boom: attempt to index nil",
+    }, "ir: an error at the case")
+    -- an assertion in a helper (a sheet's `expect`): `file` is the helper, `spec` the file that reruns the case
+    local helper = report.ir_findings({
+      cases = {
+        {
+          id = "sheet",
+          file = "<REPO>/TESTS/testing/ci_editor_sheet_spec.lua",
+          status = "fail",
+          assertions = {
+            {
+              ok = false,
+              kind = "ok",
+              msg = "differs",
+              file = "<REPO>/lua/testing/sheet/init.lua",
+              line = 683,
+            },
+          },
+        },
+      },
+    })
     eq(
-      ir_f[1],
-      { file = "TESTS/a_spec.lua", line = 9, text = "fail bad: values differ" },
-      "ir: at the failed assertion, its first line"
-    )
-    eq(
-      ir_f[2],
-      { file = "TESTS/b_spec.lua", line = 2, text = "error b::boom: attempt to index nil" },
-      "ir: an error at the case"
+      { helper[1].file, helper[1].spec },
+      { "lua/testing/sheet/init.lua", "TESTS/testing/ci_editor_sheet_spec.lua" },
+      "ir: a failure in a helper names the helper and, apart, the spec file"
     )
     eq({ report.ir_findings(nil) }, { {}, 0 }, "ir: no IR, no findings")
 
