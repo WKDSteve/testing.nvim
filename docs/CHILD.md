@@ -415,8 +415,9 @@ fake:close()
   this process and puts the old `PATH` back.
 * A stand-in is a `.cmd` on Windows and an `sh` script elsewhere. A program can be given `exit_code`, `stdout`, `stderr`;
   `stdin = true` records standard input (POSIX only; off by default, because reading an inherited terminal blocks).
-* It proves what would be called, never what the system does with it. On Windows a bare name is found only through
-  `exepath` (a `.cmd` is not found by `vim.system({ "open" })`), an empty argument ends the argument list, and an
+* It proves what would be called, never what the system does with it. A feature that calls the program by its bare
+  name (`vim.system({ "open", "-R", file })`, `jobstart`) finds the stand-in on every system, the `.cmd` on Windows
+  too. On Windows an empty argument ends the argument list, and an
   argument with `&`, `|`, `<`, `>` or `^` is not recorded faithfully (the batch shell reads it as an operator); a line
   break in an argument breaks the record on every system.
 * The guard (`process_net`) must allow the program names: list them in `allow_exec` or tag the case `@spawn`.

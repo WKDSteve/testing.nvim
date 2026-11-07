@@ -6,8 +6,8 @@ return function(H)
   local fp = require("testing.fake_programs")
   local platform = require("testing.platform")
 
-  ---Run a stand-in through the editor's own search: a `.cmd` is not found by a bare name on Windows, so the path
-  ---comes from `exepath` (which honours PATHEXT).
+  ---Run a stand-in by the path the editor's search gives (`exepath`, PATHEXT on Windows); the bare name is checked
+  ---below as well.
   local function run(fake, name, args, opts)
     return fake:with_path(function()
       local exe = vim.fn.exepath(name)
@@ -43,6 +43,16 @@ return function(H)
   eq(calls[2].argv, { "-e", "tell app" }, "calls: the second argv")
   eq(#fake:calls("osascript"), 1, "calls: filter by program")
   eq(fake:calls("open")[1].cwd ~= "", true, "calls: the working directory is recorded")
+
+  -- the bare name, as a feature calls it (`vim.system({ "open", ... })`): found on every system, the `.cmd` on
+  -- Windows too
+  fake:reset()
+  local bare = fake:with_path(function()
+    return vim.system({ "open", "bare" }, { text = true }):wait(10000)
+  end)
+  eq(bare.code, 0, "bare name: the stand-in runs")
+  eq(#fake:calls("open") == 1 and fake:calls("open")[1].argv, { "bare" }, "bare name: recorded")
+  fake:reset()
 
   fake:reset()
   eq(#fake:calls(), 0, "reset: forgotten")
