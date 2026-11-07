@@ -41,9 +41,12 @@ local STATES = { "success", "failure", "cancelled", "skipped", "other" }
 ---@return string
 function M.job_key(name)
   local s = (" " .. name:lower() .. " ")
-  s = s:gsub("ubuntu[%-_ ]?[%d%.]*", " "):gsub("windows[%-_ ]?[%w%.]*", " ")
-  s = s:gsub("macos[%-_ ]?[%d%.]*", " "):gsub("linux", " "):gsub("%f[%w]latest%f[%W]", " ")
-  s = s:gsub("[^%w%.]+", " ")
+  -- the system word with an image version right after it (`windows-2022`, `macos 14`, `ubuntu-22.04`), then the word
+  -- alone; never a following word (`suite windows test` and `suite ubuntu test` are one job)
+  for _, sys in ipairs({ "ubuntu", "windows", "macos", "linux" }) do
+    s = s:gsub(sys .. "[%-_ ]?%d[%d%.]*", " "):gsub(sys, " ")
+  end
+  s = s:gsub("%f[%w]latest%f[%W]", " "):gsub("[^%w%.]+", " ")
   return vim.trim(s)
 end
 
@@ -368,7 +371,9 @@ function M.collect(repos, opts)
     if url.code == 0 then
       owner, repo = remote.parse_origin(url.stdout or "")
     end
-    if owner or not r.from_root then
+    -- as `testing ci remote`: git itself failing is an error (exit 3), an origin that is not GitHub only a note
+    local git_failed = url.code ~= 0 and url.code ~= 2
+    if owner or git_failed or not r.from_root then
       local rec = {
         repo = repo or vim.fs.basename(r.dir),
         owner = owner,
@@ -377,9 +382,11 @@ function M.collect(repos, opts)
         workflow = opts.workflow or cfg.workflow,
         non_gating = vim.tbl_map(string.lower, cfg.non_gating),
       }
-      if not owner then
-        rec.error = url.code == 0 and "origin is not on GitHub" or "no origin remote"
+      if git_failed then
+        rec.error = ("git remote get-url origin failed (exit %s)"):format(tostring(url.code))
         rec.note = rec.error
+      elseif not owner then
+        rec.note = url.code == 0 and "origin is not on GitHub" or "no origin remote"
       end
       records[#records + 1] = rec
     end

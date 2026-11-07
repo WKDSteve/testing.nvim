@@ -20,6 +20,12 @@ return function(H)
   )
   eq(history.job_key("test (lua 5.1, macos-14)"), "test lua 5.1", "key: a matrix value stays")
   ok(history.job_key("lint") ~= history.job_key("suite"), "key: different jobs differ")
+  eq(
+    history.job_key("suite windows test"),
+    history.job_key("suite ubuntu test"),
+    "key: the word after the system stays (only an image version goes with it)"
+  )
+  eq(history.job_key("suite (macos 14)"), "suite", "key: a version after a blank goes too")
 
   local a = remote.parse({ "--history" })
   eq(a and a.history, history.DEFAULT, "parse: --history alone is the default")
@@ -191,6 +197,8 @@ return function(H)
     local res = { code = 128, stdout = "", stderr = "no repository" }
     if d == dir and args[1] == "remote" then
       res = { code = 0, stdout = "https://github.com/WKDSteve/alpha.git\n" }
+    elseif d:match("/gitlab$") and args[1] == "remote" then
+      res = { code = 0, stdout = "https://gitlab.com/WKDSteve/gitlab.git\n" }
     end
     return {
       wait = function()
@@ -264,6 +272,22 @@ return function(H)
 
   local bad = run({ "--history=0", dir })
   eq(bad.code, 2, "usage: a wrong number is exit 2")
+
+  -- as `testing ci remote`: an origin that is not GitHub is a note (exit 0), git failing is an error (exit 3)
+  local gitlab = tmp .. "/repos/gitlab"
+  local broken = tmp .. "/repos/broken"
+  vim.fn.mkdir(gitlab .. "/.github/workflows", "p")
+  vim.fn.mkdir(broken .. "/.github/workflows", "p")
+  local other = run({ "--history=10", "--json", gitlab })
+  eq(other.code, 0, "not github: exit 0 (" .. other.err .. ")")
+  local orec = vim.json.decode(other.out).repos[1]
+  eq({ orec.note, orec.error }, { "origin is not on GitHub", nil }, "not github: a note, no error")
+  local failed = run({ "--history=10", "--json", broken })
+  eq(failed.code, 3, "git failed: exit 3")
+  ok(
+    tostring(vim.json.decode(failed.out).repos[1].error):find("exit 128", 1, true),
+    "git failed: the error names git's exit code"
+  )
 
   vim.fn.delete(tmp, "rf")
 end
