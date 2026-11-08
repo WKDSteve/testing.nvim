@@ -631,6 +631,14 @@ local function execute(argv, sv)
   if argv[1] == "call" then
     return require("testing.export.call").main(vim.list_slice(argv, 2), sv)
   end
+  -- `testing act`: a finding to a task, a rule or the AI as an intent `wkd-intent/1`; the target's engine writes
+  -- (docs/CLI.md)
+  if argv[1] == "act" then
+    return require("testing.act").main(
+      vim.list_slice(argv, 2),
+      sv --[[@as { out: fun(s: string), err: fun(s: string) }]]
+    )
+  end
   -- `testing export --out <dir>`: the export folder of testing-export/1 (manifest last), runs nothing
   -- (docs/OUTPUT-FORMATS.md)
   if argv[1] == "export" then

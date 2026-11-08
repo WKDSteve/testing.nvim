@@ -54,6 +54,7 @@ return function(H)
   -- ---------------------------------------------------------------- completion (UI-22/23/26)
 
   local subcommands = {
+    "act",
     "budget",
     "cache",
     "ci",

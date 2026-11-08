@@ -166,6 +166,16 @@ from |testing-surface_view|):
         Measure the performance budgets of the runner. A measured case
         without a baseline entry compared nothing: exit 2 unless
         `--allow-new`.
+                                                                 *:Testing-act*
+:Testing act [--root={dir}]
+        A finding of the last run to a task, a rule or the AI (`testing act`).
+        The target is the current quickfix entry, else the line under the
+        cursor, else a choice. Then two steps: what (task, rule, AI) and how
+        (form, AI draft, agent; skipped when the target takes one). A task and
+        a rule are a dry run of the target's engine first, then a question;
+        a duplicate names the task that is already there. The AI gets a
+        hand-over file in testing's state folder and the command for Claude
+        Code in register `+`; nothing is sent or started.
                                                               *:Testing-export*
 :Testing export [{dir}] [--repos-root={dir}] [--remote=always|never|ask]
         Write the export folder testing-web reads, in a headless child

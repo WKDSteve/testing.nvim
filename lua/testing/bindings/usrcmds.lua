@@ -20,6 +20,7 @@
 ---   :Testing cache stats | clear [<root>]   the result cache of the project
 ---   :Testing hover               the last result of the test under the cursor (hover.nvim shows the same on `:Hover show`)
 ---   :Testing terminal            repeat the last run as the job of a terminal.nvim terminal (soft dependency, see docs/BINDINGS.md)
+---   :Testing act [--root=<dir>]  a finding (quickfix entry, cursor, or a choice) to a task, a rule or the AI (testing.bindings.act)
 ---   :Testing health | config | doctor [<root>]
 ---
 --- Runs go to a headless child nvim (`testing.bindings.child`), never into this editor. Completion
@@ -1391,6 +1392,16 @@ function M.routes()
       flags = { { name = "root", type = "DIR", desc = "The project root directory" } },
       run = function(ctx)
         M.ci_capture(ctx, { "hook", "remove" }, { value = {}, bool = {} }, "hook remove")
+      end,
+    },
+    {
+      path = { "act" },
+      desc = "A finding (quickfix entry, cursor or a choice) to a task, a rule or the AI; the target's engine writes",
+      flags = { { name = "root", type = "DIR", desc = "The project root directory" } },
+      run = function(ctx)
+        require("testing.bindings.act").run(
+          M.resolve_root(ctx.flags.root, vim.api.nvim_buf_get_name(0))
+        )
       end,
     },
     {
