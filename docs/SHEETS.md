@@ -17,6 +17,7 @@ return {
   engine = "rpc",                        -- "rpc" (default) or "manual"
   minit = "TESTS/minimal_init.lua",      -- default; relative to the project root
   sizes = { { rows = 24, cols = 80 } },  -- one run per size (default 24x80)
+  args = { "+Session load x" },          -- optional (rpc): the child's command line after its own, no shell
   steps = {
     { lua = 'require("ui").setup({ usrcmds = true })' },
     { keys = ":UI<CR>", note = "open the float" },
@@ -39,12 +40,29 @@ return {
 | `wait = expr` (`timeout` ms, default 2000) | polls a Lua expression in the child | it is not truthy in time |
 | `expect = expr` | evaluates a Lua expression in the child now | it is not truthy |
 | `screen = name` (`masks`, `cursor`, `mode`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24` | the snapshot differs (or is missing on CI) |
+| `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 
 Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns: an endless wait
 is a mistake, not a check. Every step may carry a `note`; a failure names the size, the step number and the
 note, and all failures of a sheet are one line. The first failed
 step ends that size (the steps after it depend on it). The UI is attached before the first step, so windows
 and floats are laid out for the sheet's size.
+
+`args = { ... }` (rpc sheets) is the child's command line after its own, a list without a shell: `+cmd` and `-c cmd`
+(at most 10, as the editor takes them), `--cmd cmd` (at most 9) and file names, relative to the project root, the
+child's working directory. Every other option is refused when the sheet loads (`args[1]: "--listen" is refused`): the
+harness owns the rest of the command line (`--embed`, `-u`, `--clean`, `-i NONE`). The commands run at startup, before
+the UI is attached; so that what they lay out fits the sheet's size, as in a terminal, the harness puts
+`--cmd "set lines=<rows> columns=<cols>"` first whenever there are `args` (the tenth `--cmd`). With `restart` a sheet
+checks what survives an exit, for example a session written on `VimLeavePre` and loaded by `+LastSession`:
+
+```lua
+steps = {
+  { lua = "vim.cmd.vsplit('b.txt')" },
+  { restart = true, args = { "+LastSession" } },
+  { expect = "#vim.api.nvim_list_wins() == 2", note = "the split is back" },
+},
+```
 
 `requires = { { lua = "<expr>", reason = "<n/a text>" } }` (rpc sheets) lists what the child editor must have, for example
 an optional plugin: each expression is evaluated in the child before the first step, and the first one that is not

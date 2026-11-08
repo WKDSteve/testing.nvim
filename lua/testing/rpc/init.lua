@@ -44,9 +44,12 @@ M.CALL_TIMEOUT_MS = 10000
 M.BOOT_TIMEOUT_MS = 20000
 ---How long `kill` waits for the process to end before it is abandoned (ms).
 M.REAP_MS = 10000
+---How long `restart({ quit = true })` waits for the editor to quit by itself (ms).
+M.QUIT_MS = 10000
 
 ---@class Testing.Rpc.Opts
 ---@field root? string Working directory and base of `<REPO>` (default: the current directory).
+---@field args? string[] Arguments after the editor's own (`+cmd`, a file): the command line of the child, no shell.
 ---@field minit? string Absolute path of the project's minimal init (run as the `-u` init).
 ---@field rtp_prepend? string[] Directories put first on the child's runtimepath (default: this checkout and lib.nvim).
 ---@field rtp? string[] Directories appended to the child's runtimepath.
@@ -90,6 +93,8 @@ M.REAP_MS = 10000
 ---@field generation integer
 ---@field async table<integer, fun(message: string)> Asynchronous calls waiting for an answer (failed when the process ends).
 ---@field stdin_closed? boolean
+---@field keep? { base: string, name: string } A restart that keeps the sandbox: where it is (the process's end leaves it).
+---@field args? string[] The arguments of the last restart that named its own (replace `opts.args`).
 ---@field death_output? string What the child left behind, read when its process ended (the sandbox is removed then).
 
 ---Children that are alive (or not yet cleaned up); the editor quitting kills them.
@@ -553,8 +558,9 @@ local function start(S, async_cb)
     extra_env = extra_env,
     deterministic = opts.deterministic,
     isolate_home = opts.isolate_home,
-    base = opts.base,
-    name = opts.name,
+    -- a restart that keeps the sandbox starts in the same directory (`child.restart({ keep_sandbox = true })`)
+    base = S.keep and S.keep.base or opts.base,
+    name = S.keep and S.keep.name or opts.name,
   })
   local mkdirp = require("lib.nvim.fs.mkdirp")
   for _, dir in pairs(e.dirs) do
@@ -611,6 +617,8 @@ local function start(S, async_cb)
     dirs = e.dirs,
     dropped_env = e.dropped_env,
   } --[[@as Testing.Child.Plan]]
+  -- the arguments of a restart (`child.restart({ args = ... })`), else those of the spawn
+  vim.list_extend(plan.argv, S.args or opts.args or {})
   S.plan = plan
 
   local levels = level_names()
@@ -660,7 +668,10 @@ local function start(S, async_cb)
       return
     end
     S.death_output = stderr_tail(S)
-    remove_sandbox(S)
+    -- a restart that keeps the sandbox: the next process starts in it
+    if not S.keep then
+      remove_sandbox(S)
+    end
     unregister(S)
     -- an asynchronous call that was waiting for an answer that will never come
     local message = death_message(S)
@@ -1184,13 +1195,49 @@ local function build_child(S, opts)
   end
 
   ---Kill the child (whole process tree) and start a new one with the same options; the handle stays
-  ---the same, `pid`, `sandbox` and `dirs` change.
+  ---the same, `pid` changes (and `sandbox` and `dirs`, unless they are kept).
+  ---
+  ---`quit = true` ends the editor the way a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session
+  ---plugin writes its files) and waits up to `quit_timeout_ms` (`M.QUIT_MS`) for it; an editor that does not quit is
+  ---killed and the restart raises. `keep_sandbox = true` starts the new editor in the same sandbox (its `stdpath`
+  ---and temp directories), so what the first one wrote is there for the second. `args` replaces the arguments of
+  ---the command line (`opts.args`) for this start and the next ones.
+  ---@param ropts? { quit?: boolean, keep_sandbox?: boolean, args?: string[], quit_timeout_ms?: integer }
   ---@return true
-  function child.restart()
+  function child.restart(ropts)
+    ropts = ropts or {}
+    local sandbox = S.plan and S.plan.sandbox
+    -- set before the editor ends: the end of its process must leave the sandbox
+    S.keep = ropts.keep_sandbox
+        and sandbox
+        and { base = vim.fs.dirname(sandbox), name = vim.fs.basename(sandbox) }
+      or nil
+    local qerr
+    if ropts.quit and running(S) then
+      local h = S.proc
+      -- no answer comes: the editor is gone before it could send one
+      request_async(S, "nvim_command", { "qall!" }, function() end)
+      local timeout = ropts.quit_timeout_ms or M.QUIT_MS
+      if not vim.wait(timeout, function()
+        return h.exited == true
+      end, 10) then
+        qerr = ("the editor did not quit within %d ms (:qall!)"):format(timeout)
+        S.keep = nil
+      end
+    end
     kill_process(S, "kill")
-    remove_sandbox(S)
+    if not S.keep then
+      remove_sandbox(S)
+    end
     unregister(S)
+    if qerr then
+      error("testing.rpc: restart failed: " .. qerr, 0)
+    end
+    if ropts.args then
+      S.args = vim.deepcopy(ropts.args)
+    end
     local rok, rerr = start(S)
+    S.keep = nil
     if not rok then
       error("testing.rpc: restart failed: " .. tostring(rerr), 0)
     end

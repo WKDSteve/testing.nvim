@@ -37,8 +37,9 @@ M.MAX_SOURCE = 32768
 M.FORMAT = [[
 A sheet is a Lua file that `return`s one table and is read as DATA (an empty environment: no require, os, io, vim).
 Fields: id (letters, digits, _ - .), title, task ("<area/slug>"), engine ("rpc"), minit (default
-"TESTS/minimal_init.lua"), sizes ({ { rows = 24, cols = 80 } }), steps, judge (criteria a person checks), manual
-(steps only a person can do), notes. Each step has exactly one action and may carry a note:
+"TESTS/minimal_init.lua"), sizes ({ { rows = 24, cols = 80 } }), args (the editor's command line: a list of "+cmd",
+"-c", "cmd", "--cmd", "cmd" and file names, nothing else), steps, judge (criteria a person checks), manual (steps only
+a person can do), notes. Each step has exactly one action and may carry a note:
 
 | step | does | fails when |
 |---|---|---|
@@ -49,6 +50,7 @@ Fields: id (letters, digits, _ - .), title, task ("<area/slug>"), engine ("rpc")
 | wait = "expr", timeout = ms | polls a Lua expression in the child | not truthy in time |
 | expect = "expr" | evaluates a Lua expression now | not truthy |
 | screen = "name" | compares the screen with a snapshot (masks = { { row = n } } hide rows) | it differs |
+| restart = true, args = { ... } | quits like a person (VimLeavePre runs), starts again on the same files | no quit |
 
 Milliseconds are whole numbers up to 600000. The first failed step ends the run of that size. Put what a machine can
 check into steps (wait/expect/screen) and only the judgement into judge.]]

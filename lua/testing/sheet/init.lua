@@ -11,6 +11,7 @@
 ---     task = "ui.nvim/try-the-ui-option-float-in-a-real-session",
 ---     engine = "rpc",                         -- "rpc" (testing.rpc) or "manual" (nothing to run)
 ---     sizes = { { rows = 24, cols = 80 } },   -- one run per size; default 24x80
+---     args = { "+Session load x" },           -- the child's command line after its own (rpc; no shell)
 ---     steps = {
 ---       { keys = ":UI<CR>", note = "open the float" },
 ---       { wait = "vim.api.nvim_win_get_config(0).relative ~= ''" },
@@ -34,6 +35,13 @@
 ---   expect = expr a Lua expression in the child must be truthy now
 ---   screen = name compare the screen with a snapshot (`testing.screen`; `masks`, `cursor`, `mode`
 ---                 pass through); the name gets the size: `float.80x24`
+---   restart = true  quit the child as a person does (`:qall!`, `VimLeavePre` runs) and start it again in the
+---                 same sandbox (its stdpath and temp directories stay), the UI attached again; `args = { ... }`
+---                 on the step is the command line of this start, without it the sheet's `args`
+---
+--- `args` (of the sheet and of a restart) is a list, no shell: `+cmd` and `-c cmd` (at most 10, as the editor takes),
+--- `--cmd cmd` (at most 9: the harness puts the sheet's size first, `set lines=.. columns=..`, so that what runs at
+--- startup lays out for it) and file names; any other option is refused, the harness owns the rest of the command line.
 ---
 --- The file is loaded as DATA: `load` with an empty environment, so a sheet cannot call anything
 --- while it is read; what runs is the Lua of its steps, in the child editor. `load` checks the shape
@@ -58,6 +66,7 @@ M.ACTIONS = {
   "toggle",
   "set",
   "ask",
+  "restart",
 }
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
@@ -70,6 +79,7 @@ M.ENGINE_ACTIONS = {
     expect = true,
     screen = true,
     ask = true,
+    restart = true,
   },
   browser = {
     open = true,
@@ -118,6 +128,8 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field mode? boolean
 ---@field note? string
 ---@field ignore_errmsg? boolean
+---@field restart? boolean Quit the child and start it again in the same sandbox.
+---@field args? string[] The command line of a `restart` (else the sheet's `args`).
 
 ---@class Testing.Sheet
 ---@field id string
@@ -125,6 +137,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field task? string
 ---@field engine "rpc"|"manual"|"browser"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
+---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
 ---@field steps Testing.Sheet.Step[]
 ---@field judge string[]
@@ -167,6 +180,8 @@ local STEP_KEYS = {
   mode = "boolean",
   note = "string",
   ignore_errmsg = "boolean",
+  restart = "boolean",
+  args = "table",
 }
 local SHEET_KEYS = {
   id = "string",
@@ -181,6 +196,7 @@ local SHEET_KEYS = {
   notes = "string",
   requires = "table",
   app = "string",
+  args = "table",
 }
 
 ---@param v any
@@ -259,6 +275,67 @@ local function check_requires(list)
     if type(r.reason) ~= "string" or r.reason == "" then
       return ("requires[%d].reason must be a non-empty string"):format(i)
     end
+  end
+  return nil
+end
+
+M.MAX_ARGS = 20
+M.MAX_ARG_BYTES = 1000
+---How many `+cmd` and `-c cmd` the editor takes.
+M.MAX_ARG_COMMANDS = 10
+---How many `--cmd cmd` a sheet may give: the editor takes 10, the first is the harness's (the sheet's size).
+M.MAX_ARG_PRE_COMMANDS = 9
+
+---The child's command line: a list without a shell, `+cmd`, `-c cmd`, `--cmd cmd` and file names. Every other
+---option is refused: the harness owns the rest of the command line (`--embed`, `-u`, `--clean`, `-i NONE`), and an
+---option such as `--listen`, `-l` or `-s` would change what the sheet is a check of.
+---@param list any
+---@param at string
+---@return string|nil err
+function M.check_args(list, at)
+  if not is_list(list) then
+    return at .. " must be a list of strings"
+  end
+  if #list > M.MAX_ARGS then
+    return ("%s: at most %d arguments"):format(at, M.MAX_ARGS)
+  end
+  local commands, pre, i = 0, 0, 1
+  while i <= #list do
+    local a = list[i]
+    local here = ("%s[%d]"):format(at, i)
+    if type(a) ~= "string" or a == "" then
+      return here .. " must be a non-empty string"
+    end
+    if #a > M.MAX_ARG_BYTES or a:find("%c") then
+      return ("%s: at most %d bytes, no control character"):format(here, M.MAX_ARG_BYTES)
+    end
+    if a == "-c" or a == "--cmd" then
+      local v = list[i + 1]
+      if type(v) ~= "string" or v == "" or v:find("%c") or #v > M.MAX_ARG_BYTES then
+        return ("%s: %s takes a command after it"):format(here, a)
+      end
+      if a == "-c" then
+        commands = commands + 1
+      else
+        pre = pre + 1
+      end
+      i = i + 2
+    elseif a:sub(1, 1) == "+" then
+      commands, i = commands + 1, i + 1
+    elseif a:sub(1, 1) == "-" then
+      return ("%s: %q is refused (only +cmd, -c, --cmd and file names)"):format(here, a)
+    else
+      i = i + 1
+    end
+  end
+  if commands > M.MAX_ARG_COMMANDS then
+    return ("%s: at most %d commands (+cmd, -c)"):format(at, M.MAX_ARG_COMMANDS)
+  end
+  if pre > M.MAX_ARG_PRE_COMMANDS then
+    return ("%s: at most %d --cmd (the first is the sheet's size)"):format(
+      at,
+      M.MAX_ARG_PRE_COMMANDS
+    )
   end
   return nil
 end
@@ -356,6 +433,18 @@ local function check_step(step, i, engine)
   end
   if (step.value ~= nil) ~= (action == "set") then
     return at .. ": a set step takes a value, nothing else does"
+  end
+  if action == "restart" and step.restart ~= true then
+    return at .. ".restart must be true"
+  end
+  if step.args ~= nil then
+    if action ~= "restart" then
+      return at .. ": args belongs to a restart step"
+    end
+    local aerr = M.check_args(step.args, at .. ".args")
+    if aerr then
+      return aerr
+    end
   end
   return nil
 end
@@ -456,6 +545,15 @@ function M.validate(s)
   end
   if s.requires and s.engine ~= "rpc" then
     return nil, "requires belongs to an rpc sheet"
+  end
+  if s.args ~= nil then
+    if s.engine ~= "rpc" then
+      return nil, "args belongs to an rpc sheet"
+    end
+    local aerr = M.check_args(s.args, "args")
+    if aerr then
+      return nil, aerr
+    end
   end
   if s.app then
     if s.engine ~= "browser" and s.engine ~= "desktop" then

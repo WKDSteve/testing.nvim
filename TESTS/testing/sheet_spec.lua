@@ -157,6 +157,77 @@ return function(H)
         "ignore_errmsg belongs",
         "ignore_errmsg outside keys"
       )
+      -- the child's command line: a list, no shell, only +cmd, -c, --cmd and file names
+      local function with_args(args)
+        return { id = "a", title = "T", steps = { { keys = "x" } }, args = args }
+      end
+      ok(
+        sheet.validate(
+          with_args({ "+LastSession", "-c", "set nu", "--cmd", "let g:x = 1", "a.txt" })
+        ),
+        "args: +cmd, -c, --cmd and a file load"
+      )
+      refused(with_args("+x"), "args must be a table", "args as a string")
+      refused(with_args({ a = "x" }), "args must be a list", "args as a map")
+      refused(
+        with_args({ "--listen", "x" }),
+        'args[1]: "--listen" is refused',
+        "args: another option"
+      )
+      refused(
+        with_args({ "-u", "evil.lua" }),
+        'args[1]: "-u" is refused',
+        "args: -u is the harness's"
+      )
+      refused(with_args({ "-c" }), "args[1]: -c takes a command", "args: -c without a command")
+      refused(with_args({ "+a\nb" }), "no control character", "args: a newline")
+      local eleven = {}
+      for i = 1, 11 do
+        eleven[i] = "+let g:x = " .. i
+      end
+      refused(with_args(eleven), "at most 10 commands", "args: more commands than the editor takes")
+      local ten_pre = {}
+      for i = 1, 10 do
+        vim.list_extend(ten_pre, { "--cmd", "let g:x = " .. i })
+      end
+      refused(with_args(ten_pre), "at most 9 --cmd", "args: the first --cmd is the harness's")
+      ok(sheet.validate(with_args(vim.list_slice(ten_pre, 1, 18))), "args: nine --cmd fit")
+      local drv = require("testing.sheet.driver_rpc")
+      eq(drv.command_line(nil, { rows = 20, cols = 60 }), nil, "command line: none without args")
+      eq(drv.command_line({}, { rows = 20, cols = 60 }), nil, "... nor with empty args")
+      eq(
+        drv.command_line({ "+x" }, { rows = 20, cols = 60 }),
+        { "--cmd", "set lines=20 columns=60", "+x" },
+        "command line: the sheet's size first"
+      )
+      refused({
+        id = "a",
+        title = "T",
+        engine = "browser",
+        steps = { { open = "x" } },
+        args = { "a" },
+      }, "args belongs to an rpc sheet", "args of a browser sheet")
+      refused(
+        { id = "a", title = "T", steps = { { restart = false } } },
+        "steps[1].restart must be true",
+        "restart = false"
+      )
+      refused(
+        { id = "a", title = "T", steps = { { keys = "x", args = { "a" } } } },
+        "args belongs to a restart step",
+        "args on another step"
+      )
+      refused(
+        { id = "a", title = "T", steps = { { restart = true, args = { "-l", "x" } } } },
+        'steps[1].args[1]: "-l" is refused',
+        "the args of a restart are checked too"
+      )
+      refused({
+        id = "a",
+        title = "T",
+        engine = "browser",
+        steps = { { restart = true } },
+      }, "restart is not a step of a browser sheet", "restart in a browser sheet")
     end
 
     -- loading is data only: the file sees no globals
@@ -232,6 +303,53 @@ return function(H)
         sheet.run(req, { root = root, ci = false, update = false }).status,
         "pass",
         "a met requirement runs the sheet"
+      )
+
+      -- args and restart: the child starts with the sheet's command line; a restart quits it as a person does
+      -- (VimLeavePre runs), starts it again in the same sandbox with the restart's command line, the UI attached
+      local again = assert(sheet.validate({
+        id = "again",
+        title = "again",
+        minit = S.minit,
+        args = { "+let g:started = 'sheet'", "+let g:start_cols = &columns" },
+        steps = {
+          { expect = "vim.g.started == 'sheet'", note = "the sheet's args" },
+          {
+            expect = "vim.g.start_cols == 60",
+            note = "what the args run at startup sees the sheet's size, not 80x24",
+          },
+          {
+            lua = [[vim.api.nvim_create_autocmd("VimLeavePre", { callback = function()
+              vim.fn.mkdir(vim.fn.stdpath("state"), "p")
+              vim.fn.writefile({ vim.o.columns .. "" }, vim.fn.stdpath("state") .. "/left.txt")
+            end })]],
+          },
+          {
+            restart = true,
+            args = { "-c", "let g:started = 'restart'", "+let g:also = &columns" },
+          },
+          {
+            expect = [[vim.fn.readfile(vim.fn.stdpath("state") .. "/left.txt")[1] == "60"]],
+            note = "VimLeavePre ran with the UI of the sheet's size, and its file is there",
+          },
+          {
+            expect = "vim.g.started == 'restart' and vim.g.also == 60",
+            note = "the restart's args",
+          },
+          { expect = "vim.o.columns == 60", note = "the UI is attached again" },
+          { restart = true },
+          {
+            expect = "vim.g.started == 'sheet' and vim.g.also == nil",
+            note = "no args: the sheet's",
+          },
+        },
+        sizes = { { rows = 20, cols = 60 } },
+      }))
+      local ar = sheet.run(again, { root = root, ci = false, update = false })
+      eq(
+        { ar.ok, ar.status, ar.failures },
+        { true, "pass", {} },
+        "args and restart: every step passes"
       )
       req.requires = { { lua = "error('boom')", reason = "r" } }
       has(

@@ -65,6 +65,15 @@ local function run_step(child, step, ctx)
     if not v then
       return "got " .. shown(v)
     end
+  elseif step.restart then
+    -- as a person does: quit (VimLeavePre runs), start again on what the first editor left in the sandbox
+    child.restart({
+      quit = true,
+      keep_sandbox = true,
+      args = M.command_line(step.args or ctx.sheet.args, ctx.size) or {},
+    })
+    -- the UI first again: the editor lays out its windows for the size of its UI
+    child.screen()
   elseif step.screen then
     local name = ("%s.%dx%d"):format(step.screen, ctx.size.cols, ctx.size.rows)
     local res = require("testing.screen").compare(name, child.screen(), {
@@ -82,6 +91,22 @@ local function run_step(child, step, ctx)
     end
   end
   return nil
+end
+
+---The command line of a start: the sheet's (or a restart's) arguments after one that gives the editor the sheet's
+---size, as a terminal does. What they run at startup (`+LastSession`) lays its windows out for that size; without
+---it the editor starts at 80x24 and the UI attached afterwards scales the layout. Nil without arguments.
+---@param args string[]|nil
+---@param size { rows: integer, cols: integer }
+---@return string[]|nil
+function M.command_line(args, size)
+  if not args or #args == 0 then
+    return nil
+  end
+  return vim.list_extend(
+    { "--cmd", ("set lines=%d columns=%d"):format(size.rows, size.cols) },
+    args
+  )
 end
 
 ---@class Testing.Sheet.DriverContext
@@ -107,11 +132,13 @@ function M.new(s, opts, ctx)
   function D.open_size(new_size)
     size = new_size
     local tag = ("%dx%d"):format(size.cols, size.rows)
-    local spawn = vim.tbl_extend(
-      "force",
-      { root = ctx.root, minit = minit, size = size, guard = false },
-      opts.spawn or {}
-    )
+    local spawn = vim.tbl_extend("force", {
+      root = ctx.root,
+      minit = minit,
+      size = size,
+      guard = false,
+      args = M.command_line(s.args, size),
+    }, opts.spawn or {})
     -- a spawn that raises is a failure of this size, not an error out of `run` (expect hands the
     -- verdict to the harness, it must not throw past it)
     local spawned, c, err = pcall(require("testing.rpc").spawn, spawn)

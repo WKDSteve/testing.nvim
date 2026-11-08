@@ -256,6 +256,37 @@ return function(H)
     eq(vim.fn.isdirectory(old_box), 0, "the old sandbox is removed")
     eq(r.notifies(), {}, "captures start empty")
 
+    -- 6b. restart as a person does: `:qall!` (VimLeavePre runs), the same sandbox, the restart's command line
+    r.lua([[vim.api.nvim_create_autocmd("VimLeavePre", { callback = function()
+      vim.fn.mkdir(vim.fn.stdpath("state"), "p")
+      vim.fn.writefile({ "left" }, vim.fn.stdpath("state") .. "/left.txt")
+    end })]])
+    local box = r.sandbox
+    r.restart({
+      quit = true,
+      keep_sandbox = true,
+      args = { "+let g:from_plus = 7", "-c", "let g:from_c = 8" },
+    })
+    eq(r.sandbox, box, "keep_sandbox: the same sandbox")
+    eq(
+      r.lua_get([[vim.fn.readfile(vim.fn.stdpath("state") .. "/left.txt")]]),
+      { "left" },
+      "quit: VimLeavePre ran, and what it wrote is there for the new editor"
+    )
+    eq({ r.g.from_plus, r.g.from_c }, { 7, 8 }, "args: the command line of the restart")
+    -- an editor that does not quit is killed, and the restart says so
+    r.lua(
+      [[vim.api.nvim_create_autocmd("VimLeavePre", { callback = function() vim.uv.sleep(5000) end })]]
+    )
+    local hung_ok, hung_err =
+      pcall(r.restart, { quit = true, keep_sandbox = true, quit_timeout_ms = 300 })
+    eq(hung_ok, false, "a hung quit: the restart raises")
+    has(hung_err, "did not quit within 300 ms", "... and names the wait")
+    eq(vim.fn.isdirectory(box), 0, "... the sandbox of the killed editor is removed")
+    r.restart()
+    ok(r.lua("return 1") == 1, "a restart after it works")
+    eq(r.g.from_plus, 7, "the arguments of the last restart stay")
+
     -- ===================================================================
     -- 7. a broken minit is a failed spawn with the reason, and leaves nothing behind
     local base = S.new_dir()

@@ -42,6 +42,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 |---|---|---|
 | `root` | cwd | working directory of the child, base of `<REPO>` in a trace |
 | `minit` | none | absolute path of the project's minimal init |
+| `args` | none | arguments after the editor's own (`+cmd`, a file): the child's command line, a list without a shell |
 | `rtp_prepend`, `rtp` | this checkout + lib.nvim | runtimepath entries; the FIRST entry of `rtp_prepend` wins |
 | `env_allow`, `extra_env`, `parent_env` | none | see Environment |
 | `deterministic` | `true` | `LANG`/`LC_ALL=C.UTF-8`, `TZ=UTC`; `false` passes the parent's through |
@@ -247,7 +248,11 @@ value snapshots (`a.snapshot`) yet.
   globals and `package.loaded` are *not* undone (an honest reset cannot); a non-empty list means
   `restart()`. The editor's own lazily created `nvim.*` groups are ignored.
 * `restart()`: kills the tree and starts a new process with the same options; the handle is the same
-  (`pid`, `sandbox`, `dirs` change).
+  (`pid`, `sandbox`, `dirs` change). `restart({ quit = true, keep_sandbox = true, args = { ... } })` ends the
+  editor the way a person does instead (`:qall!`, so `VimLeavePre` and `VimLeave` run; an editor that has not
+  quit after `quit_timeout_ms`, default 10 s, is killed and the restart raises), starts the new one in the same
+  sandbox (what the first one wrote below its `stdpath` is there) and with `args` as its command line (also for
+  later restarts). The step `restart` of a test sheet is this call ([SHEETS.md](SHEETS.md#a-sheet)).
 * `kill()`: kills the whole **process tree** and waits until it is gone (never longer than 10 s, then
   the process is abandoned), removes the sandbox. Windows `taskkill /PID /T /F`; POSIX: the root is
   frozen, its descendants are read from one `ps` call, the process group and every descendant get
