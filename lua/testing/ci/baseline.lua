@@ -6,7 +6,8 @@
 --- other steps are not run at the base).
 ---
 --- A finding's key is its step, its file and its text, without line and column (they move between two states), and
---- with every `:<digits>` in the text made `:#` (a message that quotes a position). Equal keys count as a multiset: two
+--- with every `:<digits>` in the text made `:#` (a message that quotes a position) and the path of a snapshot
+--- (`<state>/snap/<sha8>-<random>/tree`) made `<snapshot>`. Equal keys count as a multiset: two
 --- equal findings at `head` and one at `base` are one known and one new. A red step without findings (an exit code, a
 --- crash) is compared as a whole: it is known when the step is red at the base too.
 ---
@@ -52,7 +53,10 @@ end
 ---@return string
 function M.key(step, f)
   local file = tostring(nonnil(f.file) or ""):gsub("\\", "/")
-  local text = vim.trim(tostring(nonnil(f.text) or "")):gsub(":%d+", ":#")
+  local text = vim.trim(tostring(nonnil(f.text) or ""))
+  -- the snapshot of each state sits in a directory of its own (`.../snap/<sha8>-<random>/tree`, maybe cut to
+  -- `...nap/`), so a path in the text would tell the same finding apart between head and base
+  text = text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>"):gsub(":%d+", ":#")
   return table.concat({ step, file, text }, "\0")
 end
 

@@ -147,6 +147,28 @@ return function(H)
   end
 
   do
+    -- the snapshot path in a message differs between head and base and must not tell two equal findings apart
+    local head = {
+      steps = {
+        step("suite", "red", {
+          f("TESTS/v_spec.lua", 97, "...nap/55f79695-12b9d4/tree/TESTS/v_spec.lua:101: Invalid 'buffer'"),
+          f("TESTS/v_spec.lua", 98, [[C:\x\testing\snap\55f79695-12b9d4\tree\TESTS\w_spec.lua:5: boom]]),
+        }),
+      },
+    }
+    local base = {
+      steps = {
+        step("suite", "red", {
+          f("TESTS/v_spec.lua", 97, "...nap/a316102b-77aa01/tree/TESTS/v_spec.lua:101: Invalid 'buffer'"),
+          f("TESTS/v_spec.lua", 98, [[C:\x\testing\snap\a316102b-77aa01\tree\TESTS\w_spec.lua:5: boom]]),
+        }),
+      },
+    }
+    local r = baseline.classify(head, base)
+    eq({ #r.new, #r.known, #r.fixed }, { 0, 2, 0 }, "snapshot paths: the same red spec is known, not new and fixed")
+  end
+
+  do
     -- a red step without findings is compared as a whole
     local head = { steps = { step("gate", "red"), step("other", "red") } }
     local base = { steps = { step("gate", "red") } }
