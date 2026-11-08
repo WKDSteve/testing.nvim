@@ -610,8 +610,9 @@ On a case-sensitive file system nothing is folded.
 On the Tricentis workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) nothing unsigned may be built or
 started (EDR). `testing.machine` is the one place that decides; the command line (`testing.cli`) and the editor
 (`:Testing ci`, `:Testing ci repos`) ask it. Allowed there: `export`, `call`, `ci remote`, `ci overview`,
-`ci verify --json`, `lint` without `--fix`, and the help. Everything else (`run`, `fast`, `ci` with a run, `ci repos`,
-`sheets run`, `migrate`, ...) is refused with exit `2`, a message, and nothing started. A value that is neither
+`ci verify --json`, `lint` without `--fix`, and the help; `sheets run` and `sheets step` pass and run only manual
+sheets there, decided once the sheets are loaded ([SHEETS.md](SHEETS.md)). Everything else (`run`, `fast`, `ci` with a
+run, `ci repos`, `migrate`, ...) is refused with exit `2`, a message, and nothing started. A value that is neither
 `workstation` nor `default` is refused as a typo, for every command. `TESTING_ALLOW_WORKSTATION=1` lifts the refusal
 where it is allowed on purpose (the same switch as `testing sheets run`).
 

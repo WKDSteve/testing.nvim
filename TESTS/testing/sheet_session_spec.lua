@@ -710,6 +710,45 @@ end
       "title is required",
       "a sheet that does not load"
     )
+    local workstation = {
+      getenv = function(name)
+        return name == "NVIM_MACHINE_ROLE" and "workstation" or nil
+      end,
+    }
+    refused(
+      { root .. "/TESTS/sheets/broken.sheet.lua" },
+      "title is required",
+      "the workstation: a sheet that does not load is not run",
+      workstation
+    )
+    -- the workstation: a manual sheet (questions only) is stepped through, and nothing is started for it
+    write(
+      "TESTS/sheets/ask.sheet.lua",
+      [[return { id = "ws.ask", title = "A", engine = "manual", steps = { { ask = "does it look right?" } } }]]
+    )
+    local started = {}
+    local saved = { system = vim.system, jobstart = vim.fn.jobstart, spawn = vim.uv.spawn }
+    vim.system = function(argv, ...)
+      started[#started + 1] = vim.inspect(argv)
+      return saved.system(argv, ...)
+    end
+    vim.fn.jobstart = function(cmd, ...)
+      started[#started + 1] = vim.inspect(cmd)
+      return saved.jobstart(cmd, ...)
+    end
+    vim.uv.spawn = function(path, ...)
+      started[#started + 1] = tostring(path)
+      return saved.spawn(path, ...)
+    end
+    local code, events = step_run(
+      { "ws.ask", "--root", root },
+      { "answer yes looks fine" },
+      workstation
+    )
+    vim.system, vim.fn.jobstart, vim.uv.spawn = saved.system, saved.jobstart, saved.spawn
+    eq(code, 0, "the workstation: a manual sheet runs, exit 0")
+    ok(events[1] ~= nil, "... with its events")
+    eq(started, {}, "... and no process was started for it")
   end
 
   -- 4. the real process: stdout as it happens, closed stdin ends it, no child left -------------------------------------

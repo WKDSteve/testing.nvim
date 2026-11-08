@@ -37,6 +37,9 @@ return function(H)
     { "ci", "verify", "--json" },
     { "lint" },
     { "--help" },
+    -- they decide themselves after loading the sheets: only manual ones run there (sheet_spec, sheet_session_spec)
+    { "sheets", "run", "--task", "a/b" },
+    { "sheets", "step", "a.sheet" },
   }
   for _, argv in ipairs(allowed) do
     eq(machine.refusal(argv, WS), nil, "allowed on the workstation: " .. table.concat(argv, " "))
@@ -49,7 +52,8 @@ return function(H)
     { "ci", "verify" },
     { "ci", "trust", "x" },
     { "lint", "--fix" },
-    { "sheets", "run", "--task", "a/b" },
+    { "sheets", "new", "--from-task", "a/b" },
+    { "sheets", "prompt", "explain", "--task", "a/b" },
     { "fast" },
     { "migrate", "apply" },
   }
@@ -96,6 +100,19 @@ return function(H)
   eq(code, 2, "testing ci on the workstation: exit 2")
   eq(started, false, "nothing was started")
   has(table.concat(errs, "\n"), "refused on the workstation", "the message reaches stderr")
+  -- `testing sheets run` passes the gate of the command line: the command itself decides (only manual sheets)
+  errs = {}
+  cli.main({ "sheets", "run", "--task", "a/b", "--root", vim.fn.tempname() }, {
+    out = function() end,
+    err = function(s)
+      errs[#errs + 1] = s
+    end,
+    getenv = WS,
+  })
+  ok(
+    not table.concat(errs, "\n"):find("is refused on the workstation", 1, true),
+    "sheets run passes the gate of the command line: " .. table.concat(errs, "\n")
+  )
 
   -- ── the token of ci remote ──
   local remote = require("testing.ci.remote")

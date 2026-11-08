@@ -10,7 +10,8 @@
 --- `testing sheets run`).
 ---
 --- The allowed commands (`docs/CLI.md`, section Workstation): `export`, `call`, `ci remote`, `ci overview`,
---- `ci verify --json`, `lint` without `--fix`, and the help.
+--- `ci verify --json`, `lint` without `--fix`, and the help. `sheets run` and `sheets step` pass here and refuse
+--- themselves unless every sheet of the run is a manual one (`testing.sheet.run.refused`).
 
 local M = {}
 
@@ -83,6 +84,11 @@ function M.allowed(argv)
   end
   if first == "lint" then
     return not has("--fix"), "lint --fix"
+  end
+  -- they decide themselves once the sheets are loaded as data: only manual sheets (questions, no process) run there
+  -- (`testing.sheet.run.refused`)
+  if first == "sheets" and (argv[2] == "run" or argv[2] == "step") then
+    return true, "sheets " .. argv[2]
   end
   if first == "ci" then
     local sub = argv[2]

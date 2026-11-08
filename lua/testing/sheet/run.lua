@@ -12,8 +12,10 @@
 ---   else `<vault>/../<area>`; with `--tasks` also the projects the task's block names (it is written whole).
 --- * Each root passes the workspace trust gate (`testing.trust`) first: a sheet runs the project's minimal init.
 --- * A missing snapshot is a failure, as on CI (`ci = true`): a run from a task never writes a reference image.
---- * On the workstation (`NVIM_MACHINE_ROLE=workstation`) it refuses, unless `TESTING_ALLOW_WORKSTATION=1`; another
----   value than `workstation` / `default` is refused as a typo.
+--- * On the workstation (`NVIM_MACHINE_ROLE=workstation`) only manual sheets run (`engine = "manual"`: questions, no
+---   process), decided after every sheet of the run is loaded as data; any other sheet, or one that does not load,
+---   refuses the whole run, unless `TESTING_ALLOW_WORKSTATION=1`. Another value than `workstation` / `default` is
+---   refused as a typo.
 --- * A red sheet carries its first failure line into the block (`red: <line>`).
 
 local M = {}
@@ -63,10 +65,33 @@ function M.area_root(area, vault, getenv)
   return nil, table.concat(tried, ", ")
 end
 
----Why a sheet must not run on this machine: the workstation, or a role that is a typo. Nil when it may.
+---Whether every entry is a sheet that starts nothing: loaded (as data) and `engine = "manual"`. False for none.
+---@param entries { sheet?: Testing.Sheet }[]
+---@return boolean
+function M.only_manual(entries)
+  if #entries == 0 then
+    return false
+  end
+  for i = 1, #entries do
+    local s = entries[i] and entries[i].sheet
+    -- a sheet that does not load has no engine anyone could trust
+    if type(s) ~= "table" or s.engine ~= "manual" then
+      return false
+    end
+  end
+  return true
+end
+
+---Why sheets must not run on this machine: a role that is a typo, or the workstation. Nil when they may.
+---
+---On the workstation (`NVIM_MACHINE_ROLE=workstation`, unless `TESTING_ALLOW_WORKSTATION=1`) only manual sheets may:
+---they start nothing, a person answers their questions. `entries` are the sheets that would run, loaded as data
+---before this is asked (`{ sheet = s }`, a sheet that does not load as `{}`); without them the workstation is refused.
+---A command that cannot know its sheets yet asks `manual_only_here` first and this once they are loaded.
 ---@param getenv fun(name: string): string|nil
+---@param entries? { sheet?: Testing.Sheet }[]
 ---@return string|nil
-function M.refused(getenv)
+function M.refused(getenv, entries)
   -- trimmed: `set NVIM_MACHINE_ROLE=workstation ` in cmd keeps the blank (the nvim config's machine.lua trims too)
   local role = vim.trim(getenv("NVIM_MACHINE_ROLE") or ""):lower()
   if role ~= "" and role ~= "default" and role ~= "workstation" then
@@ -75,10 +100,23 @@ function M.refused(getenv)
     )
   end
   if role == "workstation" and getenv("TESTING_ALLOW_WORKSTATION") ~= "1" then
+    if entries and M.only_manual(entries) then
+      return nil
+    end
     return "testing sheets: refused on the workstation (NVIM_MACHINE_ROLE=workstation): a sheet starts editors and runs "
-      .. "the project's code; set TESTING_ALLOW_WORKSTATION=1 where that is allowed"
+      .. 'the project\'s code; only manual sheets (engine = "manual", questions only) run here; set '
+      .. "TESTING_ALLOW_WORKSTATION=1 where the others are allowed"
   end
   return nil
+end
+
+---Whether the machine is the workstation without the permission for the other sheets: the decision then waits until
+---the sheets are loaded (`refused(getenv, entries)`).
+---@param getenv fun(name: string): string|nil
+---@return boolean
+function M.manual_only_here(getenv)
+  return vim.trim(getenv("NVIM_MACHINE_ROLE") or ""):lower() == "workstation"
+    and getenv("TESTING_ALLOW_WORKSTATION") ~= "1"
 end
 
 ---The result of the run as a Result-IR, the input of `testing sheets report --from`: a repository without a Lua spec
@@ -194,10 +232,13 @@ function M.main(argv, sv, deps)
     sv.err("testing sheets: --tasks-cli and --dry-run belong to --tasks <vault>\n" .. M.USAGE)
     return 2
   end
-  local refused = M.refused(getenv)
-  if refused then
-    sv.err(refused)
-    return 2
+  -- the workstation decides once the sheets are loaded as data (only manual ones run there); a typo stops here
+  if not M.manual_only_here(getenv) then
+    local refused = M.refused(getenv)
+    if refused then
+      sv.err(refused)
+      return 2
+    end
   end
   local vault = o.vault and vim.fs.normalize(vim.fn.fnamemodify(o.vault, ":p")):gsub("/+$", "")
     or nil
@@ -290,6 +331,13 @@ function M.main(argv, sv, deps)
           o.id
         )
     )
+    return 2
+  end
+
+  -- before anything runs: on the workstation every sheet of the run must be a manual one
+  local refused = M.refused(getenv, mine)
+  if refused then
+    sv.err(refused)
     return 2
   end
 

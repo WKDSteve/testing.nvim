@@ -1629,6 +1629,84 @@ return function(H)
         0,
         "unless it is allowed there"
       )
+
+      -- the workstation runs manual sheets (questions only), decided after the sheets are loaded as data
+      do
+        write(
+          "p8/TESTS/sheets/m.sheet.lua",
+          [[return { id = "m", title = "M", task = "x/ask", engine = "manual", steps = { { ask = "fine?" } } }]]
+        )
+        write(
+          "p8/TESTS/sheets/m2.sheet.lua",
+          [[return { id = "m2", title = "M2", task = "x/mixed", engine = "manual", manual = { "look" } }]]
+        )
+        write(
+          "p8/TESTS/sheets/r.sheet.lua",
+          [[return { id = "r", title = "R", task = "x/mixed", steps = { { keys = "x" } } }]]
+        )
+        write(
+          "p8/TESTS/sheets/b.sheet.lua",
+          'return {\n  id = "b",\n  task = "x/brokenws",\n  engine = "manual",\n  steps = {{\n'
+        )
+        local p8 = root .. "/p8"
+        local function ws8(extra)
+          return vim.tbl_extend("force", {
+            getenv = function(name)
+              return name == "NVIM_MACHINE_ROLE" and "workstation" or nil
+            end,
+            trust_check = function()
+              return nil
+            end,
+          }, extra or {})
+        end
+        -- the real run of the manual sheet, every way of starting a process watched
+        local started = {}
+        local saved = { system = vim.system, jobstart = vim.fn.jobstart, spawn = vim.uv.spawn }
+        vim.system = function(argv, ...)
+          started[#started + 1] = vim.inspect(argv)
+          return saved.system(argv, ...)
+        end
+        vim.fn.jobstart = function(cmd, ...)
+          started[#started + 1] = vim.inspect(cmd)
+          return saved.jobstart(cmd, ...)
+        end
+        vim.uv.spawn = function(path, ...)
+          started[#started + 1] = tostring(path)
+          return saved.spawn(path, ...)
+        end
+        outs6, errs6 = {}, {}
+        local code8 = run.main({ "--task", "x/ask", "--root", p8 }, sv6, ws8())
+        vim.system, vim.fn.jobstart, vim.uv.spawn = saved.system, saved.jobstart, saved.spawn
+        eq(code8, 0, "the workstation: a manual sheet runs (exit 0): " .. table.concat(errs6, "\n"))
+        has(table.concat(outs6, "\n"), "sheet m: manual", "... and reports itself")
+        eq(started, {}, "... and no process was started for it")
+
+        ran = {}
+        local function refused8(argv, why)
+          errs6 = {}
+          eq(run.main(argv, sv6, ws8({ run = deps6(green).run })), 2, why .. ": exit 2")
+          eq(#ran, 0, why .. ": nothing ran")
+          has(table.concat(errs6, "\n"), "only manual sheets", why .. ": it says what may run")
+        end
+        refused8({ "--task", "x/mixed", "--root", p8 }, "a task with a manual and an rpc sheet")
+        refused8({ "--task", "x/brokenws", "--root", p8 }, "a sheet that does not load")
+        refused8({ "--all", "--root", p8 }, "--all with an rpc sheet among them")
+        errs6 = {}
+        eq(
+          run.main(
+            { "--task", "x/ask", "--root", p8 },
+            sv6,
+            ws8({
+              getenv = function(name)
+                return name == "NVIM_MACHINE_ROLE" and "workstaton" or nil
+              end,
+            })
+          ),
+          2,
+          "a role that is a typo is refused, manual or not"
+        )
+        has(table.concat(errs6, "\n"), "a typo", "... as a typo")
+      end
       ran = {}
       eq(
         run.main(

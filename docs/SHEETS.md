@@ -225,8 +225,12 @@ the task's block: no suite, no second command. tasks.nvim's `:Tasks sheet-run` c
   that is not found is refused (pass `--root`). The engine is found before a sheet runs.
 * Each root passes the workspace trust gate first (a sheet runs the project's minimal init).
 * A missing snapshot is a failure, as on CI: a run from a task never writes a reference image (run the spec once).
-* On the workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) it refuses, unless
-  `TESTING_ALLOW_WORKSTATION=1`; a value that is neither `workstation` nor `default` is refused as a typo.
+* On the workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) only **manual sheets** run
+  (`engine = "manual"`: questions and steps for a person, nothing is started for them). The decision waits until every
+  sheet of the run is loaded as data: one rpc, browser or desktop sheet among them, or one that does not load, refuses
+  the whole run (exit 2, nothing ran), unless `TESTING_ALLOW_WORKSTATION=1`. With `--tasks` the result is written
+  through the engine of tasks.nvim (`nvim -l`, as `:Tasks` does there). A value that is neither `workstation` nor
+  `default` is refused as a typo.
 * A red sheet carries its first failure line into the block (`red: 80x24 step 3, keys ...`).
 
 Exit codes: 0 green (or waiting for a person) and written, 1 a sheet is red or the task could not be written, 2 bad

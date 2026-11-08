@@ -261,14 +261,25 @@ function M.main(argv, sv, deps)
     sv.err("testing sheets: " .. tostring(perr) .. "\n" .. M.USAGE)
     return 2
   end
-  local refused = require("testing.sheet.run").refused(deps.getenv or vim.uv.os_getenv)
-  if refused then
-    sv.err(refused)
-    return 2
+  local gate = require("testing.sheet.run")
+  local getenv = deps.getenv or vim.uv.os_getenv
+  -- the workstation decides once the sheet is loaded as data (only a manual one runs there); a typo stops here
+  if not gate.manual_only_here(getenv) then
+    local refused = gate.refused(getenv)
+    if refused then
+      sv.err(refused)
+      return 2
+    end
   end
   local s, root = find_sheet(o)
   if not s then
+    -- on the workstation too: a sheet that does not load is never run
     sv.err("testing sheets: " .. tostring(root))
+    return 2
+  end
+  local refused = gate.refused(getenv, { { sheet = s } })
+  if refused then
+    sv.err(refused)
     return 2
   end
   for _, n in ipairs(o.break_list) do
