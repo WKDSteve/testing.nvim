@@ -56,7 +56,8 @@ function M.key(step, f)
   local text = vim.trim(tostring(nonnil(f.text) or ""))
   -- the snapshot of each state sits in a directory of its own (`.../snap/<sha8>-<random>/tree`, maybe cut to
   -- `...nap/`), so a path in the text would tell the same finding apart between head and base
-  text = text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>"):gsub(":%d+", ":#")
+  text =
+    text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>"):gsub(":%d+", ":#")
   return table.concat({ step, file, text }, "\0")
 end
 
