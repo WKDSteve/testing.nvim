@@ -471,10 +471,30 @@ M.REFRESH_AFTER = 5
 ---The statusline component: the cached result of the project of the current buffer (or `root`); starts nothing
 ---except an asynchronous refresh (the first time a project is asked about, and every `REFRESH_AFTER` seconds), so
 ---a run in a terminal, a commit or the pre-push hook show up. `stale` compares the tree of HEAD.
+---The project root of a buffer name, as the statusline found it: it is drawn on every redraw, and the search walks
+---up the directories (`stat` on every level). Emptied when it grows past `ROOT_CACHE_MAX` names.
+---@type table<string, string>
+M.root_of = {}
+M.ROOT_CACHE_MAX = 500
+local root_count = 0
+
 ---@param root? string
 ---@return string
 function M.statusline(root)
-  root = root or require("testing.bindings.usrcmds").resolve_root(nil, vim.api.nvim_buf_get_name(0))
+  if not root then
+    local name = vim.api.nvim_buf_get_name(0)
+    root = M.root_of[name]
+    if not root then
+      root = require("testing.bindings.usrcmds").resolve_root(nil, name)
+      if root_count >= M.ROOT_CACHE_MAX then
+        M.root_of, root_count = {}, 0
+      end
+      -- a buffer without a name is the current directory's, which changes: not cached
+      if name ~= "" then
+        M.root_of[name], root_count = root, root_count + 1
+      end
+    end
+  end
   local entry = M.state[key(root)]
   if not entry then
     M.state[key(root)] = { at = os.time() }

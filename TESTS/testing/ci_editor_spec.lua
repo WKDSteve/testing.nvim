@@ -981,6 +981,38 @@ return function(H)
     eq(calls, 2, "statusline: no refresh while a run goes")
     editor.state[root].running = false
 
+    -- without a root it finds the project of the buffer once per buffer name, not on every redraw
+    do
+      local usrcmds = require("testing.bindings.usrcmds")
+      local saved_resolve = usrcmds.resolve_root
+      local resolved = 0
+      usrcmds.resolve_root = function()
+        resolved = resolved + 1
+        return root
+      end
+      editor.root_of = {}
+      editor.state[root].doc, editor.state[root].at = RED, os.time()
+      local probe = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(probe, root .. "/lua/statusline_probe.lua")
+      local prev = vim.api.nvim_get_current_buf()
+      vim.api.nvim_set_current_buf(probe)
+      for _ = 1, 5 do
+        eq(editor.statusline(), "ci: ✗ luacheck stale", "statusline: the buffer's project")
+      end
+      eq(resolved, 1, "statusline: the root of a buffer is looked up once")
+      local saved_max = editor.ROOT_CACHE_MAX
+      editor.ROOT_CACHE_MAX = 0
+      editor.statusline()
+      vim.api.nvim_buf_set_name(probe, root .. "/lua/statusline_probe2.lua")
+      editor.statusline()
+      ok(resolved >= 2, "statusline: a new name is looked up")
+      ok(vim.tbl_count(editor.root_of) <= 1, "statusline: the cache stays bounded")
+      editor.ROOT_CACHE_MAX = saved_max
+      vim.api.nvim_set_current_buf(prev)
+      vim.api.nvim_buf_delete(probe, { force = true })
+      usrcmds.resolve_root = saved_resolve
+    end
+
     -- :Testing ci verify | hook through a child (fake): the first line is the message, a non-zero exit warns
     messages = {}
     local captured

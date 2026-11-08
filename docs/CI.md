@@ -488,7 +488,8 @@ since. `verify` and `hook` run the driver's subcommands of the same name and sho
 (green but partial), `ci: ! infra`, `ci: … full` while a run goes, and appends `stale` when the tree is no longer the one
 the result was for. It reads a cache and blocks on nothing: every 5 seconds (`editor.REFRESH_AFTER`) and after a run it re-reads
 the document and asks git for the tree of HEAD in the background, so a run in a terminal, a commit or the pre-push hook
-show up (uncommitted changes do not make a result stale; `ci verify` says `dirty`). Completion never waits for
+show up (uncommitted changes do not make a result stale; `ci verify` says `dirty`). The project of the current buffer
+is looked up once per buffer name (the search walks up the directories; the statusline is drawn on every redraw). Completion never waits for
 `testing ci list` either: the first <Tab> after `.testing.lua` changed starts it, the next one has the names.
 
 **Progress.** A run shows a progress indicator (`lib.nvim.progress`, in whatever style it resolves to; nothing for a
