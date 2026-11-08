@@ -584,7 +584,7 @@ return function(H)
       local testing_lua = vim.fn.readfile(target .. "/.testing.lua")
       vim.fn.writefile({
         "return { plugin = 'proj', ci = { default = 'full', profiles = { full = { 'suite' } },",
-        "  workflow = { platform = { 'suite' } } } }",
+        "  workflow = { name = 'proj', platform = { 'suite' } } } }",
       }, target .. "/.testing.lua")
       messages = {}
       vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --workflow=public")

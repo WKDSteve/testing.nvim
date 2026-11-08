@@ -135,6 +135,8 @@ keeps it that way:
 ci = {
   profiles = { ... },
   workflow = {
+    name = "tasks.nvim",                           -- the repository, for the header (never the directory's name: a
+                                                   -- worktree of `testing ci commit` is called `tree`)
     platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
     checkouts = {                                  -- optional: third-party dependencies, pinned by commit

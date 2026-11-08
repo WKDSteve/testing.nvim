@@ -62,12 +62,15 @@ return function(H)
     return code, table.concat(out, "\n"), table.concat(err, "\n")
   end
 
-  -- golden: the workflow tasks.nvim had by hand, byte for byte (third-party checkout, Node, an env variable)
+  -- golden: the workflow tasks.nvim had by hand, byte for byte (third-party checkout, Node, an env variable). The
+  -- project lies in a directory called `tree`, as a snapshot of `testing ci commit` does: the name comes from
+  -- `ci.workflow`, never from the directory (it did, and every commit of tasks.nvim was a false regression)
   do
     local root = project(
-      "tasks.nvim",
+      "tree",
       "{ 'suite', 'conformance' }",
       [[{
+        name = "tasks.nvim",
         platform = { "suite", "conformance" },
         node = { version = "22", used_by = "the Node contract check" },
         checkouts = { {
@@ -133,6 +136,7 @@ return function(H)
       "rules.nvim",
       "{ 'suite', 'conformance', 'contracts' }",
       [[{
+        name = "rules.nvim",
         platform = { "suite", "conformance", "contracts" },
         publish = { why = "docmap.nvim checks this repository out to run the rules engine in its standalone gate." },
       }]]
@@ -161,6 +165,8 @@ return function(H)
       has(table.concat(problems, "\n"), needle, msg)
     end
     refused({ bogus = 1 }, "unknown key bogus", "an unknown key")
+    refused({ platform = { "suite" } }, ".name", "no name (the directory never names the workflow)")
+    refused({ name = "a/b" }, ".name", "a name with a slash")
     refused({ platform = {} }, ".platform", "no platform step")
     refused({ platform = { "a b" } }, ".platform[1]", "a step name with a blank")
     refused(
@@ -192,7 +198,11 @@ return function(H)
     local text, problems = workflow.render(root)
     eq(text, nil, "no ci.workflow: nothing generated")
     has(table.concat(problems), "has no ci.workflow", "... and why")
-    root = project("badplat.nvim", "{ 'suite' }", "{ platform = { 'suite', 'conformance' } }")
+    root = project(
+      "badplat.nvim",
+      "{ 'suite' }",
+      "{ name = 'badplat.nvim', platform = { 'suite', 'conformance' } }"
+    )
     problems = select(2, workflow.render(root))
     has(
       table.concat(problems or {}),
@@ -203,8 +213,11 @@ return function(H)
 
   -- the step `workflow-in-sync`: a pipeline that names it is red when the workflow differs
   do
-    local root =
-      project("insync.nvim", "{ 'workflow-in-sync' }", "{ platform = { 'workflow-in-sync' } }")
+    local root = project(
+      "insync.nvim",
+      "{ 'workflow-in-sync' }",
+      "{ name = 'insync.nvim', platform = { 'workflow-in-sync' } }"
+    )
     eq(call(root), 0, "workflow-in-sync: the workflow is written")
     local state = tmp .. "/state"
     local function ci()

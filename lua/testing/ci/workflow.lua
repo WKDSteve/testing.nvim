@@ -8,6 +8,7 @@
 ---   ci = {
 ---     profiles = { ... },
 ---     workflow = {
+---       name = "tasks.nvim",                        -- the repository (never the directory: a worktree is named otherwise)
 ---       platform = { "suite", "conformance" },     -- the steps that depend on the platform (hosted windows, macOS)
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
 ---       checkouts = {                               -- optional: third-party dependencies, pinned by commit
@@ -61,6 +62,7 @@ M.ACTIONS = {
 local RESERVED_ENV = { CI_STEPS = true, CI_REPORT = true, CI_IR = true }
 
 local KEYS = {
+  name = true,
   platform = true,
   node = true,
   checkouts = true,
@@ -81,6 +83,8 @@ local KEYS = {
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field timeout integer
+---@field name string The repository's name, for the header (never the directory's: a worktree or a clone is named
+---otherwise).
 
 ---@param v any
 ---@return boolean
@@ -122,6 +126,12 @@ function M.validate(raw)
     end
   end
   local cfg = { checkouts = {}, env = {}, timeout = 30, platform = { "suite", "conformance" } }
+  -- named, never taken from the directory: `ci commit` checks a snapshot in a directory called `tree`
+  if type(raw.name) ~= "string" or not raw.name:match("^[%w][%w._-]*$") or #raw.name > 100 then
+    bad('.name: the repository\'s name (name = "tasks.nvim"), letters, digits, ".", "_" and "-"')
+  else
+    cfg.name = raw.name
+  end
   if raw.platform ~= nil then
     if not is_list(raw.platform) or #raw.platform == 0 then
       bad(".platform: expected a non-empty list of step names")
@@ -317,10 +327,7 @@ function M.render(root)
       end
     end
   end
-  local name = vim.fs.basename(vim.fs.normalize(root))
-  if not name:match("^[%w][%w._-]*$") then
-    problems[#problems + 1] = ("the directory name %q cannot name the workflow"):format(name)
-  end
+  local name = cfg.name
   local deps = {}
   for _, d in ipairs(type(loaded.config.deps) == "table" and loaded.config.deps or {}) do
     local dname = type(d) == "table" and (d.name or d[1]) or d
