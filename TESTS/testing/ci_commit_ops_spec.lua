@@ -17,6 +17,7 @@ return function(H)
   -- the snapshots of this spec go to a temp directory of its own (on Windows they go below the temp directory, not
   -- below --state-dir)
   local snapshot = require("testing.ci.snapshot")
+  local saved_temp_dir = snapshot.temp_dir
   snapshot.temp_dir = function()
     return tmp .. "/temp"
   end
@@ -126,5 +127,6 @@ return function(H)
     trust.arm(prev)
   end
 
+  snapshot.temp_dir = saved_temp_dir
   S.cleanup()
 end
