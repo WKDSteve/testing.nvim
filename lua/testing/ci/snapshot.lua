@@ -3,7 +3,8 @@
 ---@brief The snapshot of one commit: a detached `git worktree` outside the repository, for `testing ci commit`.
 ---@description
 --- `create(root, rev)` checks the commit out with `git worktree add --detach` into a directory of its own below the
---- state directory (`<state>/testing/snap/<sha8>-<random>/tree`, with a throwaway state directory beside it). Only
+--- state directory (`<state>/testing/snap/<sha8>-<random>/tree`, with a throwaway state directory beside it; on Windows
+--- below the temp directory instead, `M.in_temp`). Only
 --- objects are read: the working tree, the index and the branches of the checkout stay as they are, so another session
 --- may keep editing, committing and rebasing there while the snapshot is tested. The repository's hooks do not run
 --- (an empty `core.hooksPath`), submodules are not checked out.
@@ -43,12 +44,24 @@ local function git(argv, cwd)
   return res.code or 1, res.stdout or "", res.stderr or ""
 end
 
----The base directory of all snapshots.
+---Replaced by a spec: whether snapshots go below the temp directory instead of the state directory (Windows). The
+---state directory is below `AppData`, and a packaged app (MSIX, such as the Claude desktop app) writes there into a
+---private copy of its own that WSL and a container engine cannot see: a container spec of the snapshot then fails
+---with "no such file or directory". The temp directory is not redirected. Elsewhere the state directory stays (the
+---podman machine of macOS mounts `/Users`, not the temp directory below `/var/folders`).
+---@type boolean
+M.in_temp = require("testing.platform").is_windows()
+
+---Replaced by a spec: the temp directory.
+---@type fun(): string
+M.temp_dir = vim.uv.os_tmpdir
+
+---The base directory of all snapshots: `<temp>/testing/snap` on Windows, else `<state>/testing/snap`.
 ---@param opts? { state_dir?: string }
 ---@return string
 function M.base(opts)
-  local state = (opts and opts.state_dir) or vim.fn.stdpath("state")
-  return vim.fs.normalize(state) .. "/testing/snap"
+  local dir = M.in_temp and M.temp_dir() or (opts and opts.state_dir) or vim.fn.stdpath("state")
+  return vim.fs.normalize(dir) .. "/testing/snap"
 end
 
 ---A revision as the command line may name it: no leading `-` (an option to git), no blank, no shell character.

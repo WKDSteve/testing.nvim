@@ -265,8 +265,11 @@ testing ci commit --repos-root=<dir> --since=<time> [--repos-include=<a,b>] [--r
 
 The question of a review: does this commit break something? `testing ci commit` answers it for the commit, not for
 the working tree. Each commit is checked out into a detached `git worktree` of its own below the state directory
-(`testing/snap/`), and the pipeline runs there in a child process (`testing ci --keep-going`, a throwaway state
-directory). The working tree, the index and the branches are never touched, so another session may keep editing,
+(`testing/snap/`; on Windows below the temp directory, `%TEMP%\testing\snap\`), and the pipeline runs there in a
+child process (`testing ci --keep-going`, a throwaway state directory). Why not the state directory on Windows: it
+lies below `AppData`, and a packaged app (MSIX, such as the Claude desktop app) writes there into a private copy that
+WSL and a container engine cannot see, so a container spec of the snapshot failed with "no such file or directory"
+while it was green in the working tree; the temp directory is not redirected. The working tree, the index and the branches are never touched, so another session may keep editing,
 committing and rebasing in the same checkout: its uncommitted work cannot turn the result red.
 
 A red run is not the end: the red steps (only those) run again on the snapshot of the base (`--base`, default the

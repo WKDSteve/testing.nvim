@@ -62,6 +62,33 @@ return function(H)
     eq(snapshot.valid_rev(""), false, "rev: empty")
   end
 
+  -- where the snapshots go: below the temp directory on Windows (a packaged app writes AppData into a private copy
+  -- that a container engine cannot see), below the state directory elsewhere
+  do
+    local saved_in, saved_temp = snapshot.in_temp, snapshot.temp_dir
+    eq(
+      snapshot.in_temp,
+      require("testing.platform").is_windows(),
+      "snap base: temp on Windows only"
+    )
+    snapshot.temp_dir = function()
+      return "C:\\Users\\u\\AppData\\Local\\Temp"
+    end
+    snapshot.in_temp = true
+    eq(
+      snapshot.base({ state_dir = "C:/Users/u/AppData/Local/nvim-data" }),
+      "C:/Users/u/AppData/Local/Temp/testing/snap",
+      "snap base: Windows takes the temp directory, not the state directory"
+    )
+    snapshot.in_temp = false
+    eq(
+      snapshot.base({ state_dir = "/home/u/.local/state/nvim" }),
+      "/home/u/.local/state/nvim/testing/snap",
+      "snap base: elsewhere the state directory"
+    )
+    snapshot.in_temp, snapshot.temp_dir = saved_in, saved_temp
+  end
+
   -- documentation
   do
     for _, f in ipairs({

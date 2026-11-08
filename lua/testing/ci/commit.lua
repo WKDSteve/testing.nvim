@@ -64,7 +64,7 @@ M.USAGE = table.concat({
   "  --include-docs    run a commit that changes only documentation too",
   "  --agent           the agent report (default in an agent environment); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci-commit/1 document there",
-  "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'))",
+  "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
   "  --root=<dir>      the repository (default: the current directory)",
   "  -- <options>      passed on to the suite step of both runs",
   "verdicts: clean 0, known-red 0, flaky 0, docs-only 0, empty 0, regression 1, unclassified 1, error 2, infra 3",

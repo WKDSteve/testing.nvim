@@ -14,6 +14,13 @@ return function(H)
   local eq, has, call = S.eq, S.has, S.call
   local cli, tmp, state_dir, write, git_out = S.cli, S.tmp, S.state_dir, S.write, S.git_out
   local worktrees = S.worktrees
+  -- the snapshots of this spec go to a temp directory of its own (on Windows they go below the temp directory, not
+  -- below --state-dir)
+  local snapshot = require("testing.ci.snapshot")
+  snapshot.temp_dir = function()
+    return tmp .. "/temp"
+  end
+  local snap_base = snapshot.base({ state_dir = state_dir })
 
   local root, c1 = S.project("proj", { ["gate.txt"] = "green\n", ["README.md"] = "# proj\n" })
   local c2 = S.commit(root, { ["gate.txt"] = "red\n" }, "turn the gate red")
@@ -66,13 +73,14 @@ return function(H)
   do
     eq(worktrees(root), 1, "no snapshot is left registered")
     local left = 0
-    for _ in vim.fs.dir(state_dir .. "/testing/snap") do
+    for _ in vim.fs.dir(snap_base) do
       left = left + 1
     end
     eq(left, 0, "no snapshot directory is left")
     local r = call(root, c1, "--agent", "--force", "--keep")
     local kept = r.out:match("  kept  (%S+)")
     ok(kept and vim.fn.isdirectory(kept) == 1, "--keep: the snapshot is named and still there")
+    has(vim.fs.normalize(kept), snap_base .. "/", "--keep: ... below the snapshot base")
     eq(worktrees(root), 2, "--keep: ... and registered")
     git_out(root, "worktree", "remove", "--force", kept)
   end
