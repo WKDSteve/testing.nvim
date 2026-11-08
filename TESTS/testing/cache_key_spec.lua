@@ -361,6 +361,11 @@ return function(H)
   eq(#rv, 64, "the runner digest is a sha256")
   eq(cache.runner_version({}), rv, "memoized")
 
+  -- a text with a NUL byte (a binary input) is hashed, not an E976 error; plain text keeps the plain sha256
+  eq(hash.sha256("abc"), vim.fn.sha256("abc"), "sha256: a plain text is hashed as before")
+  eq(#hash.sha256("a\0b"), 64, "sha256: a NUL byte does not raise")
+  ok(hash.sha256("a\0b") ~= hash.sha256("a\0c"), "sha256: texts with a NUL tell apart")
+
   cache.reset()
   S.remove(root)
   S.remove(cdir)

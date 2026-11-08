@@ -373,7 +373,7 @@ function M.runner_key()
     local code, tree = git({ "rev-parse", "HEAD^{tree}" }, d)
     local dcode, diff = git({ "diff", "HEAD" }, d)
     parts[#parts + 1] = (code == 0 and vim.trim(tree) or "nogit")
-      .. ((dcode == 0 and diff ~= "") and ("~" .. vim.fn.sha256(diff):sub(1, 12)) or "")
+      .. ((dcode == 0 and diff ~= "") and ("~" .. require("testing.cache.hash").sha256(diff):sub(1, 12)) or "")
   end
   runner_key_cache = table.concat(parts, "+")
   return runner_key_cache
@@ -386,7 +386,7 @@ end
 ---@param base string|nil
 ---@return string
 local function memory_path(root, sha, args, base)
-  local key = vim.fn.sha256(table.concat({
+  local key = require("testing.cache.hash").sha256(table.concat({
     base or "-",
     args.profile or "-",
     args.include_docs and "docs" or "-",

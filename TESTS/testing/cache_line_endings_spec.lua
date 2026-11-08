@@ -53,7 +53,7 @@ return function(H)
   local bin, _, bin_flag = h:file(tmp .. "/bin.dat")
   eq(
     { bin, bin_flag },
-    { vim.fn.sha256("\0\1\2\r\n\3"), false },
+    { require("testing.cache.hash").sha256("\0\1\2\r\n\3"), false },
     "a binary file is hashed as it is"
   )
   S.write(tmp .. "/other.txt", "one\r\ntwo!\r\n")

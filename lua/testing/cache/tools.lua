@@ -84,9 +84,9 @@ local function git_identity(name, lookup)
   end
   return version
     .. "|config "
-    .. vim.fn.sha256(table.concat(config, "\0")):sub(1, 16)
+    .. require("testing.cache.hash").sha256(table.concat(config, "\0")):sub(1, 16)
     .. "|env "
-    .. vim.fn.sha256(table.concat(env, "\0")):sub(1, 16)
+    .. require("testing.cache.hash").sha256(table.concat(env, "\0")):sub(1, 16)
 end
 
 ---What a program is, as a line of the key: its version, and for git also its configuration. Made once per process; `over`

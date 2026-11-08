@@ -117,6 +117,24 @@ local function valid_entry(raw, keep_analysis)
   }
 end
 
+local ESC = string.char(255)
+
+---sha256 hex of a text that may hold NUL bytes. Neovim before 0.12 turns such a string into a Blob and `vim.fn.sha256`
+---raises E976. Where it does, the NUL is written as a two-byte escape (and the escape byte doubled) first: injective,
+---and where `vim.fn.sha256` takes the text as it is (a text without NUL, or a newer Neovim) the hash is the plain one,
+---so no existing key changes.
+---@param text string
+---@return string hex
+function M.sha256(text)
+  local ok, hex = pcall(vim.fn.sha256, text)
+  if ok then
+    return hex
+  end
+  return vim.fn.sha256((text:gsub("[%z" .. ESC .. "]", function(c)
+    return c == ESC and ESC .. ESC or ESC .. string.char(254)
+  end)))
+end
+
 ---The text as it is hashed: `\r\n` read as `\n`, unless the file is binary (a NUL byte in the first
 ---`M.BINARY_PROBE` bytes). A lone `\r` stays.
 ---@param text string
@@ -140,9 +158,9 @@ end
 local function hashes_of(text)
   local norm, crlf = M.normalize(text)
   if not crlf then
-    return vim.fn.sha256(text), nil, nil
+    return M.sha256(text), nil, nil
   end
-  return vim.fn.sha256(norm), vim.fn.sha256(text), true
+  return M.sha256(norm), M.sha256(text), true
 end
 
 ---@param path? string Index file; nil keeps the index in memory only.
@@ -439,7 +457,7 @@ function Hasher:tree(dir, opts)
     any_crlf = any_crlf or crlf == true
     parts[#parts + 1] = rel .. "\0" .. sha
   end
-  return vim.fn.sha256(table.concat(parts, "\n")), nil, any_crlf
+  return M.sha256(table.concat(parts, "\n")), nil, any_crlf
 end
 
 ---Write the index back when something changed (bounded, atomic).
