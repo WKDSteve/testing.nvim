@@ -1,4 +1,5 @@
 ---@module 'testing.bindings.act'
+-- @cache-env TASKS_VAULT *_DIR
 ---@brief `:Testing act`: the finding under the cursor (or of the quickfix entry, or a choice) to a task, a rule or the AI.
 ---@description
 --- The editor side of `testing act` (`testing.act`). The target is, in this order: the current quickfix entry when it
@@ -52,7 +53,7 @@ local function relative(root, file)
   end
   local abs = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
   local prefix = vim.fs.normalize(root) .. "/"
-  if vim.fn.has("win32") == 1 then
+  if require("testing.platform").is_case_insensitive() then
     if abs:lower():sub(1, #prefix) == prefix:lower() then
       return abs:sub(#prefix + 1)
     end

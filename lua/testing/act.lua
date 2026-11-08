@@ -1,4 +1,6 @@
 ---@module 'testing.act'
+-- @cache-env TASKS_VAULT *_DIR
+-- @cache-allow outside
 ---@brief `testing act`: hand a finding to a task, a rule or the AI, as an intent `wkd-intent/1`; the target's engine writes.
 ---@description
 --- One way in for the actions on a finding (`testing-finding/1`, `testing.finding`), from the command line and the
