@@ -200,7 +200,8 @@ function M.perform(root, doc, what, mode)
       end
       run = act.rules_runner(cli)
     end
-    local family = type(doc.rule) == "string" and doc.rule:match("^(%a+)%-") or nil
+    -- the engine takes the family from a rule id only (`LUA-12`); anything else is asked for
+    local family = type(doc.rule) == "string" and doc.rule:match("^(%a+)%-%d+$") or nil
     local function go(fam)
       confirm_then(doc, function(yes)
         return act.to_rule(intent, { yes = yes, family = fam }, run)

@@ -167,6 +167,9 @@ return function(H)
   eq(coden, 3, "no task vault: exit 3")
   has(table.concat(errn, "\n"), "TASKS_VAULT", "the message names what is missing")
 
+  local codeh, outh = run({ "--help" })
+  eq(codeh, 0, "--help: exit 0")
+  has(table.concat(outh, "\n"), "usage: testing act", "--help prints the usage")
   local codeu = run({ "0000000000000000", "--do=task" }, { tasks = fake_tasks })
   eq(codeu, 2, "an unknown fp: exit 2")
   eq(run({ first.fp }, { tasks = fake_tasks }), 2, "no --do: exit 2")
@@ -340,6 +343,23 @@ return function(H)
   act.handoff_file = real_handoff
   ok(vim.uv.fs_stat(ai_file) ~= nil, "Write: the hand-over is there")
   has(reg["+"] or "", 'claude "Read ', "the command is in register +")
+
+  -- a rule: the family comes from a rule id only, anything else is asked for
+  local inputs = {}
+  ui.input = function(o, cb)
+    inputs[#inputs + 1] = o.prompt
+    cb("lua")
+  end
+  rule_calls = {}
+  ui.engines = { rules = fake_rules }
+  answer = 1
+  ui.perform(fx.beta, vim.tbl_extend("force", other, { rule = "stylua-x" }), "rule", "form")
+  eq(#inputs, 1, "a rule that is no rule id: the family is asked for")
+  eq(rule_calls[1].opts.family, "LUA", "the answer, upper case, goes to the engine")
+  inputs, rule_calls = {}, {}
+  ui.perform(fx.beta, vim.tbl_extend("force", other, { rule = "LUA-12" }), "rule", "form")
+  eq(#inputs, 0, "a rule id: no question, the engine takes its family")
+  eq(#rule_calls, 1, "only the dry run (Cancel)")
 
   ui.engines, ui.ask, ui.select, ui.input = seams.engines, seams.ask, seams.select, seams.input
 

@@ -468,6 +468,11 @@ end
 ---@param sv { out: fun(s: string), err: fun(s: string), state_dir?: string, getenv?: fun(name: string): string|nil, act?: Testing.Act.Engines }
 ---@return integer exit_code
 function M.main(argv, sv)
+  -- before the parse: `--help` is no option of an action, and `testing --help` points here
+  if vim.tbl_contains(argv, "--help") or vim.tbl_contains(argv, "-h") then
+    sv.out(M.USAGE)
+    return M.EXIT_OK
+  end
   local flags, pos = parse(argv)
   if not flags then
     sv.err("testing act: " .. tostring(pos))
@@ -475,10 +480,6 @@ function M.main(argv, sv)
     return M.EXIT_USAGE
   end
   ---@cast pos string[]
-  if argv[1] == "--help" or argv[1] == "-h" then
-    sv.out(M.USAGE)
-    return M.EXIT_OK
-  end
   if (flags.list and #pos > 0) or (not flags.list and #pos ~= 1) then
     sv.err(M.USAGE)
     return M.EXIT_USAGE
