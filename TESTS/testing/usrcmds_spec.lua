@@ -576,6 +576,32 @@ return function(H)
       )
       has(all_messages(), "runner-guard install", "--workflow: the report names what is left to do")
       vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --force")
+
+      -- --workflow=public: generated from ci.workflow; without it an error, with it the file, kept without --force
+      messages = {}
+      vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --workflow=public")
+      has(all_messages(), "has no ci.workflow", "--workflow=public without ci.workflow: says why")
+      local testing_lua = vim.fn.readfile(target .. "/.testing.lua")
+      vim.fn.writefile({
+        "return { plugin = 'proj', ci = { default = 'full', profiles = { full = { 'suite' } },",
+        "  workflow = { platform = { 'suite' } } } }",
+      }, target .. "/.testing.lua")
+      messages = {}
+      vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --workflow=public")
+      has(all_messages(), "kept:", "--workflow=public: an existing workflow is kept")
+      messages = {}
+      vim.cmd("Testing init " .. vim.fn.fnameescape(target) .. " --workflow=public --force")
+      has(
+        all_messages(),
+        "replaced: .github/workflows/ci.yml",
+        "--workflow=public --force replaces it"
+      )
+      has(
+        table.concat(vim.fn.readfile(target .. "/.github/workflows/ci.yml"), "\n"),
+        "--step=suite",
+        "--workflow=public: the generated workflow"
+      )
+      vim.fn.writefile(testing_lua, target .. "/.testing.lua")
     end)
     usrcmds.ask, vim.api.nvim_list_uis = real_ask, real_uis
   end

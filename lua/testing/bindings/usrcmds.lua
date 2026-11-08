@@ -905,7 +905,7 @@ function M.routes()
         {
           name = "workflow",
           type = "STRING",
-          desc = "Write only ci.yml, self-hosted plus hosted macOS: two-runner, two-runner-private",
+          desc = "Write only ci.yml: two-runner, two-runner-private, public (from ci.workflow)",
         },
         {
           name = "update",
@@ -944,6 +944,31 @@ function M.routes()
             notify().error(table.concat(lines, "\n"))
           else
             notify().info(table.concat(lines, "\n"))
+          end
+          return
+        end
+        -- generated from `ci.workflow` (testing.ci.workflow), as `testing init --workflow=public`
+        if ctx.flags.workflow == "public" then
+          if ctx.flags.hooks or ctx.flags.plugin then
+            notify().error("testing init: --workflow=public takes neither --hooks nor --plugin")
+            return
+          end
+          local lines, failed = {}, false
+          local code =
+            require("testing.ci.workflow").run(root, ctx.flags.force and "force" or "create", {
+              out = function(s)
+                lines[#lines + 1] = s
+              end,
+              err = function(s)
+                lines[#lines + 1] = s
+                failed = true
+              end,
+            })
+          local text = ("testing init %s\n%s"):format(root, table.concat(lines, "\n"))
+          if failed or code ~= 0 then
+            notify().error(text)
+          else
+            notify().info(text)
           end
           return
         end

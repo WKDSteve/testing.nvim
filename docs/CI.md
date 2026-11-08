@@ -120,6 +120,7 @@ decision of its own.
 | `conformance` | `testing conformance <root> --gate` in this process (a gate: without `--gate` it only reports) | |
 | `surface` | `testing surface <root>` in this process | |
 | `budget` | `testing budget <root>` in this process | |
+| `workflow-in-sync` | `testing init <root> --workflow=public --check` in this process: `.github/workflows/ci.yml` is the one `ci.workflow` gives, byte for byte ([WORKFLOW-CI.md](WORKFLOW-CI.md#generated-from-testinglua---workflowpublic)). Opt-in: named in a profile | |
 
 `stylua`, `luacheck` and `luals` are also the checks of [`testing lint`](#testing-lint-the-linters-on-the-changed-files):
 each carries a `lint` descriptor (`files`: the tool takes the files to check, else it checks the whole workspace and

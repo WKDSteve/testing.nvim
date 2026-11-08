@@ -149,6 +149,14 @@ local PRESETS = {
     args = {},
     needs = {},
   },
+  -- `testing init --workflow=public --check` (testing.ci.workflow): the workflow is the one `ci.workflow` gives, byte
+  -- for byte
+  ["workflow-in-sync"] = {
+    name = "workflow-in-sync",
+    inprocess = "init",
+    args = { "--workflow=public", "--check" },
+    needs = {},
+  },
 }
 
 ---@param name any

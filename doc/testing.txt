@@ -137,7 +137,8 @@ lint ~
         Generate the test setup of a plugin repository. An existing file is
         never overwritten without `--force`. `--workflow=two-runner` or
         `two-runner-private` writes only `.github/workflows/ci.yml`: the local
-        runner plus a GitHub-hosted macOS leg.
+        runner plus a GitHub-hosted macOS leg. `--workflow=public` generates
+        that file from `ci.workflow` of `.testing.lua`.
 :Testing conformance [{root}] [--gate] [--only={ids}] [--skip={ids}] [--bridge]
         Run the conformance checks K1..K16 on the project (a report; a failed
         gate is a warning, not an error).

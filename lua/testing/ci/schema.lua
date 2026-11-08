@@ -332,7 +332,8 @@ function M.resolve(raw)
     return nil, { ("ci: expected a table, got %s"):format(show(raw)) }
   end
   for key in pairs(raw) do
-    if key ~= "profiles" and key ~= "default" and key ~= "steps" then
+    -- `workflow` is read by `testing init --workflow=public` (testing.ci.workflow), not by the pipeline
+    if key ~= "profiles" and key ~= "default" and key ~= "steps" and key ~= "workflow" then
       problems[#problems + 1] = ("unknown key 'ci.%s'"):format(tostring(key))
     end
   end
@@ -475,7 +476,7 @@ function M.check(v)
 end
 
 ---The keys of a section that adjusts the derived pipeline (no `profiles`).
-local DERIVED_KEYS = { skip = true, steps = true, default = true }
+local DERIVED_KEYS = { skip = true, steps = true, default = true, workflow = true }
 
 ---The pipeline of a project: its `ci` section, or the one derived from the repository (`testing.ci.derive`) when the
 ---section is absent or has no `profiles`. Such a section only adjusts what is derived: `skip` (names to leave out),

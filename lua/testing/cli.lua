@@ -241,7 +241,7 @@ local function run_migrate(rest, sv)
 end
 
 local INIT_USAGE =
-  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --workflow=two-runner|two-runner-private [--force]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
+  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --workflow=two-runner|two-runner-private [--force]\n       testing init [<root>] --workflow=public [--force | --check]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
 
 ---`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`),
 ---`testing init [<root>] --workflow=<kind> [--force]`: write only the two-runner workflow with its macOS leg, and
@@ -286,6 +286,25 @@ local function run_init(rest, sv)
     end
   end
   root = vim.fs.normalize(vim.fn.fnamemodify(root or ".", ":p")):gsub("/+$", "")
+  -- `--workflow=public` is generated from `ci.workflow` (testing.ci.workflow): written, replaced or compared
+  if o.workflow == "public" then
+    local misuse = (o.update or o.hooks or o.plugin or o.write or o.force_comments)
+      and "--workflow=public takes --force or --check, nothing else"
+    if misuse or (o.force and o.check) then
+      sv.err(
+        ("testing: init: %s\n%s"):format(
+          misuse or "--force and --check exclude each other",
+          INIT_USAGE
+        )
+      )
+      return 2
+    end
+    return require("testing.ci.workflow").run(
+      root,
+      o.check and "check" or o.force and "force" or "create",
+      sv
+    )
+  end
   local misuse = (o.write or o.check) and not o.update and "--write and --check go with --update"
     or (o.write and o.check) and "--write and --check exclude each other"
     or (o.update and (o.hooks or o.plugin)) and "--update takes neither --hooks nor --plugin"

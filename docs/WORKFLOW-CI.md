@@ -124,10 +124,55 @@ Plain `testing init` still writes the hosted three-system matrix.
 - **First run.** The templates are checked against the rendered file, not on a real macOS VM; the first push of a
   repository is that check.
 
+### Generated from `.testing.lua`: `--workflow=public`
+
+The two templates above are written once and then edited by hand: the checkouts of the dependencies, the tools, their
+versions and the action SHAs end up in the workflow a second time, next to `.testing.lua`. For a public repository
+(pull requests from forks get hosted CI) `--workflow=public` generates the whole file from `ci.workflow` instead, and
+keeps it that way:
+
+```lua
+ci = {
+  profiles = { ... },
+  workflow = {
+    platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
+    node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
+    checkouts = {                                  -- optional: third-party dependencies, pinned by commit
+      { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
+    },
+    env = { TASKS_REQUIRE_SNACKS = "1" },          -- optional: environment of the pipeline step
+    publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
+    timeout = 30,                                  -- optional: minutes of a leg
+  },
+}
+```
+
+```bash
+testing init --workflow=public            # write .github/workflows/ci.yml (an existing one is kept)
+testing init --workflow=public --force    # replace it
+testing init --workflow=public --check    # compare byte for byte, print a diff, exit 1 when it differs
+```
+
+- **Layout.** A push to `main` runs the whole profile on the self-hosted runner plus a hosted macOS leg with the
+  `platform` steps; every other event (a pull request, also from a fork) runs only on hosted runners: ubuntu with the
+  whole profile, windows with the `platform` steps. A pull request never reaches the self-hosted runner; the header
+  says to approve no pull request that touches `.github/`.
+- **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
+  their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
+  `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a
+  repository is `owner/name`, a third-party `ref` a full commit id, an env name `NAME` and none the step sets itself,
+  no text with a line break); a `platform` step that is not in the default profile is an error.
+- **Kept in sync.** The preset step `workflow-in-sync` runs the `--check`: a repository that names it in a profile is red
+  as soon as the file and `.testing.lua` disagree. It is opt-in: a repository without `ci.workflow` is not generated and
+  not checked.
+- **First users.** rules.nvim and tasks.nvim: their hand-written workflows were the model; tasks.nvim's is generated
+  byte for byte, rules.nvim's differs only in the comment above the publish job.
+
 ### Why there is no `testing ci workflow`
 
 Decided on 2026-11-04: `testing init` already writes the workflow of a repository, so `--workflow` is a second kind of
-the same thing, and a `ci` verb would be a second place for it. `testing ci` runs a pipeline; it writes no setup.
+the same thing, and a `ci` verb would be a second place for it. `testing ci` runs a pipeline; it writes no setup. The
+generated workflow is therefore `testing init --workflow=public`, and only its check is a step of the pipeline.
 
 ### What `testing ci remote` shows
 
