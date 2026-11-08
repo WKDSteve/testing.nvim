@@ -72,7 +72,8 @@ return function(H)
       "snap base: temp on Windows only"
     )
     snapshot.temp_dir = function()
-      return "C:\\Users\\u\\AppData\\Local\\Temp"
+      -- slashes: vim.fs.normalize turns a backslash into a slash on Windows only
+      return "C:/Users/u/AppData/Local/Temp"
     end
     snapshot.in_temp = true
     eq(
