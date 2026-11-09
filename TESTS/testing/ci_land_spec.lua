@@ -111,6 +111,24 @@ return function(H)
   has(w.text, "is red on the hosted CI", "red: says so")
   has(w.text, "macos    failure  https://x/job/9", "red: names the red system")
 
+  -- all jobs green while the run is still in progress is no verdict: a later job or the conclusion can still be red
+  w = scenario({
+    states = {
+      { overall = "success", run = { status = "in_progress" } },
+      { overall = "failure", run = { status = "completed", url = "https://x/run/3" } },
+    },
+  })
+  eq(w.code, 1, "in progress: green jobs of an unfinished run do not land")
+  ok(not (w.pushes[2] or ""):find(":refs/heads/main", 1, true), "in progress: main does not move")
+  has(w.text, "the run is not completed yet", "in progress: says why it waits")
+  w = scenario({
+    states = {
+      { overall = "success", run = { status = "in_progress" } },
+      { overall = "success", run = { status = "completed" } },
+    },
+  })
+  eq(w.code, 0, "in progress: lands once the run is completed")
+
   -- landing the same commit again (an earlier land was red): its old run is no answer until the new one exists
   w = scenario({
     states = {

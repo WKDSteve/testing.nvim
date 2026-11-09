@@ -277,6 +277,21 @@ function M.run(args, say, state_dir)
       state = "no_run"
       rec = { overall = "no_run", note = "only an older run of this commit so far" }
     end
+    -- every job created so far is green, but the run is not completed: a job that GitHub creates later (`needs:`) or
+    -- the run's own conclusion could still be red, so this is no verdict yet
+    if
+      GREEN[state]
+      and type(rec.run) == "table"
+      and rec.run.status
+      and rec.run.status ~= "completed"
+    then
+      state = "running"
+      rec = vim.tbl_extend(
+        "force",
+        rec,
+        { overall = "running", note = "jobs green, the run is not completed yet" }
+      )
+    end
     if state ~= last then
       say(
         ("land: %s on %s: %s%s"):format(

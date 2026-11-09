@@ -408,6 +408,8 @@ For a public repository the hosted runners are free and check all three systems;
 long suite before a push at all. `testing ci land` pushes the commit to a check branch `ci/<repo>-<sha12>`, waits for
 the run of the CI workflow for exactly that commit (`testing ci remote`), and only when it is green moves `<branch>` to
 it, as a plain fast-forward push. `<branch>` is never red; a red run leaves it where it was and names the red systems.
+Green means the run is completed: while it is still in progress, jobs that are all green so far are no verdict (a job
+created later or the run's own conclusion could still be red).
 
 - `<remote>/<branch>` (fetched) must be an ancestor of the commit. When another session landed meanwhile, the commit is
   rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
