@@ -67,9 +67,10 @@ return function(H)
       kind = "ci-commit",
       repo = "r",
       sha = "abc",
-      duration_s = 12.345,
+      duration_s = 70.1,
       wait_s = 3,
       verdict = "clean",
+      steps = { suite = 61.6 },
     }),
     "record: written"
   )
@@ -78,10 +79,20 @@ return function(H)
   eq(broken, 0, "read: nothing broken")
   local e = entries[1]
   eq(
-    { e.v, e.kind, e.repo, e.host, e.duration_s, e.wait_s },
-    { 1, "ci-commit", "r", "h1", 12.3, 3 },
-    "the line"
+    { e.v, e.kind, e.repo, e.host, e.duration_ms, e.wait_ms, e.steps.suite, e.duration_s },
+    { 1, "ci-commit", "r", "h1", 70100, 3000, 61600, nil },
+    "the line: whole milliseconds"
   )
+  local rf = assert(io.open(m.path, "rb"))
+  local raw = rf:read("*a")
+  rf:close()
+  has(raw, '"duration_ms":70100', "the line: no 70.09999999999999 in the file")
+  eq(
+    metrics.seconds_of({ duration_s = 12.5 }, "duration"),
+    12.5,
+    "an older line with duration_s is still read"
+  )
+  eq(metrics.seconds_of({ duration_ms = 1500 }, "duration"), 1.5, "a line with duration_ms")
   ok(type(e.ts) == "string" and e.ts:match("^%d%d%d%d%-%d%d%-%d%dT") ~= nil, "the line: a UTC time")
   ok(e.os == "windows" or e.os == "linux" or e.os == "macos", "the line: the system")
 

@@ -6,8 +6,11 @@
 --- The numbers behind the CI cadence (docs/CI.md, "Metrics"): does a cheaper cadence really mean fewer and shorter runs?
 --- Every heavy run of the command line appends one JSON line to `metrics.jsonl`:
 ---
----   { v = 1, ts, kind, repo, sha?, host, os, duration_s, wait_s?, verdict, profile?, files? = { selected, cached, ran },
----     quick?, steps? = { [name] = seconds }, note? }
+---   { v = 1, ts, kind, repo, sha?, host, os, duration_ms, wait_ms?, verdict, profile?,
+---     files? = { selected, cached, ran }, steps? = { [name] = ms }, note? }
+---
+--- Whole milliseconds (the callers hand seconds to `record`); lines written before 2026-11-09 evening carry `duration_s`
+--- and `wait_s` instead, `seconds_of` reads both.
 ---
 --- `kind`: `suite` (a whole suite), `suite-partial` (a selection), `ci` (`testing ci`), `ci-commit` / `ci-commit-quick`
 --- (one commit of `testing ci commit`), `land`. Never a secret, an environment value or a path below the repository.
@@ -94,14 +97,28 @@ local function this_os()
   return "linux"
 end
 
----Seconds with one decimal.
+---Whole milliseconds of a number of seconds. Written as integers: the JSON encoder prints 16 digits, so a tenth of a
+---second (70.1) came out as 70.09999999999999.
 ---@param s number|nil
----@return number|nil
-function M.seconds(s)
+---@return integer|nil
+function M.ms(s)
   if type(s) ~= "number" then
     return nil
   end
-  return math.floor(s * 10 + 0.5) / 10
+  return math.floor(s * 1000 + 0.5)
+end
+
+---The seconds of a line: `duration_ms` (written since 2026-11-09 evening), else the older `duration_s`.
+---@param e table
+---@param field "duration"|"wait"
+---@return number
+function M.seconds_of(e, field)
+  local ms = e[field .. "_ms"]
+  if type(ms) == "number" then
+    return ms / 1000
+  end
+  local s = e[field .. "_s"]
+  return type(s) == "number" and s or 0
 end
 
 ---Append one run. Never raises and never fails the run: a line that cannot be written is lost.
@@ -119,8 +136,16 @@ function M.record(m, entry)
       host = m.host,
       os = this_os(),
     }, entry)
-    line.duration_s = M.seconds(line.duration_s)
-    line.wait_s = M.seconds(line.wait_s)
+    -- the callers give seconds; the line keeps whole milliseconds
+    line.duration_ms, line.duration_s = M.ms(line.duration_s), nil
+    line.wait_ms, line.wait_s = M.ms(line.wait_s), nil
+    if type(line.steps) == "table" then
+      local steps = {}
+      for name, s in pairs(line.steps) do
+        steps[name] = M.ms(s)
+      end
+      line.steps = steps
+    end
     local st = vim.uv.fs_stat(m.path)
     if st and st.size > M.MAX_BYTES then
       os.remove(m.path:gsub("%.jsonl$", "") .. ".1.jsonl")

@@ -440,7 +440,7 @@ once take as long as two after each other and are flakier. On Linux, where a pro
 
 Whether a cadence saves anything is a question of numbers, not of impressions. Every heavy run of the command line
 appends one JSON line to `metrics.jsonl` (`testing.metrics`): its kind (`suite`, `suite-partial`, `ci`, `ci-commit`,
-`ci-commit-quick`, `land`), repository, commit, machine, system, duration, the wait in the queue, the verdict, the
+`ci-commit-quick`, `land`), repository, commit, machine, system, duration, the wait in the queue (whole milliseconds), the verdict, the
 duration of each step (`ci`, `ci-commit`) and for a suite the spec files selected, from the cache and run. No secret,
 no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--json` gives `testing-stats/1`.
 

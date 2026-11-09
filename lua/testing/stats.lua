@@ -71,7 +71,9 @@ function M.aggregate(entries, opts)
       n = n + 1
       first = (not first or e.ts < first) and e.ts or first
       last = (not last or e.ts > last) and e.ts or last
-      local d = type(e.duration_s) == "number" and e.duration_s or 0
+      local metrics = require("testing.metrics")
+      local d = metrics.seconds_of(e, "duration")
+      local w = metrics.seconds_of(e, "wait")
       local k = kinds[e.kind]
       if not k then
         k = { runs = 0, seconds = 0, durations = {}, wait = 0, waited = 0, verdicts = {} }
@@ -80,8 +82,8 @@ function M.aggregate(entries, opts)
       k.runs = k.runs + 1
       k.seconds = k.seconds + d
       k.durations[#k.durations + 1] = d
-      if type(e.wait_s) == "number" and e.wait_s > 0 then
-        k.wait = k.wait + e.wait_s
+      if w > 0 then
+        k.wait = k.wait + w
         k.waited = k.waited + 1
       end
       local v = tostring(e.verdict or "?")
