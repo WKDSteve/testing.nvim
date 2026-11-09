@@ -64,6 +64,7 @@ M.ACTIONS = {
   "click",
   "hover",
   "focus",
+  "blur",
   "scheme",
   "shot",
   "toggle",
@@ -90,6 +91,7 @@ M.ENGINE_ACTIONS = {
     click = true,
     hover = true,
     focus = true,
+    blur = true,
     scheme = true,
     wait = true,
     expect = true,
@@ -126,6 +128,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field click? string
 ---@field hover? string A CSS selector the pointer moves over (browser): a later `shot` shows the `:hover` state.
 ---@field focus? string A CSS selector that gets the keyboard focus (browser).
+---@field blur? boolean Takes the keyboard focus from whatever has it (browser); red when something but the page itself holds it afterwards.
 ---@field scheme? "light"|"dark" The page's `prefers-color-scheme` from now on (browser).
 ---@field shot? string
 ---@field toggle? string
@@ -181,6 +184,7 @@ local STEP_KEYS = {
   click = "string",
   hover = "string",
   focus = "string",
+  blur = "boolean",
   scheme = "string",
   shot = "string",
   toggle = "string",
@@ -237,6 +241,8 @@ end
 ---Upper bounds: an endless wait (`timeout = 1/0`) or a screen of a billion rows is a mistake, not a check.
 M.MAX_MS = 10 * 60 * 1000
 M.MAX_CELLS = 1000
+---A browser or desktop sheet's size is pixels, not cells: a page taller than a screen is a normal thing to shoot.
+M.MAX_PIXELS = 4000
 
 ---@param v any
 ---@param max number
@@ -454,6 +460,9 @@ local function check_step(step, i, engine)
   if action == "restart" and step.restart ~= true then
     return at .. ".restart must be true"
   end
+  if action == "blur" and step.blur ~= true then
+    return at .. ".blur must be true"
+  end
   if step.args ~= nil then
     if action ~= "restart" then
       return at .. ": args belongs to a restart step"
@@ -530,14 +539,14 @@ function M.validate(s)
   if not is_list(s.sizes) or #s.sizes == 0 then
     return nil, "sizes must be a non-empty list"
   end
+  local max_size = (s.engine == "browser" or s.engine == "desktop") and M.MAX_PIXELS or M.MAX_CELLS
   for i, size in ipairs(s.sizes) do
     if
       type(size) ~= "table"
-      or not pos_int(size.rows, M.MAX_CELLS)
-      or not pos_int(size.cols, M.MAX_CELLS)
+      or not pos_int(size.rows, max_size)
+      or not pos_int(size.cols, max_size)
     then
-      return nil,
-        ("sizes[%d] must be { rows = n, cols = n } with 1 <= n <= %d"):format(i, M.MAX_CELLS)
+      return nil, ("sizes[%d] must be { rows = n, cols = n } with 1 <= n <= %d"):format(i, max_size)
     end
   end
   for _, f in ipairs({ "judge", "manual" }) do

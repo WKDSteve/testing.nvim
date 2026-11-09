@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 
 const SKIP = 77;
 const DRIVER_SCHEMA = 'testing-sheet-driver/1';
-const ACTIONS = ['open', 'press', 'click', 'hover', 'focus', 'scheme', 'wait', 'expect', 'shot'];
+const ACTIONS = ['open', 'press', 'click', 'hover', 'focus', 'blur', 'scheme', 'wait', 'expect', 'shot'];
 
 function describe(step) {
   for (const a of ACTIONS) {
@@ -58,6 +58,14 @@ async function runStep(page, step, where) {
     await page.hover(step.hover, { timeout: 5000 });
   } else if (step.focus !== undefined) {
     await page.focus(step.focus, { timeout: 5000 });
+  } else if (step.blur !== undefined) {
+    // the keyboard focus leaves whatever has it; a handler that gives it to another element is a failure of the step
+    const holder = await page.evaluate(() => {
+      document.activeElement?.blur();
+      const now = document.activeElement;
+      return !now || now === document.body || now === document.documentElement ? '' : now.outerHTML.slice(0, 80);
+    });
+    if (holder) throw new Error(`the focus is on ${holder}`);
   } else if (step.scheme !== undefined) {
     // prefers-color-scheme for the page from now on (light or dark), without reloading it
     await page.emulateMedia({ colorScheme: step.scheme });

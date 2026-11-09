@@ -42,7 +42,7 @@ return {
 | `screen = name` (`masks`, `cursor`, `mode`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24` | the snapshot differs (or is missing on CI) |
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 
-Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns: an endless wait
+Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns (4000 pixels for a browser or desktop sheet): an endless wait
 is a mistake, not a check. Every step may carry a `note`; a failure names the size, the step number and the
 note, and all failures of a sheet are one line. The first failed
 step ends that size (the steps after it depend on it). The UI is attached before the first step, so windows
@@ -453,6 +453,7 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `click = selector` | clicks the first element that matches the CSS selector | none matches in 5 s |
 | `hover = selector` | moves the pointer over the element and leaves it there: a later `expect` or `shot` sees its `:hover` state (JavaScript cannot trigger `:hover`) | none matches in 5 s |
 | `focus = selector` | gives the element the keyboard focus (`:focus`, the focus ring) | none matches in 5 s |
+| `blur = true` | takes the keyboard focus from whatever has it (the next key goes to the page): the way back from a `focus`, without an `expect` that does it on the side | something but the page itself holds the focus afterwards (a handler gave it to another element) |
 | `scheme = "light"\|"dark"` | the page's `prefers-color-scheme` from now on, without a reload | never |
 | `wait = js` (`timeout` ms, default 2000) | waits until the expression is truthy | it is not truthy in time |
 | `expect = js` | evaluates the expression now | it is not truthy |
@@ -461,9 +462,9 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 A `shot` name is part of a file name: letters, digits, `_` and `-` only; `open`, `press`, `click`, `hover` and `focus`
 must not be empty and `scheme` is `light` or `dark` (all of them are refused when the sheet loads). The looks of a
 control in one sheet: `{ scheme = "dark" }`, `{ hover = "#save" }`, `{ shot = "save-hover-dark" }`, `{ focus = "#save" }`,
-`{ shot = "save-focus-dark" }`, and a `judge` line for the person who looks at the shots.
+`{ shot = "save-focus-dark" }`, `{ blur = true }`, and a `judge` line for the person who looks at the shots.
 
-`sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700). A step of the other engine
+`sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700, at most 4000 each). A step of the other engine
 is refused when the sheet loads (`steps[2]: keys is not a step of a browser sheet`). The first failed step ends a
 size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-core`, found in
 `$TESTING_PLAYWRIGHT_DIR`, the project or `../mdview.nvim`). Without node, `playwright-core` or chromium the sheet

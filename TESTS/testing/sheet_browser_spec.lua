@@ -52,6 +52,8 @@ return function(H)
     { click = "" },
     { hover = "" },
     { focus = "" },
+    { blur = false },
+    { blur = "#k" },
     { scheme = "blue" },
     { scheme = "" },
   }) do
@@ -212,4 +214,57 @@ return function(H)
     { root = root, playwright_dir = pw_dir }
   )
   ok(not unhovered.ok, "without a hover step the control is not in its hover state")
+
+  -- 5. blur: the focus leaves; red when a handler hands it on --------------------------------------------------------
+  local handed = assert(io.open(root .. "/blur.html", "wb"))
+  handed:write(table.concat({
+    '<!doctype html><input id="a"><input id="b">',
+    '<input id="c" onblur="document.getElementById(\'b\').focus()">',
+  }, "\n"))
+  handed:close()
+  local blurred = sheet.run(
+    assert(sheet.validate({
+      id = "page.blur",
+      title = "Blur",
+      engine = "browser",
+      steps = {
+        { open = "blur.html" },
+        { focus = "#a" },
+        { expect = "document.activeElement.id === 'a'", note = "focused" },
+        { blur = true },
+        { expect = "document.activeElement === document.body", note = "the focus is gone" },
+      },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(blurred.ok, "blur takes the focus: " .. table.concat(blurred.failures, "; "))
+  local passed_on = sheet.run(
+    assert(sheet.validate({
+      id = "page.blur-handler",
+      title = "Blur handed on",
+      engine = "browser",
+      steps = { { open = "blur.html" }, { focus = "#c" }, { blur = true } },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(
+    not passed_on.ok and (passed_on.failures[1] or ""):find("the focus is on", 1, true) ~= nil,
+    "a blur whose handler hands the focus to another element is red: "
+      .. table.concat(passed_on.failures, "; ")
+  )
+
+  -- 6. the size of a browser sheet is pixels: a tall page is fine, the size of a terminal grid stays small ------------
+  local tall = {
+    id = "t",
+    title = "t",
+    engine = "browser",
+    steps = { { open = "x" } },
+    sizes = { { cols = 1000, rows = 2400 } },
+  }
+  ok(sheet.validate(tall) ~= nil, "a browser sheet may be 2400 pixels tall")
+  tall.sizes = { { cols = 1000, rows = 4001 } }
+  ok(select(2, sheet.validate(tall)) ~= nil, "but not beyond 4000")
+  local grid =
+    { id = "g", title = "g", steps = { { keys = "x" } }, sizes = { { cols = 80, rows = 1001 } } }
+  ok(select(2, sheet.validate(grid)) ~= nil, "an rpc sheet stays within 1000 cells")
 end
