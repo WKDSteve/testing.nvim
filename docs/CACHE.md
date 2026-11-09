@@ -189,7 +189,10 @@ and nothing else: it is tested in its own repository):
 `expand`, an ex command with a file argument, ...) gets into its key: the files of its spec root (helpers, fixtures, the
 harness; other spec files only when something in the closure lists directories, because then a lint spec may be
 reading them), every path-like string literal that names an existing file or directory below the root (a word of a
-command string such as `runtime plugin/x.lua` counts), and what it declares in its header:
+command string such as `runtime plugin/x.lua` counts), and what it declares in its header. A literal under `.git` is
+not guessed as an input: a module that names `".git"` looks for the root of the repository it works on, and the whole
+object store would be too large for a key; a spec that really reads this checkout's git declares it
+(`-- @cache-inputs .git/HEAD`) or runs `git` (then it has no key anyway):
 
 ```lua
 -- @cache-inputs README.md docs/

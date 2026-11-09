@@ -1426,7 +1426,17 @@ local function input_lines(file_info, spec_info, ctx, hasher, agg, force_tree)
         then
           rel = rel:match("^(.*)/[^/]*$") or ""
         end
-        if not standard and rel ~= "" and rel ~= "." and not rel:find("..", 1, true) then
+        -- `.git` names the repository root of whatever project the module works on (specs make their own temp
+        -- repositories for that), not this checkout's history: a guess under it would put the whole object store into
+        -- the key. Reading this checkout's git is declared (`@cache-inputs .git/HEAD`) or runs `git` (no key anyway).
+        local git = rel == ".git" or rel:find("^%.git/") ~= nil
+        if
+          not standard
+          and not git
+          and rel ~= ""
+          and rel ~= "."
+          and not rel:find("..", 1, true)
+        then
           local w = add(rel, false)
           if w then
             return w
