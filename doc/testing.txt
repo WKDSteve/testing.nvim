@@ -290,6 +290,8 @@ for the hosted CI and moves main to it only when that is green (needs
 Heavy runs (a whole suite, `ci` with the whole suite, `ci commit`) take turns
 on one machine: a second one waits and says for what (docs/CI.md, "One heavy
 run at a time"). `TESTING_QUEUE=off` turns that off.
+`stats [--since=7d] [--repo=<name>] [--json]` sums up what the heavy runs of
+this machine cost (one line each in `metrics.jsonl`; docs/CI.md, "Metrics").
 
 Workspace trust ~                                             *testing-trust*
 The runner executes a project's `.testing.lua`, minimal init and specs, so it

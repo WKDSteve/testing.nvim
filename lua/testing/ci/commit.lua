@@ -86,6 +86,7 @@ M.USAGE = table.concat({
 ---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
 ---@field queue? Testing.Queue The entry's queue (`testing.queue`): a commit that runs takes its turn.
 ---@field queue_say? fun(s: string) Where the queue says that it waits.
+---@field metrics? Testing.Metrics The entry's metrics (`testing.metrics`): one line per commit that ran.
 ---@field json? string
 ---@field state_dir? string
 ---@field agent? boolean
@@ -734,11 +735,30 @@ local function check(root, sha, args, say, snaps)
     r.verdict, r.problems = "infra", { "queue: " .. tostring(waited_too_long) }
     return r
   end
+  local started = vim.uv.hrtime()
   local ok_run, res = pcall(run_check, root, sha, args, say, snaps, r, base, mem)
   queue.release(queued)
   if not ok_run then
     error(res, 0)
   end
+  -- one line of `testing stats` per commit that ran (a kept result ran nothing)
+  local steps = {}
+  local head = type(res.head) == "table" and res.head or {}
+  for _, s in ipairs(head.steps or {}) do
+    if type(s.name) == "string" and type(s.ms) == "number" then
+      steps[s.name] = math.floor(s.ms / 100 + 0.5) / 10
+    end
+  end
+  require("testing.metrics").record(args.metrics, {
+    kind = res.quick and "ci-commit-quick" or "ci-commit",
+    repo = vim.fs.basename(root),
+    sha = sha,
+    duration_s = (vim.uv.hrtime() - started) / 1e9,
+    wait_s = queued and queued.waited_s or nil,
+    verdict = res.verdict,
+    profile = type(res.profile) == "string" and res.profile or nil,
+    steps = steps,
+  })
   return res
 end
 
@@ -1330,6 +1350,7 @@ function M.main(argv, sv)
   -- each commit that runs takes its turn in the queue (testing.queue); a kept result waits for nobody
   args.queue = (sv --[[@as table]]).queue
   args.queue_say = err
+  args.metrics = (sv --[[@as table]]).metrics
   for i, plan in ipairs(plans) do
     local name = names[i]
     local rs = {}

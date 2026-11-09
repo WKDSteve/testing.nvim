@@ -53,6 +53,7 @@ M.time = os.time
 ---@class Testing.Queue.Handle
 ---@field noop? boolean Nothing was taken (off, a child of the holder, no lock file possible).
 ---@field held? { token: string, path: string, depth: integer, env_before?: string }
+---@field waited_s? number How long this call waited for a slot (seconds).
 
 ---@class Testing.Queue.AcquireOpts
 ---@field max_wait_ms? integer
@@ -159,6 +160,7 @@ function M.acquire(q, what, say, opts)
   local deadline = now() + (opts.max_wait_ms or M.MAX_WAIT_MS)
   local slots = q.slots or M.DEFAULT_SLOTS
   local waited = false
+  local wait_from = now()
 
   ---Try slot `n`: "taken", "busy" (with the holder's lock), or "broken" (no lock file can be made there).
   ---@return "taken"|"busy"|"broken" what
@@ -206,7 +208,7 @@ function M.acquire(q, what, say, opts)
         if waited then
           say("testing: queue: your turn, " .. what .. " starts")
         end
-        return { held = held }
+        return { held = held, waited_s = (now() - wait_from) / 1000 }
       elseif state == "broken" then
         -- a temp directory that refuses the file: run, and say that nothing was queued
         say(("testing: queue: no lock file (%s): %s runs without waiting"):format(detail, what))
@@ -264,10 +266,11 @@ end
 ---@param fn fun(): T
 ---@return T
 function M.quiet_children(fn)
-  local before = vim.env[M.OFF_ENV]
-  vim.env[M.OFF_ENV] = "off"
+  -- nor do they write metrics lines (testing.metrics): what a spec starts is no run of the user's
+  local before, metrics_before = vim.env[M.OFF_ENV], vim.env.TESTING_METRICS
+  vim.env[M.OFF_ENV], vim.env.TESTING_METRICS = "off", "off"
   local ok, res = pcall(fn)
-  vim.env[M.OFF_ENV] = before
+  vim.env[M.OFF_ENV], vim.env.TESTING_METRICS = before, metrics_before
   if not ok then
     error(res, 0)
   end

@@ -387,7 +387,22 @@ function M.main(argv, sv)
   local state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p")
     or sv.state_dir
     or vim.fn.stdpath("state")
-  return M.run(args, sv.out, state_dir --[[@as string]])
+  local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
+  local c, out = M.deps.git(root, { "rev-parse", "--verify", "--quiet", args.rev .. "^{commit}" })
+  local started = M.deps.now()
+  local code = M.run(args, sv.out, state_dir --[[@as string]])
+  -- one line of `testing stats`: how long until landed (only when the entry armed the metrics)
+  require("testing.metrics").record((sv --[[@as table]]).metrics, {
+    kind = "land",
+    repo = vim.fs.basename(root),
+    sha = c == 0 and vim.trim(out) or nil,
+    duration_s = M.deps.now() - started,
+    verdict = code == M.EXIT_OK and "landed"
+      or code == M.EXIT_RED and "red"
+      or code == M.EXIT_USAGE and "error"
+      or "infra",
+  })
+  return code
 end
 
 return M

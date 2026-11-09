@@ -78,6 +78,7 @@ M.OWN_ARGS = { migrate = true, conformance = true, surface = true }
 ---@field rtp_dirs string[] Absolute `--rtp` directories.
 ---@field argv string[] The effective arguments (stored in the IR header).
 ---@field stamp? table The own flags of `testing stamp` (`--out`, `--note`): the run writes a stamp after a complete green verdict.
+---@field last_report? table The report of the run (`run_measured`), for the metrics line.
 
 ---Parse; kept as a delegate for callers of the M0 API.
 ---@param argv string[]
@@ -604,6 +605,8 @@ run_measured = function(plan, sv)
       end
     end
   end
+  -- the caller records the run (testing.metrics)
+  plan.last_report = last
   return code
 end
 
@@ -634,6 +637,10 @@ local function execute(argv, sv)
   end
   -- `testing sheets report|new`: the list of live checks from the test sheets, a draft sheet from a task
   -- (docs/SHEETS.md)
+  -- `testing stats`: what the heavy runs of this machine cost (testing.metrics, docs/CI.md "Metrics")
+  if argv[1] == "stats" then
+    return require("testing.stats").main(vim.list_slice(argv, 2), sv --[[@as table]])
+  end
   if argv[1] == "sheets" then
     return require("testing.sheet.report").main(vim.list_slice(argv, 2), sv)
   end
@@ -917,6 +924,7 @@ local function execute(argv, sv)
       return M.EXIT_INFRA
     end
   end
+  local started = vim.uv.hrtime()
   local ok_run, code = pcall(queue.quiet_children, function()
     return run_measured(plan, sv)
   end)
@@ -924,7 +932,39 @@ local function execute(argv, sv)
   if not ok_run then
     error(code, 0)
   end
+  M.record_metrics(sv, plan, handle, (vim.uv.hrtime() - started) / 1e9)
   return code
+end
+
+---One line of `testing stats` for a suite run (only when the entry armed the metrics).
+---@param sv Testing.Run.Services
+---@param plan Testing.Cli.RunPlan
+---@param handle Testing.Queue.Handle|nil
+---@param seconds number
+function M.record_metrics(sv, plan, handle, seconds)
+  local m = (sv --[[@as table]]).metrics
+  local last = plan.last_report
+  if not m or not last or not last.result then
+    return
+  end
+  local v = require("testing.report.verdict").of(last.result)
+  local files = v.files or {}
+  local git = last.result.run and last.result.run.git
+  require("testing.metrics").record(m, {
+    kind = (v.kind == "green-partial" or require("testing.stamp.write").refuse(plan.args))
+        and "suite-partial"
+      or "suite",
+    repo = vim.fs.basename(plan.root),
+    sha = type(git) == "table" and type(git.sha) == "string" and git.sha or nil,
+    duration_s = seconds,
+    wait_s = handle and handle.waited_s or nil,
+    verdict = v.kind,
+    files = {
+      selected = (files.cached or 0) + (files.ran or 0),
+      cached = files.cached or 0,
+      ran = files.ran or 0,
+    },
+  })
 end
 
 ---Run the CLI. Never raises: an internal error becomes exit code 3 with a message on stderr.

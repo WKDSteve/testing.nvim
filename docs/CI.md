@@ -436,6 +436,25 @@ flakes. The bottleneck is shared (starting processes, the file system, the virus
 once take as long as two after each other and are flakier. On Linux, where a process starts in a fraction of that time
 (the hosted ubuntu leg runs the same specs in 126 s against 331 s on windows), more slots may pay: measure first.
 
+## Metrics: what the runs cost
+
+Whether a cadence saves anything is a question of numbers, not of impressions. Every heavy run of the command line
+appends one JSON line to `metrics.jsonl` (`testing.metrics`): its kind (`suite`, `suite-partial`, `ci`, `ci-commit`,
+`ci-commit-quick`, `land`), repository, commit, machine, system, duration, the wait in the queue, the verdict, the
+duration of each step (`ci`, `ci-commit`) and for a suite the spec files selected, from the cache and run. No secret,
+no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--json` gives `testing-stats/1`.
+
+- Where: `$TESTING_METRICS_FILE`, else `%LOCALAPPDATA%\testing\metrics.jsonl` on Windows, `$XDG_DATA_HOME/testing/` or
+  `~/.local/share/testing/` elsewhere: read from the environment, not from `stdpath()`, which `scripts/test.sh` points
+  at a throwaway folder. Above 8 MB the file moves aside to `metrics.1.jsonl` (both are read).
+- Who writes: only the command-line entry (`scripts/testing.lua`); a spec or an editor that calls `cli.main` writes
+  nothing. A run counts once: `ci commit` records each commit that ran (not a kept result), and its runs at the commit
+  and the base (children carrying the queue's token) write no line of their own; `testing ci` records one `ci` line,
+  not a second one for its suite; the processes a suite starts write nothing (`TESTING_METRICS=off` for them). A CI
+  service (`CI` set) records nothing. `TESTING_METRICS=off` turns it off by hand.
+- Not the same as `testing history`: that is the log of results of one project (green or red, flaky cases);
+  `testing stats` is the cost of the machine across repositories.
+
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```

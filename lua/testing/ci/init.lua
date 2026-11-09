@@ -780,7 +780,12 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   local ok, code = pcall(
     require("testing.cli").main,
     argv,
-    vim.tbl_extend("force", sv, { out = sink(sv.out), err = sink(sv.err), trust = trust_ctx })
+    -- `metrics = false`: the pipeline records this run as one `ci` line, not a second `suite` line
+    vim.tbl_extend(
+      "force",
+      sv,
+      { out = sink(sv.out), err = sink(sv.err), trust = trust_ctx, metrics = false }
+    )
   )
   if scratch then
     scratch_traces = isolated.trace_base()
@@ -1617,6 +1622,21 @@ function M.main(argv, sv)
     out(line)
   end
   queue.release(queued)
+  -- one line of `testing stats` (only when the entry armed the metrics)
+  local step_seconds = {}
+  for _, s in ipairs(steps_doc) do
+    step_seconds[s.name] = type(s.ms) == "number" and math.floor(s.ms / 100 + 0.5) / 10 or nil
+  end
+  require("testing.metrics").record((sv --[[@as table]]).metrics, {
+    kind = "ci",
+    repo = vim.fs.basename(root),
+    sha = type(facts.commit) == "string" and facts.commit or nil,
+    duration_s = os.time() - started,
+    wait_s = queued and queued.waited_s or nil,
+    verdict = doc.verdict,
+    profile = profile,
+    steps = step_seconds,
+  })
   return exit
 end
 
