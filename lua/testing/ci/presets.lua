@@ -82,7 +82,10 @@ local PRESETS = {
     tool = "luacheck",
     -- one finding per line, `file:line:col: (W211) message`, without colours
     fixed = { "--formatter", "plain", "--codes" },
-    args = { "." },
+    -- `.deps/` holds the checkouts of the dependencies (the generated workflow, docs/WORKFLOW-CI.md): their code is
+    -- not the project's. stylua skips hidden folders by itself, luacheck does not; a command-line `--exclude-files`
+    -- adds to the `exclude_files` of .luacheckrc instead of replacing them.
+    args = { ".", "--exclude-files", ".deps/**" },
     needs = { "luacheck" },
     version_argv = { "luacheck", "--version" },
     efm = "%f:%l:%c: %m",

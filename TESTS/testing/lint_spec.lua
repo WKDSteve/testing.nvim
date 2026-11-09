@@ -512,8 +512,8 @@ os.exit(code)
     )
     eq(
       last_call(),
-      "luacheck --formatter plain --codes lua/proj/mod.lua lua/proj/new.lua",
-      "changed: the files replace the paths of the args"
+      "luacheck --formatter plain --codes --exclude-files .deps/** lua/proj/mod.lua lua/proj/new.lua",
+      "changed: the files replace the paths of the args (an option and its value stay)"
     )
     local named = run(scoped, "luacheck", "--json", "--file=" .. scoped .. "/lua/proj/bad.lua")
     eq(

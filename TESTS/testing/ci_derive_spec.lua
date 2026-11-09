@@ -292,6 +292,30 @@ return function(H)
     end
   end
 
+  -- luacheck leaves `.deps/` (the dependencies the generated workflow checks out) alone; the project's own
+  -- exclude_files still apply
+  do
+    local root = project("deps-lint", {
+      [".luacheckrc"] = 'std = "luajit"\nexclude_files = { "skip.lua" }\n',
+      [".deps/dep.nvim/lua/dep/init.lua"] = "leaked_global = 1\n",
+      ["skip.lua"] = "excluded_global = 1\n",
+    })
+    local p = schema.load(root)
+    local argv = table.concat(p.steps.luacheck.argv, " ")
+    has(argv, "--exclude-files .deps/**", "deps lint: the argv leaves .deps out")
+    if vim.fn.executable("luacheck") == 1 then
+      local res = run(root, "--step=luacheck")
+      eq(res.code, 0, "deps lint: green with a bad file in .deps (" .. res.out .. res.err .. ")")
+      write(root .. "/lua/proj/bad.lua", "own_global = 1\n")
+      res = run(root, "--step=luacheck")
+      eq(res.code, 1, "deps lint: the project's own file is still checked")
+      ok(
+        not (res.out .. res.err):find("excluded_global", 1, true),
+        "deps lint: ... and .luacheckrc's exclude_files still apply"
+      )
+    end
+  end
+
   -- the surface gate: derived when the specs track the surface and there is a baseline, on Linux only (the baseline
   -- comes from a Linux run), and fed the Result-IR of the suite of the same run
   do
