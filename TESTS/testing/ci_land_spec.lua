@@ -111,6 +111,17 @@ return function(H)
   has(w.text, "is red on the hosted CI", "red: says so")
   has(w.text, "macos    failure  https://x/job/9", "red: names the red system")
 
+  -- landing the same commit again (an earlier land was red): its old run is no answer until the new one exists
+  w = scenario({
+    states = {
+      { overall = "failure", run = { created_at = "1970-01-01T00:00:00Z" } },
+      { overall = "running", run = { created_at = "1970-01-01T00:20:00Z" } },
+      { overall = "success", run = { created_at = "1970-01-01T00:20:00Z" } },
+    },
+  })
+  eq(w.code, 0, "again: the old red run of the commit does not count")
+  has(w.text, "only an older run of this commit so far", "again: says why it waits")
+
   -- main moved before: nothing is pushed
   w = scenario({ base = OTHER, states = { { overall = "success" } } })
   eq(w.code, 1, "moved before: exit 1")

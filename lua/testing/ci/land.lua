@@ -269,6 +269,14 @@ function M.run(args, say, state_dir)
   while true do
     rec = d.remote(root, sha, state_dir)
     local state = rec.overall or "unknown"
+    -- a run of the same commit from before this push (an earlier land that was red) is no answer for this one: until
+    -- the new run exists, the newest run of the commit is that old one (a minute of slack for the two clocks)
+    local created = type(rec.run) == "table"
+      and require("testing.ci.remote").epoch(rec.run.created_at)
+    if created and created < pushed_at - 60 then
+      state = "no_run"
+      rec = { overall = "no_run", note = "only an older run of this commit so far" }
+    end
     if state ~= last then
       say(
         ("land: %s on %s: %s%s"):format(
