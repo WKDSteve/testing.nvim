@@ -468,5 +468,91 @@ return function(H)
     has(out, "workflow-in-sync", "... naming the step")
   end
 
+  -- packages: one step per system on every hosted leg, never on a self-hosted one, nothing without them -------------------
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    eq(workflow.validate({ name = "x" }).packages, {}, "packages: none by default")
+    refused({ name = "x", packages = "ripgrep" }, ".packages: expected a list", "packages: a list")
+    refused({ name = "x", packages = { "ripgrep" } }, ".packages[1]: expected", "packages: tables")
+    refused(
+      { name = "x", packages = { { name = "ripgrep", why = "a", cmd = "x" } } },
+      "unknown key cmd",
+      "packages: no other key"
+    )
+    for _, bad in ipairs({ "rg; rm -rf /", "a b", "$(x)", "-y", "", "a&b", "x|y" }) do
+      refused(
+        { name = "x", packages = { { name = bad, why = "a" } } },
+        ".packages[1].name",
+        "packages: the name " .. vim.inspect(bad) .. " is no package name"
+      )
+    end
+    refused(
+      { name = "x", packages = { { name = "ripgrep" } } },
+      ".packages[1].why",
+      "packages: a reason"
+    )
+    refused(
+      { name = "x", packages = { { name = "ripgrep", why = "line\nbreak" } } },
+      ".packages[1].why",
+      "packages: one line"
+    )
+    refused(
+      {
+        name = "x",
+        packages = { { name = "ripgrep", why = "a" }, { name = "ripgrep", why = "b" } },
+      },
+      "ripgrep twice",
+      "packages: no repeat"
+    )
+    local many = {}
+    for i = 1, workflow.MAX_PACKAGES + 1 do
+      many[i] = { name = "p" .. i, why = "a" }
+    end
+    refused({ name = "x", packages = many }, "at most", "packages: a limit")
+
+    local with = project(
+      "with-packages",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "public", packages = { { name = "ripgrep", why = "insights.nvim scans with it" } } }'
+    )
+    local text, problems = workflow.render(with)
+    eq(problems, {}, "packages: no problem")
+    has(text, "# ripgrep: insights.nvim scans with it\n", "packages: the reason is above the steps")
+    has(
+      text,
+      "if: matrix.hosted && runner.os == 'Linux'\n        run: sudo apt-get install -y ripgrep",
+      "packages: apt"
+    )
+    has(
+      text,
+      "if: matrix.hosted && runner.os == 'macOS'\n        run: brew install ripgrep",
+      "packages: brew"
+    )
+    has(
+      text,
+      "if: matrix.hosted && runner.os == 'Windows'\n        run: choco install ripgrep -y --no-progress",
+      "packages: choco"
+    )
+    local before = project(
+      "without-packages",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "public" }'
+    )
+    local plain = workflow.render(before)
+    ok(
+      not plain:find("Install ripgrep", 1, true),
+      "packages: a workflow without them has no such step"
+    )
+    -- the step comes before the pipeline step that needs the program, and only that
+    ok(
+      text:find("Install ripgrep (Windows)", 1, true) < text:find("matrix.steps }}", 1, true),
+      "packages: installed before the pipeline runs"
+    )
+  end
+
   vim.fn.delete(tmp, "rf")
 end

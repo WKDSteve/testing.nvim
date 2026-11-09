@@ -15,6 +15,7 @@
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
 ---       },
 ---       env = { TASKS_REQUIRE_SNACKS = "1" },       -- optional: environment of the pipeline step
+---       packages = { { name = "ripgrep", why = "insights.nvim scans with it" } },   -- optional: installed on the hosted legs
 ---       publish = true,                             -- optional: the job that moves `ci-verified` (or { why = "..." })
 ---       timeout = 30,                               -- optional: minutes of a leg
 ---     },
@@ -68,12 +69,16 @@ M.LAYOUTS = { public = true, private = true, hosted = true }
 ---Environment names the pipeline step sets itself.
 local RESERVED_ENV = { CI_STEPS = true, CI_REPORT = true, CI_IR = true }
 
+---Most packages a workflow installs: every one is a step of every hosted leg.
+M.MAX_PACKAGES = 8
+
 local KEYS = {
   name = true,
   layout = true,
   platform = true,
   node = true,
   checkouts = true,
+  packages = true,
   env = true,
   publish = true,
   timeout = true,
@@ -89,6 +94,7 @@ local KEYS = {
 ---@field platform string[]
 ---@field node? { version: string, used_by: string }
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
+---@field packages { name: string, why: string }[] Installed on every hosted leg (apt, brew, choco), never on a self-hosted one.
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
@@ -139,6 +145,7 @@ function M.validate(raw)
   end
   local cfg = {
     checkouts = {},
+    packages = {},
     env = {},
     timeout = 30,
     platform = { "suite", "conformance" },
@@ -215,6 +222,38 @@ function M.validate(raw)
             bad(".checkouts[%d].why: one line of text", i)
           else
             cfg.checkouts[#cfg.checkouts + 1] = { repo = c.repo, ref = c.ref, why = c.why }
+          end
+        end
+      end
+    end
+  end
+  if raw.packages ~= nil then
+    if not is_list(raw.packages) then
+      bad(".packages: expected a list")
+    else
+      if #raw.packages > M.MAX_PACKAGES then
+        bad(".packages: at most %d", M.MAX_PACKAGES)
+      end
+      local seen = {}
+      for i, p in ipairs(raw.packages) do
+        if type(p) ~= "table" then
+          bad('.packages[%d]: expected { name = "ripgrep", why = "<one line>" }', i)
+        else
+          for k in pairs(p) do
+            if k ~= "name" and k ~= "why" then
+              bad(".packages[%d]: unknown key %s", i, tostring(k))
+            end
+          end
+          if type(p.name) ~= "string" or not p.name:match("^[%w][%w._+-]*$") or #p.name > 64 then
+            -- one word for apt, brew and choco: nothing a shell could read as its own
+            bad('.packages[%d].name: a package name, letters, digits, ".", "_", "+" and "-"', i)
+          elseif seen[p.name] then
+            bad(".packages[%d].name: %s twice", i, p.name)
+          elseif not is_text(p.why) then
+            bad(".packages[%d].why: one line of text, why the runs need it", i)
+          else
+            seen[p.name] = true
+            cfg.packages[#cfg.packages + 1] = { name = p.name, why = p.why }
           end
         end
       end
@@ -335,6 +374,34 @@ local function checkout_block(name, repo, ref, pinned)
   end
   lines[#lines + 1] = "          ref: " .. ref
   return table.concat(lines, "\n") .. "\n"
+end
+
+---The steps that install the packages of `ci.workflow.packages` on a hosted leg, one per system (apt, brew, choco): the
+---name is checked to be one word nobody's shell reads as its own. Nothing for none, so a workflow without packages stays
+---byte for byte what it was; never on a self-hosted leg (`matrix.hosted`), whose machine is not the workflow's to change.
+---@param packages { name: string, why: string }[]
+---@return string
+local function package_steps(packages)
+  if #packages == 0 then
+    return ""
+  end
+  local out = {}
+  for _, p in ipairs(packages) do
+    out[#out + 1] = "      # " .. p.name .. ": " .. p.why .. "\n"
+    for _, sys in ipairs({
+      { "Linux", "sudo apt-get install -y " .. p.name },
+      { "macOS", "brew install " .. p.name },
+      { "Windows", "choco install " .. p.name .. " -y --no-progress" },
+    }) do
+      out[#out + 1] = table.concat({
+        "      - name: Install " .. p.name .. " (" .. sys[1] .. ")",
+        "        if: matrix.hosted && runner.os == '" .. sys[1] .. "'",
+        "        run: " .. sys[2],
+        "",
+      }, "\n")
+    end
+  end
+  return table.concat(out)
 end
 
 ---The text of the workflow of `root`.
@@ -738,6 +805,7 @@ function M.render_cfg(cfg, deps, opts)
     LUAROCKS_ACTION = M.ACTIONS.luarocks,
     UPLOAD_ACTION = M.ACTIONS.upload,
     CHECKOUTS = (table.concat(checkouts):gsub("\n$", "")),
+    PACKAGE_STEPS = package_steps(cfg.packages),
     NODE_STEP = cfg.node
         and ("      - uses: actions/setup-node@%s\n        if: matrix.hosted && matrix.steps == ''\n        with:\n          node-version: %s\n"):format(
           M.ACTIONS.node,

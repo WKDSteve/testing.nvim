@@ -53,7 +53,7 @@ jobs:
         if: matrix.hosted && matrix.steps == ''
       - if: matrix.hosted && matrix.steps == ''
         run: luarocks install luacheck @@LUACHECK_VERSION@@
-@@NODE_STEP|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
+@@PACKAGE_STEPS|raw@@@@NODE_STEP|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
         env:
 @@ENV|raw@@          CI_STEPS: ${{ matrix.steps }}
           CI_REPORT: ${{ runner.temp }}/ci-report.json

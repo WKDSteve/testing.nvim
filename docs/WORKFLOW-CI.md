@@ -149,6 +149,7 @@ ci = {
       { repo = "WKDSteve/hover.nvim", ref = "ci-verified", why = "<only the test sheets load it>" },
     },
     env = { TASKS_REQUIRE_SNACKS = "1" },          -- optional: environment of the pipeline step
+    packages = { { name = "ripgrep", why = "<one line: what the runs need it for>" } },   -- optional: programs of the hosted legs
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
     land = true,                                   -- optional: `testing ci land` (layouts public and hosted)
     timeout = 30,                                  -- optional: minutes of a leg
@@ -167,6 +168,11 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   a hosted ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook
   would refuse the move from a shallow checkout anyway. The jobs are named `testing ci (<system>)`, so
   `testing ci remote` puts each leg in its column and the publish job in none.
+- **Packages.** `packages` names programs the specs or test sheets need and a runner image lacks (`ripgrep`, for a sheet
+  that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
+  macOS and `choco` on Windows (one name for all three), and never on the self-hosted leg, whose machine is not the
+  workflow's to change. A name is a package name (letters, digits, `.`, `_`, `+`, `-`; nothing a shell would read as its
+  own), `why` is one line above the steps, at most 8 packages. Without `packages` the file is what it was.
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a
