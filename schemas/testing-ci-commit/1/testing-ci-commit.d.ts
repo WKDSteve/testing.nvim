@@ -50,6 +50,8 @@ export interface CommitResult {
   suite_args?: string[];
   /** True when the result was kept from an earlier call (nothing ran). */
   reused?: boolean;
+  /** `--quick`: the suite ran what the diff to the base reaches; a clean quick result is no proof of the tree. */
+  quick?: boolean;
   /** False when a list of findings was cut: the rest counts as new. */
   exact: boolean;
   changed_files?: string[];

@@ -72,6 +72,7 @@
         "profile": { "type": ["string", "null"] },
         "suite_args": { "type": "array", "items": { "type": "string" } },
         "reused": { "type": "boolean" },
+        "quick": { "type": "boolean", "description": "--quick: the suite ran what the diff to the base reaches (--affected=<base>); a clean quick result is no proof of the tree." },
         "exact": { "type": "boolean" },
         "changed_files": { "type": "array", "items": { "type": "string" } },
         "docs_only": { "type": "boolean" },

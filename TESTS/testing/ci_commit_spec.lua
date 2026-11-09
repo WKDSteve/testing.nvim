@@ -725,6 +725,57 @@ return function(H)
       "the commit's run is not narrowed"
     )
 
+    -- --quick: the commit runs what the diff to the base reaches; the base takes the red files, never the empty diff
+    -- of the base to itself; a clean quick run is no proof of the tree
+    local base_sha = ("b"):rep(40)
+    seen = {}
+    local quick_args = commit.parse({ ("a"):rep(40), "--quick", "--", "--cached" })
+    quick_args.state_dir = tmp
+    r = commit.check(tmp, ("a"):rep(40), quick_args, function() end)
+    eq(r.verdict, "known-red", "quick: red at both: known")
+    eq(r.quick, true, "quick: the result says so")
+    eq(
+      seen[1].suite,
+      { "--cached", "--affected=" .. base_sha },
+      "quick: the commit runs what the diff reaches"
+    )
+    ok(
+      not table.concat(seen[2].suite, " "):find("--affected", 1, true),
+      "quick: the base gets no --affected (its diff to itself is empty)"
+    )
+    eq(
+      vim.list_slice(seen[2].suite, #seen[2].suite - 1),
+      { "--file", "TESTS/a_spec.lua" },
+      "quick: the base runs the red file"
+    )
+    has(commit.headline(r), "KNOWN-RED quick", "quick: the headline says so")
+    local snapshot_run = require("testing.ci.snapshot_run")
+    local saved_keep, kept = snapshot_run.keep, 0
+    snapshot_run.keep = function()
+      kept = kept + 1
+      return true
+    end
+    commit.run_ci = function(snap, _, extra, suite_args)
+      seen[#seen + 1] = { sha = snap.sha:sub(1, 1), extra = extra, suite = suite_args }
+      return 0, { profile = "full", steps = { { name = "suite", state = "green" } } }, ""
+    end
+    r = commit.check(tmp, ("c"):rep(40), quick_args, function() end)
+    eq(r.verdict, "clean", "quick: clean")
+    eq(kept, 0, "quick: a clean quick run keeps no proof of the tree")
+    has(commit.headline(r), "CLEAN quick", "quick: the clean headline says so")
+    r = commit.check(tmp, ("d"):rep(40), args, function() end)
+    eq({ r.verdict, r.quick }, { "clean", nil }, "a full run is no quick one")
+    eq(kept, 1, "a clean full run keeps its proof")
+    snapshot_run.keep = saved_keep
+    local bad, why = commit.parse({ "HEAD", "--quick", "--", "--file", "x" })
+    eq(bad, nil, "quick: refuses a selection of its own")
+    has(why, "--quick selects by the diff itself", "quick: ... and says why")
+    eq(
+      commit.parse({ "HEAD", "--quick", "--", "--jobs", "2" }).quick,
+      true,
+      "quick: other options pass"
+    )
+
     snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
     snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
     vim.fn.delete(tree, "rf")

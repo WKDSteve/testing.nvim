@@ -62,6 +62,7 @@ M.USAGE = table.concat({
   "  --force           run again even when a result for the commit is kept",
   "  --keep            leave the snapshots (git worktrees) in place and name them",
   "  --include-docs    run a commit that changes only documentation too",
+  "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
   "  --agent           the agent report (default in an agent environment); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci-commit/1 document there",
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
@@ -82,6 +83,7 @@ M.USAGE = table.concat({
 ---@field force boolean
 ---@field keep boolean
 ---@field include_docs boolean
+---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
 ---@field json? string
 ---@field state_dir? string
 ---@field agent? boolean
@@ -115,6 +117,7 @@ function M.parse(argv)
     force = false,
     keep = false,
     include_docs = false,
+    quick = false,
     root = ".",
     suite_args = {},
     help = false,
@@ -136,6 +139,8 @@ function M.parse(argv)
       args.keep = true
     elseif key == "include-docs" and value == nil then
       args.include_docs = true
+    elseif key == "quick" and value == nil then
+      args.quick = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -186,6 +191,10 @@ function M.parse(argv)
     end
     if args.since and (args.since:sub(1, 1) == "-" or args.since:find("%c")) then
       return nil, "--since: expected a date git understands (2.days.ago, 2026-11-01)"
+    end
+    if args.quick and M.selects(args.suite_args) then
+      return nil,
+        "--quick selects by the diff itself: no --affected, --changed, --since, --file or --only after --"
     end
   end
   return args
@@ -395,6 +404,7 @@ local function memory_path(root, sha, args, base)
     args.profile or "-",
     args.include_docs and "docs" or "-",
     table.concat(args.suite_args, "\0"),
+    args.quick and "quick" or "-",
     M.runner_key(),
   }, "\n"))
   return ("%s/%s-%s.json"):format(memory_dir(root, args.state_dir), sha, key:sub(1, 12))
@@ -552,6 +562,35 @@ function M.confirm(snap, root, profile, new_items, suite_args)
   return still, flaky
 end
 
+---Do the suite options select spec files already (`--affected`, `--changed`, `--since`, `--file`, `--only`)?
+---@param suite_args string[]
+---@return boolean
+function M.selects(suite_args)
+  for _, a in ipairs(suite_args) do
+    local name = a:match("^%-%-([%w%-]+)")
+    if
+      name == "affected"
+      or name == "changed"
+      or name == "since"
+      or name == "file"
+      or name == "only"
+    then
+      return true
+    end
+  end
+  return false
+end
+
+---The suite options without the `--affected` of `--quick`: at the base the diff to itself is empty, so the base takes
+---the red files of the commit (`base_suite_args`), or the whole suite when those cannot be named.
+---@param suite_args string[]
+---@return string[]
+function M.without_affected(suite_args)
+  return vim.tbl_filter(function(a)
+    return a ~= "--affected" and not a:match("^%-%-affected=")
+  end, suite_args)
+end
+
 ---The suite options of the run at the base: those of the commit's run plus a `--file` for every spec file that is red
 ---at the commit, so the base runs those files and not the whole suite (a finding of the commit is in one of them, and
 ---the base is asked about exactly the findings of the commit). The whole suite runs when that cannot be said for sure:
@@ -704,6 +743,11 @@ local function check(root, sha, args, say, snaps)
   -- `--cached` needs no folder of its own: a snapshot is a worktree of this repository, and the cache folder is that
   -- of the main checkout (`testing.cache.store.repo_key`), shared with the base and with runs in the working tree
   local suite_args = args.suite_args
+  if args.quick and base then
+    -- what the diff to the base reaches; a root commit has no base and runs everything
+    suite_args = vim.list_extend(vim.deepcopy(suite_args), { "--affected=" .. base })
+    r.quick = true
+  end
   local code, head_doc, tail = M.run_ci(head_snap, root, extra, suite_args)
   r.head = head_doc or vim.NIL
   r.steps_head = step_states(head_doc)
@@ -713,8 +757,9 @@ local function check(root, sha, args, say, snaps)
   if code == M.EXIT_OK then
     r.verdict = "clean"
     -- the run at the commit is a snapshot run: a green, complete one is the proof of the commit's tree, so the
-    -- pre-push hook (`--snapshot`) and `testing ci --snapshot` do not run the same tree again
-    if head_doc then
+    -- pre-push hook (`--snapshot`) and `testing ci --snapshot` do not run the same tree again. A quick run selected:
+    -- it proves nothing about the tree
+    if head_doc and not r.quick then
       require("testing.ci.snapshot_run").keep(root, args.state_dir, head_doc)
     end
   elseif code ~= M.EXIT_FAILED or not head_doc then
@@ -751,7 +796,8 @@ local function check(root, sha, args, say, snaps)
       local profile = type(r.profile) == "string" and { "--profile=" .. r.profile } or {}
       local base_code
       -- only the spec files that are red at the commit run at the base (a run of the whole suite takes minutes)
-      local base_suite_args, narrowed = M.base_suite_args(cls0.new, suite_args, base_snap.tree)
+      local base_suite_args, narrowed =
+        M.base_suite_args(cls0.new, M.without_affected(suite_args), base_snap.tree)
       if narrowed then
         say(
           ("ci commit %s: the suite at the base runs only the red spec files"):format(sha:sub(1, 7))
@@ -883,7 +929,8 @@ end
 ---@return string
 function M.headline(r)
   local short = r.sha:sub(1, 7)
-  local v = r.verdict:upper()
+  -- `CLEAN quick`: what the diff reaches was green, not the whole suite
+  local v = r.verdict:upper() .. (r.quick and " quick" or "")
   local tail = ("exit %d"):format(r.exit)
   if
     r.verdict == "regression"
@@ -911,8 +958,9 @@ function M.headline(r)
     return ("ci commit %s %s %d files, not run %s"):format(short, v, #(r.changed_files or {}), tail)
   elseif r.verdict == "clean" then
     local n = #(r.steps_head or {})
-    return ("ci commit %s CLEAN %s %d steps%s %s"):format(
+    return ("ci commit %s %s %s %d steps%s %s"):format(
       short,
+      v,
       tostring(r.profile ~= vim.NIL and r.profile or "?"),
       n,
       r.reused and " (kept result)" or "",

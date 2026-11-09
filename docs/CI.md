@@ -266,8 +266,8 @@ skips a suite whose stamp does not verify, and a suite with options after `--` a
 ```
 testing ci commit <rev>... | --range=<a>..<b> | --since=<time>  [--base=<rev>] [--profile=<name>] [--force] [--keep]
 testing ci commit --repos-root=<dir> --since=<time> [--repos-include=<a,b>] [--repos-exclude=<a,b>]
-                           [--include-docs] [--json=<file>] [--agent|--no-agent] [--state-dir=<dir>] [--root=<dir>]
-                           [-- <suite options>]
+                           [--include-docs] [--quick] [--json=<file>] [--agent|--no-agent] [--state-dir=<dir>]
+                           [--root=<dir>] [-- <suite options>]
 ```
 
 The question of a review: does this commit break something? `testing ci commit` answers it for the commit, not for
@@ -302,6 +302,16 @@ file, or a red file does not exist at the base (a renamed spec file). With `--ca
 (`testing ci commit <rev> -- --cached`) the commit, its base and the runs in the working tree share one cache: a
 snapshot is a `git worktree` of the repository, and the cache folder of a worktree is that of its main checkout (see
 [CACHE.md](CACHE.md)). A spec file whose inputs did not change between them does not run again.
+
+**`--quick`: each commit cheaply, the whole state once.** With `--quick` the suite at the commit runs only the spec
+files the diff to the base reaches (`--affected=<base>`, the selection of [CACHE.md](CACHE.md)); the other steps run as
+usual (lint takes seconds). At the base, where the diff to itself is empty, `--affected` is left out: the base takes the
+red files of the commit as above, or the whole suite when those cannot be named. The verdict carries the word
+(`ci commit abc1234 CLEAN quick full 4 steps exit 0`, `"quick": true` in the document), is kept apart from a full
+result, and a clean quick run is **no proof** of the tree: the pre-push hook does not take it. The intended cadence:
+`--quick` for every commit as it is made, one full `testing ci commit HEAD --base=@{upstream} -- --cached` before the
+push (its clean result is the proof the hook takes); a red tip is narrowed down with `--range`. `--quick` refuses a
+selection of its own after `--` (`--affected`, `--changed`, `--since`, `--file`, `--only`).
 
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position); equal findings count as often as they occur. A red step without findings (an
