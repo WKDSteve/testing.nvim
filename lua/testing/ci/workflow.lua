@@ -414,7 +414,7 @@ function M.render(root)
     PORTABLE_TEXT = english(portable),
     PLATFORM_STEPS = table.concat(cfg.platform, ","),
     PUBLISH_HEADER = cfg.publish
-        and "# - publish-ci-verified: after a green push only, on the self-hosted runner. It waits for macOS too: `ci-verified` means\n#   green on all three systems.\n"
+        and "# - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs\n#   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.\n"
       or "",
     CHECKOUT_ACTION = M.ACTIONS.checkout,
     SETUP_VIM_ACTION = M.ACTIONS.setup_vim,

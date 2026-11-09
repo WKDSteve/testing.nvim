@@ -4,13 +4,10 @@
     name: publish ci-verified branch
     needs: [pipeline]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, windows]
+    # Hosted, not self-hosted: the job pushes with write access, and on the maintainer's machine the global pre-push
+    # hook cannot see the old tip in this shallow checkout and refuses every move of ci-verified.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    # `shell: bash` resolves to the WSL launcher on this machine; Git Bash is named explicitly, in 8.3 form because
-    # the shell string is split at spaces.
-    defaults:
-      run:
-        shell: C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}
     permissions:
       contents: write
     steps:

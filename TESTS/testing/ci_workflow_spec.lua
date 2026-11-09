@@ -155,6 +155,16 @@ return function(H)
     has(text, "--step=suite,conformance,contracts", "the platform steps on the hosted legs")
     has(text, "publish-ci-verified:", "the publish job")
     has(text, "docmap.nvim checks this repository out", "... with why")
+    -- the job that pushes ci-verified never runs on the self-hosted runner: there it would hold write access on the
+    -- maintainer's machine, whose global pre-push hook refuses the move from a shallow checkout
+    local job = text:match("\n  publish%-ci%-verified:\n(.*)$")
+    has(job, "runs-on: ubuntu-latest", "the publish job runs hosted")
+    for runs_on in job:gmatch("runs%-on:[^\n]*") do
+      ok(
+        not runs_on:find("self-hosted", 1, true),
+        "... never on the self-hosted runner: " .. runs_on
+      )
+    end
   end
 
   -- every value is checked before it reaches the template

@@ -158,7 +158,9 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
 - **Layout.** A push to `main` runs the whole profile on the self-hosted runner plus a hosted macOS leg with the
   `platform` steps; every other event (a pull request, also from a fork) runs only on hosted runners: ubuntu with the
   whole profile, windows with the `platform` steps. A pull request never reaches the self-hosted runner; the header
-  says to approve no pull request that touches `.github/`.
+  says to approve no pull request that touches `.github/`. The job that moves `ci-verified` (`publish`) runs on a hosted
+  ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook would
+  refuse the move from a shallow checkout anyway.
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a

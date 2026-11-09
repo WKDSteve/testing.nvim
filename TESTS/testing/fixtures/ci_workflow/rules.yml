@@ -11,8 +11,8 @@
 #   0.12.2, stylua 2.5.2, luacheck 1.2.0); a difference between the two is a finding.
 # - macOS: a GitHub-hosted leg on every event, also on a push: the repository is public, so it costs nothing, and no
 #   self-hosted runner has macOS. It runs the steps that depend on the platform: the suite, conformance and contracts.
-# - publish-ci-verified: after a green push only, on the self-hosted runner. It waits for macOS too: `ci-verified` means
-#   green on all three systems.
+# - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs
+#   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.
 #
 # A fork can edit this file in its pull request (e.g. `runs-on: self-hosted`). The repository therefore requires
 # approval before a workflow of an outside contributor runs; never approve a pull request that touches `.github/`.
@@ -120,13 +120,10 @@ jobs:
     name: publish ci-verified branch
     needs: [pipeline]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, windows]
+    # Hosted, not self-hosted: the job pushes with write access, and on the maintainer's machine the global pre-push
+    # hook cannot see the old tip in this shallow checkout and refuses every move of ci-verified.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    # `shell: bash` resolves to the WSL launcher on this machine; Git Bash is named explicitly, in 8.3 form because
-    # the shell string is split at spaces.
-    defaults:
-      run:
-        shell: C:\PROGRA~1\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}
     permissions:
       contents: write
     steps:
