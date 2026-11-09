@@ -175,7 +175,7 @@ local function resolve(program, root)
   if not program:find("[/\\]") or program:match("^%a:[/\\]") or program:match("^[/\\]") then
     -- A bare name on Windows: the system's search takes `.exe` only, so `pnpm` (a `pnpm.cmd` shim) was never found.
     -- `exepath` reads PATHEXT like the shell does; the name stays when nothing is found (the start then says so).
-    if not program:find("[/\\]") and vim.fn.has("win32") == 1 then
+    if not program:find("[/\\]") and require("testing.platform").is_windows() then
       local found = vim.fn.exepath(program)
       if found ~= "" then
         return found
