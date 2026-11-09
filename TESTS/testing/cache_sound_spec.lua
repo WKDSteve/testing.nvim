@@ -378,6 +378,19 @@ return function(H)
     )
     info = scan.analyze('local x = vim.fs.dir("lua")\n')
     ok(info.markers.dirscan == true, "a directory listing is marked")
+    for _, src in ipairs({ "for n in vim.fs.dir(d) do end\n", "local it = vim.fs.dir\n" }) do
+      ok(scan.analyze(src).markers.dirscan == true, "vim.fs.dir is a listing: " .. src)
+    end
+    -- the folder of a path is no listing: nearly every spec finds its own folder this way, and a listing makes
+    -- `--affected` select the spec for any change
+    info = scan.analyze(
+      'local d = vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))\n'
+    )
+    ok(info.markers.dirscan == false, "vim.fs.dirname is no directory listing")
+    ok(
+      info.markers.selfscan == false,
+      "... and no look at its own surroundings that reads the project"
+    )
     info = scan.analyze('local p = "../x/y.txt"\n')
     ok(info.markers.outside == true, "a `..` literal is marked as outside")
     info = scan.analyze('local p = "C:\\\\Users\\\\x"\n')

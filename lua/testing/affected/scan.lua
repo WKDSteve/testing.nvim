@@ -28,7 +28,7 @@ local M = {}
 ---Version of the analysis. Bump it whenever `analyze` can answer differently for the same text: the index
 ---of the cache (`testing.cache.hash`) keeps analyses with the hashes and drops the ones of another version.
 ---@type integer
-M.VERSION = 12
+M.VERSION = 13
 
 ---Largest file read by `index`/`read_text` (a bigger file is reported as unreadable, never cut).
 ---@type integer
@@ -606,7 +606,7 @@ local function scan_markers(code, text)
       "fs_opendir",
       "fs_read%f[%W]",
       "fs_readfile",
-      "vim%.fs%.dir",
+      "vim%.fs%.dir%f[^%w_]", -- not `vim.fs.dirname`, which lists nothing
       "vim%.fs%.find",
       "vim%.fn%.glob",
       "vim%.fn%.readdir",
@@ -630,7 +630,7 @@ local function scan_markers(code, text)
       "fs_scandir",
       "fs_opendir",
       "fs_readdir",
-      "vim%.fs%.dir",
+      "vim%.fs%.dir%f[^%w_]", -- not `vim.fs.dirname`, which lists nothing
       "vim%.fs%.find",
       "vim%.fn%.glob",
       "vim%.fn%.readdir",
