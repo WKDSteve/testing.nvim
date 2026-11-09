@@ -144,8 +144,9 @@ ci = {
     layout = "public",                             -- optional: "public" (default), "private" or "hosted"
     platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
-    checkouts = {                                  -- optional: third-party dependencies, pinned by commit
+    checkouts = {                                  -- optional: more checkouts below .deps/, not on the specs' rtp
       { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
+      { repo = "WKDSteve/hover.nvim", ref = "ci-verified", why = "<only the test sheets load it>" },
     },
     env = { TASKS_REQUIRE_SNACKS = "1" },          -- optional: environment of the pipeline step
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
@@ -168,7 +169,8 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a
-  repository is `owner/name`, a third-party `ref` a full commit id, an env name `NAME` and none the step sets itself,
+  repository is `owner/name`, a `ref` a full commit id, or `ci-verified` for a repository of the owner of the
+  dependencies (third-party code is always pinned), an env name `NAME` and none the step sets itself,
   no text with a line break); a `platform` step that is not in the default profile is an error.
 - **Kept in sync.** The preset step `workflow-in-sync` runs the `--check`: a repository that names it in a profile is red
   as soon as the file and `.testing.lua` disagree. It is opt-in: a repository without `ci.workflow` is not generated and

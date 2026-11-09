@@ -307,6 +307,45 @@ return function(H)
       "conformance is no step of the profile full",
       "a platform step outside the default profile"
     )
+
+    -- more checkouts below .deps/: a repository of the owner may follow ci-verified (or be pinned, and says why),
+    -- third-party code is always pinned
+    root = project(
+      "extra.nvim",
+      "{ 'suite' }",
+      "{ name = 'extra.nvim', platform = { 'suite' }, checkouts = { { repo = 'WKDSteve/hover.nvim', ref = 'ci-verified', why = 'only the sheets load it' }, { repo = 'WKDSteve/open.nvim', ref = '"
+        .. ("b"):rep(40)
+        .. "' } } }"
+    )
+    text, problems = workflow.render(root)
+    ok(text ~= nil, "own checkouts: generated (" .. table.concat(problems or {}, "; ") .. ")")
+    text = text or ""
+    has(
+      text,
+      "      # only the sheets load it\n"
+        .. "      - uses: actions/checkout@"
+        .. workflow.ACTIONS.checkout
+        .. "\n        with:\n          persist-credentials: false\n          repository: WKDSteve/hover.nvim\n"
+        .. "          path: .deps/hover.nvim\n          ref: ci-verified\n",
+      "own checkouts: ci-verified, below .deps/, no pin comment"
+    )
+    has(
+      text,
+      "          path: .deps/open.nvim\n          # Pinned: a commit whose own CI was green",
+      "own checkouts: a pinned one of the owner is not called third-party"
+    )
+    root = project(
+      "foreign.nvim",
+      "{ 'suite' }",
+      "{ name = 'foreign.nvim', platform = { 'suite' }, checkouts = { { repo = 'folke/snacks.nvim', ref = 'ci-verified' } } }"
+    )
+    text, problems = workflow.render(root)
+    eq(text, nil, "third-party ci-verified: refused")
+    has(
+      table.concat(problems or {}),
+      "folke/snacks.nvim is no repository of WKDSteve",
+      "third-party ci-verified: ... naming the repository"
+    )
   end
 
   -- the step `workflow-in-sync`: a pipeline that names it is red when the workflow differs

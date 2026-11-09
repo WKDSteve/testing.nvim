@@ -11,7 +11,7 @@
 ---       name = "tasks.nvim",                        -- the repository (never the directory: a worktree is named otherwise)
 ---       platform = { "suite", "conformance" },     -- the steps that depend on the platform (hosted windows, macOS)
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
----       checkouts = {                               -- optional: third-party dependencies, pinned by commit
+---       checkouts = {                               -- optional: more checkouts below .deps/ (third-party: pinned)
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
 ---       },
 ---       env = { TASKS_REQUIRE_SNACKS = "1" },       -- optional: environment of the pipeline step
@@ -199,8 +199,15 @@ function M.validate(raw)
           end
           if type(c.repo) ~= "string" or not c.repo:match("^[%w][%w._-]*/[%w][%w._-]*$") then
             bad(".checkouts[%d].repo: expected owner/name", i)
-          elseif type(c.ref) ~= "string" or not c.ref:match("^" .. ("%x"):rep(40) .. "$") then
-            bad(".checkouts[%d].ref: expected a full commit id (third-party code is pinned)", i)
+          elseif
+            type(c.ref) ~= "string"
+            or not (c.ref:match("^" .. ("%x"):rep(40) .. "$") or c.ref == scaffold.DEFAULT_REF)
+          then
+            bad(
+              ".checkouts[%d].ref: expected a full commit id (third-party code is pinned) or %q (a repository of the owner)",
+              i,
+              scaffold.DEFAULT_REF
+            )
           elseif c.why ~= nil and not is_text(c.why) then
             bad(".checkouts[%d].why: one line of text", i)
           else
@@ -550,15 +557,30 @@ function M.render_cfg(cfg, deps, opts)
     checkouts[#checkouts + 1] = checkout_block(d, owner .. "/" .. d, scaffold.DEFAULT_REF)
   end
   for _, c in ipairs(cfg.checkouts) do
+    local mine = c.repo:match("^([^/]+)/") == owner
+    if c.ref == scaffold.DEFAULT_REF and not mine then
+      return nil,
+        {
+          ("ci.workflow.checkouts: %s is no repository of %s: only those have %s, third-party code is pinned"):format(
+            c.repo,
+            owner,
+            scaffold.DEFAULT_REF
+          ),
+        }
+    end
     if c.why then
       checkouts[#checkouts + 1] = M.wrap(c.why, "      # ")
     end
-    checkouts[#checkouts + 1] = checkout_block(
-      c.repo:match("/(.+)$"),
-      c.repo,
-      c.ref,
-      "Pinned: third-party code runs inside the specs on the self-hosted runner. Bump on purpose."
-    )
+    local pinned = nil
+    if not mine then
+      pinned =
+        "Pinned: third-party code runs inside the specs on the self-hosted runner. Bump on purpose."
+    elseif c.ref ~= scaffold.DEFAULT_REF then
+      pinned = ("Pinned: a commit whose own CI was green (no %s branch to follow). Bump on purpose."):format(
+        scaffold.DEFAULT_REF
+      )
+    end
+    checkouts[#checkouts + 1] = checkout_block(c.repo:match("/(.+)$"), c.repo, c.ref, pinned)
   end
   checkouts[#checkouts + 1] =
     checkout_block("testing.nvim", owner .. "/testing.nvim", scaffold.DEFAULT_REF)
