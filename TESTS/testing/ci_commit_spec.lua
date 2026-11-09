@@ -672,23 +672,8 @@ return function(H)
       )
     end
 
-    eq(
-      commit.shared_cache_args({ "--cached" }, "/c"),
-      { "--cached", "--cache-dir", "/c" },
-      "cache: --cached shares a folder"
-    )
-    eq(
-      commit.shared_cache_args({ "--jobs", "2" }, "/c"),
-      { "--jobs", "2" },
-      "cache: without --cached nothing changes"
-    )
-    eq(
-      commit.shared_cache_args({ "--cached", "--cache-dir", "/mine" }, "/c"),
-      { "--cached", "--cache-dir", "/mine" },
-      "cache: the caller's folder wins"
-    )
-
-    -- through `check`: the commit runs everything, the base only the red file; both with the same cache folder
+    -- through `check`: the commit runs everything, the base only the red file; the cache folder is not passed (the
+    -- snapshots are worktrees and share the main checkout's, `cache_repo_key_spec`)
     local tmp = tree .. "-state"
     vim.fn.mkdir(tmp, "p")
     local saved = { create = snapshot.create, remove = snapshot.remove, run_ci = commit.run_ci }
@@ -725,16 +710,10 @@ return function(H)
     args.state_dir = tmp
     local r = commit.check(tmp, ("a"):rep(40), args, function() end)
     eq(r.verdict, "known-red", "narrowed base: red at both: known")
-    local cache = tmp .. "/ci-commit/cache"
-    has(
-      table.concat(seen[1].suite, " "),
-      "--cached --cache-dir",
-      "the commit's run shares the cache"
-    )
-    eq(
-      seen[1].suite[#seen[1].suite],
-      seen[2].suite[#seen[1].suite],
-      "the base shares the same folder"
+    eq(seen[1].suite, { "--cached" }, "the commit's run gets the suite options as given")
+    ok(
+      not table.concat(seen[2].suite, " "):find("--cache-dir", 1, true),
+      "the base gets no folder of its own"
     )
     eq(
       vim.list_slice(seen[2].suite, #seen[2].suite - 1),
@@ -745,7 +724,6 @@ return function(H)
       not table.concat(seen[1].suite, " "):find("--file", 1, true),
       "the commit's run is not narrowed"
     )
-    ok(cache ~= nil, "cache folder named")
 
     snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
     snapshot.parent, snapshot.changed_files = saved_parent, saved_changed

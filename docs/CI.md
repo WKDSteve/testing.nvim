@@ -299,9 +299,9 @@ The suite at the base is not run whole either: it gets a `--file` for every spec
 finding of the commit is in one of them). The whole suite runs at the base when that cannot be said for sure: the
 suite options already select (`--file`, `--changed`, `--only`), the suite step is red without a finding that has a
 file, or a red file does not exist at the base (a renamed spec file). With `--cached` among the suite options
-(`testing ci commit <rev> -- --cached`) the commit and its base share one cache folder (`ci-commit/cache` in the state
-directory), so a spec file that did not change between the two does not run again; without `--cache-dir` the cache of
-a snapshot would be its own, as it is per project root.
+(`testing ci commit <rev> -- --cached`) the commit, its base and the runs in the working tree share one cache: a
+snapshot is a `git worktree` of the repository, and the cache folder of a worktree is that of its main checkout (see
+[CACHE.md](CACHE.md)). A spec file whose inputs did not change between them does not run again.
 
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position); equal findings count as often as they occur. A red step without findings (an

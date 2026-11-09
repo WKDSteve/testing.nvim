@@ -74,7 +74,12 @@ One entry per spec **file**: the Result-IR case list of that file. Entries live 
 
     stdpath('cache')/testing/<name>-<12 hex of sha256(project key)>/entries/<64 hex key>.json
 
-(`<project key>` is `lib.nvim.fs.project_key`, the git root). The directory is per user and per machine and is never
+(`<project key>` is `lib.nvim.fs.project_key`, the git root; for a linked worktree, `git worktree add`, it is the git
+root of the main checkout the worktree belongs to, read from its `.git` file and `commondir`). All worktrees of a
+repository therefore share one cache: the snapshots of `testing ci commit`, its base and the runs in the working tree
+find each other's entries. That is safe because a key describes the content a spec file depends on, never the place: an
+entry is a hit only where all its inputs are equal. A bare repository has no main checkout; its worktrees keep a folder
+each. The directory is per user and per machine and is never
 shared across a trust boundary. It is regenerable: deleting it costs time, never correctness. Writes are atomic
 (`lib.nvim.fs.write.atomic`); a temp file of an interrupted write (`entries/<key>.json.atomic-tmp.*`,
 `index.json.atomic-tmp.*`, `keys.json.atomic-tmp.*`) is removed when it is older than an hour.
@@ -85,7 +90,8 @@ run remembers about its own history (`stdpath('state')/testing/<project>/`: `key
 every run with an empty key-flip memory: a flip is then found only inside one run, and the "last green run" of a red
 verdict is "none recorded". Restore the state directory as well when those matter.
 
-The folder is named by `cache.project_key` of `.testing.lua` when it is set, else by the checkout path. A run keeps the
+The folder is named by `cache.project_key` of `.testing.lua` when it is set, else by the checkout path (that of the
+main checkout, for a worktree). A run keeps the
 folder it started with: a spec of the run that calls `cli.main` for another project (as many specs of this suite do)
 changes the process-wide key while the files run, and the results of the hosting run are still stored where its next run
 looks.

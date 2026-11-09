@@ -602,26 +602,6 @@ function M.base_suite_args(items, suite_args, base_tree)
   return out, true
 end
 
----With `--cached` among the suite options, the commit and its base share one cache folder: the cache of a run is
----per project root, and two snapshots are two roots, so without it the base would run every file again. An entry is
----keyed on everything the file can reach, so a file that did not change between the two is the same answer.
----@param suite_args string[]
----@param dir string The folder to share.
----@return string[] suite_args
-function M.shared_cache_args(suite_args, dir)
-  local cached = false
-  for _, a in ipairs(suite_args) do
-    if a == "--cache-dir" or a:match("^%-%-cache%-dir=") then
-      return suite_args
-    end
-    cached = cached or a == "--cached"
-  end
-  if not cached then
-    return suite_args
-  end
-  return vim.list_extend(vim.deepcopy(suite_args), { "--cache-dir", dir })
-end
-
 ---The `unknown step <name>` problems of a run (a step the base does not have yet).
 ---@param doc table|nil
 ---@return string[]
@@ -721,8 +701,9 @@ local function check(root, sha, args, say, snaps)
   snaps[#snaps + 1] = head_snap
   local extra = args.profile and { "--profile=" .. args.profile } or {}
   say(("ci commit %s: testing ci at the commit"):format(sha:sub(1, 7)))
-  local suite_args =
-    M.shared_cache_args(args.suite_args, memory_dir(root, args.state_dir) .. "/cache")
+  -- `--cached` needs no folder of its own: a snapshot is a worktree of this repository, and the cache folder is that
+  -- of the main checkout (`testing.cache.store.repo_key`), shared with the base and with runs in the working tree
+  local suite_args = args.suite_args
   local code, head_doc, tail = M.run_ci(head_snap, root, extra, suite_args)
   r.head = head_doc or vim.NIL
   r.steps_head = step_states(head_doc)

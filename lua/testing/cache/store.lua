@@ -57,15 +57,66 @@ M.is_key = is_key
 ---@type string|nil
 M.project_key = nil
 
+---@param path string
+---@return string|nil
+local function read_line(path)
+  local fd = uv.fs_open(path, "r", 292) -- 0444
+  if not fd then
+    return nil
+  end
+  local data = uv.fs_read(fd, 4096, 0)
+  uv.fs_close(fd)
+  return data and data:match("^%s*(.-)%s*$") or nil
+end
+
+---The project key of a checkout: the git root of `root`, and for a linked worktree (`git worktree add`, which is how
+---`testing ci commit` takes its snapshots) the key of the main checkout it belongs to. All worktrees of a repository
+---then share one cache, and so do the runs in the working tree and the commit checks: an entry is keyed on the
+---content it depends on, never on the place, so a file the one run saw green is a hit for the other.
+---@param root string
+---@return string
+function M.repo_key(root)
+  local project_key = require("lib.nvim.fs.project_key")
+  local top = project_key(root)
+  local dotgit = top .. "/.git"
+  local st = uv.fs_stat(dotgit)
+  if not st or st.type ~= "file" then
+    return top
+  end
+  -- `.git` of a linked worktree: `gitdir: <repo>/.git/worktrees/<name>`, and that folder's `commondir` names the
+  -- shared git dir relative to it
+  local gitdir = (read_line(dotgit) or ""):match("^gitdir:%s*(.+)$")
+  if not gitdir then
+    return top
+  end
+  if not (gitdir:match("^%a:[/\\]") or gitdir:match("^[/\\]")) then
+    gitdir = top .. "/" .. gitdir
+  end
+  local common = read_line(gitdir .. "/commondir")
+  if not common or common == "" then
+    return top
+  end
+  if not (common:match("^%a:[/\\]") or common:match("^[/\\]")) then
+    common = gitdir .. "/" .. common
+  end
+  common = vim.fs.normalize(vim.fn.fnamemodify(common, ":p")):gsub("/+$", "")
+  if vim.fs.basename(common) ~= ".git" then
+    return top -- a bare repository: no main checkout to share with
+  end
+  local main = vim.fs.dirname(common)
+  if not uv.fs_stat(main) then
+    return top
+  end
+  return project_key(main)
+end
+
 ---Directory of the cache of a project.
 ---@param root string
 ---@param opts? { cache_dir?: string, project_key?: string }
 ---@return string
 function M.dir(root, opts)
   local base = (opts and opts.cache_dir) or vim.fn.stdpath("cache")
-  local key = (opts and opts.project_key)
-    or M.project_key
-    or require("lib.nvim.fs.project_key")(root)
+  local key = (opts and opts.project_key) or M.project_key or M.repo_key(root)
   local name = (key:match("([^/\\]+)[/\\]*$") or "project"):gsub("[^%w_.%-]", "_")
   return ("%s/testing/%s-%s"):format(base, name, vim.fn.sha256(key):sub(1, 12))
 end
