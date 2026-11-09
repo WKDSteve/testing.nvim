@@ -1305,6 +1305,36 @@ function M.main_wsl(argv, args, sv)
       end
     end
   end
+  -- Revisions as commit ids: in the mirror `HEAD`, a branch name or `@{upstream}` would name the mirror's own refs
+  -- (an old clone, no upstream), not the Windows checkout's. Unknown ones stay as given: the run in WSL reports them.
+  local function sha_of(rev)
+    local code, sha = git(
+      { "rev-parse", "--verify", "--quiet", (rev == "" and "HEAD" or rev) .. "^{commit}" },
+      root
+    )
+    return code == 0 and vim.trim(sha) or rev
+  end
+  local function range_of(r)
+    local a, dots, b = r:match("^(.-)(%.%.%.?)(.*)$")
+    return a and (sha_of(a) .. dots .. sha_of(b)) or sha_of(r)
+  end
+  local REV_VALUED = { base = sha_of, range = range_of }
+  local i = 1
+  while i <= #inner and inner[i] ~= "--" do
+    local a = inner[i]
+    local name, eq, value = a:match("^%-%-([%w%-]+)(=?)(.*)$")
+    if name and REV_VALUED[name] and eq == "=" then
+      inner[i] = ("--%s=%s"):format(name, REV_VALUED[name](value))
+    elseif name and VALUED[name] and eq == "" then
+      i = i + 1
+      if REV_VALUED[name] and inner[i] then
+        inner[i] = REV_VALUED[name](inner[i])
+      end
+    elseif not name then
+      inner[i] = sha_of(a)
+    end
+    i = i + 1
+  end
   -- the dependencies the commit declares (and testing.nvim, lib.nvim), as Windows paths of their checkouts
   local deps_mod = require("testing.deps")
   local dirs = {}

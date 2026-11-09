@@ -308,11 +308,15 @@ virus scanner make a suite whose spec files start editors slow: testing.nvim's w
 about 650 s on Windows on the same PC (2026-11-09). `testing ci commit <rev>... --wsl` keeps a mirror below
 `~/.cache/testing-wsl/` inside WSL (the Linux file system; a checkout below `/mnt/c` is as slow as Windows), fetches the
 repository and its dependencies from the Windows checkouts (the dependencies at their committed HEAD: their uncommitted
-changes are not seen), runs the ordinary `ci commit` there and prints its report and exit code here. Options of this
-side never go into WSL (`--root`, `--json`, `--state-dir`, a `--cache-dir` of the suite: Windows paths). It takes no
-turn in the queue (a minute must not wait behind a Windows run of ten) and writes its metrics line with `os = "wsl"`.
+changes are not seen), runs the ordinary `ci commit` there and prints its report and exit code here. The revisions
+(`HEAD`, a branch, `@{upstream}`, both ends of `--range`, `--base`) are turned into commit ids here first: in the mirror
+those names would be its own refs. Options of this side never go into WSL (`--root`, `--json`, `--state-dir`, a
+`--cache-dir` of the suite: Windows paths). It takes no turn in the queue (a minute must not wait behind a Windows run
+of ten) and writes its metrics line with `os = "wsl"`. A clean result there is no proof for the pre-push hook of this
+side (it proves Linux, the hook guards Windows): the hook runs its `fast` profile, seconds.
 WSL needs `nvim`, `git` and the tools of the pipeline (`stylua`, `luacheck`, at the versions of
-`testing.ci.workflow.TOOLS`) on its PATH; a missing one ends the check as `infra`, as on Windows. What is
+`testing.ci.workflow.TOOLS`) on its PATH; `~/.local/bin` is added (a shell started by `wsl.exe` reads no profile), so
+the release binaries can live there without `sudo`. A missing one ends the check as `infra`, as on Windows. What is
 Windows-specific is checked by the windows leg of the hosted CI. Not with `--repos-root`.
 
 **`--quick`: each commit cheaply, the whole state once.** With `--quick` the suite at the commit runs only the spec

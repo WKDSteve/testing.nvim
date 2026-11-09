@@ -95,8 +95,9 @@ function M.script(o)
       name
     )
   end
+  -- the repository at the Windows HEAD as well: `--since` and the worktrees start from the mirror's HEAD
   local src = M.wsl_path(o.root)
-  lines[#lines + 1] = ("sync %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
+  lines[#lines + 1] = ("head_of %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
     q(o.repo),
     q(src),
     o.repo

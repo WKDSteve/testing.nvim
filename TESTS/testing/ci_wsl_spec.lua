@@ -41,7 +41,7 @@ return function(H)
   )
   has(script, '"+HEAD:refs/remotes/win/HEAD"', "script: a detached HEAD is fetched too")
   has(script, 'export PATH="$HOME/.local/bin:$PATH"', "script: tools in ~/.local/bin are found")
-  has(script, "sync 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
+  has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
   has(
     script,
@@ -123,7 +123,38 @@ return function(H)
     not inner2:find("'--no-agent'", 1, true),
     "ci commit --wsl: nor the report options of this side"
   )
-  has(inner2, "'HEAD' '--' '--cached'", "ci commit --wsl: the revisions and suite options do")
+  -- revisions go as commit ids: in the mirror HEAD, a branch or @{upstream} would name the mirror's own refs
+  local head =
+    vim.trim(vim.system({ "git", "rev-parse", "HEAD" }, { text = true }):wait().stdout or "")
+  has(
+    inner2,
+    ("'%s' '--' '--cached'"):format(head),
+    "ci commit --wsl: the revisions (as ids) and suite options do"
+  )
+  local function inner_of(argv)
+    commit.main(argv, { out = function() end, err = function() end })
+    return seen:match("ci commit (.-)\n")
+  end
+  has(
+    inner_of({ "--range=HEAD..HEAD", "--wsl" }),
+    ("'--range=%s..%s'"):format(head, head),
+    "ci commit --wsl: both ends of --range"
+  )
+  has(
+    inner_of({ "HEAD", "--base", "HEAD", "--wsl" }),
+    ("'--base' '%s'"):format(head),
+    "ci commit --wsl: --base as a separate value"
+  )
+  has(
+    inner_of({ "no-such-rev-x", "--wsl" }),
+    "'no-such-rev-x'",
+    "ci commit --wsl: an unknown revision stays as given"
+  )
+  has(
+    wsl.script({ repo = "r", root = "E:/r", deps = {}, argv = {}, json = "C:/o" }),
+    "head_of 'r' '/mnt/e/r' ||",
+    "script: the repository itself at the Windows HEAD"
+  )
   -- scripts/test.sh hands down `--state-dir <dir>` and, for --cached, `--cache-dir <dir>`: Windows paths, never into WSL
   commit.main({
     "HEAD",
