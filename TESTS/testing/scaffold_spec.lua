@@ -236,6 +236,13 @@ return function(H)
   has(sh, "FAIL_CODE=1", "test.sh fails with exit code 1 (3 for the ci verb)")
   has(sh, '"$DRIVER" conformance .', "test.sh has the conformance subcommand")
   has(sh, '"$DRIVER" surface .', "test.sh has the surface subcommand")
+  has(sh, '"$DRIVER" lint "$@"', "test.sh has the lint subcommand")
+  has(
+    sh,
+    '"${1:-}" != "conformance" && "${1:-}" != "lint" ]]',
+    "test.sh: lint asks for no real state directory (it writes none)"
+  )
+  has(sh, "surface | conformance | lint) ;;", "test.sh: lint takes no suite lock")
   has(sh, '"$DRIVER" ci ${ci_args[@]+', "test.sh has the ci subcommand")
   has(
     sh,

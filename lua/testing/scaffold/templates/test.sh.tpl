@@ -5,6 +5,8 @@
 #   scripts/test.sh                  every spec under TESTS/
 #   scripts/test.sh --file config    only spec files whose name contains "config"
 #   scripts/test.sh --json ir.json   also write the machine-readable result (the IR)
+#   scripts/test.sh lint [options]   the lint checks (`testing lint`: stylua, luacheck) on the changed files, named
+#                                    files (`--file=<f>`) or everything (`--all`); `--fix` rewrites what stylua can
 #   scripts/test.sh ci               the whole pipeline (`testing ci`: stylua, luacheck, the suite, ...)
 #   scripts/test.sh ci --profile=fast   the quick check before a push; `ci verify`, `ci list` as well
 #
@@ -127,7 +129,7 @@ done
 # and handed to `testing ci --state-dir` / `testing run --state-dir` (an argument, not the environment: the specs
 # must not inherit it).
 real_state=""
-if [[ "${1:-}" != "surface" && "${1:-}" != "conformance" ]]; then
+if [[ "${1:-}" != "surface" && "${1:-}" != "conformance" && "${1:-}" != "lint" ]]; then
   real_state="$(nvim -n -i NONE --headless -u NONE --cmd 'lua io.stdout:write(vim.fn.stdpath("state"))' --cmd 'qa!' 2>/dev/null)" || real_state=""
   if [[ "${1:-}" == "ci" ]]; then
     [[ -n "$real_state" ]] || fail 'error: cannot ask nvim for stdpath("state"); the ci document would be lost.'
@@ -149,7 +151,7 @@ fi
 # not released on exit: a holder whose pid is gone is taken over silently.
 full_suite=0
 case "${1:-}" in
-  surface | conformance) ;;
+  surface | conformance | lint) ;;
   ci)
     case "${2:-}" in
       "" | -*) full_suite=1 ;;
@@ -176,6 +178,14 @@ export XDG_CACHE_HOME="$scratch/cache"
 if [ "${1:-}" = "surface" ]; then
   shift
   nvim -n -i NONE --headless -u NONE -l "$DRIVER" surface . "$@"
+  exit $?
+fi
+# `scripts/test.sh lint [...]`: the lint checks of the pipeline on the changed files (docs/CI.md of testing.nvim), in the
+# same environment. Nothing of the project runs and no state is written, so it takes neither the state directory nor the
+# suite lock; the working directory is the repository's root (the `cd` above).
+if [ "${1:-}" = "lint" ]; then
+  shift
+  nvim -n -i NONE --headless -u NONE -l "$DRIVER" lint "$@"
   exit $?
 fi
 # `scripts/test.sh conformance`: the conformance suite K1..K16 in the same environment (docs/CONFORMANCE.md of testing.nvim)
