@@ -388,7 +388,7 @@ out and cost reruns. A heavy run therefore waits for the one before it, across e
 user on that machine:
 
 - heavy: a whole suite (`testing <root>`, `scripts/test.sh` without a selection), `testing ci` whose steps include the
-  whole suite, `testing ci commit` (the whole call);
+  whole suite, `testing ci commit` (each commit that runs; a kept result waits for nobody);
 - light, never waiting: a selected suite (`--file`, `--affected`, `--changed`, `--only`, ...), a run without the suite
   step (the `fast` profile of the pre-push hook), `--shard`, `--watch`.
 

@@ -776,6 +776,38 @@ return function(H)
       "quick: other options pass"
     )
 
+    -- the queue (testing.queue): a commit that runs takes its turn, a kept result waits for nobody. A fresh module:
+    -- the run that hosts this spec may hold the real queue in this process.
+    local saved_queue = package.loaded["testing.queue"]
+    package.loaded["testing.queue"] = nil
+    local fresh = require("testing.queue")
+    fresh.MAX_WAIT_MS = 0
+    local lock = tmp .. "/heavy.lock"
+    local lf = assert(io.open(lock, "wb"))
+    lf:write(vim.json.encode({
+      pid = vim.uv.os_getppid(),
+      token = "other",
+      started = os.time(),
+      what = "another session's suite",
+    }))
+    lf:close()
+    local said = {}
+    local qargs = commit.parse({ ("e"):rep(40), "--", "--cached" })
+    qargs.state_dir = tmp
+    qargs.queue = { path = lock, off = false }
+    qargs.queue_say = function(s)
+      said[#said + 1] = s
+    end
+    r = commit.check(tmp, ("e"):rep(40), qargs, function() end)
+    eq(r.verdict, "infra", "queue: a commit that has to run waits (and gives up at once here)")
+    has(r.problems[1], "queue:", "queue: ... and says why")
+    has(r.problems[1], "another session's suite", "queue: names what it waited for")
+    -- the clean full result of ("d"):rep(40) above is kept: it needs no turn
+    r = commit.check(tmp, ("d"):rep(40), qargs, function() end)
+    eq({ r.verdict, r.reused }, { "clean", true }, "queue: a kept result waits for nobody")
+    package.loaded["testing.queue"] = saved_queue
+    os.remove(lock)
+
     snapshot.create, snapshot.remove, commit.run_ci = saved.create, saved.remove, saved.run_ci
     snapshot.parent, snapshot.changed_files = saved_parent, saved_changed
     vim.fn.delete(tree, "rf")

@@ -84,6 +84,8 @@ M.USAGE = table.concat({
 ---@field keep boolean
 ---@field include_docs boolean
 ---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
+---@field queue? Testing.Queue The entry's queue (`testing.queue`): a commit that runs takes its turn.
+---@field queue_say? fun(s: string) Where the queue says that it waits.
 ---@field json? string
 ---@field state_dir? string
 ---@field agent? boolean
@@ -655,6 +657,9 @@ local function unknown_steps(doc)
   return out
 end
 
+---@type fun(root: string, sha: string, args: Testing.Ci.Commit.Args, say: fun(s: string), snaps: table, r: table, base: string|nil, mem: string): table
+local run_check
+
 ---Check one commit (the body of `M.check`).
 ---@param root string
 ---@param sha string
@@ -717,6 +722,30 @@ local function check(root, sha, args, say, snaps)
     end
   end
 
+  -- the run itself is a heavy run (testing.queue); a kept result above needs no turn. The runs it starts at the
+  -- commit and at the base carry the token and never wait for it.
+  local queue = require("testing.queue")
+  local queued, waited_too_long = queue.acquire(
+    args.queue,
+    ("ci commit %s in %s"):format(sha:sub(1, 7), vim.fs.basename(root)),
+    args.queue_say or say
+  )
+  if not queued then
+    r.verdict, r.problems = "infra", { "queue: " .. tostring(waited_too_long) }
+    return r
+  end
+  local ok_run, res = pcall(run_check, root, sha, args, say, snaps, r, base, mem)
+  queue.release(queued)
+  if not ok_run then
+    error(res, 0)
+  end
+  return res
+end
+
+---The run of one commit after `check` found no kept result: the snapshot, the pipeline, the base, the verdict.
+---@return table result
+run_check = function(root, sha, args, say, snaps, r, base, mem)
+  local problem
   local function cleanup()
     for _, s in ipairs(snaps) do
       if args.keep then
@@ -1298,17 +1327,9 @@ function M.main(argv, sv)
   local results, worst, tally = {}, M.EXIT_OK, {}
   local repo_docs = {}
   local names = M.repo_names(plans)
-  -- the whole call is one heavy run (testing.queue): its children (`testing ci` at the commit and at the base) carry
-  -- the token and never wait for it
-  local queue = require("testing.queue")
-  local queued, waited_too_long = queue.acquire(
-    (sv --[[@as table]]).queue,
-    ("ci commit of %d commit(s) in %s"):format(total, table.concat(names, ", ")),
-    err
-  )
-  if not queued then
-    return fail(M.EXIT_INFRA, "queue: " .. tostring(waited_too_long))
-  end
+  -- each commit that runs takes its turn in the queue (testing.queue); a kept result waits for nobody
+  args.queue = (sv --[[@as table]]).queue
+  args.queue_say = err
   for i, plan in ipairs(plans) do
     local name = names[i]
     local rs = {}
@@ -1336,7 +1357,6 @@ function M.main(argv, sv)
       problem = plan.problem or vim.NIL,
     }
   end
-  queue.release(queued)
 
   if #results > 1 or multi then
     out(M.summary(tally, #results, worst, multi and #plans or nil))
