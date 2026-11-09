@@ -1,4 +1,7 @@
 ---@module 'testing.queue'
+-- @cache-allow env
+-- (`from_env` takes the environment as an argument and is tested with a fake one; the token in `$TESTING_HEAVY_RUN` is
+-- the runner's own state and changes nothing a spec sees)
 ---@brief One heavy run at a time per machine and user: a full suite, `testing ci` with its suite step, `ci commit`.
 ---@description
 --- Two heavy runs at once (two sessions, a review and a fleet roll) make load-sensitive specs time out and cost reruns.

@@ -42,6 +42,7 @@ local REQUIRED_LIB = {
   { "lib.nvim.fs.collect_recursive", "spec discovery" },
   { "lib.nvim.fs.find_upward_dir", "finding the project root" },
   { "lib.nvim.fs.mkdirp", "creating the state directories" },
+  { "lib.nvim.fs.create_exclusive", "the lock of the queue of heavy runs" },
   { "lib.nvim.fs.normkey", "comparing paths" },
   { "lib.nvim.fs.watch", "the watch loop" },
   { "lib.nvim.fs.project_key", "stable project key of a run" },

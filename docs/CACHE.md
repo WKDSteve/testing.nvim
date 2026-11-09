@@ -248,7 +248,7 @@ computed name or as a whole (a snapshot that is compared with itself, a redactio
 takes the environment as an argument and is tested with a fake one). The file is then not judged for those reads; a
 name it declares with `-- @cache-env` still joins the key. The runner's own modules that read the whole environment
 carry it (`testing.cache`, `testing.child`, `testing.guard.state`, `testing.isolation.snapshot`, `testing.rpc.trace`,
-`testing.run.cached`, `testing.run.inproc`, `testing.stamp.collect`): `*` there would put every variable of the process
+`testing.run.cached`, `testing.run.inproc`, `testing.stamp.collect`, `testing.queue`): `*` there would put every variable of the process
 into the key, and a runner script that exports a per-run directory (`XDG_STATE_HOME` of `scripts/test.sh`) would give
 every invocation another key. A module without it takes the key away from every spec whose `require` closure reaches
 it (`testing.run.project` loads `testing.stamp.write`, and through it `testing.stamp.collect`): no false green, but the
