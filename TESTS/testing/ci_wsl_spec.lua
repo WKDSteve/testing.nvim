@@ -122,24 +122,21 @@ return function(H)
   )
   has(inner2, "'HEAD' '--' '--cached'", "ci commit --wsl: the revisions and suite options do")
   -- scripts/test.sh hands down `--state-dir <dir>` and, for --cached, `--cache-dir <dir>`: Windows paths, never into WSL
-  commit.main(
-    {
-      "HEAD",
-      "--wsl",
-      "--state-dir",
-      "C:/S",
-      "--",
-      "--cached",
-      "--cache-dir",
-      "C:/K",
-      "--jobs",
-      "2",
-    },
-    {
-      out = function() end,
-      err = function() end,
-    }
-  )
+  commit.main({
+    "HEAD",
+    "--wsl",
+    "--state-dir",
+    "C:/S",
+    "--",
+    "--cached",
+    "--cache-dir",
+    "C:/K",
+    "--jobs",
+    "2",
+  }, {
+    out = function() end,
+    err = function() end,
+  })
   local inner3 = seen:match("ci commit (.-)\n")
   ok(
     not inner3:find("C:/S", 1, true),
