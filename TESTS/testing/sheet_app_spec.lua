@@ -96,6 +96,20 @@ vim.wait(120000)
       "good",
       { build = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "broken" } }
     ),
+    multi = app_entry("good", {
+      build = {
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "fine" },
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "second" },
+      },
+    }),
+    multifail = app_entry("good", {
+      build = {
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "fine" },
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "broken" },
+      },
+    }),
+    shim = app_entry("good", { build = { "shim-tool" } }),
+    shimbad = app_entry("good", { build = { "shim-tool", "a&b" } }),
     nameless = { run = { "${nope}" } },
     bad = { run = "a string" },
   }) .. " } }\n")
@@ -106,7 +120,7 @@ if _G.arg[1] == "broken" then
   io.stderr:write("error: a Rust thing\n")
   os.exit(101)
 end
-local f = assert(io.open("built.txt", "wb"))
+local f = assert(io.open(_G.arg[1] == "second" and "built2.txt" or "built.txt", "wb"))
 f:write("yes")
 f:close()
 ]]
@@ -120,6 +134,8 @@ f:close()
   -- 1. the description -----------------------------------------------------------------------------------------------
   do
     eq(app.check({ run = { "a" } }), nil, "a run is enough")
+    eq(app.check({ run = { "a" }, build = { "b", "c" } }), nil, "a build is one argv")
+    eq(app.check({ run = { "a" }, build = { { "b" }, { "c", "d" } } }), nil, "or a list of them")
     for _, c in ipairs({
       { "x", "must be a table" },
       { {}, "run must be" },
@@ -127,6 +143,9 @@ f:close()
       { { run = {} }, "run must be" },
       { { run = { "a", 1 } }, "run must be" },
       { { run = { "a" }, build = "cargo build" }, "build must be" },
+      { { run = { "a" }, build = { { "a" }, "b" } }, "build must be" },
+      { { run = { "a" }, build = { { "a" }, {} } }, "build must be" },
+      { { run = { "a" }, build = {} }, "build must be" },
       { { run = { "a" }, shell = true }, "unknown field shell" },
       { { run = { "a" }, env = { A = 1 } }, "env must be" },
       { { run = { "a" }, ready = {} }, "ready needs stdout" },
@@ -224,6 +243,44 @@ f:close()
     local built = assert(app.start("built", root))
     built.stop()
     ok(vim.uv.fs_stat(root .. "/built.txt") ~= nil, "the build runs in the project root")
+
+    -- a build of several steps runs them one after the other, and the first that fails ends it, named by its number
+    os.remove(root .. "/built.txt")
+    local multi = assert(app.start("multi", root))
+    multi.stop()
+    ok(
+      vim.uv.fs_stat(root .. "/built.txt") ~= nil and vim.uv.fs_stat(root .. "/built2.txt") ~= nil,
+      "both steps of the build ran"
+    )
+    os.remove(root .. "/built2.txt")
+    local _, e7 = app.start("multifail", root)
+    has(e7, "build (step 2) failed (exit 101)", "the second step fails, and says which")
+    ok(vim.uv.fs_stat(root .. "/built2.txt") == nil, "nothing runs after a failed step")
+
+    -- Windows: a bare name finds a batch file on the PATH (`pnpm` is `pnpm.cmd`), and an argument that cmd.exe would
+    -- read as its own is refused, not quoted
+    if vim.fn.has("win32") == 1 then
+      local bin = root .. "/bin"
+      vim.fn.mkdir(bin, "p")
+      local f = assert(io.open(bin .. "/shim-tool.cmd", "wb"))
+      f:write("@echo off\r\necho shimmed> shim.txt\r\n")
+      f:close()
+      local saved = vim.env.PATH
+      vim.env.PATH = bin:gsub("/", "\\") .. ";" .. saved
+      local ok_shim, shim = pcall(function()
+        local plain = assert(app.start("shim", root))
+        plain.stop()
+        local _, bad = app.start("shimbad", root)
+        return bad
+      end)
+      vim.env.PATH = saved
+      ok(ok_shim, "the shim run did not raise: " .. tostring(shim))
+      ok(
+        vim.uv.fs_stat(root .. "/shim.txt") ~= nil,
+        "a bare name finds shim-tool.cmd through PATHEXT"
+      )
+      has(shim, "cmd.exe would read", "an argument with an ampersand for a batch file is refused")
+    end
   end
 
   -- 3. `testing sheets run --all` ---------------------------------------------------------------------------------------

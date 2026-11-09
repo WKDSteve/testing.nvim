@@ -63,6 +63,34 @@ local function is_argv(v)
   return true
 end
 
+---`build` is one argv or a list of argvs (a step after the other: the interface of a page, then the program that embeds it).
+---@param v any
+---@return boolean
+local function is_build(v)
+  if is_argv(v) then
+    return true
+  end
+  if type(v) ~= "table" or #v == 0 then
+    return false
+  end
+  for k, argv in pairs(v) do
+    if type(k) ~= "number" or not is_argv(argv) then
+      return false
+    end
+  end
+  return true
+end
+
+---The steps of a build as a list of argvs, whichever form it was written in.
+---@param build string[]|string[][]
+---@return string[][]
+local function build_steps(build)
+  if type(build[1]) == "table" then
+    return build
+  end
+  return { build }
+end
+
 ---What is wrong with the description of an app.
 ---@param spec any
 ---@return string|nil err
@@ -85,8 +113,8 @@ function M.check(spec)
   if not is_argv(spec.run) then
     return "run must be a list of strings (an argv, no shell)"
   end
-  if spec.build ~= nil and not is_argv(spec.build) then
-    return "build must be a list of strings (an argv, no shell)"
+  if spec.build ~= nil and not is_build(spec.build) then
+    return "build must be a list of strings (an argv, no shell) or a list of such lists"
   end
   if spec.env ~= nil then
     if type(spec.env) ~= "table" then
@@ -145,9 +173,37 @@ end
 ---@return string
 local function resolve(program, root)
   if not program:find("[/\\]") or program:match("^%a:[/\\]") or program:match("^[/\\]") then
+    -- A bare name on Windows: the system's search takes `.exe` only, so `pnpm` (a `pnpm.cmd` shim) was never found.
+    -- `exepath` reads PATHEXT like the shell does; the name stays when nothing is found (the start then says so).
+    if not program:find("[/\\]") and vim.fn.has("win32") == 1 then
+      local found = vim.fn.exepath(program)
+      if found ~= "" then
+        return found
+      end
+    end
     return program
   end
   return root .. "/" .. program
+end
+
+---A batch file runs through `cmd.exe`, which reads its arguments again: a quote, `%`, `&`, `|`, `<`, `>`, `^` or a line
+---break in one of them would be taken for the shell's own. What a `.testing.lua` writes for it is checked, not quoted.
+---@param argv string[]
+---@return string|nil err
+local function batch_args_ok(argv)
+  if not argv[1]:lower():match("%.[cb][ma][dt]$") then
+    return nil
+  end
+  for i = 2, #argv do
+    if argv[i]:find('[%"%%&|<>%^\r\n]') then
+      return ("argument %d of %s has a character that cmd.exe would read as its own: %q"):format(
+        i,
+        argv[1],
+        argv[i]
+      )
+    end
+  end
+  return nil
 end
 
 ---@param argv string[]
@@ -192,16 +248,23 @@ function M.start(name, root, opts)
   end
 
   if spec.build then
-    local argv = vim.deepcopy(spec.build)
-    argv[1] = resolve(argv[1], root)
-    local ok, obj = pcall(vim.system, argv, { cwd = root, text = true })
-    if not ok then
-      return nil, "its build did not start: " .. tostring(obj)
-    end
-    local done = obj:wait(M.BUILD_MS)
-    if done.code ~= 0 then
-      local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
-      return nil, ("its build failed (exit %d): %s"):format(done.code, why)
+    for n, step in ipairs(build_steps(spec.build)) do
+      local argv = vim.deepcopy(step)
+      argv[1] = resolve(argv[1], root)
+      local which = type(spec.build[1]) == "table" and (" (step %d)"):format(n) or ""
+      local berr = batch_args_ok(argv)
+      if berr then
+        return nil, ("its build%s was not started: %s"):format(which, berr)
+      end
+      local ok, obj = pcall(vim.system, argv, { cwd = root, text = true })
+      if not ok then
+        return nil, ("its build%s did not start: %s"):format(which, tostring(obj))
+      end
+      local done = obj:wait(M.BUILD_MS)
+      if done.code ~= 0 then
+        local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
+        return nil, ("its build%s failed (exit %d): %s"):format(which, done.code, why)
+      end
     end
   end
 

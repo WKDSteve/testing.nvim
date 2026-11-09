@@ -367,7 +367,11 @@ return {
 ```
 
 * `build` and `run` are argv lists, never a shell, and run in the project root. A program named by a path is relative
-  to the root; a bare name comes from the PATH.
+  to the root; a bare name comes from the PATH, on Windows through PATHEXT too, so `pnpm` finds `pnpm.cmd`. `build` may
+  also be a list of such lists, run one after the other (`build = { { "pnpm", "--dir", "ui", "build" }, { "cargo",
+  "build" } }`); the first one that fails ends it and the failure names its number. A batch file (`.cmd`, `.bat`) is run by
+  `cmd.exe`, which reads its arguments again: one with a quote, `%`, `&`, `|`, `<`, `>`, `^` or a line break is
+  refused, not quoted.
 * `${temp}` is a folder of this run, removed afterwards: the user's real settings stay untouched. It can be used in `run`
   and `env`.
 * `ready` waits (`timeout_ms`, default 30 s) for a line on the app's stdout that matches the Lua pattern `stdout`; `as`

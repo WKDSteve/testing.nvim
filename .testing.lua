@@ -64,6 +64,8 @@ return {
         "osascript",
         "trash",
         "xdg-open",
+        -- sheet_app_spec: a batch file of its own on the PATH, to see that a bare name finds it (Windows)
+        "shim-tool",
       },
     },
   },
@@ -112,6 +114,7 @@ return {
     -- `does-not-exist*`: specs of the start-failure path start an executable that is not there
     spawn = {
       "nvim",
+      "shim-tool",
       "wsl",
       "tmux",
       "podman",
