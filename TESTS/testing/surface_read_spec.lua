@@ -162,6 +162,36 @@ return function(H)
     ok(table.concat(bad_chunk.notes, "\n"):find("boom", 1, true), "is a note too")
   end)
 
+  -- ------------------------------------------------------------------ .deps/ is not the plugin
+  -- The generated workflow checks the dependencies out into `.deps/`, below the root: a command defined there is a
+  -- dependency's (testing.nvim's :Testing in a CI run), not the plugin's. The same file in another folder below the
+  -- root counts, so the spec can see a missing entry.
+  S.run(function()
+    local root = S.fixture()
+    local function place(rel, name)
+      local path = root .. "/" .. rel
+      vim.fn.mkdir(vim.fs.dirname(path), "p")
+      local f = assert(io.open(path, "wb"))
+      f:write(("vim.api.nvim_create_user_command(%q, function() end, {})\n"):format(name))
+      f:close()
+      local m = assert(io.open(root .. "/TESTS/minimal_init.lua", "ab"))
+      m:write(("dofile(%q)\n"):format(path))
+      m:close()
+    end
+    place(".deps/depx.nvim/plugin/depx.lua", "DepxDeps")
+    place("extra/plugin/own.lua", "DepxOwn")
+    local s, err = surface.collect(root, {
+      plugin = "fxsurf",
+      minit = root .. "/TESTS/minimal_init.lua",
+    })
+    ok(s, ".deps: the surface is read: " .. tostring(err))
+    if s then
+      local by = S.by_id(s)
+      ok(by["command:DepxOwn"] ~= nil, ".deps: a command below the root is the plugin's")
+      eq(by["command:DepxDeps"], nil, ".deps: ... one in .deps/ is not")
+    end
+  end)
+
   -- ------------------------------------------------------------------ a child that cannot start
   local s2, err2 = surface.collect("/nonexistent/x", {
     plugin = "fxsurf",

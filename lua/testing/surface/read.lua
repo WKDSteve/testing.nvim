@@ -15,7 +15,8 @@
 ---   health    `lua/<plugin>/health.lua` exists
 ---
 --- "Of the plugin" means: the registry key is the plugin (or `<plugin>/<surface>`, or the name of the
---- repository directory), or the call site / the handler function lies below the project root.
+--- repository directory), or the call site / the handler function lies below the project root (not in `.deps/`,
+--- the checkouts of the dependencies).
 ---
 --- Entry: `{ id, kind, name, desc?, src?, detail? }`, `src` as `path:line` relative to the root when it
 --- lies inside. `detail` per kind: binding `{ lhs, modes, action?, direct?, buffer? }`, command
@@ -87,6 +88,7 @@ end
 ---@return { owned: fun(path: string|nil): boolean, rel: fun(path: string): string, fn_src: fun(f: any): string|nil }
 local function paths(root)
   local base = key_of(root):gsub("/+$", "")
+  local deps_dir = base .. "/.deps/"
   local P = {}
   ---@param path string|nil
   ---@return boolean
@@ -95,6 +97,10 @@ local function paths(root)
       return false
     end
     local k = key_of((path:gsub("^@", "")))
+    -- `.deps/` holds the checkouts of the dependencies (the generated workflow): below the root, not the plugin's
+    if k:sub(1, #deps_dir) == deps_dir then
+      return false
+    end
     return k == base or k:sub(1, #base + 1) == base .. "/"
   end
   ---@param path string

@@ -84,7 +84,8 @@ passes `REPOS_DIR` on only when `env_allow` lists it. The runner's own editor ne
 "Of the plugin" means: the registry key is the plugin (or `<plugin>/<surface>` or the repository
 directory name), or it appeared in the registry while the plugin was set up (a plugin may file its
 actions under another name, sessions.nvim files them under `Session`), or the call site / the handler
-function lies below the project root.
+function lies below the project root. `.deps/` below the root is not the plugin: it holds the checkouts of the
+dependencies (the generated workflow of [WORKFLOW-CI.md](WORKFLOW-CI.md)).
 
 **The surface depends on the `setup` options.** An opt-in keymap that the default `setup()` does not bind
 is not in the surface. Put the options that switch every optional part on into `.testing.lua`
