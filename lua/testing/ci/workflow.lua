@@ -77,6 +77,7 @@ local KEYS = {
   env = true,
   publish = true,
   timeout = true,
+  land = true,
 }
 
 ---@class Testing.Ci.Workflow.Checkout
@@ -90,6 +91,8 @@ local KEYS = {
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field env table<string, string>
 ---@field publish? { why?: string }
+---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
+---green there only publishes (docs/CI.md, "Land through the hosted CI").
 ---@field timeout integer
 ---@field layout "public"|"private"|"hosted"
 ---@field name string The repository's name, for the header (never the directory's: a worktree or a clone is named
@@ -246,6 +249,21 @@ function M.validate(raw)
       cfg.publish = { why = raw.publish.why }
     else
       bad('.publish: true, or { why = "<who checks out ci-verified>" }')
+    end
+  end
+  cfg.land = false
+  if raw.land ~= nil then
+    if type(raw.land) ~= "boolean" then
+      bad(".land: true or false")
+    elseif raw.land and (raw.layout or "public") == "private" then
+      -- a private repository pays for hosted minutes: it lands with a local full run (testing ci commit), not here
+      bad(
+        '.land: not with layout = "private" (hosted minutes are paid there; land a private repository locally)'
+      )
+    elseif raw.land and not raw.publish then
+      bad(".land: needs publish = true (a landed commit moves ci-verified)")
+    else
+      cfg.land = raw.land
     end
   end
   if raw.timeout ~= nil then
@@ -612,6 +630,36 @@ function M.render_cfg(cfg, deps, opts)
     tools = tools,
     steps = table.concat(cfg.platform, ","),
   })
+  -- `testing ci land`: a check branch `ci/**` runs the hosted legs (in the public layout only a push to MAIN goes to the
+  -- self-hosted runner), and a push to main of a commit that is already green there only publishes
+  local verified_job, pipeline_gate = "", ""
+  local publish_needs, publish_if =
+    "[pipeline]", "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+  if cfg.land then
+    parts.TRIGGERS = parts.TRIGGERS:gsub("branches: %[main%]", 'branches: [main, "ci/**"]', 1)
+    if cfg.layout == "public" then
+      parts.MATRIX = parts.MATRIX:gsub(
+        "github%.event_name == 'push' &&",
+        "github.event_name == 'push' && github.ref == 'refs/heads/main' &&",
+        1
+      )
+    end
+    local vtext, verr = scaffold.render_template("ci_already_verified_job.yml.tpl", {})
+    if not vtext then
+      return nil, { tostring(verr) }
+    end
+    verified_job = vtext
+    pipeline_gate = table.concat({
+      "    needs: [already-verified]",
+      "    # Not on main when the same commit was green on a check branch ci/** (testing ci land): it ran there already.",
+      "    if: ${{ !cancelled() && needs.already-verified.outputs.verified != 'true' }}",
+      "",
+    }, "\n")
+    publish_needs = "[already-verified, pipeline]"
+    publish_if = "${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && "
+      .. "(needs.pipeline.result == 'success' || "
+      .. "(needs.pipeline.result == 'skipped' && needs.already-verified.outputs.verified == 'true')) }}"
+  end
   -- the cache transport and `--cached` belong to the hosted layout only (its legs start empty every time)
   local cache = cfg.layout == "hosted"
   local key = ("testing-${{ runner.os }}-nvim%s-"):format(M.TOOLS.nvim)
@@ -627,10 +675,11 @@ function M.render_cfg(cfg, deps, opts)
     if cfg.publish.why then
       why = why .. " " .. cfg.publish.why
     end
-    local text, err = scaffold.render_template(
-      "ci_publish_job.yml.tpl",
-      { WHY = (M.wrap(why, "  # "):gsub("\n$", "")) }
-    )
+    local text, err = scaffold.render_template("ci_publish_job.yml.tpl", {
+      WHY = (M.wrap(why, "  # "):gsub("\n$", "")),
+      NEEDS = publish_needs,
+      IF = publish_if,
+    })
     if not text then
       return nil, { tostring(err) }
     end
@@ -699,6 +748,8 @@ function M.render_cfg(cfg, deps, opts)
       or "",
     ENV = table.concat(env),
     PUBLISH_JOB = publish_job,
+    VERIFIED_JOB = verified_job,
+    PIPELINE_GATE = pipeline_gate,
   }
   local text, err = scaffold.render_template("ci_generated.yml.tpl", vars)
   if not text then

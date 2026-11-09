@@ -13,9 +13,9 @@ concurrency:
 @@CONCURRENCY|raw@@  cancel-in-progress: true
 
 jobs:
-  pipeline:
+@@VERIFIED_JOB|raw@@  pipeline:
     name: testing ci (${{ matrix.name }})
-    runs-on: ${{ matrix.runs-on }}
+@@PIPELINE_GATE|raw@@    runs-on: ${{ matrix.runs-on }}
 @@TIMEOUT_TEXT|raw@@    timeout-minutes: @@TIMEOUT@@
     strategy:
       # One platform failing must not cancel the other.

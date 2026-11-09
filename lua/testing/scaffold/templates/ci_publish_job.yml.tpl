@@ -2,8 +2,8 @@
 @@WHY|raw@@
   publish-ci-verified:
     name: publish ci-verified branch
-    needs: [pipeline]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: @@NEEDS|raw@@
+    if: @@IF|raw@@
     # Hosted, not self-hosted: the job pushes with write access, and on the maintainer's machine the global pre-push
     # hook cannot see the old tip in this shallow checkout and refuses every move of ci-verified.
     runs-on: ubuntu-latest

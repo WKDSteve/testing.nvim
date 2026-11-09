@@ -150,6 +150,7 @@ ci = {
     },
     env = { TASKS_REQUIRE_SNACKS = "1" },          -- optional: environment of the pipeline step
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
+    land = true,                                   -- optional: `testing ci land` (public/hosted, needs publish)
     timeout = 30,                                  -- optional: minutes of a leg
   },
 }
@@ -172,6 +173,11 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   repository is `owner/name`, a `ref` a full commit id, or `ci-verified` for a repository of the owner of the
   dependencies (third-party code is always pinned), an env name `NAME` and none the step sets itself,
   no text with a line break); a `platform` step that is not in the default profile is an error.
+- **`land = true`** (layouts `public` and `hosted`, with `publish`): the workflow also runs on a push to a check branch
+  `ci/**`, always on hosted runners (in `public` only a push to main reaches the self-hosted runner), and a first job
+  `already-verified` looks for a green run of the same commit on such a branch. When `testing ci land` then moves main
+  to that commit, the legs are skipped and only `publish-ci-verified` runs: the commit is not tested twice. Without the
+  key the file is byte for byte what it was. See docs/CI.md, "Land through the hosted CI".
 - **Kept in sync.** The preset step `workflow-in-sync` runs the `--check`: a repository that names it in a profile is red
   as soon as the file and `.testing.lua` disagree. It is opt-in: a repository without `ci.workflow` is not generated and
   not checked.

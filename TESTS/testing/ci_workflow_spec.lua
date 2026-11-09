@@ -255,6 +255,83 @@ return function(H)
     has(problems[1], ".layout", "... and the problem names the key")
   end
 
+  -- land = true (testing ci land): a check branch ci/** runs hosted legs, a push to main of a commit that was green
+  -- there only publishes; without it the file is the same as before (the goldens above)
+  do
+    for _, layout in ipairs({ "hosted", "public" }) do
+      local root = project(
+        "land-" .. layout,
+        "{ 'suite', 'conformance' }",
+        ('{ name = "demo.nvim", layout = %q, publish = true, land = true }'):format(layout)
+      )
+      local text, problems = workflow.render(root)
+      eq(problems, {}, layout .. " land: no problem")
+      has(
+        text,
+        '    branches: [main, "ci/**"]\n',
+        layout .. " land: a push to ci/** runs the workflow"
+      )
+      has(
+        text,
+        "\n  already-verified:\n",
+        layout .. " land: the job that finds an earlier green run"
+      )
+      has(
+        text,
+        'select(.name == env.WORKFLOW and (.head_branch | startswith(\\"ci/\\")))',
+        layout .. " land: ... of this workflow on a ci/ branch"
+      )
+      has(text, "    needs: [already-verified]\n", layout .. " land: the legs wait for that answer")
+      has(
+        text,
+        "if: ${{ !cancelled() && needs.already-verified.outputs.verified != 'true' }}",
+        layout .. " land: ... and are skipped when it was green already"
+      )
+      has(text, "needs: [already-verified, pipeline]", layout .. " land: publish waits for both")
+      has(
+        text,
+        "(needs.pipeline.result == 'skipped' && needs.already-verified.outputs.verified == 'true')",
+        layout .. " land: publish also runs for a commit that was green on ci/**"
+      )
+      has(
+        text,
+        "github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.pipeline.result",
+        layout .. " land: publish only on main"
+      )
+      for line in text:gmatch("[^\n]+") do
+        if line:match("^%s*#") then
+          ok(
+            #line <= workflow.WIDTH,
+            layout .. " land: a comment line is at most 120 wide: " .. line
+          )
+        end
+      end
+      if layout == "public" then
+        -- only a push to MAIN reaches the self-hosted runner: a push to ci/** gets the hosted legs
+        local main_legs, other =
+          text:match("github%.ref == 'refs/heads/main' && '(%[.-%])' || '(%[.-%])'")
+        ok(main_legs ~= nil, "public land: the self-hosted legs need a push to main")
+        ok(
+          other and not other:find("self-hosted", 1, true),
+          "public land: a push to ci/** runs no leg on the local runner"
+        )
+      end
+    end
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    refused(
+      { name = "x", layout = "private", publish = true, land = true },
+      "not with layout",
+      "land: not private"
+    )
+    refused({ name = "x", layout = "hosted", land = true }, "needs publish", "land: needs publish")
+    refused({ name = "x", land = "yes" }, ".land: true or false", "land: a boolean")
+    eq(workflow.validate({ name = "x" }).land, false, "land: off by default")
+  end
+
   -- every value is checked before it reaches the template
   do
     local function refused(wf, needle, msg)
