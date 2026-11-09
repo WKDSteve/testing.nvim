@@ -500,14 +500,10 @@ return function(H)
       ".packages[1].why",
       "packages: one line"
     )
-    refused(
-      {
-        name = "x",
-        packages = { { name = "ripgrep", why = "a" }, { name = "ripgrep", why = "b" } },
-      },
-      "ripgrep twice",
-      "packages: no repeat"
-    )
+    refused({
+      name = "x",
+      packages = { { name = "ripgrep", why = "a" }, { name = "ripgrep", why = "b" } },
+    }, "ripgrep twice", "packages: no repeat")
     local many = {}
     for i = 1, workflow.MAX_PACKAGES + 1 do
       many[i] = { name = "p" .. i, why = "a" }
