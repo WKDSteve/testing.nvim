@@ -37,6 +37,8 @@ return function(H)
   local function project(name, profile, wf, deps)
     local root = tmp .. "/" .. name
     write(root .. "/lua/proj/init.lua", "return {}\n")
+    -- rules.nvim and tasks.nvim have the wrapper: their legs run `scripts/ci.sh`
+    write(root .. "/scripts/ci.sh", '#!/usr/bin/env bash\nexec scripts/test.sh ci "$@"\n')
     write(
       root .. "/.testing.lua",
       ("return { plugin = 'proj', deps = %s, ci = { default = 'full', profiles = { full = %s }, workflow = %s } }\n"):format(
@@ -167,6 +169,90 @@ return function(H)
         "... never on the self-hosted runner: " .. runs_on
       )
     end
+  end
+
+  -- the layouts: private (macOS by hand, no pull request) and hosted (no self-hosted runner, the result cache), each
+  -- golden; every leg's job name lands in its column of `testing ci remote`, the publish job in none
+  do
+    local remote = require("testing.ci.remote")
+    ---The legs of the matrix expression: `{ push = {...}, other = {...} }` (hosted: one list for every event).
+    local function matrix(text)
+      local pushed, other = text:match("github%.event_name == 'push' && '(%[.-%])' || '(%[.-%])'")
+      if not pushed then
+        local all = assert(text:match("fromJSON%('(%[.-%])'%)"), "a matrix")
+        return { push = vim.json.decode(all), other = vim.json.decode(all) }
+      end
+      return { push = vim.json.decode(pushed), other = vim.json.decode(other) }
+    end
+    local function self_hosted(leg)
+      return type(leg["runs-on"]) == "table" and vim.tbl_contains(leg["runs-on"], "self-hosted")
+    end
+    for _, layout in ipairs({ "private", "hosted" }) do
+      local root = project(
+        layout,
+        "{ 'suite', 'conformance' }",
+        ('{ name = "demo.nvim", layout = %q, publish = true }'):format(layout)
+      )
+      local text, problems = workflow.render(root)
+      eq(problems, {}, layout .. ": no problem")
+      ok(text == read(golden .. "/" .. layout .. ".yml"), layout .. ": the golden workflow")
+      local legs = matrix(text)
+      for _, leg in ipairs(vim.list_extend(vim.deepcopy(legs.push), legs.other)) do
+        eq(
+          remote.job_os({
+            name = "testing ci (" .. leg.name .. ")",
+            labels = self_hosted(leg) and leg["runs-on"] or { leg["runs-on"] },
+          }),
+          leg.name,
+          layout .. ": ci remote puts the leg " .. leg.name .. " in its column"
+        )
+        eq(
+          leg.hosted,
+          not self_hosted(leg),
+          layout .. ": hosted means no local runner: " .. leg.name
+        )
+      end
+      eq(
+        remote.job_os({ name = "publish ci-verified branch", labels = { "ubuntu-latest" } }),
+        "other",
+        layout .. ": the publish job is no leg"
+      )
+      for _, leg in ipairs(legs.other) do
+        ok(
+          not self_hosted(leg),
+          layout .. ": no other event reaches the local runner: " .. leg.name
+        )
+      end
+      for line in text:gmatch("[^\n]+") do
+        if line:match("^%s*#") then
+          ok(#line <= workflow.WIDTH, layout .. ": a comment line is at most 120 wide: " .. line)
+        end
+      end
+      if layout == "private" then
+        has(text, "\n  workflow_dispatch:\n", "private: macOS runs by hand")
+        ok(not text:find("\n  pull_request:", 1, true), "private: no paid pull-request legs")
+        eq(#legs.push, 1, "private: a push has one leg")
+        ok(self_hosted(legs.push[1]), "private: ... on the local runner")
+        eq(legs.other[1].name, "macos", "private: the run by hand is macOS")
+        has(text, "means green on Windows", "private: ci-verified says what it covers")
+      else
+        ok(not text:find('"self-hosted"', 1, true), "hosted: no leg on a self-hosted runner")
+        has(text, "actions/cache/restore@", "hosted: the result cache is restored")
+        has(text, "actions/cache/save@", "hosted: ... and saved")
+        has(
+          text,
+          "if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'",
+          "hosted: ... only by a push to main"
+        )
+        has(text, '"--json=$env:CI_IR" --cached', "hosted: the suite uses it")
+        eq(#legs.push, 3, "hosted: three systems")
+      end
+    end
+    local bad =
+      project("badlayout", "{ 'suite', 'conformance' }", '{ name = "x", layout = "cloud" }')
+    local text, problems = workflow.render(bad)
+    eq(text, nil, "an unknown layout: nothing is generated")
+    has(problems[1], ".layout", "... and the problem names the key")
   end
 
   -- every value is checked before it reaches the template

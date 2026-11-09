@@ -285,9 +285,11 @@ return function(H)
   has(texts[".gitattributes"], "eol=lf", ".gitattributes pins LF")
   has(texts[".luacheckrc"], "busted", ".luacheckrc declares the busted std")
 
-  -- CI: 3 OS, timeout, IR artifact on failure, both checkouts from ci-verified
+  -- CI: generated in the hosted layout (testing.ci.workflow): 3 OS, timeout, the report and the IR on failure, the
+  -- result cache, both checkouts from ci-verified, every action pinned, nothing on a self-hosted runner
   local ci = texts[".github/workflows/ci.yml"]
   for _, needle in ipairs({
+    "# CI of myplug.nvim: one pipeline, GitHub-hosted runners only.",
     "timeout-minutes:",
     "ubuntu-latest",
     "windows-latest",
@@ -295,15 +297,23 @@ return function(H)
     "fail-fast: false",
     "actions/upload-artifact",
     "if: failure()",
-    "testing-ir.json",
-    "scripts/test.sh --json",
-    'repository: "WKDSteve/testing.nvim"',
+    "suite-ir.json",
+    "scripts/test.sh ci @steps",
+    "actions/cache/restore@",
+    "TESTING_CACHE_HOME",
+    '"--json=$env:CI_IR" --cached',
+    "repository: WKDSteve/testing.nvim",
     "path: .deps/testing.nvim",
-    'repository: "WKDSteve/lib.nvim"',
+    "repository: WKDSteve/lib.nvim",
     "path: .deps/lib.nvim",
-    "set -o pipefail",
+    "pull_request:",
   }) do
     has(ci, needle, "ci.yml has " .. needle)
+  end
+  lacks(ci, "@@", "ci.yml: no placeholder left")
+  lacks(ci, 'self-hosted"', "ci.yml: no leg on a self-hosted runner")
+  for line in ci:gmatch("uses: ([^\n]+)") do
+    ok(line:match("@%x%x%x%x%x%x%x+ # v%d") ~= nil, "ci.yml: pinned by commit: " .. line)
   end
   local _, n_verified = ci:gsub("ref: ci%-verified", "")
   eq(n_verified, 2, "both dependencies are checked out from ci-verified")
@@ -475,7 +485,7 @@ return function(H)
   )
   has(
     slurp(p6 .. "/.github/workflows/ci.yml"),
-    'repository: "someone/runtime-analysis.nvim"',
+    "repository: someone/runtime-analysis.nvim",
     "the owner is used"
   )
   eq(
@@ -851,14 +861,14 @@ return function(H)
     local public = slurp(wf_root .. "/" .. CI_FILE)
     lacks(public, "@@", "two-runner: no placeholder left")
     lacks(public, "\r", "two-runner: LF only")
-    has(public, 'repository: "WKDSteve/ui.nvim"', "two-runner: the dependency is checked out")
+    has(public, "repository: WKDSteve/ui.nvim", "two-runner: the dependency is checked out")
     has(public, "path: .deps/ui.nvim", "two-runner: ... where scripts/test.sh looks")
     has(public, "scripts/test.sh ci @steps", "two-runner: runs what `testing init` writes")
     lacks(public, "scripts/ci.sh", "two-runner: not a shim that `testing init` does not write")
     has(public, "persist-credentials: false", "two-runner: a checkout keeps no credentials")
     has(public, "fail-fast: false", "two-runner: a red macOS leg does not cancel the local one")
     has(public, "pull_request:", "two-runner: pull requests run")
-    lacks(public, "workflow_dispatch", "two-runner: public needs no run by hand")
+    lacks(public, "\n  workflow_dispatch:", "two-runner: public needs no run by hand")
     -- every action reaches the maintainer's machine: pinned by commit, as in the repositories it comes from
     for line in public:gmatch("uses: ([^\n]+)") do
       ok(line:match("@%x%x%x%x%x%x%x+ # v%d") ~= nil, "two-runner: pinned by commit: " .. line)
@@ -913,7 +923,11 @@ return function(H)
     lacks(private, "@@", "two-runner-private: no placeholder left")
     has(private, "workflow_dispatch:", "two-runner-private: macOS runs by hand")
     has(private, "gh workflow run ci.yml", "two-runner-private: ... and the file says how")
-    has(private, "0.062 USD per minute", "two-runner-private: ... and why not on every push")
+    has(
+      private,
+      "hosted minutes of a private repository are paid",
+      "two-runner-private: ... and why not on every push"
+    )
     lacks(private, "\n  pull_request:", "two-runner-private: no paid pull-request legs")
     has(
       private,

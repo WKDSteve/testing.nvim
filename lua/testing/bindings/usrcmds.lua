@@ -905,7 +905,7 @@ function M.routes()
         {
           name = "workflow",
           type = "STRING",
-          desc = "Write only ci.yml: two-runner, two-runner-private, public (from ci.workflow)",
+          desc = "Only ci.yml: public (from ci.workflow), two-runner, two-runner-private, hosted",
         },
         {
           name = "update",

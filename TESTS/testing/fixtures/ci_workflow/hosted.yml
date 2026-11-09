@@ -1,0 +1,190 @@
+# CI of demo.nvim: one pipeline, GitHub-hosted runners only.
+#
+# What is checked lives only in the `ci` section of .testing.lua; every leg runs it with `scripts/ci.sh` (`testing ci`),
+# exactly as the pre-push hook and `:Testing ci` do. This file only prepares the machine.
+#
+# - every event (a push to main, a pull request, also from a fork): GitHub-hosted runners only, a throwaway VM with a
+#   read-only token and no secrets; nothing runs on the maintainer's machine. The whole profile runs on ubuntu, the
+#   steps that depend on the platform (the suite and conformance) on windows and macOS. The legs pin nvim 0.12.2, stylua
+#   2.5.2, luacheck 1.2.0.
+# - the result cache (docs/CI-CACHE.md of testing.nvim): the suite reuses the green results of earlier runs; a pull
+#   request only restores it, only a push to main saves it.
+# - publish-ci-verified: after a green push only. It waits for every leg: `ci-verified` means green on all three
+#   systems.
+#
+# A fork can edit this file in its pull request (e.g. `runs-on: self-hosted`). The repository therefore requires
+# approval before a workflow of an outside contributor runs; never approve a pull request that touches `.github/`.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    name: testing ci (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+    strategy:
+      # One platform failing must not cancel the other.
+      fail-fast: false
+      matrix:
+        # Every event gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend
+        # on the platform (stylua and luacheck do not).
+        include: ${{ fromJSON('[{"name":"ubuntu","runs-on":"ubuntu-latest","hosted":true,"steps":""},{"name":"windows","runs-on":"windows-latest","hosted":true,"steps":"--step=suite,conformance"},{"name":"macos","runs-on":"macos-latest","hosted":true,"steps":"--step=suite,conformance"}]') }}
+    defaults:
+      run:
+        # One shell on every runner: `bash` is the WSL launcher on the self-hosted machine, pwsh is everywhere.
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      # Found by scripts/test.sh in `.deps/<name>`. lib.nvim and testing.nvim come from the branch that only moves
+      # once the dependency's own CI is green.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/lib.nvim
+          path: .deps/lib.nvim
+          ref: ci-verified
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/testing.nvim
+          path: .deps/testing.nvim
+          ref: ci-verified
+      # The tools every leg needs, at the versions of the table in testing.nvim (testing.ci.workflow).
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        if: matrix.hosted
+        with:
+          neovim: true
+          version: v0.12.2
+      # The action installs stylua on PATH; `--version` only proves it is there, the check itself is the pipeline's.
+      - uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5
+        if: matrix.hosted && matrix.steps == ''
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v2.5.2
+          args: --version
+      # PUC Lua, not "luajit-2.1" (that tarball 404s); `std = "luajit"` in .luacheckrc decides what is checked against.
+      - uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13
+        if: matrix.hosted && matrix.steps == ''
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6
+        if: matrix.hosted && matrix.steps == ''
+      - if: matrix.hosted && matrix.steps == ''
+        run: luarocks install luacheck 1.2.0
+      # The result cache (docs/CI-CACHE.md of testing.nvim). The key is only the transport: every entry carries its
+      # own full spec key and is checked against it when read, so a wrong restore can lower the hit rate and never turn
+      # a result green. A pull request only restores; only a push to main saves.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/testing-cache
+          key: testing-${{ runner.os }}-nvim0.12.2-${{ github.sha }}
+          restore-keys: testing-${{ runner.os }}-nvim0.12.2-
+      - name: scripts/ci.sh ${{ matrix.steps }}
+        env:
+          TESTING_CACHE_HOME: ${{ runner.temp }}/testing-cache
+          CI_STEPS: ${{ matrix.steps }}
+          CI_REPORT: ${{ runner.temp }}/ci-report.json
+          CI_IR: ${{ runner.temp }}/suite-ir.json
+        run: |
+          nvim --version | Select-Object -First 1
+          # Git Bash on Windows (never the WSL launcher), bash elsewhere; scripts/ci.sh is a bash script.
+          $bash = if ($IsWindows) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' } else { 'bash' }
+          $steps = @($env:CI_STEPS -split ' ' | Where-Object { $_ })
+          & $bash scripts/ci.sh @steps --keep-going --no-agent "--json=$env:CI_REPORT" -- "--json=$env:CI_IR" --cached
+          exit $LASTEXITCODE
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ runner.temp }}/testing-cache
+          key: testing-${{ runner.os }}-nvim0.12.2-${{ github.sha }}
+      # The report names every step and, for a red one, its findings or last output lines; the suite IR (everything
+      # after `--` goes to the suite step) names the failing case and its assertions.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: failure()
+        with:
+          name: ci-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/ci-report.json
+            ${{ runner.temp }}/suite-ir.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Moves the branch `ci-verified` to a commit whose pipeline is green on all three systems, never backwards along main
+  # (two pushes can finish out of order), and retries a lost lease. A consumer that checks this repository out with
+  # `ref: ci-verified` always tests against a known-good commit.
+  publish-ci-verified:
+    name: publish ci-verified branch
+    needs: [pipeline]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Hosted, not self-hosted: the job pushes with write access, and on the maintainer's machine the global pre-push
+    # hook cannot see the old tip in this shallow checkout and refuses every move of ci-verified.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Never move ci-verified backwards along main's history: two pushes can finish
+      # out of order, and the older run must not overwrite the newer verified commit.
+      # If main's history was rewritten (compare status 'diverged'), ci-verified is
+      # deliberately reset to the new verified commit. The
+      # lookup fails closed (an API or network error stops the job instead of
+      # falling through to a push) and the update carries a lease on the tip it
+      # compared against.
+      - name: Publish ci-verified
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Look the branch up on the remote instead of inferring "missing" from an API
+          # error: a failed lookup must stop the job, not fall through to a push.
+          # A concurrent run may move ci-verified between the comparison and the push
+          # (lease rejected). Re-read the tip and compare again: if the newer run is
+          # already ahead of this commit there is nothing left to publish, so that is
+          # success, not a failure.
+          for attempt in 1 2 3 4; do
+            tip=$(git ls-remote --heads origin refs/heads/ci-verified | cut -f1)
+            if [ -z "$tip" ]; then
+              # First publish. A plain push creates the branch and is rejected if a
+              # concurrent run created it first; the next attempt then compares.
+              git push origin HEAD:refs/heads/ci-verified && exit 0
+              echo "first publish failed on attempt $attempt (another run may have created the branch)"
+              [ "$attempt" -lt 4 ] && sleep $((attempt * 2))
+              continue
+            fi
+            status=$(gh api "repos/$REPO/compare/$tip...$SHA" --jq .status)
+            case "$status" in
+              behind | identical)
+                echo "ci-verified ($tip) is '$status' relative to $SHA (published or superseded); leaving it alone"
+                exit 0
+                ;;
+              ahead | diverged)
+                # The lease makes the server refuse the update if ci-verified moved since
+                # the comparison, so an older run can never overwrite a newer one.
+                git push origin HEAD:refs/heads/ci-verified --force-with-lease="refs/heads/ci-verified:$tip" && exit 0
+                echo "push failed on attempt $attempt (lease rejected or another error, see the git output above)"
+                [ "$attempt" -lt 4 ] && sleep $((attempt * 2))
+                ;;
+              *)
+                echo "::error::unexpected compare status '$status' for $tip...$SHA"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::could not publish ci-verified after 4 attempts"
+          exit 1

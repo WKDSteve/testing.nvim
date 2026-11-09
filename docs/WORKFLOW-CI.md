@@ -88,48 +88,51 @@ The GitHub workflow of a repository does not spell the commands out again: it ch
 ## One pipeline, two kinds of runner
 
 CI stays on the local runner. macOS is the one exception, because there is no local Mac: its leg runs in a throwaway
-GitHub-hosted VM, never on the local machine. `testing init` writes this as a workflow, so a move to the local runner
-no longer loses macOS:
+GitHub-hosted VM, never on the local machine. Every workflow `testing init` writes comes from one generator
+(`testing.ci.workflow`) in one of three **layouts**:
+
+| Event | `public` | `private` | `hosted` |
+| --- | --- | --- | --- |
+| push to `main` | local runner, whole profile; **hosted macOS**, platform steps | local runner, whole profile | hosted ubuntu (whole profile), hosted windows and macOS (platform steps) |
+| `workflow_dispatch` | no such trigger | **hosted macOS**, platform steps | no such trigger |
+| `pull_request` | hosted ubuntu (whole profile), hosted windows and macOS (platform steps) | no such trigger | as a push |
 
 ```bash
-testing init --workflow=two-runner           # a public repository
-testing init --workflow=two-runner-private   # a private repository
+testing init                                 # the whole setup; its ci.yml in the layout `hosted`
+testing init --workflow=two-runner           # only ci.yml, layout `public`
+testing init --workflow=two-runner-private   # only ci.yml, layout `private`
+testing init --workflow=hosted               # only ci.yml, layout `hosted`
 ```
 
-It writes only `.github/workflows/ci.yml` and touches nothing else. An existing file is kept; `--force` replaces this
-one file. The checkouts below `.deps/` come from the `DEPS=(...)` line of `scripts/test.sh`, else from `deps` in the
-text of `.testing.lua`, else `lib.nvim`; nothing of the project runs for that, and a name it cannot read is an error.
-Plain `testing init` still writes the hosted three-system matrix.
-
-| Event | `two-runner` (public) | `two-runner-private` |
-| --- | --- | --- |
-| push to `main` | local runner, whole profile; **hosted macOS**, `--step=suite` | local runner, whole profile |
-| `workflow_dispatch` | no such trigger | **hosted macOS**, `--step=suite` |
-| `pull_request` | hosted ubuntu (whole profile), hosted windows and macOS (`--step=suite`) | no such trigger |
+`--workflow=<kind>` writes only `.github/workflows/ci.yml` and touches nothing else. An existing file is kept; `--force`
+replaces this one file. The checkouts below `.deps/` come from the `DEPS=(...)` line of `scripts/test.sh`, else from
+`deps` in the text of `.testing.lua`, else `lib.nvim`; nothing of the project runs for that, and a name it cannot read
+is an error. These kinds take the defaults (the suite as the platform step, no Node, no pinned checkout); a repository
+that needs more describes it in `ci.workflow` and uses `--workflow=public` (below), which keeps the file in sync.
 
 - **Why private is by hand.** Standard runners are free for public repositories. A private one has 12 USD a month on
   GitHub Free and macOS costs 0.062 USD per minute (GitHub docs, 2026-11-04), about 190 minutes. Start the leg with
   `gh workflow run ci.yml`. The 30-minute timeout limits one run to 1.86 USD.
-- **Steps.** A hosted leg runs what depends on the platform. When `.testing.lua` makes `conformance` a gate, add it
-  (`--step=suite,conformance`); a pipeline without that step answers with a usage error, never a pass. A pipeline
-  written by hand may name its steps differently.
-- **Entry point.** The workflow calls `scripts/test.sh ci`, which `testing init` writes. A repository with the
-  `scripts/ci.sh` shim can call that instead, it is the same pipeline.
+- **Hosted only.** The layout `hosted` never reaches the local runner and carries the result cache
+  ([CI-CACHE.md](CI-CACHE.md)): the suite runs with `--cached`, a pull request only restores the cache, a push to `main`
+  saves it.
+- **Steps.** A hosted leg runs what depends on the platform (`platform`, the suite by default); a pipeline without such
+  a step answers with a usage error, never a pass.
+- **Entry point.** Every leg calls `scripts/ci.sh` where the repository has that wrapper, else `scripts/test.sh ci`,
+  which `testing init` writes: the same pipeline.
 - **The runner guard does not see the hosted leg.** The guard is a hook in the `.env` of a local runner
   ([RUNNER-GUARD.md](RUNNER-GUARD.md#hosted-legs)). A guard that refuses the local job does not stop the macOS leg
   (`fail-fast: false`).
 - **A job with `needs: [pipeline]` waits for every leg.** A `publish-ci-verified` job behind this matrix does not move
   the branch while macOS alone is red, and a push with the local runner off stays open until that job is discarded
   after 24 h.
-- **First run.** The templates are checked against the rendered file, not on a real macOS VM; the first push of a
-  repository is that check.
+- **First run.** The layouts are checked against golden files, not on a real macOS VM; the first push of a repository is
+  that check.
 
 ### Generated from `.testing.lua`: `--workflow=public`
 
-The two templates above are written once and then edited by hand: the checkouts of the dependencies, the tools, their
-versions and the action SHAs end up in the workflow a second time, next to `.testing.lua`. For a public repository
-(pull requests from forks get hosted CI) `--workflow=public` generates the whole file from `ci.workflow` instead, and
-keeps it that way:
+The kinds above write the defaults once. `--workflow=public` takes everything from `ci.workflow` instead (the layout
+too, despite the flag's name: it was the first layout) and keeps the file that way:
 
 ```lua
 ci = {
@@ -137,6 +140,7 @@ ci = {
   workflow = {
     name = "tasks.nvim",                           -- the repository, for the header (never the directory's name: a
                                                    -- worktree of `testing ci commit` is called `tree`)
+    layout = "public",                             -- optional: "public" (default), "private" or "hosted"
     platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
     checkouts = {                                  -- optional: third-party dependencies, pinned by commit
@@ -155,12 +159,11 @@ testing init --workflow=public --force    # replace it
 testing init --workflow=public --check    # compare byte for byte, print a diff, exit 1 when it differs
 ```
 
-- **Layout.** A push to `main` runs the whole profile on the self-hosted runner plus a hosted macOS leg with the
-  `platform` steps; every other event (a pull request, also from a fork) runs only on hosted runners: ubuntu with the
-  whole profile, windows and macOS with the `platform` steps. A pull request never reaches the self-hosted runner; the header
-  says to approve no pull request that touches `.github/`. The job that moves `ci-verified` (`publish`) runs on a hosted
-  ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook would
-  refuse the move from a shallow checkout anyway.
+- **Layout.** As in the table above. In `public` a pull request never reaches the self-hosted runner; the header says to
+  approve no pull request that touches `.github/`. In every layout the job that moves `ci-verified` (`publish`) runs on
+  a hosted ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook
+  would refuse the move from a shallow checkout anyway. The jobs are named `testing ci (<system>)`, so
+  `testing ci remote` puts each leg in its column and the publish job in none.
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a

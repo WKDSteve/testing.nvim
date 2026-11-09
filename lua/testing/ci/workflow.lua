@@ -56,13 +56,21 @@ M.ACTIONS = {
   luarocks = "35d062def313a7699a0d513e996bcf4352f05389 # v6",
   node = "249970729cb0ef3589644e2896645e5dc5ba9c38 # v6",
   upload = "cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7",
+  cache = "0057852bfaa89a56745cba8c7296529d2fc39830 # v4",
 }
+
+---Where the legs run (`ci.workflow.layout`):
+---  public   a push on the self-hosted runner plus hosted macOS; every other event (a pull request) only hosted runners
+---  private  a push on the self-hosted runner; macOS hosted by hand (`workflow_dispatch`), no pull_request trigger
+---  hosted   every event on hosted runners only (ubuntu, windows, macOS), with the result cache
+M.LAYOUTS = { public = true, private = true, hosted = true }
 
 ---Environment names the pipeline step sets itself.
 local RESERVED_ENV = { CI_STEPS = true, CI_REPORT = true, CI_IR = true }
 
 local KEYS = {
   name = true,
+  layout = true,
   platform = true,
   node = true,
   checkouts = true,
@@ -83,6 +91,7 @@ local KEYS = {
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field timeout integer
+---@field layout "public"|"private"|"hosted"
 ---@field name string The repository's name, for the header (never the directory's: a worktree or a clone is named
 ---otherwise).
 
@@ -125,7 +134,20 @@ function M.validate(raw)
       bad(": unknown key %s", tostring(k))
     end
   end
-  local cfg = { checkouts = {}, env = {}, timeout = 30, platform = { "suite", "conformance" } }
+  local cfg = {
+    checkouts = {},
+    env = {},
+    timeout = 30,
+    platform = { "suite", "conformance" },
+    layout = "public",
+  }
+  if raw.layout ~= nil then
+    if type(raw.layout) ~= "string" or not M.LAYOUTS[raw.layout] then
+      bad('.layout: "public", "private" or "hosted"')
+    else
+      cfg.layout = raw.layout
+    end
+  end
   -- named, never taken from the directory: `ci commit` checks a snapshot in a directory called `tree`
   if type(raw.name) ~= "string" or not raw.name:match("^[%w][%w._-]*$") or #raw.name > 100 then
     bad('.name: the repository\'s name (name = "tasks.nvim"), letters, digits, ".", "_" and "-"')
@@ -241,19 +263,22 @@ M.CHECKOUTS_WIDTH = 114
 ---@param text string
 ---@param prefix string What every line starts with (`  # `).
 ---@param width? integer
+---@param rest? string What the lines after the first start with (default `prefix`; `#   ` under a `# - ` bullet).
 ---@return string lines Each line ends with a newline.
-function M.wrap(text, prefix, width)
+function M.wrap(text, prefix, width, rest)
   width = width or M.WIDTH
-  local out, line = {}, prefix
+  rest = rest or prefix
+  local out, line, empty = {}, prefix, true
   for word in text:gmatch("%S+") do
-    if line ~= prefix and #line + 1 + #word > width then
+    if not empty and #line + 1 + #word > width then
       out[#out + 1] = line
-      line = prefix .. word
+      line = rest .. word
     else
-      line = line == prefix and (prefix .. word) or (line .. " " .. word)
+      line = empty and (line .. word) or (line .. " " .. word)
     end
+    empty = false
   end
-  if line ~= prefix then
+  if not empty then
     out[#out + 1] = line
   end
   return table.concat(out, "\n") .. "\n"
@@ -327,7 +352,6 @@ function M.render(root)
       end
     end
   end
-  local name = cfg.name
   local deps = {}
   for _, d in ipairs(type(loaded.config.deps) == "table" and loaded.config.deps or {}) do
     local dname = type(d) == "table" and (d.name or d[1]) or d
@@ -340,7 +364,178 @@ function M.render(root)
   if #problems > 0 then
     return nil, problems
   end
+  return M.render_cfg(cfg, deps, { script = M.script_of(root) })
+end
 
+---What every leg runs: `scripts/ci.sh` where the repository has that wrapper, else `scripts/test.sh ci`.
+---@param root string
+---@return string
+function M.script_of(root)
+  return vim.uv.fs_stat(root .. "/scripts/ci.sh") and "scripts/ci.sh" or "scripts/test.sh ci"
+end
+
+---The `ci.workflow` that `testing init` writes a workflow from when the repository has none of its own: the name, a
+---layout, the suite as the step that depends on the platform.
+---@param name string
+---@param layout "public"|"private"|"hosted"
+---@return Testing.Ci.Workflow.Config|nil cfg
+---@return string[] problems
+function M.defaults(name, layout)
+  return M.validate({ name = name, layout = layout, platform = { "suite" } })
+end
+
+local LEG = {
+  self_hosted = '{"name":"windows","runs-on":["self-hosted","windows"],"hosted":false,"steps":""}',
+  ubuntu = '{"name":"ubuntu","runs-on":"ubuntu-latest","hosted":true,"steps":""}',
+  windows = '{"name":"windows","runs-on":"windows-latest","hosted":true,"steps":"--step=%s"}',
+  macos = '{"name":"macos","runs-on":"macos-latest","hosted":true,"steps":"--step=%s"}',
+}
+
+---The parts of the workflow that depend on the layout.
+---@param cfg Testing.Ci.Workflow.Config
+---@param words { platform: string, portable: string, tools: string, steps: string }
+---@return table<string, string>
+local function layout_parts(cfg, words)
+  local function legs(...)
+    local list = {}
+    for i, leg in ipairs({ ... }) do
+      list[i] = leg:find("%s", 1, true) and leg:format(words.steps) or leg
+    end
+    return "[" .. table.concat(list, ",") .. "]"
+  end
+  local function bullet(text)
+    return M.wrap(text, "# - ", M.WIDTH, "#   ")
+  end
+  local fork = "A fork can edit this file in its pull request (e.g. `runs-on: self-hosted`). The repository therefore "
+    .. "requires approval before a workflow of an outside contributor runs; never approve a pull request that touches "
+    .. "`.github/`."
+  local push_pr = "  push:\n    branches: [main]\n  pull_request:\n"
+  local group = "  group: ci-${{ github.workflow }}-${{ github.ref }}\n"
+  local self_tools = "Hosted legs only: the tools the self-hosted runner has on its PATH."
+  if cfg.layout == "private" then
+    return {
+      KINDS = "two kinds of runner",
+      LAYOUT_TEXT = bullet(
+        "push to main: the self-hosted runner (the maintainer's local Windows machine), tools on its PATH, the whole "
+          .. 'profile. Without a running runner its job stays "Queued" (no red mark, discarded after 24 h).'
+      )
+        .. bullet(
+          ("workflow_dispatch: a GitHub-hosted macOS leg, started by hand with `gh workflow run ci.yml`. It runs the steps that depend on the platform: %s. There is no local Mac; a throwaway VM, never the local machine. The leg pins the versions the self-hosted runner has (%s)."):format(
+            words.platform,
+            words.tools
+          )
+        ),
+      FORK_TEXT = "#\n"
+        .. M.wrap(
+          "Why macOS only by hand: hosted minutes of a private repository are paid, a leg on every push would use them up within days, and an empty budget ends a job without a single step. Hence no pull_request trigger either. `testing ci remote` counts push runs only: a macOS run by hand is no verdict there and the MACOS cell stays `-`.",
+          "# "
+        ),
+      TRIGGERS = "  push:\n    branches: [main]\n  workflow_dispatch:\n",
+      CONCURRENCY = "  # The event is part of the group: a push must not cancel the paid macOS run, and that run must not cancel a push.\n"
+        .. "  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}\n",
+      TIMEOUT_TEXT = "    # On the macOS leg this is also the price limit of one run.\n",
+      MATRIX_TEXT = M.wrap(
+        ("Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one added later, gets the hosted macOS leg with the steps that depend on the platform (%s do not)."):format(
+          words.portable
+        ),
+        "        # "
+      ),
+      MATRIX = ("${{ fromJSON(github.event_name == 'push' && '%s' || '%s') }}"):format(
+        legs(LEG.self_hosted),
+        legs(LEG.macos)
+      ),
+      TOOLS_TEXT = self_tools,
+      SYSTEMS = "the self-hosted runner (macOS runs by hand)",
+      PUBLISH_HEADER = bullet(
+        "publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs on the maintainer's machine. It waits for the self-hosted leg: `ci-verified` means green on Windows."
+      ),
+    }
+  elseif cfg.layout == "hosted" then
+    return {
+      KINDS = "GitHub-hosted runners only",
+      LAYOUT_TEXT = bullet(
+        ("every event (a push to main, a pull request, also from a fork): GitHub-hosted runners only, a throwaway VM with a read-only token and no secrets; nothing runs on the maintainer's machine. The whole profile runs on ubuntu, the steps that depend on the platform (%s) on windows and macOS. The legs pin %s."):format(
+          words.platform,
+          words.tools
+        )
+      )
+        .. bullet(
+          "the result cache (docs/CI-CACHE.md of testing.nvim): the suite reuses the green results of earlier runs; a pull request only restores it, only a push to main saves it."
+        ),
+      FORK_TEXT = "#\n" .. M.wrap(fork, "# "),
+      TRIGGERS = push_pr,
+      CONCURRENCY = group,
+      TIMEOUT_TEXT = "",
+      MATRIX_TEXT = M.wrap(
+        ("Every event gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend on the platform (%s do not)."):format(
+          words.portable
+        ),
+        "        # "
+      ),
+      MATRIX = ("${{ fromJSON('%s') }}"):format(legs(LEG.ubuntu, LEG.windows, LEG.macos)),
+      TOOLS_TEXT = "The tools every leg needs, at the versions of the table in testing.nvim (testing.ci.workflow).",
+      SYSTEMS = "all three systems",
+      PUBLISH_HEADER = bullet(
+        "publish-ci-verified: after a green push only. It waits for every leg: `ci-verified` means green on all three systems."
+      ),
+    }
+  end
+  -- public: rules.nvim and tasks.nvim had this by hand, and their files are generated byte for byte
+  return {
+    KINDS = "two kinds of runner",
+    LAYOUT_TEXT = table.concat({
+      "# - push to main: the self-hosted runner (the maintainer's local Windows machine), tools on its PATH. Without a running",
+      '#   runner a push stays "Queued" (no red mark, discarded after 24 h).',
+      "# - pull_request (also from forks): GitHub-hosted runners, a throwaway VM with a read-only token and no secrets (every",
+      "#   dependency is a public repository). A pull request never runs on the self-hosted runner: it would run its own",
+      "#   workflow code on the maintainer's machine. The hosted legs pin the versions the self-hosted runner has (nvim",
+      ("#   %s); a difference between the two is a finding."):format(
+        (words.tools:gsub("^nvim ", ""))
+      ),
+      "# - macOS: a GitHub-hosted leg on every event, also on a push: the repository is public, so it costs nothing, and no",
+      ("#   self-hosted runner has macOS. It runs the steps that depend on the platform: %s."):format(
+        words.platform
+      ),
+      "",
+    }, "\n"),
+    FORK_TEXT = "#\n" .. M.wrap(fork, "# "),
+    TRIGGERS = push_pr,
+    CONCURRENCY = group,
+    TIMEOUT_TEXT = "",
+    MATRIX_TEXT = M.wrap(
+      ("Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one added later (workflow_dispatch, pull_request_target, ...), gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend on the platform (%s do not)."):format(
+        words.portable
+      ),
+      "        # "
+    ),
+    MATRIX = ("${{ fromJSON(github.event_name == 'push' && '%s' || '%s') }}"):format(
+      legs(LEG.self_hosted, LEG.macos),
+      legs(LEG.ubuntu, LEG.windows, LEG.macos)
+    ),
+    TOOLS_TEXT = self_tools,
+    SYSTEMS = "all three systems",
+    PUBLISH_HEADER = "# - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs\n#   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.\n",
+  }
+end
+
+---The text of a workflow from a checked `ci.workflow` (`M.validate`) and the dependencies (testing.nvim is added).
+---@param cfg Testing.Ci.Workflow.Config
+---@param deps string[] Dependency names, checked by the caller (`testing.deps.is_valid_name`), without testing.nvim.
+---@param opts? { script?: string, owner?: string } `script`: what every leg runs (default `scripts/test.sh ci`); `owner`: of the
+---dependency repositories (default `testing.scaffold.DEFAULT_OWNER`, checked by the caller).
+---@return string|nil text
+---@return string[] problems
+function M.render_cfg(cfg, deps, opts)
+  opts = opts or {}
+  local script = opts.script or "scripts/test.sh ci"
+  local owner = opts.owner or scaffold.DEFAULT_OWNER
+  if not owner:match("^[%w][%w-]*$") then
+    return nil, { "the owner of the dependencies: letters, digits and -" }
+  end
+  if script ~= "scripts/ci.sh" and script ~= "scripts/test.sh ci" then
+    return nil, { "the script of a leg is scripts/ci.sh or scripts/test.sh ci" }
+  end
+  local name = cfg.name
   local own = vim.list_extend(vim.deepcopy(deps), { "testing.nvim" })
   local checkouts = {}
   checkouts[1] = M.wrap(
@@ -352,8 +547,7 @@ function M.render(root)
     M.CHECKOUTS_WIDTH
   )
   for _, d in ipairs(deps) do
-    checkouts[#checkouts + 1] =
-      checkout_block(d, scaffold.DEFAULT_OWNER .. "/" .. d, scaffold.DEFAULT_REF)
+    checkouts[#checkouts + 1] = checkout_block(d, owner .. "/" .. d, scaffold.DEFAULT_REF)
   end
   for _, c in ipairs(cfg.checkouts) do
     if c.why then
@@ -367,7 +561,7 @@ function M.render(root)
     )
   end
   checkouts[#checkouts + 1] =
-    checkout_block("testing.nvim", scaffold.DEFAULT_OWNER .. "/testing.nvim", scaffold.DEFAULT_REF)
+    checkout_block("testing.nvim", owner .. "/testing.nvim", scaffold.DEFAULT_REF)
 
   local platform_words = {}
   for i, n in ipairs(cfg.platform) do
@@ -384,11 +578,30 @@ function M.render(root)
     env[#env + 1] = ("          %s: %s\n"):format(k, render.yaml_quote(cfg.env[k]))
   end
 
+  local tools = ("nvim %s, stylua %s, luacheck %s%s"):format(
+    M.TOOLS.nvim,
+    M.TOOLS.stylua,
+    M.TOOLS.luacheck,
+    cfg.node and (", Node " .. cfg.node.version) or ""
+  )
+  local parts = layout_parts(cfg, {
+    platform = english(platform_words),
+    portable = english(portable),
+    tools = tools,
+    steps = table.concat(cfg.platform, ","),
+  })
+  -- the cache transport and `--cached` belong to the hosted layout only (its legs start empty every time)
+  local cache = cfg.layout == "hosted"
+  local key = ("testing-${{ runner.os }}-nvim%s-"):format(M.TOOLS.nvim)
+  if cache then
+    table.insert(env, 1, "          TESTING_CACHE_HOME: ${{ runner.temp }}/testing-cache\n")
+  end
+
   local publish_job = ""
   if cfg.publish then
-    local why = "Moves the branch `ci-verified` to a commit whose pipeline is green on all three systems, never backwards "
-      .. "along main (two pushes can finish out of order), and retries a lost lease. A consumer that checks this "
-      .. "repository out with `ref: ci-verified` always tests against a known-good commit."
+    local why = ("Moves the branch `ci-verified` to a commit whose pipeline is green on %s, never backwards "):format(
+      parts.SYSTEMS
+    ) .. "along main (two pushes can finish out of order), and retries a lost lease. A consumer that checks this " .. "repository out with `ref: ci-verified` always tests against a known-good commit."
     if cfg.publish.why then
       why = why .. " " .. cfg.publish.why
     end
@@ -409,18 +622,46 @@ function M.render(root)
     LUACHECK_VERSION = M.TOOLS.luacheck,
     LUA_VERSION = M.TOOLS.lua,
     TIMEOUT = tostring(cfg.timeout),
-    TOOLS_HEADER = cfg.node and (", Node " .. cfg.node.version) or "",
-    PLATFORM_TEXT = english(platform_words),
-    MATRIX_TEXT = M.wrap(
-      ("Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one added later (workflow_dispatch, pull_request_target, ...), gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend on the platform (%s do not)."):format(
-        english(portable)
+    KINDS = parts.KINDS,
+    INTRO = M.wrap(
+      ("What is checked lives only in the `ci` section of .testing.lua; every leg runs it with %s, exactly as the pre-push hook and `:Testing ci` do. This file only prepares the machine."):format(
+        script == "scripts/ci.sh" and "`scripts/ci.sh` (`testing ci`)" or ("`" .. script .. "`")
       ),
-      "        # "
+      "# "
     ),
-    PLATFORM_STEPS = table.concat(cfg.platform, ","),
-    PUBLISH_HEADER = cfg.publish
-        and "# - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs\n#   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.\n"
+    LAYOUT_TEXT = parts.LAYOUT_TEXT,
+    FORK_TEXT = parts.FORK_TEXT,
+    TRIGGERS = parts.TRIGGERS,
+    CONCURRENCY = parts.CONCURRENCY,
+    TIMEOUT_TEXT = parts.TIMEOUT_TEXT,
+    MATRIX_TEXT = parts.MATRIX_TEXT,
+    MATRIX = parts.MATRIX,
+    TOOLS_TEXT = parts.TOOLS_TEXT,
+    SCRIPT = script,
+    SCRIPT_FILE = script:match("^(%S+)"),
+    SUITE_EXTRA = cache and " --cached" or "",
+    CACHE_RESTORE = cache
+        and table.concat({
+          "      # The result cache (docs/CI-CACHE.md of testing.nvim). The key is only the transport: every entry carries its",
+          "      # own full spec key and is checked against it when read, so a wrong restore can lower the hit rate and never turn",
+          "      # a result green. A pull request only restores; only a push to main saves.",
+          "      - uses: actions/cache/restore@" .. M.ACTIONS.cache,
+          "        with:",
+          "          path: ${{ runner.temp }}/testing-cache",
+          "          key: " .. key .. "${{ github.sha }}",
+          "          restore-keys: " .. key,
+          "",
+        }, "\n")
       or "",
+    CACHE_SAVE = cache and table.concat({
+      "      - uses: actions/cache/save@" .. M.ACTIONS.cache,
+      "        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'",
+      "        with:",
+      "          path: ${{ runner.temp }}/testing-cache",
+      "          key: " .. key .. "${{ github.sha }}",
+      "",
+    }, "\n") or "",
+    PUBLISH_HEADER = cfg.publish and parts.PUBLISH_HEADER or "",
     CHECKOUT_ACTION = M.ACTIONS.checkout,
     SETUP_VIM_ACTION = M.ACTIONS.setup_vim,
     STYLUA_ACTION = M.ACTIONS.stylua,
@@ -437,7 +678,7 @@ function M.render(root)
     ENV = table.concat(env),
     PUBLISH_JOB = publish_job,
   }
-  local text, err = scaffold.render_template("ci_public.yml.tpl", vars)
+  local text, err = scaffold.render_template("ci_generated.yml.tpl", vars)
   if not text then
     return nil, { tostring(err) }
   end

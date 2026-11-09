@@ -241,7 +241,7 @@ local function run_migrate(rest, sv)
 end
 
 local INIT_USAGE =
-  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --workflow=two-runner|two-runner-private [--force]\n       testing init [<root>] --workflow=public [--force | --check]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
+  "usage: testing init [<root>] [--force] [--hooks] [--plugin=<name>]\n       testing init [<root>] --workflow=two-runner|two-runner-private|hosted [--force]\n       testing init [<root>] --workflow=public [--force | --check]\n       testing init [<root>] --update [--write [--force | --force-comments] | --check]"
 
 ---`testing init [<root>] [--force] [--hooks] [--plugin=<name>]`: generate the test setup (`testing.scaffold`),
 ---`testing init [<root>] --workflow=<kind> [--force]`: write only the two-runner workflow with its macOS leg, and

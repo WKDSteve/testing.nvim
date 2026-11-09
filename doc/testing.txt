@@ -135,9 +135,10 @@ lint ~
 :Testing list [{root}]    List what would run.
 :Testing init [{root}] [--force] [--plugin={name}] [--workflow={kind}]
         Generate the test setup of a plugin repository. An existing file is
-        never overwritten without `--force`. `--workflow=two-runner` or
-        `two-runner-private` writes only `.github/workflows/ci.yml`: the local
-        runner plus a GitHub-hosted macOS leg. `--workflow=public` generates
+        never overwritten without `--force`. `--workflow=two-runner`,
+        `two-runner-private` or `hosted` writes only `.github/workflows/ci.yml`
+        in that layout of the generator (the local runner plus a GitHub-hosted
+        macOS leg, or hosted runners only). `--workflow=public` generates
         that file from `ci.workflow` of `.testing.lua`.
 :Testing conformance [{root}] [--gate] [--only={ids}] [--skip={ids}] [--bridge]
         Run the conformance checks K1..K16 on the project (a report; a failed
