@@ -298,11 +298,16 @@ return function(H)
     local root = project("deps-lint", {
       [".luacheckrc"] = 'std = "luajit"\nexclude_files = { "skip.lua" }\n',
       [".deps/dep.nvim/lua/dep/init.lua"] = "leaked_global = 1\n",
+      [".luarocks/share/lua/5.4/rock.lua"] = "rock_global = 1\n",
       ["skip.lua"] = "excluded_global = 1\n",
     })
     local p = schema.load(root)
     local argv = table.concat(p.steps.luacheck.argv, " ")
-    has(argv, "--exclude-files .deps/**", "deps lint: the argv leaves .deps out")
+    has(
+      argv,
+      "--exclude-files .deps/** .luarocks/**",
+      "deps lint: the argv leaves .deps and .luarocks out"
+    )
     if vim.fn.executable("luacheck") == 1 then
       local res = run(root, "--step=luacheck")
       eq(res.code, 0, "deps lint: green with a bad file in .deps (" .. res.out .. res.err .. ")")

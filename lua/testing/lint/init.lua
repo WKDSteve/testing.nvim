@@ -405,9 +405,12 @@ local function quiet() end
 function M.step_parts(check)
   local lint = check.preset.lint --[[@as Testing.Ci.PresetLint]]
   local own = vim.list_slice(check.step.argv or {}, 2 + #(check.preset.fixed or {}))
-  local valued = {}
+  local valued, many = {}, {}
   for _, o in ipairs(lint.valued or {}) do
     valued[o] = true
+  end
+  for _, o in ipairs(lint.many or {}) do
+    many[o] = true
   end
   local options, paths = {}, {}
   local i = 1
@@ -420,6 +423,11 @@ function M.step_parts(check)
       if valued[a] and own[i + 1] then
         i = i + 1
         options[#options + 1] = own[i]
+      elseif many[a] then
+        while own[i + 1] and own[i + 1]:sub(1, 1) ~= "-" do
+          i = i + 1
+          options[#options + 1] = own[i]
+        end
       end
     elseif lint.path_option then
       options[#options + 1] = a
@@ -469,13 +477,13 @@ local function run_check(check, files, root, ctx)
   local keep
   if files then
     if lint.files then
-      -- the tool and its fixed arguments, then the files instead of the step's args
-      -- the tool, its fixed arguments, what goes before named files, the options of the step's args, the files
+      -- the tool, its fixed arguments, what goes before named files, the files, then the options of the step's args:
+      -- an option that takes many values (luacheck's `--exclude-files <glob> [<glob>] ...`) would take the files too
       local argv = { check.preset.tool }
       vim.list_extend(argv, check.preset.fixed or {})
       vim.list_extend(argv, lint.file_args or {})
-      vim.list_extend(argv, (M.step_parts(check)))
       vim.list_extend(argv, files)
+      vim.list_extend(argv, (M.step_parts(check)))
       step.argv = argv
     else
       -- the whole workspace: only the findings of the files in scope count
@@ -551,8 +559,8 @@ local function run_fix(check, targets, all, root)
     vim.list_extend(argv, vim.list_slice(check.step.argv, 2 + #(check.preset.fixed or {})))
   else
     vim.list_extend(argv, lint.file_args or {})
+    vim.list_extend(argv, targets) -- before the options, as in the check
     vim.list_extend(argv, (M.step_parts(check)))
-    vim.list_extend(argv, targets)
   end
   step.argv, step.efm, step.version_argv = argv, nil, nil
   local planned, _, problems = internal.plan(

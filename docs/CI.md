@@ -120,7 +120,7 @@ decision of its own.
 | Preset | Runs | Needs |
 | --- | --- | --- |
 | `stylua` | `stylua --check .` (`--check` is fixed, `args` replaces `.`: a step never turns into a formatter) | `stylua` |
-| `luacheck` | `luacheck --formatter plain --codes . --exclude-files .deps/**` (`args` replaces everything after `--codes`; `.deps/` holds the checkouts of the dependencies, and stylua skips that hidden folder by itself) | `luacheck` |
+| `luacheck` | `luacheck --formatter plain --codes . --exclude-files .deps/** .luarocks/**` (`args` replaces everything after `--codes`; `.deps/` holds the checkouts of the dependencies and `.luarocks/` the rocks the generated workflow installs, and stylua skips those hidden folders by itself) | `luacheck` |
 | `luals` | `lua-language-server --checklevel=Warning --check_format=pretty --check=. --configpath=<merged>` (`args` replaces `--check=.`, e.g. `{ "--check=lua" }`; a single file is not checked by LuaLS, name a directory; the configuration is built for the run, [below](#the-luals-preset-the-library-the-editor-gives-luals)). Never derived: a repo names it in a profile or runs `testing lint luals` | `lua-language-server` |
 | `suite` | the suite, in this process (`testing stamp <root>`, or `testing run` with `stamp = false`) | |
 | `conformance` | `testing conformance <root> --gate` in this process (a gate: without `--gate` it only reports) | |

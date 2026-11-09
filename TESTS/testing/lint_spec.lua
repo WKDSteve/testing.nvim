@@ -440,6 +440,8 @@ os.exit(code)
   local is_windows = require("testing.platform").is_windows()
   local stub_dir = tmp .. "/stub-bin"
   local stub_log = tmp .. "/stub.log"
+  -- the real tool, found before the stubs go first on PATH ("" when it is not installed)
+  local real_luacheck = vim.fn.exepath("luacheck")
   write(stub_dir .. "/stub.lua", STUB)
   for _, name in ipairs({ "stylua", "luacheck", "lua-language-server" }) do
     if is_windows then
@@ -512,9 +514,18 @@ os.exit(code)
     )
     eq(
       last_call(),
-      "luacheck --formatter plain --codes --exclude-files .deps/** lua/proj/mod.lua lua/proj/new.lua",
-      "changed: the files replace the paths of the args (an option and its value stay)"
+      "luacheck --formatter plain --codes lua/proj/mod.lua lua/proj/new.lua --exclude-files .deps/** .luarocks/**",
+      "changed: the files replace the paths of the args; the options follow them"
     )
+    -- the real luacheck reads that argv: `--exclude-files` takes many globs, so files after it would be globs too
+    -- (luacheck then exits 4, "missing argument 'files'")
+    if real_luacheck ~= "" then
+      local argv = vim.split(last_call(), " ", { trimempty = true })
+      argv[1] = real_luacheck
+      local real = vim.system(argv, { cwd = scoped, text = true }):wait()
+      eq(real.code, 1, "changed: the real luacheck takes the argv and finds the unused variable")
+      has(real.stdout or "", "lua/proj/mod.lua", "changed: ... in the named file")
+    end
     local named = run(scoped, "luacheck", "--json", "--file=" .. scoped .. "/lua/proj/bad.lua")
     eq(
       finding_files(check_of(named.doc, "luacheck")),
@@ -577,8 +588,8 @@ os.exit(code)
     eq(lc.not_checked, { "scripts/tool.lua" }, "step args: the others are not checked")
     eq(
       last_call(),
-      "luacheck --formatter plain --codes --std luajit lua/proj/new.lua",
-      "step args: its options stay"
+      "luacheck --formatter plain --codes lua/proj/new.lua --std luajit",
+      "step args: its options stay (after the files)"
     )
     has(
       run(opts, "luacheck", "--no-agent").out,

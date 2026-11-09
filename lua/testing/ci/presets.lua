@@ -14,7 +14,9 @@
 --- findings are filtered afterwards. `fix` is the command that rewrites the files (`--fix`), `ext` the file
 --- extensions the check reads, `on_save = false` keeps an expensive check out of the check on save. `file_args` go
 --- before named files (stylua: its ignore file applies to them too), `valued` names the options of `args` whose
---- value is the next argument (not a path), `path_option` the option that carries the path (`--check=<dir>`).
+--- value is the next argument (not a path), `many` those that take every argument up to the next option (luacheck's
+--- `--exclude-files <glob> [<glob>] ...`; named files therefore come before the options), `path_option` the option
+--- that carries the path (`--check=<dir>`).
 
 local M = {}
 
@@ -37,6 +39,7 @@ local M = {}
 ---@field message? string The text of a finding whose error format has no `%m`.
 ---@field file_args? string[] Arguments that go before named files (check and fix).
 ---@field valued? string[] Options of `args` that take the next argument as their value.
+---@field many? string[] Options of `args` that take every argument up to the next option as their values.
 ---@field path_option? string The prefix of the argument that names the path (`--check=`); else a path is an argument
 ---that is no option.
 
@@ -82,10 +85,11 @@ local PRESETS = {
     tool = "luacheck",
     -- one finding per line, `file:line:col: (W211) message`, without colours
     fixed = { "--formatter", "plain", "--codes" },
-    -- `.deps/` holds the checkouts of the dependencies (the generated workflow, docs/WORKFLOW-CI.md): their code is
-    -- not the project's. stylua skips hidden folders by itself, luacheck does not; a command-line `--exclude-files`
-    -- adds to the `exclude_files` of .luacheckrc instead of replacing them.
-    args = { ".", "--exclude-files", ".deps/**" },
+    -- `.deps/` holds the checkouts of the dependencies and `.luarocks/` the rocks the generated workflow installs
+    -- luacheck with (docs/WORKFLOW-CI.md): their code is not the project's. stylua skips hidden folders by itself,
+    -- luacheck does not; a command-line `--exclude-files` adds to the `exclude_files` of .luacheckrc instead of
+    -- replacing them.
+    args = { ".", "--exclude-files", ".deps/**", ".luarocks/**" },
     needs = { "luacheck" },
     version_argv = { "luacheck", "--version" },
     efm = "%f:%l:%c: %m",
@@ -106,8 +110,19 @@ local PRESETS = {
         "--max-string-line-length",
         "--max-comment-line-length",
         "--max-cyclomatic-complexity",
+      },
+      -- `--exclude-files <glob> [<glob>] ...`: every argument up to the next option is a value
+      many = {
         "--exclude-files",
         "--include-files",
+        "--ignore",
+        "--enable",
+        "--only",
+        "--globals",
+        "--read-globals",
+        "--new-globals",
+        "--new-read-globals",
+        "--not-globals",
       },
     },
   },
