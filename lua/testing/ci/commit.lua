@@ -731,6 +731,11 @@ local function check(root, sha, args, say, snaps)
   end
   if code == M.EXIT_OK then
     r.verdict = "clean"
+    -- the run at the commit is a snapshot run: a green, complete one is the proof of the commit's tree, so the
+    -- pre-push hook (`--snapshot`) and `testing ci --snapshot` do not run the same tree again
+    if head_doc then
+      require("testing.ci.snapshot_run").keep(root, args.state_dir, head_doc)
+    end
   elseif code ~= M.EXIT_FAILED or not head_doc then
     r.verdict = code == M.EXIT_USAGE and "error" or "infra"
     for _, p in ipairs(head_doc and head_doc.problems or {}) do

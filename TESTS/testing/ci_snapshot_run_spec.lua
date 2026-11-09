@@ -224,6 +224,59 @@ return function(H)
   r = ci(unpack(with("--snapshot", "--reuse")))
   eq(r.code, 2, "--reuse with --snapshot: usage")
 
+  -- a green run of a profile proves every profile it covers (the same pipeline, each of its steps green), and a green
+  -- `ci commit` is such a run: the pre-push hook asking `fast` does not run a tree `ci commit` already checked
+  do
+    local cov = S.project("cov", { ["gate.txt"] = "green\n" })
+    local cfg = require("lib.nvim.fs.read")(cov .. "/.testing.lua")
+    local with_fast =
+      cfg:gsub("full = { 'suite', 'gate' }", "full = { 'suite', 'gate' }, fast = { 'gate' }")
+    ok(with_fast ~= cfg, "cover: the fixture has a fast profile now")
+    S.commit(cov, { [".testing.lua"] = with_fast }, "a fast profile")
+    local function cov_ci(...)
+      return ci("--root=" .. cov, "--state-dir=" .. S.state_dir, ...)
+    end
+
+    r = S.call(cov, "HEAD")
+    eq(r.code, 0, "cover: ci commit is clean (" .. r.out .. r.err .. ")")
+    r = cov_ci("--snapshot", "--profile=full")
+    has(r.out, "kept: tree", "cover: ci commit kept the proof of the tree")
+    r = cov_ci("--snapshot", "--profile=fast")
+    eq(r.code, 0, "cover: fast is green (" .. r.out .. r.err .. ")")
+    has(r.out, "kept: tree", "cover: ... from the full run, not from a run of its own")
+    has(r.out, "in profile full", "cover: ... and says which profile proved it")
+    has(r.out, "TESTING_CI_OK", "cover: ... with the sentinel")
+
+    -- the other way round: a part does not prove the whole
+    S.commit(cov, { ["lua/cov/y.lua"] = "return 2\n" }, "another tree")
+    r = cov_ci("--snapshot", "--profile=fast")
+    eq(r.code, 0, "cover: fast on the new tree is green (" .. r.out .. r.err .. ")")
+    ok(not r.out:find("kept", 1, true), "cover: ... after a run of its own")
+    r = cov_ci("--snapshot", "--profile=full")
+    eq(r.code, 0, "cover: full is green (" .. r.out .. r.err .. ")")
+    ok(not r.out:find("kept", 1, true), "cover: fast does not prove full")
+
+    -- another pipeline in the working tree: the profiles may mean other steps, the proof does not cover them
+    S.commit(cov, { ["lua/cov/z.lua"] = "return 3\n" }, "a third tree")
+    r = cov_ci("--snapshot", "--profile=full")
+    eq(r.code, 0, "cover: full on the third tree (" .. r.out .. r.err .. ")")
+    S.write(
+      cov .. "/.testing.lua",
+      (with_fast:gsub("fast = { 'gate' }", "fast = { 'gate', 'suite' }"))
+    )
+    r = cov_ci("--snapshot", "--profile=fast")
+    eq(r.code, 0, "cover: another pipeline, fast still runs green (" .. r.out .. r.err .. ")")
+    ok(not r.out:find("kept", 1, true), "cover: ... and is not taken from the full run")
+    S.git_out(cov, "checkout", "--", ".testing.lua")
+
+    -- a red ci commit keeps nothing
+    S.commit(cov, { ["gate.txt"] = "red\n" }, "red gate")
+    r = S.call(cov, "HEAD")
+    ok(r.code ~= 0 or not r.first:find("CLEAN", 1, true), "cover: a red commit is not clean")
+    r = cov_ci("--snapshot", "--profile=fast")
+    eq(r.code, 1, "cover: no proof of a red tree: fast runs and is red")
+  end
+
   -- the pre-push hook runs the profile that way when asked
   local hook = require("testing.ci.hook")
   local snap_text = hook.text({ run = "fast", driver_dir = "/opt/testing.nvim", snapshot = true })

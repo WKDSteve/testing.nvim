@@ -317,7 +317,8 @@ exit code is the worst. A result is kept per commit, profile, base, suite option
 lib.nvim, with their uncommitted changes) (`<state>/testing/<project>/ci-commit/`) and comes back at once
 (`(kept result)`); a new runner checks again, `--force` runs it again anyway (after a change of a tool or another
 dependency). `--keep` leaves the worktrees in place and names them; every call removes snapshots older than 12 h that
-a crashed run left.
+a crashed run left. A `clean` commit also leaves the proof of its tree for `testing ci --snapshot` and the pre-push hook
+with `--snapshot` ([Prove HEAD without the working tree](#prove-head-without-the-working-tree-testing-ci---snapshot)): pushing it runs nothing again.
 
 **The report is written for an agent first.** Its first line is the verdict
 (`ci commit abc1234 REGRESSION 2 new, 1 known, 0 fixed (luacheck 2) exit 1`), then only the new findings
@@ -398,6 +399,12 @@ with another message, and it does not depend on the working tree, so a dirty che
 nothing. The record counts when it is a snapshot run on this system and this Neovim and is not older than the age of
 `ci verify` (7 days); the tree holds `.testing.lua`, so the pipeline is the same, while the versions of the tools are not
 asked again (the CI of the host runs everything). `--force` runs anyway; without `--snapshot` it is refused with exit 2.
+
+A kept run also proves the **profiles it covers**: when the pipeline is the same (`pipeline_sha` of the run and of the
+working tree's `.testing.lua`) and every step of the asked profile is in the run and green, a green `full` answers for
+`fast` (`kept: tree <t> was green in profile full`). A part never proves the whole. **`testing ci commit` keeps its
+run too**: the run at the commit is a snapshot run, so a `CLEAN` commit leaves the proof of its tree, and the pre-push
+hook with `--snapshot` (below) does not run that tree again. A red, flaky or known-red commit leaves none.
 
 Whole profiles only: `--step` and `--reuse` are refused with exit 2; `--rev` without `--snapshot` too. The trust gate
 applies to the repository and to the `.testing.lua` the commit carries (a root trusted through the store is trusted for

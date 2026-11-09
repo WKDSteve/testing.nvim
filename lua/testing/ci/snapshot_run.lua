@@ -127,6 +127,73 @@ local function keep_proof(dir, path, doc)
   end
 end
 
+---Keep a green, complete run as the proof of its tree (`testing ci commit` writes it too: its run at the commit is a
+---snapshot run like this one). A run that is red, partial or names no tree or profile is not kept.
+---@param root string The real repository.
+---@param state_dir string|nil
+---@param doc table A `testing-ci/1` document.
+---@return boolean kept
+function M.keep(root, state_dir, doc)
+  if
+    type(doc) ~= "table"
+    or doc.verdict ~= "green"
+    or doc.partial == true
+    or type(doc.tree) ~= "string"
+    or not doc.tree:match("^%x+$")
+    or type(doc.profile) ~= "string"
+  then
+    return false
+  end
+  local kept = vim.deepcopy(doc)
+  kept.snapshot = true
+  local dir, path = proof_path(root, state_dir, doc.tree, doc.profile)
+  keep_proof(dir, path, kept)
+  return true
+end
+
+---A kept proof of ANOTHER profile that covers this one: the same pipeline (`pipeline_sha`), and every step of the
+---profile is in that run and green. A green `full` therefore proves `fast` when `fast` is a part of it.
+---@param root string
+---@param state_dir string|nil
+---@param tree string
+---@param pipeline Testing.Ci.Pipeline The pipeline of the working tree; used only when its digest is the run's.
+---@param profile string
+---@return table|nil doc
+function M.covering_proof(root, state_dir, tree, pipeline, profile)
+  local wanted = pipeline and pipeline.profiles and pipeline.profiles[profile]
+  if type(wanted) ~= "table" or #wanted == 0 then
+    return nil
+  end
+  local sha = vim.fn.sha256(require("lib.nvim.json.canonical").encode(pipeline.digest_input))
+  local dir = proof_path(root, state_dir, tree, profile)
+  local prefix = tree:sub(1, 20) .. "-"
+  local ok, iter = pcall(vim.fs.dir, dir)
+  if not ok then
+    return nil
+  end
+  for name, kind in iter do
+    if kind == "file" and name:sub(1, #prefix) == prefix and name:match("%.json$") then
+      local doc = kept_proof(dir .. "/" .. name, tree)
+      if doc and doc.pipeline_sha == sha then
+        local green = {}
+        for _, s in ipairs(doc.steps or {}) do
+          if s.state == "green" then
+            green[s.name] = true
+          end
+        end
+        local covered = true
+        for _, step in ipairs(wanted) do
+          covered = covered and green[step] == true
+        end
+        if covered then
+          return doc
+        end
+      end
+    end
+  end
+  return nil
+end
+
 ---The end of what the child printed.
 ---@param text string
 ---@return string|nil
@@ -177,19 +244,26 @@ function M.main(args, root, sv)
   -- a green run of this very tree is kept: nothing to run again
   local tree = tree_of(root, sha)
   local profile = args.profile
+  local pipeline = require("testing.ci.schema").load(root)
   if not profile then
-    local pipeline = require("testing.ci.schema").load(root)
     profile = pipeline and pipeline.default or nil
   end
   local proofs, proof
   if tree and profile then
     proofs, proof = proof_path(root, state_dir, tree, profile)
-    if not args.force and not args.with and kept_proof(proof, tree) then
+    local kept = not args.force
+      and not args.with
+      and (
+        kept_proof(proof, tree)
+        or (pipeline and M.covering_proof(root, state_dir, tree, pipeline, profile))
+      )
+    if kept then
       out(
-        ("ci --snapshot %s green exit 0 (profile %s, kept: tree %s was green)"):format(
+        ("ci --snapshot %s green exit 0 (profile %s, kept: tree %s was green%s)"):format(
           sha:sub(1, 7),
           profile,
-          tree:sub(1, 8)
+          tree:sub(1, 8),
+          kept.profile ~= profile and (" in profile " .. tostring(kept.profile)) or ""
         )
       )
       out(require("testing.ci").SENTINEL)
