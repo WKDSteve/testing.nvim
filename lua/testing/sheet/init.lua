@@ -62,6 +62,9 @@ M.ACTIONS = {
   "open",
   "press",
   "click",
+  "hover",
+  "focus",
+  "scheme",
   "shot",
   "toggle",
   "set",
@@ -85,6 +88,9 @@ M.ENGINE_ACTIONS = {
     open = true,
     press = true,
     click = true,
+    hover = true,
+    focus = true,
+    scheme = true,
     wait = true,
     expect = true,
     shot = true,
@@ -118,6 +124,9 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field open? string
 ---@field press? string
 ---@field click? string
+---@field hover? string A CSS selector the pointer moves over (browser): a later `shot` shows the `:hover` state.
+---@field focus? string A CSS selector that gets the keyboard focus (browser).
+---@field scheme? "light"|"dark" The page's `prefers-color-scheme` from now on (browser).
 ---@field shot? string
 ---@field toggle? string
 ---@field set? string
@@ -170,6 +179,9 @@ local STEP_KEYS = {
   open = "string",
   press = "string",
   click = "string",
+  hover = "string",
+  focus = "string",
+  scheme = "string",
   shot = "string",
   toggle = "string",
   set = "string",
@@ -424,12 +436,17 @@ local function check_step(step, i, engine)
       action == "open"
       or action == "press"
       or action == "click"
+      or action == "hover"
+      or action == "focus"
       or action == "toggle"
       or action == "set"
       or action == "ask"
     ) and step[action] == ""
   then
     return ("%s.%s must not be empty"):format(at, action)
+  end
+  if action == "scheme" and step.scheme ~= "light" and step.scheme ~= "dark" then
+    return at .. '.scheme: "light" or "dark"'
   end
   if (step.value ~= nil) ~= (action == "set") then
     return at .. ": a set step takes a value, nothing else does"

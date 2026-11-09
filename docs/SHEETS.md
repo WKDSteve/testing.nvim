@@ -451,11 +451,17 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `open = target` | loads a URL, or a file (relative to the project root) | the page does not load |
 | `press = key` | a key by Playwright name (`Tab`, `Shift+Tab`, `Escape`, `Control+k`) | never |
 | `click = selector` | clicks the first element that matches the CSS selector | none matches in 5 s |
+| `hover = selector` | moves the pointer over the element and leaves it there: a later `expect` or `shot` sees its `:hover` state (JavaScript cannot trigger `:hover`) | none matches in 5 s |
+| `focus = selector` | gives the element the keyboard focus (`:focus`, the focus ring) | none matches in 5 s |
+| `scheme = "light"\|"dark"` | the page's `prefers-color-scheme` from now on, without a reload | never |
 | `wait = js` (`timeout` ms, default 2000) | waits until the expression is truthy | it is not truthy in time |
 | `expect = js` | evaluates the expression now | it is not truthy |
 | `shot = name` | a screenshot `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` (the input of the AI judge) | never |
 
-A `shot` name is part of a file name: letters, digits, `_` and `-` only; `open`, `press` and `click` must not be empty (both are refused when the sheet loads).
+A `shot` name is part of a file name: letters, digits, `_` and `-` only; `open`, `press`, `click`, `hover` and `focus`
+must not be empty and `scheme` is `light` or `dark` (all of them are refused when the sheet loads). The looks of a
+control in one sheet: `{ scheme = "dark" }`, `{ hover = "#save" }`, `{ shot = "save-hover-dark" }`, `{ focus = "#save" }`,
+`{ shot = "save-focus-dark" }`, and a `judge` line for the person who looks at the shots.
 
 `sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700). A step of the other engine
 is refused when the sheet loads (`steps[2]: keys is not a step of a browser sheet`). The first failed step ends a

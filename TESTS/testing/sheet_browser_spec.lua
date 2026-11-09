@@ -50,6 +50,10 @@ return function(H)
     { open = "" },
     { press = "" },
     { click = "" },
+    { hover = "" },
+    { focus = "" },
+    { scheme = "blue" },
+    { scheme = "" },
   }) do
     local _, why = sheet.validate({ id = "x", title = "x", engine = "browser", steps = { bad } })
     ok(why ~= nil, "a step with an unusable value is refused at load: " .. vim.inspect(bad))
@@ -147,4 +151,65 @@ return function(H)
     not red.ok and red.failures[1]:find("wrong on purpose", 1, true) ~= nil,
     "a wrong expectation is red and names its note"
   )
+
+  -- 4. the looks of a control: under the pointer, with the focus, light and dark (the hand test "hover, focus, colours")
+  local looks = assert(io.open(root .. "/looks.html", "wb"))
+  looks:write(table.concat({
+    "<!doctype html><style>",
+    "#k { background: rgb(0, 0, 255); outline: none; }",
+    "#k:hover { background: rgb(255, 0, 0); }",
+    "#k:focus { outline: 3px solid rgb(0, 128, 0); }",
+    "@media (prefers-color-scheme: dark) { body { background: rgb(0, 0, 0); } }",
+    '</style><button id="k">K</button><p id="away">away</p>',
+  }, "\n"))
+  looks:close()
+  local function bg(sel)
+    return ("getComputedStyle(document.querySelector('%s')).backgroundColor"):format(sel)
+  end
+  local styled = sheet.run(
+    assert(sheet.validate({
+      id = "page.looks",
+      title = "Hover, focus, scheme",
+      engine = "browser",
+      steps = {
+        { open = "looks.html" },
+        { scheme = "light" },
+        { expect = bg("#k") .. " === 'rgb(0, 0, 255)'", note = "at rest" },
+        { hover = "#k" },
+        { expect = bg("#k") .. " === 'rgb(255, 0, 0)'", note = "under the pointer" },
+        { shot = "hover" },
+        { hover = "#away" },
+        { expect = bg("#k") .. " === 'rgb(0, 0, 255)'", note = "the pointer moved away" },
+        { focus = "#k" },
+        { expect = "document.activeElement.id === 'k'", note = "focused" },
+        {
+          expect = "getComputedStyle(document.querySelector('#k')).outlineColor === 'rgb(0, 128, 0)'",
+          note = "the focus ring shows",
+        },
+        { scheme = "dark" },
+        { expect = bg("body") .. " === 'rgb(0, 0, 0)'", note = "dark scheme" },
+        { scheme = "light" },
+        { expect = bg("body") .. " !== 'rgb(0, 0, 0)'", note = "back to light" },
+      },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(styled.ok, "hover, focus and scheme on a real page: " .. table.concat(styled.failures, "; "))
+  ok(
+    vim.uv.fs_stat(root .. "/TESTS/sheets/out/page.looks.hover.1000x700.png") ~= nil,
+    "the shot under the pointer is an artifact"
+  )
+  local unhovered = sheet.run(
+    assert(sheet.validate({
+      id = "page.nohover",
+      title = "No hover",
+      engine = "browser",
+      steps = {
+        { open = "looks.html" },
+        { expect = bg("#k") .. " === 'rgb(255, 0, 0)'", note = "red only under the pointer" },
+      },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(not unhovered.ok, "without a hover step the control is not in its hover state")
 end

@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 
 const SKIP = 77;
 const DRIVER_SCHEMA = 'testing-sheet-driver/1';
-const ACTIONS = ['open', 'press', 'click', 'wait', 'expect', 'shot'];
+const ACTIONS = ['open', 'press', 'click', 'hover', 'focus', 'scheme', 'wait', 'expect', 'shot'];
 
 function describe(step) {
   for (const a of ACTIONS) {
@@ -53,6 +53,14 @@ async function runStep(page, step, where) {
     await page.keyboard.press(step.press);
   } else if (step.click !== undefined) {
     await page.click(step.click, { timeout: 5000 });
+  } else if (step.hover !== undefined) {
+    // the pointer stays over the element: a later `shot` shows its :hover state (JS cannot trigger :hover)
+    await page.hover(step.hover, { timeout: 5000 });
+  } else if (step.focus !== undefined) {
+    await page.focus(step.focus, { timeout: 5000 });
+  } else if (step.scheme !== undefined) {
+    // prefers-color-scheme for the page from now on (light or dark), without reloading it
+    await page.emulateMedia({ colorScheme: step.scheme });
   } else if (step.wait !== undefined) {
     await waitFor(page, step.wait, step.timeout ?? 2000);
   } else if (step.expect !== undefined) {
