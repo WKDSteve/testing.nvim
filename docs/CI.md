@@ -381,6 +381,28 @@ the trust store is trusted for the `.testing.lua` it was trusted with: a commit 
 (exit 2), because that file is what runs in the snapshot; `TESTING_TRUST_ROOTS`, `CI` and `TESTING_TRUST=1` trust the
 root whatever the file says. Refused on the workstation like every run.
 
+## One heavy run at a time: the queue
+
+Two heavy runs at once on one machine (two sessions, a review next to a fleet roll) make load-sensitive specs time
+out and cost reruns. A heavy run therefore waits for the one before it, across every session and repository of the
+user on that machine:
+
+- heavy: a whole suite (`testing <root>`, `scripts/test.sh` without a selection), `testing ci` whose steps include the
+  whole suite, `testing ci commit` (the whole call);
+- light, never waiting: a selected suite (`--file`, `--affected`, `--changed`, `--only`, ...), a run without the suite
+  step (the `fast` profile of the pre-push hook), `--shard`, `--watch`.
+
+The waiting run says once what it waits for (`testing: queue: waiting for ci commit of 2 commit(s) in testing.nvim (pid
+4711, for 312 s)`) and again when its turn comes. The lock is `<temp>/testing/heavy-run-<user>.lock` (the user's temp
+directory: `scripts/test.sh` points `stdpath('state')` at a throwaway folder), made exclusively, with the pid, a token,
+the start and what runs. A lock whose process is gone is taken over. Waiting ends after four hours (exit 3).
+
+It is re-entrant: the holder hands its token to its children (`$TESTING_HEAVY_RUN`), so the runs `testing ci commit`
+starts at the commit and at its base are part of its turn; a nested call in the same process shares the hold. Only the
+command-line entry arms the queue: a spec or an editor that calls `cli.main` as a library never waits, and a suite sets
+`TESTING_QUEUE=off` for the processes it starts (a spec that starts `scripts/testing.lua` must not wait for another
+session). `TESTING_QUEUE=off` turns it off by hand; `TESTING_QUEUE_FILE` names another lock file.
+
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```

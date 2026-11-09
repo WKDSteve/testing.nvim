@@ -1312,6 +1312,22 @@ function M.main(argv, sv)
     return stop_early(code --[[@as integer]], why, profile, nil, #partial_why > 0)
   end
 
+  -- a run with the whole suite is a heavy run: one at a time on this machine (testing.queue). Lint alone (the `fast`
+  -- run of the pre-push hook) and a selected suite never wait.
+  local queue = require("testing.queue")
+  local queued
+  if has_suite and not suite_selects then
+    local waited_too_long
+    queued, waited_too_long = queue.acquire(
+      (sv --[[@as table]]).queue,
+      ("testing ci %s of %s"):format(profile, vim.fs.basename(root)),
+      err
+    )
+    if not queued then
+      return stop_early(M.EXIT_INFRA, { "queue: " .. tostring(waited_too_long) }, profile)
+    end
+  end
+
   -- every process of our own is started now and collected later: git facts and the tool versions
   local facts = git_facts(root)
   local versions = start_versions(planned)
@@ -1596,6 +1612,7 @@ function M.main(argv, sv)
   for _, line in ipairs(agent and report.agent(doc) or report.term(doc, M.SENTINEL)) do
     out(line)
   end
+  queue.release(queued)
   return exit
 end
 

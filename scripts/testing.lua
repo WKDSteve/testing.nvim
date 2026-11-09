@@ -71,10 +71,12 @@ end
 -- throwaway state (`scripts/test.sh`) names the real one with `--state-dir`; that decides the store.
 local trust_mod = require("testing.trust")
 local trust_store = trust_mod.store_from_args(arg or {}) or trust_mod.path()
+-- one heavy run at a time on this machine (testing.queue): armed here only, never for a library call of `cli.main`
+local queue = require("testing.queue").from_env(os.getenv)
 local ok_run, code = pcall(
   cli.main,
   arg or {},
-  { env = env, script = this, trust = { env = trust_env, store = trust_store } }
+  { env = env, script = this, trust = { env = trust_env, store = trust_store }, queue = queue }
 )
 if not ok_run then
   die("testing: internal error: " .. tostring(code))

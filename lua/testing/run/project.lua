@@ -54,6 +54,7 @@ M.EXIT_INFRA = 3
 ---@field isolated? table `testing.run.isolated` (seam for specs)
 ---@field discover? table `testing.discover` (seam for specs)
 ---@field state_dir? string Overrides `stdpath('state')` (history).
+---@field queue? Testing.Queue One heavy run at a time per machine (`testing.queue`); set by the command-line entry only.
 ---@field cache_dir? string Overrides `stdpath('cache')` (the result cache, specs).
 ---@field cache? table Replaces `testing.cache` (specs).
 ---@field audit_salt? string Fixes which hits a fractional `--cache-audit` picks (specs).

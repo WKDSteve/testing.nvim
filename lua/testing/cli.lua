@@ -902,7 +902,29 @@ local function execute(argv, sv)
       return code
     end
   end
-  return run_measured(plan, sv)
+  -- the whole suite is a heavy run: one at a time on this machine (testing.queue); a selection is not. The processes
+  -- the suite starts never queue (a spec that starts `scripts/testing.lua` must not wait for another session's run).
+  local queue = require("testing.queue")
+  local handle, waited_too_long
+  if not require("testing.stamp.write").refuse(args) and not args.shard then
+    handle, waited_too_long = queue.acquire(
+      (sv --[[@as table]]).queue,
+      ("the suite of %s"):format(vim.fs.basename(root)),
+      sv.err
+    )
+    if not handle then
+      sv.err("testing: queue: " .. tostring(waited_too_long))
+      return M.EXIT_INFRA
+    end
+  end
+  local ok_run, code = pcall(queue.quiet_children, function()
+    return run_measured(plan, sv)
+  end)
+  queue.release(handle)
+  if not ok_run then
+    error(code, 0)
+  end
+  return code
 end
 
 ---Run the CLI. Never raises: an internal error becomes exit code 3 with a message on stderr.
