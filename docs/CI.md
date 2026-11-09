@@ -429,6 +429,13 @@ command-line entry arms the queue: a spec or an editor that calls `cli.main` as 
 `TESTING_QUEUE=off` for the processes it starts (a spec that starts `scripts/testing.lua` must not wait for another
 session). `TESTING_QUEUE=off` turns it off by hand; `TESTING_QUEUE_FILE` names another lock file.
 
+`TESTING_QUEUE_SLOTS=<n>` (1 to 16, default 1) lets n heavy runs go at the same time (slot n is `heavy-run-<user>-<n>.lock`).
+One slot is the default because of a measurement on a 12-core Windows machine (2026-11-09, testing.nvim, no cache): one
+run with `--jobs 4` 725 s, one with `--jobs 8` 911 s and a flake, two runs with `--jobs 4` at once 1516 s each and five
+flakes. The bottleneck is shared (starting processes, the file system, the virus scanner), not the cores: two runs at
+once take as long as two after each other and are flakier. On Linux, where a process starts in a fraction of that time
+(the hosted ubuntu leg runs the same specs in 126 s against 331 s on windows), more slots may pay: measure first.
+
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
 ```

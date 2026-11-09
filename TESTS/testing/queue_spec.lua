@@ -57,7 +57,22 @@ return function(H)
   local from = queue.from_env(function(name)
     return ({ TESTING_QUEUE = "off", TESTING_HEAVY_RUN = "tok", TESTING_QUEUE_FILE = "/x.lock" })[name]
   end)
-  eq(from, { path = "/x.lock", token = "tok", off = true }, "from_env: the three variables")
+  eq(
+    from,
+    { path = "/x.lock", token = "tok", off = true, slots = queue.DEFAULT_SLOTS },
+    "from_env: the variables"
+  )
+  for value, want in pairs({ ["3"] = 3, ["0"] = queue.DEFAULT_SLOTS, ["x"] = queue.DEFAULT_SLOTS }) do
+    eq(
+      queue.from_env(function(name)
+        return name == "TESTING_QUEUE_SLOTS" and value or nil
+      end).slots,
+      want,
+      "from_env: TESTING_QUEUE_SLOTS=" .. value
+    )
+  end
+  eq(queue.slot_path("/t/q.lock", 1), "/t/q.lock", "slot 1 is the file itself")
+  eq(queue.slot_path("/t/q.lock", 2), "/t/q-2.lock", "slot 2 beside it")
   has(
     queue.from_env(function() end).path,
     "/testing/heavy-run-",
@@ -123,6 +138,35 @@ return function(H)
   end, said), 1, "wait: once, not on every look")
   has(said[#said], "your turn", "wait: says when it starts")
   queue.release(h)
+
+  -- two slots: a second run goes at once while the first one runs; a third waits for either
+  said = {}
+  write_lock({ pid = parent, token = "other", started = os.time(), what = "first" })
+  local two = queue.acquire(q({ slots = 2 }), "second", say, { max_wait_ms = 200, poll_ms = 20 })
+  ok(two and two.held, "two slots: the second run goes at once")
+  eq(two and two.held.path, queue.slot_path(lock, 2), "two slots: ... in slot 2")
+  eq(#said, 0, "two slots: without a wait")
+  queue.release(two)
+  eq(io.open(queue.slot_path(lock, 2)) == nil, true, "two slots: the release removes slot 2")
+  local f2 = assert(io.open(queue.slot_path(lock, 2), "wb"))
+  f2:write(vim.json.encode({ pid = parent, token = "o2", started = os.time(), what = "second" }))
+  f2:close()
+  local clk = 0
+  local third, third_why = queue.acquire(q({ slots = 2 }), "third", say, {
+    max_wait_ms = 100,
+    poll_ms = 50,
+    now = function()
+      return clk
+    end,
+    sleep = function(ms)
+      clk = clk + ms
+    end,
+  })
+  eq(third, nil, "two slots full: the third waits (and gives up here)")
+  has(third_why, "first", "two slots full: ... names a holder")
+  has(said[1] or "", "and 1 more", "two slots full: ... and that there is one more")
+  os.remove(queue.slot_path(lock, 2))
+  os.remove(lock)
 
   -- a holder that is gone: taken over
   said = {}

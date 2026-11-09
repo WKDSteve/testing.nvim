@@ -33,6 +33,10 @@ M.TOKEN_ENV = "TESTING_HEAVY_RUN"
 M.OFF_ENV = "TESTING_QUEUE"
 ---Another lock file (specs).
 M.FILE_ENV = "TESTING_QUEUE_FILE"
+---How many heavy runs may go at the same time (`1` to `16`).
+M.SLOTS_ENV = "TESTING_QUEUE_SLOTS"
+---The slots without `$TESTING_QUEUE_SLOTS`.
+M.DEFAULT_SLOTS = 1
 ---How often a waiting run looks again.
 M.POLL_MS = 2000
 ---How long a run waits at most (then it gives up, exit 3).
@@ -41,9 +45,10 @@ M.MAX_WAIT_MS = 4 * 60 * 60 * 1000
 M.time = os.time
 
 ---@class Testing.Queue
----@field path string The lock file.
+---@field path string The lock file of the first slot (slot n: `<name>-<n>.lock` beside it).
 ---@field token? string `$TESTING_HEAVY_RUN`: this process is a child of the holder.
 ---@field off boolean
+---@field slots? integer How many heavy runs at the same time (default `M.DEFAULT_SLOTS`).
 
 ---@class Testing.Queue.Handle
 ---@field noop? boolean Nothing was taken (off, a child of the holder, no lock file possible).
@@ -77,11 +82,27 @@ function M.from_env(getenv)
   getenv = getenv or os.getenv
   local file = getenv(M.FILE_ENV)
   local token = getenv(M.TOKEN_ENV)
+  local slots = tonumber(getenv(M.SLOTS_ENV) or "")
+  if not slots or slots ~= math.floor(slots) or slots < 1 or slots > 16 then
+    slots = M.DEFAULT_SLOTS
+  end
   return {
     path = (file and file ~= "") and file or M.default_path(),
     token = (token and token ~= "") and token or nil,
     off = getenv(M.OFF_ENV) == "off",
+    slots = slots,
   }
+end
+
+---The lock file of slot `n` (slot 1 is `path` itself).
+---@param path string
+---@param n integer
+---@return string
+function M.slot_path(path, n)
+  if n == 1 then
+    return path
+  end
+  return (path:gsub("%.lock$", "")) .. "-" .. n .. ".lock"
 end
 
 ---Is the process alive? (A process of another user answers EPERM: alive.)
@@ -136,62 +157,86 @@ function M.acquire(q, what, say, opts)
   local pid = uv.os_getpid()
   local token = ("%d-%d-%d"):format(pid, os.time(), math.floor(uv.hrtime() % 1e9))
   local deadline = now() + (opts.max_wait_ms or M.MAX_WAIT_MS)
+  local slots = q.slots or M.DEFAULT_SLOTS
   local waited = false
-  while true do
-    -- `started` is when the run gets the lock, not when it began to wait: a waiter reads it as "running for N s"
-    local body = vim.json.encode({ pid = pid, token = token, started = M.time(), what = what })
-      .. "\n"
-    local ok, err = create_exclusive(q.path, body)
-    if ok then
-      held = { token = token, path = q.path, depth = 1, env_before = vim.env[M.TOKEN_ENV] }
-      vim.env[M.TOKEN_ENV] = token
-      if waited then
-        say("testing: queue: your turn, " .. what .. " starts")
+
+  ---Try slot `n`: "taken", "busy" (with the holder's lock), or "broken" (no lock file can be made there).
+  ---@return "taken"|"busy"|"broken" what
+  ---@return table|string|nil detail
+  local function try(n)
+    local path = M.slot_path(q.path, n)
+    for _ = 1, 2 do
+      -- `started` is when the run gets the lock, not when it began to wait: a waiter reads it as "running for N s"
+      local body = vim.json.encode({ pid = pid, token = token, started = M.time(), what = what })
+        .. "\n"
+      local ok, err = create_exclusive(path, body)
+      if ok then
+        held = { token = token, path = path, depth = 1, env_before = vim.env[M.TOKEN_ENV] }
+        vim.env[M.TOKEN_ENV] = token
+        return "taken"
       end
-      return { held = held }
-    end
-    if not create_exclusive.is_exists(err) then
-      -- a temp directory that refuses the file: run, and say that nothing was queued
-      say(
-        ("testing: queue: no lock file (%s): %s runs without waiting"):format(tostring(err), what)
-      )
-      return { noop = true }
-    end
-    local cur, text = read_lock(q.path)
-    local holder = cur and type(cur.pid) == "number" and math.floor(cur.pid) or nil
-    if text and (not holder or holder == pid or not M.alive(holder)) then
+      if not create_exclusive.is_exists(err) then
+        return "broken", tostring(err)
+      end
+      local cur, text = read_lock(path)
+      local holder = cur and type(cur.pid) == "number" and math.floor(cur.pid) or nil
+      if not (text and (not holder or holder == pid or not M.alive(holder))) then
+        return "busy", cur or {}
+      end
       -- a holder that is gone (or a file nobody can read as a lock): taken over, unless it changed meanwhile
-      local again = select(2, read_lock(q.path))
-      if again == text then
-        say(
-          ("testing: queue: the lock of pid %s is left over (the process is gone): taken over"):format(
-            tostring(cur and cur.pid or "?")
-          )
+      local again = select(2, read_lock(path))
+      if again ~= text then
+        return "busy", cur or {}
+      end
+      say(
+        ("testing: queue: the lock of pid %s is left over (the process is gone): taken over"):format(
+          tostring(cur and cur.pid or "?")
         )
-        os.remove(q.path)
-      end
-    else
-      if now() >= deadline then
-        return nil,
-          ("waited %d min for %s (pid %s): given up"):format(
-            math.floor((opts.max_wait_ms or M.MAX_WAIT_MS) / 60000),
-            tostring(cur and cur.what or "another run"),
-            tostring(holder)
-          )
-      end
-      if not waited then
-        waited = true
-        local since = cur and tonumber(cur.started)
-        say(
-          ("testing: queue: waiting for %s (pid %s%s): one heavy run at a time on this machine"):format(
-            tostring(cur and cur.what or "another heavy run"),
-            tostring(holder),
-            since and (", for %d s"):format(math.max(0, os.time() - since)) or ""
-          )
-        )
-      end
-      sleep(opts.poll_ms or M.POLL_MS)
+      )
+      os.remove(path)
     end
+    return "busy", {}
+  end
+
+  while true do
+    local busy = {}
+    for n = 1, slots do
+      local state, detail = try(n)
+      if state == "taken" then
+        if waited then
+          say("testing: queue: your turn, " .. what .. " starts")
+        end
+        return { held = held }
+      elseif state == "broken" then
+        -- a temp directory that refuses the file: run, and say that nothing was queued
+        say(("testing: queue: no lock file (%s): %s runs without waiting"):format(detail, what))
+        return { noop = true }
+      end
+      busy[#busy + 1] = detail
+    end
+    local cur = busy[1] or {}
+    if now() >= deadline then
+      return nil,
+        ("waited %d min for %s (pid %s): given up"):format(
+          math.floor((opts.max_wait_ms or M.MAX_WAIT_MS) / 60000),
+          tostring(cur.what or "another run"),
+          tostring(cur.pid)
+        )
+    end
+    if not waited then
+      waited = true
+      local since = tonumber(cur.started)
+      say(
+        ("testing: queue: waiting for %s (pid %s%s)%s: %d heavy run(s) at a time on this machine"):format(
+          tostring(cur.what or "another heavy run"),
+          tostring(cur.pid),
+          since and (", for %d s"):format(math.max(0, os.time() - since)) or "",
+          #busy > 1 and (" and %d more"):format(#busy - 1) or "",
+          slots
+        )
+      )
+    end
+    sleep(opts.poll_ms or M.POLL_MS)
   end
 end
 
