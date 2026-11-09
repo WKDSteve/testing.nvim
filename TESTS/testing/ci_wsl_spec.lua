@@ -43,6 +43,11 @@ return function(H)
   has(script, 'export PATH="$HOME/.local/bin:$PATH"', "script: tools in ~/.local/bin are found")
   has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
+  local lock_at, first_sync = script:find("flock 9", 1, true), script:find("head_of '", 1, true)
+  ok(
+    lock_at and first_sync and lock_at < first_sync,
+    "script: the mirror is locked before anything is checked out (two checks at once)"
+  )
   has(
     script,
     "TESTING_QUEUE=off TESTING_METRICS=off",

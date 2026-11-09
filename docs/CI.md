@@ -312,7 +312,8 @@ changes are not seen), runs the ordinary `ci commit` there and prints its report
 (`HEAD`, a branch, `@{upstream}`, both ends of `--range`, `--base`) are turned into commit ids here first: in the mirror
 those names would be its own refs. Options of this side never go into WSL (`--root`, `--json`, `--state-dir`, a
 `--cache-dir` of the suite: Windows paths). It takes no turn in the queue (a minute must not wait behind a Windows run
-of ten) and writes its metrics line with `os = "wsl"`. A clean result there is no proof for the pre-push hook of this
+of ten) and writes its metrics line with `os = "wsl"`; two `--wsl` checks at once wait for each other on a lock of
+the mirror (`flock`), since the second would check the dependencies out under the first one's suite. A clean result there is no proof for the pre-push hook of this
 side (it proves Linux, the hook guards Windows): the hook runs its `fast` profile, seconds.
 WSL needs `nvim`, `git` and the tools of the pipeline (`stylua`, `luacheck`, at the versions of
 `testing.ci.workflow.TOOLS`) on its PATH; `~/.local/bin` is added (a shell started by `wsl.exe` reads no profile), so

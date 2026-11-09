@@ -72,6 +72,8 @@ function M.script(o)
     'export PATH="$HOME/.local/bin:$PATH"',
     'M="$HOME/' .. M.MIRROR .. '"',
     'mkdir -p "$M"',
+    -- one check at a time per mirror: a second one would check the dependencies out under the running suite
+    'if command -v flock >/dev/null 2>&1; then exec 9>"$M/.lock"; flock 9; fi',
     "sync() {",
     '  if [ ! -d "$M/$1/.git" ]; then git -c core.autocrlf=false clone -q "$2" "$M/$1" || return 1; fi',
     -- HEAD too: a detached HEAD of the Windows checkout is on no branch
