@@ -38,10 +38,7 @@ jobs:
       # One platform failing must not cancel the other.
       fail-fast: false
       matrix:
-        # Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one
-        # added later (workflow_dispatch, pull_request_target, ...), gets hosted runners: the whole profile on ubuntu,
-        # and on windows the steps that depend on the platform (@@PORTABLE_TEXT|raw@@ do not).
-        include: ${{ fromJSON(github.event_name == 'push' && '[{"name":"windows","runs-on":["self-hosted","windows"],"hosted":false,"steps":""},{"name":"macos","runs-on":"macos-latest","hosted":true,"steps":"--step=@@PLATFORM_STEPS|raw@@"}]' || '[{"name":"ubuntu","runs-on":"ubuntu-latest","hosted":true,"steps":""},{"name":"windows","runs-on":"windows-latest","hosted":true,"steps":"--step=@@PLATFORM_STEPS|raw@@"}]') }}
+@@MATRIX_TEXT|raw@@        include: ${{ fromJSON(github.event_name == 'push' && '[{"name":"windows","runs-on":["self-hosted","windows"],"hosted":false,"steps":""},{"name":"macos","runs-on":"macos-latest","hosted":true,"steps":"--step=@@PLATFORM_STEPS|raw@@"}]' || '[{"name":"ubuntu","runs-on":"ubuntu-latest","hosted":true,"steps":""},{"name":"windows","runs-on":"windows-latest","hosted":true,"steps":"--step=@@PLATFORM_STEPS|raw@@"},{"name":"macos","runs-on":"macos-latest","hosted":true,"steps":"--step=@@PLATFORM_STEPS|raw@@"}]') }}
     defaults:
       run:
         # One shell on every runner: `bash` is the WSL launcher on the self-hosted machine, pwsh is everywhere.

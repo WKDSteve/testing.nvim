@@ -94,6 +94,8 @@ return function(H)
       other and not other:find("self-hosted", 1, true),
       "every other event (a pull request) never does"
     )
+    -- the header promises a macOS leg on every event: a pull request gets one too
+    has(other, '{"name":"macos","runs-on":"macos-latest"', "a pull request runs on macOS too")
     has(
       text,
       "never approve a pull request that touches `.github/`",

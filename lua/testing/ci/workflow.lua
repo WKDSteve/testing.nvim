@@ -411,7 +411,12 @@ function M.render(root)
     TIMEOUT = tostring(cfg.timeout),
     TOOLS_HEADER = cfg.node and (", Node " .. cfg.node.version) or "",
     PLATFORM_TEXT = english(platform_words),
-    PORTABLE_TEXT = english(portable),
+    MATRIX_TEXT = M.wrap(
+      ("Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one added later (workflow_dispatch, pull_request_target, ...), gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend on the platform (%s do not)."):format(
+        english(portable)
+      ),
+      "        # "
+    ),
     PLATFORM_STEPS = table.concat(cfg.platform, ","),
     PUBLISH_HEADER = cfg.publish
         and "# - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs\n#   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.\n"

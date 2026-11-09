@@ -157,7 +157,7 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
 
 - **Layout.** A push to `main` runs the whole profile on the self-hosted runner plus a hosted macOS leg with the
   `platform` steps; every other event (a pull request, also from a fork) runs only on hosted runners: ubuntu with the
-  whole profile, windows with the `platform` steps. A pull request never reaches the self-hosted runner; the header
+  whole profile, windows and macOS with the `platform` steps. A pull request never reaches the self-hosted runner; the header
   says to approve no pull request that touches `.github/`. The job that moves `ci-verified` (`publish`) runs on a hosted
   ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook would
   refuse the move from a shallow checkout anyway.
