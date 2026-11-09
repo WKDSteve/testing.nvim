@@ -997,7 +997,7 @@ end
 
 ---The records of `repos`, sorted by name; the token source (or why there is none).
 ---@param repos { dir: string, from_root: boolean }[]
----@param opts { workflow?: string, state_dir: string, clones?: table<string, string[]>, token?: string, max_age?: integer } `clones`: the result of `M.dedupe_clones` when the caller did it; `token`: the caller's, before the adapter's own sources; `max_age`: stored answers of the commit younger than these seconds stand in for a request
+---@param opts { workflow?: string, state_dir: string, clones?: table<string, string[]>, token?: string, max_age?: integer, sha?: string } `clones`: the result of `M.dedupe_clones` when the caller did it; `token`: the caller's, before the adapter's own sources; `max_age`: stored answers of the commit younger than these seconds stand in for a request; `sha`: this commit instead of the head of `origin/<branch>` (one repository)
 ---@return table[] records
 ---@return { token_source?: string, token_error?: string, token?: string } info `token`: the token the adapter used
 ---(whatever its source, `gh auth token` included), so that a caller that writes documents can redact it as a value
@@ -1024,10 +1024,15 @@ function M.collect(repos, opts)
         problem = problem,
         url = M.deps.git(r.dir, { "remote", "get-url", "origin" }),
         -- --no-show-signature: with `log.showSignature` set, gpg's lines would come before the hash
-        head = M.deps.git(
-          r.dir,
-          { "log", "-1", "--no-show-signature", "--format=%H%n%B", "origin/" .. branch, "--" }
-        ),
+        -- `opts.sha`: one named commit (testing ci land asks about the commit on its check branch)
+        head = M.deps.git(r.dir, {
+          "log",
+          "-1",
+          "--no-show-signature",
+          "--format=%H%n%B",
+          opts.sha or ("origin/" .. branch),
+          "--",
+        }),
       }
     end
     for _, s in ipairs(slice) do

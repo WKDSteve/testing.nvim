@@ -284,6 +284,9 @@ revisions given, `--since`, `--repos-root`; the quickfix list holds only the new
 findings). `ci commit {rev} --quick` runs only the spec files the diff to the
 base reaches (`CLEAN quick`); it is no proof of the tree: before the push one
 full `ci commit HEAD --base=@{upstream} -- --cached`.
+`ci land [{rev}]` pushes a commit to a check branch `ci/<repo>-<sha>`, waits
+for the hosted CI and moves main to it only when that is green (needs
+`ci.workflow.land = true`; docs/CI.md, "Land through the hosted CI").
 Heavy runs (a whole suite, `ci` with the whole suite, `ci commit`) take turns
 on one machine: a second one waits and says for what (docs/CI.md, "One heavy
 run at a time"). `TESTING_QUEUE=off` turns that off.

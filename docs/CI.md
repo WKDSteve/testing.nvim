@@ -381,6 +381,32 @@ the trust store is trusted for the `.testing.lua` it was trusted with: a commit 
 (exit 2), because that file is what runs in the snapshot; `TESTING_TRUST_ROOTS`, `CI` and `TESTING_TRUST=1` trust the
 root whatever the file says. Refused on the workstation like every run.
 
+## Land through the hosted CI: `testing ci land`
+
+```
+testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep]
+```
+
+For a public repository the hosted runners are free and check all three systems; the machine then need not run the
+long suite before a push at all. `testing ci land` pushes the commit to a check branch `ci/<repo>-<sha12>`, waits for
+the run of the CI workflow for exactly that commit (`testing ci remote`), and only when it is green moves `<branch>` to
+it, as a plain fast-forward push. `<branch>` is never red; a red run leaves it where it was and names the red systems.
+
+- `<remote>/<branch>` (fetched) must be an ancestor of the commit. When another session landed meanwhile, the commit is
+  rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
+- The workflow of the commit must run on `ci/**`: `ci.workflow.land = true` in `.testing.lua`, regenerated with
+  `testing init --workflow=public --force` (docs/WORKFLOW-CI.md). On main its job `already-verified` sees the green run
+  of the same commit and skips the legs; only `publish-ci-verified` runs.
+- The check branch is deleted afterwards, green or red (`--keep` leaves it).
+- It waits up to 90 minutes, a look every 30 s; a run that does not appear within 5 minutes means the pushed workflow
+  does not run on `ci/**` (exit 3). Run it in the background: the machine stays free.
+- Exit codes: 0 landed (or already there), 1 red or `<branch>` moved, 2 usage (no land in the workflow), 3 git, GitHub
+  or the wait failed.
+
+The local proof is not needed for this: the pre-push hook runs only the `fast` profile (lint, seconds) for a commit
+without one. A private repository (hosted minutes are paid) lands with one local full run instead:
+`testing ci commit HEAD --base=@{upstream} -- --cached`, then a push.
+
 ## One heavy run at a time: the queue
 
 Two heavy runs at once on one machine (two sessions, a review next to a fleet roll) make load-sensitive specs time

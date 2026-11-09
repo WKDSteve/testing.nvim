@@ -1084,6 +1084,10 @@ function M.main(argv, sv)
     end
     return require("testing.ci.commit").main(rest, sv)
   end
+  -- the hosted CI checks a commit on a branch of its own, main moves to it when green (testing.ci.land)
+  if argv[1] == "land" then
+    return require("testing.ci.land").main(vim.list_slice(argv, 2), sv)
+  end
   -- before the multi-repository run: `remote --repos-root` is not `testing ci --repos-root`
   if argv[1] == "remote" then
     return require("testing.ci.remote").main(vim.list_slice(argv, 2), sv)

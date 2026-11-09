@@ -1042,5 +1042,39 @@ return function(H)
   eq(run({ "--help" }).code, 0, "usage: --help")
   eq(run({ tmp .. "/absent" }).code, remote.EXIT_USAGE, "usage: a root that is not a directory")
 
+  -- `sha`: one named commit instead of the head of origin/<branch> (testing ci land asks about its check branch)
+  do
+    local saved_git, saved_token = remote.deps.git, remote.deps.token
+    local git_calls = {}
+    remote.deps.git = function(_, args)
+      git_calls[#git_calls + 1] = table.concat(args, " ")
+      local out = args[1] == "remote" and "https://github.com/WKDSteve/alpha.nvim.git\n"
+        or (("f"):rep(40) .. "\nmessage\n")
+      return {
+        wait = function()
+          return { code = 0, stdout = out, stderr = "" }
+        end,
+      }
+    end
+    remote.deps.token = function()
+      return nil, "no token here"
+    end
+    local recs = remote.collect(
+      { { dir = tmp, from_root = false } },
+      { state_dir = tmp .. "/sha-state", sha = ("f"):rep(40) }
+    )
+    remote.deps.git, remote.deps.token = saved_git, saved_token
+    has(
+      table.concat(git_calls, "\n"),
+      "--format=%H%n%B " .. ("f"):rep(40) .. " --",
+      "sha: git log names the commit"
+    )
+    ok(
+      not table.concat(git_calls, "\n"):find("origin/", 1, true),
+      "sha: not the head of origin/<branch>"
+    )
+    eq(recs[1].sha, ("f"):rep(40), "sha: the record is about that commit")
+  end
+
   vim.fn.delete(tmp, "rf")
 end
