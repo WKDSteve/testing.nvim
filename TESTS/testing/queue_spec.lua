@@ -98,17 +98,24 @@ return function(H)
     what = "ci commit of 3 commit(s) in x",
   })
   local slept = 0
+  local saved_time, clock_s = queue.time, 7000
+  queue.time = function()
+    return clock_s
+  end
   h = queue.acquire(q(), "suite B", say, {
     poll_ms = 1,
     sleep = function()
       slept = slept + 1
+      clock_s = clock_s + 1
       if slept == 3 then
         os.remove(lock) -- the other run ends
       end
     end,
   })
+  queue.time = saved_time
   ok(h and h.held, "wait: taken after the other run ended")
   eq(slept, 3, "wait: it waited until then")
+  eq(read().started, 7003, "wait: started is when the lock was taken, not when the wait began")
   has(said[1], "waiting for ci commit of 3 commit(s) in x", "wait: says what it waits for")
   has(said[1], "pid " .. parent, "wait: ... and the holder")
   eq(#vim.tbl_filter(function(s)

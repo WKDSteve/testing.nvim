@@ -37,6 +37,8 @@ M.FILE_ENV = "TESTING_QUEUE_FILE"
 M.POLL_MS = 2000
 ---How long a run waits at most (then it gives up, exit 3).
 M.MAX_WAIT_MS = 4 * 60 * 60 * 1000
+---Seconds since the epoch, for `started` in the lock (replaced by specs).
+M.time = os.time
 
 ---@class Testing.Queue
 ---@field path string The lock file.
@@ -133,11 +135,12 @@ function M.acquire(q, what, say, opts)
   end
   local pid = uv.os_getpid()
   local token = ("%d-%d-%d"):format(pid, os.time(), math.floor(uv.hrtime() % 1e9))
-  local body = vim.json.encode({ pid = pid, token = token, started = os.time(), what = what })
-    .. "\n"
   local deadline = now() + (opts.max_wait_ms or M.MAX_WAIT_MS)
   local waited = false
   while true do
+    -- `started` is when the run gets the lock, not when it began to wait: a waiter reads it as "running for N s"
+    local body = vim.json.encode({ pid = pid, token = token, started = M.time(), what = what })
+      .. "\n"
     local ok, err = create_exclusive(q.path, body)
     if ok then
       held = { token = token, path = q.path, depth = 1, env_before = vim.env[M.TOKEN_ENV] }
