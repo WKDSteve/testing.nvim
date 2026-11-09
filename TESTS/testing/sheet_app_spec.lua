@@ -265,6 +265,10 @@ f:close()
       local f = assert(io.open(bin .. "/shim-tool.cmd", "wb"))
       f:write("@echo off\r\necho shimmed> shim.txt\r\n")
       f:close()
+      -- what sits beside a shim in a real install (pnpm): a shell script of the same name, which Windows cannot run
+      local decoy = assert(io.open(bin .. "/shim-tool", "wb"))
+      decoy:write("#!/bin/sh\nexit 1\n")
+      decoy:close()
       local saved = vim.env.PATH
       vim.env.PATH = bin:gsub("/", "\\") .. ";" .. saved
       local ok_shim, shim = pcall(function()

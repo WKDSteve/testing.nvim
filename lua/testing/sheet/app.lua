@@ -171,15 +171,40 @@ end
 ---@param program string
 ---@param root string
 ---@return string
+---A bare name on Windows: the system's search takes `.exe` only, so `pnpm` (a `pnpm.cmd` shim) was never found. The
+---extensions a process can start (`.com`, `.exe`, `.bat`, `.cmd`) are tried in the order of PATHEXT, because a bare
+---`exepath("pnpm")` answers the extensionless shell script that sits beside the shim, which Windows cannot run. The name
+---stays when nothing is found (the start then says so); a name with an extension of its own is looked up as it is.
+---@param program string
+---@return string
+local function find_launchable(program)
+  local launchable = { [".com"] = true, [".exe"] = true, [".bat"] = true, [".cmd"] = true }
+  if launchable[(program:match("%.[^.]+$") or ""):lower()] then
+    local found = vim.fn.exepath(program)
+    return found ~= "" and found or program
+  end
+  local exts = {}
+  for ext in (vim.env.PATHEXT or ""):gmatch("[^;]+") do
+    if launchable[ext:lower()] then
+      exts[#exts + 1] = ext:lower()
+    end
+  end
+  if #exts == 0 then
+    exts = { ".com", ".exe", ".bat", ".cmd" }
+  end
+  for _, ext in ipairs(exts) do
+    local found = vim.fn.exepath(program .. ext)
+    if found ~= "" then
+      return found
+    end
+  end
+  return program
+end
+
 local function resolve(program, root)
   if not program:find("[/\\]") or program:match("^%a:[/\\]") or program:match("^[/\\]") then
-    -- A bare name on Windows: the system's search takes `.exe` only, so `pnpm` (a `pnpm.cmd` shim) was never found.
-    -- `exepath` reads PATHEXT like the shell does; the name stays when nothing is found (the start then says so).
     if not program:find("[/\\]") and require("testing.platform").is_windows() then
-      local found = vim.fn.exepath(program)
-      if found ~= "" then
-        return found
-      end
+      return find_launchable(program)
     end
     return program
   end
