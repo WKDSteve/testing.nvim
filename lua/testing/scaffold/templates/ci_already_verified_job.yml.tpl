@@ -1,6 +1,6 @@
   # testing ci land pushes a commit to a check branch ci/** first and moves main to it only when that run was green:
   # the push to main is then the same commit again. This job (seconds, no checkout) finds such a green run of this
-  # workflow for this commit on a ci/** branch; then the legs are skipped and publish-ci-verified runs alone. Any other
+  # workflow for this commit on a ci/** branch; then the legs are skipped (publish-ci-verified, if any, runs). Any other
   # answer (none, an API error) runs the legs as usual.
   already-verified:
     name: already verified on ci/**

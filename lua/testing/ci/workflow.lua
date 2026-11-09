@@ -260,8 +260,6 @@ function M.validate(raw)
       bad(
         '.land: not with layout = "private" (hosted minutes are paid there; land a private repository locally)'
       )
-    elseif raw.land and not raw.publish then
-      bad(".land: needs publish = true (a landed commit moves ci-verified)")
     else
       cfg.land = raw.land
     end

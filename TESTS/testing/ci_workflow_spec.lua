@@ -327,7 +327,19 @@ return function(H)
       "not with layout",
       "land: not private"
     )
-    refused({ name = "x", layout = "hosted", land = true }, "needs publish", "land: needs publish")
+    -- without publish: the legs are skipped on main all the same, there is just nothing to publish
+    local nopub = project(
+      "land-nopublish",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "hosted", land = true }'
+    )
+    local nptext, npproblems = workflow.render(nopub)
+    eq(npproblems, {}, "land without publish: no problem")
+    has(nptext, "\n  already-verified:\n", "land without publish: the legs still skip on main")
+    ok(
+      not nptext:find("\n  publish-ci-verified:\n", 1, true),
+      "land without publish: no publish job"
+    )
     refused({ name = "x", land = "yes" }, ".land: true or false", "land: a boolean")
     eq(workflow.validate({ name = "x" }).land, false, "land: off by default")
   end

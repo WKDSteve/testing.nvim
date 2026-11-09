@@ -396,7 +396,7 @@ it, as a plain fast-forward push. `<branch>` is never red; a red run leaves it w
   rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
 - The workflow of the commit must run on `ci/**`: `ci.workflow.land = true` in `.testing.lua`, regenerated with
   `testing init --workflow=public --force` (docs/WORKFLOW-CI.md). On main its job `already-verified` sees the green run
-  of the same commit and skips the legs; only `publish-ci-verified` runs.
+  of the same commit and skips the legs; only `publish-ci-verified` runs, when the workflow has one.
 - The check branch is deleted afterwards, green or red (`--keep` leaves it).
 - It waits up to 90 minutes, a look every 30 s; a run that does not appear within 5 minutes means the pushed workflow
   does not run on `ci/**` (exit 3). Run it in the background: the machine stays free.
