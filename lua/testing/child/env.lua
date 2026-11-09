@@ -181,6 +181,11 @@ function M.sanitize(parent, opts)
       dropped[#dropped + 1] = name
     end
   end
+  -- What a spec starts is no run of the user's: a `scripts/testing.lua` a spec runs on a fixture neither waits in the
+  -- machine's queue of heavy runs (testing.queue) nor writes a line into the user's metrics (testing.metrics). Set, not
+  -- inherited: `LOCALAPPDATA` and `HOME` reach the child, and without these the real files would be used.
+  env.TESTING_QUEUE = "off"
+  env.TESTING_METRICS = "off"
   return { env = env, dropped = dropped }
 end
 

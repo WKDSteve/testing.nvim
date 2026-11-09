@@ -150,4 +150,17 @@ return function(H)
     { nil, nil, { "HOMEDRIVE", "HOMEPATH" } },
     "POSIX: HOMEDRIVE/HOMEPATH are removed"
   )
+
+  -- a child never waits in the machine's queue nor writes the user's metrics, whatever the parent has: a spec that
+  -- starts scripts/testing.lua on a fixture wrote 56 lines into the real metrics file before this
+  local quiet = env.sanitize({
+    PATH = "/bin",
+    LOCALAPPDATA = "C:/U/L",
+    TESTING_METRICS = "on",
+  }).env
+  eq(
+    { quiet.TESTING_QUEUE, quiet.TESTING_METRICS, quiet.LOCALAPPDATA },
+    { "off", "off", "C:/U/L" },
+    "queue and metrics are off in every child (LOCALAPPDATA still reaches it)"
+  )
 end
