@@ -130,7 +130,8 @@ function M.record(m, entry)
     return false
   end
   local ok = pcall(function()
-    local line = vim.tbl_extend("keep", {
+    -- the caller wins (`os = "wsl"` for a run in WSL started from Windows)
+    local line = vim.tbl_extend("force", {
       v = M.SCHEMA_V,
       ts = os.date("!%Y-%m-%dT%H:%M:%SZ"),
       host = m.host,

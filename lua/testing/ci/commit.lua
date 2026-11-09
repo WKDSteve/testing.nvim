@@ -63,6 +63,7 @@ M.USAGE = table.concat({
   "  --keep            leave the snapshots (git worktrees) in place and name them",
   "  --include-docs    run a commit that changes only documentation too",
   "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
+  "  --wsl             run the check in WSL2 (about ten times faster than on Windows); not with --repos-root",
   "  --agent           the agent report (default in an agent environment); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci-commit/1 document there",
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
@@ -84,6 +85,7 @@ M.USAGE = table.concat({
 ---@field keep boolean
 ---@field include_docs boolean
 ---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
+---@field wsl? boolean `--wsl`: the check runs in WSL2 (`testing.ci.wsl`), the report and the exit code come back.
 ---@field queue? Testing.Queue The entry's queue (`testing.queue`): a commit that runs takes its turn.
 ---@field queue_say? fun(s: string) Where the queue says that it waits.
 ---@field metrics? Testing.Metrics The entry's metrics (`testing.metrics`): one line per commit that ran.
@@ -144,6 +146,8 @@ function M.parse(argv)
       args.include_docs = true
     elseif key == "quick" and value == nil then
       args.quick = true
+    elseif key == "wsl" and value == nil then
+      args.wsl = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -1267,6 +1271,97 @@ function M.repo_names(plans)
   return names
 end
 
+---`ci commit ... --wsl`: the same check in WSL2 (`testing.ci.wsl`), the report printed here as without it.
+---@param argv string[] The arguments as given.
+---@param args Testing.Ci.Commit.Args
+---@param sv table
+---@return integer
+function M.main_wsl(argv, args, sv)
+  local out, err = sv.out, sv.err
+  if #args.repos_roots > 0 then
+    err("testing ci commit: --wsl checks one repository (not with --repos-root)")
+    return M.EXIT_USAGE
+  end
+  local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
+  -- what goes to the inner `ci commit`: everything but the options of this side
+  -- Options of this side, in both spellings (`--state-dir <dir>` and `--state-dir=<dir>`): their values are Windows
+  -- paths (scripts/test.sh hands down its real state folder, and a cache folder for `--cached`), WSL keeps its own.
+  local OWN_VALUED = { root = true, json = true, ["state-dir"] = true }
+  local inner, passthrough, skip_next = {}, false, false
+  for _, a in ipairs(argv) do
+    if skip_next then
+      skip_next = false
+    else
+      if a == "--" then
+        passthrough = true
+      end
+      local name, has_value = a:match("^%-%-([%w%-]+)(=?)")
+      local valued = passthrough and name == "cache-dir" or not passthrough and OWN_VALUED[name]
+      local flag = not passthrough and (a == "--wsl" or a == "--agent" or a == "--no-agent")
+      if valued then
+        skip_next = has_value == ""
+      elseif not flag then
+        inner[#inner + 1] = a
+      end
+    end
+  end
+  -- the dependencies the commit declares (and testing.nvim, lib.nvim), as Windows paths of their checkouts
+  local deps_mod = require("testing.deps")
+  local dirs = {}
+  for _, name in ipairs(M.dep_names(root)) do
+    local found = deps_mod.resolve(name, root)
+    if found and found.dir then
+      dirs[name] = found.dir
+    end
+  end
+  local this = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
+  dirs["testing.nvim"] = dirs["testing.nvim"] or vim.fs.normalize(this)
+  if not dirs["lib.nvim"] then
+    err("testing ci commit --wsl: lib.nvim was not found")
+    return M.EXIT_INFRA
+  end
+  -- No turn in the queue: a check in WSL takes about a minute and must not wait behind a Windows run of ten (the
+  -- queue is for the slow runs that make each other flaky). The Windows side writes the metrics line.
+  out(("ci commit: in WSL2 (mirror ~/%s)"):format(require("testing.ci.wsl").MIRROR))
+  local started = vim.uv.hrtime()
+  local doc, problem = require("testing.ci.wsl").run(root, inner, dirs)
+  if not doc then
+    err("testing ci commit --wsl: " .. tostring(problem))
+    return M.EXIT_INFRA
+  end
+  local agent = args.agent
+  if agent == nil then
+    agent = require("testing.report.agent").choose(nil, sv.env) == "agent"
+  end
+  local commits = type(doc.commits) == "table" and doc.commits or {}
+  for _, r in ipairs(commits) do
+    for _, line in ipairs(M.lines(r, agent)) do
+      out(line)
+    end
+    if not r.reused then
+      require("testing.metrics").record((sv --[[@as table]]).metrics, {
+        kind = r.quick and "ci-commit-quick" or "ci-commit",
+        repo = vim.fs.basename(root),
+        sha = r.sha,
+        os = "wsl",
+        duration_s = (vim.uv.hrtime() - started) / 1e9 / math.max(1, #commits),
+        verdict = r.verdict,
+        profile = type(r.profile) == "string" and r.profile or nil,
+      })
+    end
+  end
+  out("ran in WSL2: what is Windows-specific is checked by the windows leg of the hosted CI")
+  if args.json then
+    pcall(
+      require("lib.nvim.fs.write.atomic"),
+      vim.fn.fnamemodify(args.json, ":p"),
+      require("lib.nvim.json.canonical").encode(doc) .. "\n",
+      { mkdirp = true }
+    )
+  end
+  return type(doc.exit) == "number" and doc.exit or M.EXIT_INFRA
+end
+
 ---`testing ci commit ...`.
 ---@param argv string[] The arguments after `ci commit`.
 ---@param sv table `out`, `err`, `env`, `state_dir`.
@@ -1284,6 +1379,9 @@ function M.main(argv, sv)
     return M.EXIT_OK
   end
   args.state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p") or sv.state_dir
+  if args.wsl then
+    return M.main_wsl(argv, args, sv)
+  end
   local agent = args.agent
   if agent == nil then
     agent = require("testing.report.agent").choose(nil, sv.env) == "agent"

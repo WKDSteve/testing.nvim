@@ -303,6 +303,18 @@ file, or a red file does not exist at the base (a renamed spec file). With `--ca
 snapshot is a `git worktree` of the repository, and the cache folder of a worktree is that of its main checkout (see
 [CACHE.md](CACHE.md)). A spec file whose inputs did not change between them does not run again.
 
+**`--wsl`: the same check in WSL2, about ten times faster.** On Windows, starting processes, the file system and the
+virus scanner make a suite whose spec files start editors slow: testing.nvim's whole suite took 64 s in WSL2 against
+about 650 s on Windows on the same PC (2026-11-09). `testing ci commit <rev>... --wsl` keeps a mirror below
+`~/.cache/testing-wsl/` inside WSL (the Linux file system; a checkout below `/mnt/c` is as slow as Windows), fetches the
+repository and its dependencies from the Windows checkouts (the dependencies at their committed HEAD: their uncommitted
+changes are not seen), runs the ordinary `ci commit` there and prints its report and exit code here. Options of this
+side never go into WSL (`--root`, `--json`, `--state-dir`, a `--cache-dir` of the suite: Windows paths). It takes no
+turn in the queue (a minute must not wait behind a Windows run of ten) and writes its metrics line with `os = "wsl"`.
+WSL needs `nvim`, `git` and the tools of the pipeline (`stylua`, `luacheck`, at the versions of
+`testing.ci.workflow.TOOLS`) on its PATH; a missing one ends the check as `infra`, as on Windows. What is
+Windows-specific is checked by the windows leg of the hosted CI. Not with `--repos-root`.
+
 **`--quick`: each commit cheaply, the whole state once.** With `--quick` the suite at the commit runs only the spec
 files the diff to the base reaches (`--affected=<base>`, the selection of [CACHE.md](CACHE.md)); the other steps run as
 usual (lint takes seconds). At the base, where the diff to itself is empty, `--affected` is left out: the base takes the
