@@ -6,7 +6,10 @@
 ---   * `stylua`      when there is a `stylua.toml` or `.stylua.toml`;
 ---   * `luacheck`    when there is a `.luacheckrc` (its own `include_files`/`exclude_files` decide what is read);
 ---   * `suite`       when discovery finds a spec file (`roots` and `spec_pattern` of `.testing.lua`, default `TESTS`);
----   * `conformance` when `.testing.lua` makes the conformance suite a gate (`conformance.gate = true`).
+---   * `conformance` when `.testing.lua` makes the conformance suite a gate (`conformance.gate = true`);
+---   * `surface`     when the specs track the surface (`surface.track = true`) and there is a `surface.baseline.json`:
+---                   the regression gate of docs/SURFACE.md, read from the Result-IR of the suite of the same run, on
+---                   Linux only (the baseline is written from a Linux run).
 ---
 --- Profiles: `fast` (stylua and luacheck, the pre-push check) and `full` (everything), `full` is the default. What
 --- was derived and why is part of the pipeline (`derived`), so `testing ci list` and the document can say so.
@@ -14,6 +17,17 @@
 --- machine.
 
 local M = {}
+
+---The baseline of the surface gate, relative to the root.
+M.SURFACE_BASELINE = "surface.baseline.json"
+
+---The derived surface step: what the hand-written workflows ran after the suite (`testing surface --from <ir>
+-----baseline surface.baseline.json --require-signed-baseline`); `testing ci` adds the `--from`.
+M.SURFACE_STEP = {
+  preset = "surface",
+  args = { "--baseline", M.SURFACE_BASELINE, "--require-signed-baseline" },
+  when = { os = { "linux" } },
+}
 
 ---@param root string
 ---@param rel string
@@ -41,7 +55,7 @@ end
 
 ---The derived `ci` section of a project, before the project's own `skip` and `steps` are applied.
 ---@param root string
----@param project table The configuration of `.testing.lua` (`roots`, `spec_pattern`, `conformance`).
+---@param project table The configuration of `.testing.lua` (`roots`, `spec_pattern`, `conformance`, `surface`).
 ---@return table|nil section `{ default, profiles }`, nil when nothing can be derived
 ---@return table<string, string>|string why The reason of each derived step, or why nothing was derived.
 function M.section(root, project)
@@ -68,6 +82,13 @@ function M.section(root, project)
     rest[#rest + 1] = "conformance"
     why.conformance = "conformance.gate = true"
   end
+  local steps = {}
+  local surface = type(project.surface) == "table" and project.surface or {}
+  if spec and surface.track == true and kind(root, M.SURFACE_BASELINE) == "file" then
+    rest[#rest + 1] = "surface"
+    why.surface = ("%s (surface.track = true)"):format(M.SURFACE_BASELINE)
+    steps.surface = vim.deepcopy(M.SURFACE_STEP)
+  end
   if #fast == 0 and #rest == 0 then
     return nil,
       "a Lua project without stylua.toml, .luacheckrc or spec files: nothing to derive (write a `ci` section)"
@@ -80,7 +101,7 @@ function M.section(root, project)
   end
   vim.list_extend(full, rest)
   profiles.full = full
-  return { default = "full", profiles = profiles }, why
+  return { default = "full", profiles = profiles, steps = steps }, why
 end
 
 return M

@@ -563,7 +563,8 @@ function M.load(root)
   end
   -- the project's own steps: a derived one defined anew, or a new one that joins `full`
   local own = type(raw.steps) == "table" and raw.steps or {}
-  section.steps = own
+  -- a derived step that needs more than its preset (the surface gate) comes with its definition; the project's wins
+  section.steps = vim.tbl_extend("force", section.steps or {}, own)
   local names = vim.tbl_keys(own)
   table.sort(names)
   for _, name in ipairs(names) do

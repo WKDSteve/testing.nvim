@@ -85,6 +85,12 @@ the repository has:
 | `luacheck` | `.luacheckrc` | the project lints with luacheck (its own `include_files`/`exclude_files` decide what is read) |
 | `suite` | discovery finds a spec file (`roots` and `spec_pattern` of `.testing.lua`, default `TESTS`; the same as `testing run` sees) | the project has specs |
 | `conformance` | `conformance.gate = true` | the project made the conformance suite a gate |
+| `surface` | `surface.track = true`, a `surface.baseline.json` and specs | the regression gate of [SURFACE.md](SURFACE.md): `testing surface --from <ir> --baseline surface.baseline.json --require-signed-baseline`, on Linux only (the baseline is written from a Linux run) |
+
+The surface step reads the hits of the suite of the **same run**: `testing ci` hands it the suite's Result-IR (the
+caller's `--json` after `--`, or a file of its own that is removed when the run ends). Without a suite in the run
+(`--step=surface`) the step is an error, not a gate that passes without hits; with a surface step planned, `--reuse`
+runs the suite anyway.
 
 Profiles: `fast` (stylua and luacheck, the check before a push) and `full` (all of them), `full` is the default.
 `testing ci list` says where each step came from (`derived: stylua (stylua.toml)`), the document `testing-ci/1` has

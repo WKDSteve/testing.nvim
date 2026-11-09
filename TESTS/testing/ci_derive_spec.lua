@@ -291,4 +291,109 @@ return function(H)
       has(res.out, "docs", "doc example: the repository's own step is listed")
     end
   end
+
+  -- the surface gate: derived when the specs track the surface and there is a baseline, on Linux only (the baseline
+  -- comes from a Linux run), and fed the Result-IR of the suite of the same run
+  do
+    local tracked = "{ plugin = 'proj', surface = { track = true } }"
+    local files = vim.tbl_extend("force", FULL, { ["surface.baseline.json"] = "{}\n" })
+    local root = project("surface", files, tracked)
+    local section, why = derive.section(root, { surface = { track = true } })
+    eq(section.profiles.full, { "fast", "suite", "surface" }, "surface: derived after the suite")
+    has(why.surface, "surface.baseline.json", "surface: because of the baseline")
+    eq(section.steps.surface.when, { os = { "linux" } }, "surface: on Linux only")
+    eq(
+      section.steps.surface.args,
+      { "--baseline", "surface.baseline.json", "--require-signed-baseline" },
+      "surface: the gate the hand-written workflows ran"
+    )
+    eq(
+      derive.section(root, {}).profiles.full,
+      { "fast", "suite" },
+      "surface: not without surface.track"
+    )
+    local no_base = project("surface-no-baseline", FULL, tracked)
+    eq(
+      derive.section(no_base, { surface = { track = true } }).profiles.full,
+      { "fast", "suite" },
+      "surface: not without a baseline"
+    )
+
+    local p = schema.load(root)
+    eq(p.steps.surface.os, { linux = true }, "surface load: the derived definition is used")
+    eq(p.steps.surface.inprocess, "surface", "surface load: the in-process preset")
+    local own = project(
+      "surface-own",
+      files,
+      "{ plugin = 'proj', surface = { track = true }, ci = { steps = { surface = { preset = 'surface', args = { '--baseline', 'surface.baseline.json' } } } } }"
+    )
+    p = schema.load(own)
+    eq(p.steps.surface.os, nil, "surface load: the project's own definition wins")
+    eq(p.derived.surface ~= nil, true, "surface load: ... and the step is still derived")
+
+    -- the wiring: the surface step gets `--from <the suite's Result-IR>`, which exists while it runs and is gone after
+    -- the run; the step itself is replaced (reading the surface needs a child editor with the plugin)
+    local seen = {}
+    local real = cli.main
+    cli.main = function(argv, sv)
+      if argv[1] == "surface" then
+        local from
+        for i, a in ipairs(argv) do
+          if a == "--from" then
+            from = argv[i + 1]
+          end
+        end
+        seen[#seen + 1] = {
+          argv = argv,
+          from = from,
+          existed = from ~= nil and vim.uv.fs_stat(from) ~= nil,
+        }
+        return 0
+      end
+      return real(argv, sv)
+    end
+    local ran_ok, res = pcall(run, own, "--step=suite,surface")
+    local only_ok, only = pcall(run, own, "--step=surface")
+    local caller_ir = tmp .. "/surface-caller-ir.json"
+    local caller_ok, with_json =
+      pcall(run, own, "--step=suite,surface", "--", "--json=" .. caller_ir)
+    cli.main = real
+    ok(ran_ok, "surface run: no error (" .. tostring(not ran_ok and res or "") .. ")")
+    ok(only_ok and caller_ok, "surface run: the other runs raised nothing")
+    if ran_ok then
+      eq(res.code, 0, "surface run: green (" .. res.out .. res.err .. ")")
+      eq(#seen >= 1, true, "surface run: the surface step ran")
+      local first = seen[1] or {}
+      ok(first.from ~= nil, "surface run: the step got --from")
+      eq(first.existed, true, "surface run: ... a Result-IR that existed while the step ran")
+      eq(
+        first.from and vim.uv.fs_stat(first.from) or nil,
+        nil,
+        "surface run: ... and is gone after the run"
+      )
+      has(
+        table.concat(first.argv or {}, " "),
+        "--baseline surface.baseline.json",
+        "surface run: ... with its own args"
+      )
+    end
+    if only_ok then
+      eq(only.code, 2, "surface alone: an error, not a green gate without hits")
+      has(
+        only.out .. only.err,
+        "no Result-IR of a suite in this run",
+        "surface alone: ... saying why"
+      )
+    end
+    if caller_ok then
+      eq(with_json.code, 0, "surface with --json: green")
+      local last = seen[#seen] or {}
+      eq(
+        last.from and vim.fs.normalize(last.from) or nil,
+        vim.fs.normalize(vim.fn.fnamemodify(caller_ir, ":p")),
+        "surface with --json: the caller's Result-IR is the one read"
+      )
+      ok(vim.uv.fs_stat(caller_ir) ~= nil, "surface with --json: ... and the caller's file is kept")
+    end
+  end
 end

@@ -21,7 +21,8 @@ on the hosted runner. This page is the use case; [CI.md](CI.md) is the reference
 ## A repository, set up
 
 A Lua project with a `stylua.toml`, a `.luacheckrc` and specs needs **no `ci` section at all**: `stylua`, `luacheck`,
-the suite (and `conformance`, when it is a gate) are derived from those files, `fast` and `full` with them
+the suite (and `conformance` when it is a gate, `surface` when there is a `surface.baseline.json`) are derived from
+those files, `fast` and `full` with them
 ([CI.md](CI.md#without-writing-a-pipeline-the-derived-one)). `testing ci list` shows what was derived and why. Only
 what differs is written down:
 

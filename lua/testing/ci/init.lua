@@ -664,10 +664,13 @@ end
 ---@param root string
 ---@param suite_args string[]
 ---@param sv table The services of the outer run (`out`, `err`, `env`, `script`).
----@param o { selects: boolean, stamp_out?: string, events?: string } `selects`: the suite options select part of the
----suite (a run that cannot earn a stamp); `stamp_out`: where the stamp goes (`--state-dir`); `events`: the suite's
----own events file.
+---@param o { selects: boolean, stamp_out?: string, events?: string, keep_ir?: boolean, suite_ir?: string } `selects`:
+---the suite options select part of the suite (a run that cannot earn a stamp); `stamp_out`: where the stamp goes
+---(`--state-dir`); `events`: the suite's own events file; `keep_ir`: the suite leaves its Result-IR for a later step;
+---`suite_ir`: that Result-IR, the hits of the surface gate.
 ---@return Testing.Ci.StepResult
+---@return string|nil ir The Result-IR the suite wrote in this step.
+---@return boolean|nil own The IR is ours (no `--json` of the caller): the run removes it.
 local function run_inprocess(planned, root, suite_args, sv, o)
   local step = planned.step
   local command = step.inprocess
@@ -702,6 +705,20 @@ local function run_inprocess(planned, root, suite_args, sv, o)
     if not has_events then
       vim.list_extend(ours, { "--events", o.events })
     end
+  end
+  -- the surface gate counts what the suite of this run exercised: its hits come from that suite's Result-IR
+  if command == "surface" and not select(2, last_option(rest, "from")) then
+    if not o.suite_ir then
+      return {
+        name = step.name,
+        state = "error",
+        exit = M.EXIT_USAGE,
+        ms = 0,
+        errors = {},
+        reason = "no Result-IR of a suite in this run: the surface gate reads its hits from the suite of the same run",
+      }
+    end
+    vim.list_extend(ours, { "--from", o.suite_ir })
   end
   if command == "stamp" and o.stamp_out then
     local _, has_out = last_option(rest, "out")
@@ -791,9 +808,11 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   ---@type Testing.Ci.StepResult
   local result = { name = step.name, state = "red", ms = 0, errors = errors }
   local verdict
+  local fresh_ir ---@type string|nil
   if ir_path then
     local now = mtime_ns(ir_path)
     local fresh = now ~= nil and (ir_before == nil or now ~= ir_before)
+    fresh_ir = fresh and ir_path or nil
     local f = fresh and io.open(ir_path, "rb") or nil
     if f then
       local okd, ir = pcall(vim.json.decode, f:read("*a"))
@@ -804,13 +823,14 @@ local function run_inprocess(planned, root, suite_args, sv, o)
         verdict = type(v) == "table" and v.kind or nil
       end
     end
-    if own_ir then
+    -- a later step of the run (the surface gate) reads it; the run removes it at its end
+    if own_ir and not o.keep_ir then
       os.remove(ir_path)
     end
   end
   if not ok then
     result.state, result.exit, result.reason = "infra", M.EXIT_INFRA, tostring(code)
-    return result
+    return result, fresh_ir, own_ir
   end
   result.exit = code
   if is_suite then
@@ -841,7 +861,7 @@ local function run_inprocess(planned, root, suite_args, sv, o)
       or code == M.EXIT_USAGE and "error"
       or "infra"
   end
-  return result
+  return result, fresh_ir, own_ir
 end
 
 ---@param results Testing.Ci.StepResult[]
@@ -1322,6 +1342,12 @@ function M.main(argv, sv)
   local started = os.time()
   local results, first_red = {}, nil
   local stop, ran = false, 0
+  -- a surface gate reads the hits of this run's suite: the suite then really runs and leaves its Result-IR
+  local wants_ir = false
+  for _, p in ipairs(planned) do
+    wants_ir = wants_ir or (not p.skip and p.step.inprocess == "surface")
+  end
+  local suite_ir, own_suite_ir ---@type string|nil, string|nil
   for _, p in ipairs(planned) do
     local step = p.step
     ---@type Testing.Ci.StepResult
@@ -1351,6 +1377,7 @@ function M.main(argv, sv)
       end
       local t0 = vim.uv.hrtime()
       local reused = args.reuse
+        and not wants_ir
         and step.inprocess == "run"
         and step.stamp
         and not suite_selects
@@ -1383,13 +1410,19 @@ function M.main(argv, sv)
           reason = "reused: its stamp verifies",
         }
       elseif step.inprocess then
-        r = run_inprocess(
-          p,
-          root,
-          args.suite_args,
-          step_sv,
-          { selects = suite_selects, stamp_out = stamp_out, events = suite_events }
-        )
+        local ir, ours
+        r, ir, ours = run_inprocess(p, root, args.suite_args, step_sv, {
+          selects = suite_selects,
+          stamp_out = stamp_out,
+          events = suite_events,
+          keep_ir = wants_ir,
+          suite_ir = suite_ir,
+        })
+        if step.inprocess == "run" then
+          suite_ir = ir
+          -- ours (not the caller's --json): removed when the run ends
+          own_suite_ir = ours and ir or own_suite_ir
+        end
         if r.partial and r.state == "green" and not suite_selects then
           partial_why[#partial_why + 1] = "suite green-partial"
         end
@@ -1431,6 +1464,9 @@ function M.main(argv, sv)
       reason = r.reason,
       findings_total = r.findings_total or 0,
     })
+  end
+  if own_suite_ir then
+    os.remove(own_suite_ir)
   end
   if ran == 0 then
     partial_why[#partial_why + 1] = "no step ran on " .. this_os()
