@@ -436,6 +436,7 @@ scripts/test.sh --file config    # specs whose file name contains "config"
 TESTING_CACHE_HOME=~/.cache/testing-nvim-tests scripts/test.sh --cached   # unchanged specs do not run again
 scripts/test.sh ci               # the whole pipeline locally: stylua, luacheck, the specs, the conformance gate
 scripts/test.sh ci --profile=fast   # formatting and lint only, before a push
+scripts/test.sh lint             # the same lint on the changed files only, in seconds (`--all`, `--fix`; a project scaffolded since 2026-11-09, older ones with `testing init --update`)
 ```
 
 The pipeline is the `ci` section of [`.testing.lua`](.testing.lua) ([docs/CI.md](docs/CI.md)): `full` checks what

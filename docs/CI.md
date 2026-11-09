@@ -911,6 +911,7 @@ The findings themselves are in the document `testing-ci/1` (`--json`), which is 
 ```
 testing lint [<check>...] [--file=<f>...|--changed|--all] [--fix] [--on-save] [--agent|--no-agent] [--json] [--root=<dir>]
 :Testing lint [<check>...] [--file|--changed|--all] [--fix] [--root=<dir>]
+scripts/test.sh lint [...]      # the same, from the project's own script (a project scaffolded since 2026-11-09; older ones: `testing init --update`)
 ```
 
 The lint checks without the rest of the pipeline, for the files that changed, the current file or everything.
