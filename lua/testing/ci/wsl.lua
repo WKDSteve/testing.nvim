@@ -44,7 +44,8 @@ end
 ---@param path string
 ---@return string
 function M.wsl_path(path)
-  local p = vim.fs.normalize(path)
+  -- the backslashes by hand: vim.fs.normalize turns them into slashes only on Windows
+  local p = vim.fs.normalize((path:gsub("\\", "/")))
   local drive, rest = p:match("^(%a):/(.*)$")
   if drive then
     return ("/mnt/%s/%s"):format(drive:lower(), rest)
@@ -67,23 +68,28 @@ end
 function M.script(o)
   local lines = {
     "set -u",
+    -- tools installed for the user without sudo (stylua, luacheck): a shell started by wsl.exe reads no profile
+    'export PATH="$HOME/.local/bin:$PATH"',
     'M="$HOME/' .. M.MIRROR .. '"',
     'mkdir -p "$M"',
     "sync() {",
     '  if [ ! -d "$M/$1/.git" ]; then git -c core.autocrlf=false clone -q "$2" "$M/$1" || return 1; fi',
-    '  git -C "$M/$1" -c core.autocrlf=false fetch -q --force "$2" "+refs/heads/*:refs/remotes/win/*" || return 1',
+    -- HEAD too: a detached HEAD of the Windows checkout is on no branch
+    '  git -C "$M/$1" -c core.autocrlf=false fetch -q --force "$2" "+refs/heads/*:refs/remotes/win/*" '
+      .. '"+HEAD:refs/remotes/win/HEAD" || return 1',
     "}",
+    -- HEAD is read BEFORE the fetch: another session committing in between would else name a commit not fetched
     "head_of() {",
-    '  git -C "$M/$1" -c core.autocrlf=false checkout -q --force --detach "$(git -C "$2" rev-parse HEAD)" || return 1',
+    '  h="$(git -C "$2" rev-parse HEAD)" || return 1',
+    '  sync "$1" "$2" || return 1',
+    '  git -C "$M/$1" -c core.autocrlf=false checkout -q --force --detach "$h" || return 1',
     "}",
   }
   local names = vim.tbl_keys(o.deps)
   table.sort(names)
   for _, name in ipairs(names) do
     local src = M.wsl_path(o.deps[name])
-    lines[#lines + 1] = ("sync %s %s && head_of %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
-      q(name),
-      q(src),
+    lines[#lines + 1] = ("head_of %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
       q(name),
       q(src),
       name

@@ -33,11 +33,14 @@ return function(H)
     argv = { "abc1234", "--quick", "--", "--cached" },
     json = "C:/T/out.json",
   })
-  has(
-    script,
-    "sync 'lib.nvim' '/mnt/e/repos/lib.nvim' && head_of 'lib.nvim'",
-    "script: a dependency at its HEAD"
+  has(script, "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' ||", "script: a dependency at its HEAD")
+  local hb = script:match("head_of%(%) {\n(.-)\n}")
+  ok(
+    hb and hb:find("rev-parse HEAD", 1, true) < hb:find('sync "$1"', 1, true),
+    "script: HEAD is read before the fetch (another session may commit in between)"
   )
+  has(script, '"+HEAD:refs/remotes/win/HEAD"', "script: a detached HEAD is fetched too")
+  has(script, 'export PATH="$HOME/.local/bin:$PATH"', "script: tools in ~/.local/bin are found")
   has(script, "sync 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
   has(
