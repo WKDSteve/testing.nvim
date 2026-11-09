@@ -49,7 +49,13 @@ Bericht steht das Urteil je Commit. Ein schon geprüfter Commit kommt sofort aus
 `testing-ci-commit/1`, `--keep` lässt die Worktrees zum Nachstellen stehen (die `rerun`-Zeile nennt den Befehl).
 Mit `-- --cached` teilen Commit und Basis einen Cache und laufen schneller. Auf der Workstation läuft es nicht (wie jeder Lauf).
 
-**Sofort prüfen, nicht am Ende.** Jeden Commit gleich nach dem Erstellen mit `scripts/test.sh ci commit <sha>` im
-Hintergrund prüfen und währenddessen weiterarbeiten (immer nur ein `ci commit` zur Zeit); das Urteil vor dem Push und
-im Review lesen. Am Ende alle auf einmal (`--range`) kostet je Commit einen vollen Lauf plus den der Basis, mehrere
-am Stück dauern schnell 40 Minuten. Ein umgeschriebener Commit (Rebase, Amend) mit gleichem Baum behält sein Urteil.
+**CI-Takt: schnell je Commit, voll einmal pro Push** (Regeln `CI-01` bis `CI-08` in
+`$RULES_VAULT/rulesets/arbeit/regeln/CI_TAKT.md`). Je Commit sofort im Hintergrund `scripts/test.sh ci commit <sha> --quick -- --cached` und
+weiterarbeiten: Lint und die Specs, die der Diff erreicht; eine `REGRESSION` sofort beheben; quick ist kein Beweis.
+Einmal pro Push voll für den Endstand: `scripts/test.sh ci commit HEAD --base=@{upstream} --wsl -- --cached` (auf
+Windows in WSL2, etwa zehnmal schneller; ohne WSL ohne `--wsl`). Ein CLEANer Windows-Lauf legt den Beweis für den
+pre-push-Hook ab, sonst läuft der Hook nur `fast` (Sekunden). Ist der Endstand rot, grenzt
+`--range=@{upstream}..HEAD` den Commit ein. Öffentliche Repos mit `ci.workflow.land = true` landen per
+`testing ci land` (gehostete CI vor `main`). Gebündelt pushen; fertig erst bei grüner CI je System. Im Arbeitsbaum
+läuft nur `scripts/test.sh --file <teil>`. Ein umgeschriebener Commit (Rebase, Amend) mit gleichem Baum behält sein
+Urteil.
