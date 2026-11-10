@@ -57,6 +57,8 @@ return {
       expect = [[_G.panel_text():find("hello tile", 1, true) ~= nil]],
       note = "the child's screen as text in the tile",
     },
+    -- the README picture (assets/screenshots/sheet-panel.png is this file, copied): a skip where no browser is installed
+    { shot = "panel", note = "a picture of the panel beside the code" },
     { keys = "c", note = "the key: to the end" },
     {
       wait = [[_G.panel_text():find("finished: pass", 1, true) ~= nil]],

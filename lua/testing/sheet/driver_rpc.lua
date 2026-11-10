@@ -23,11 +23,13 @@ local function shown(v)
   return #s > 200 and (s:sub(1, 200) .. "...") or s
 end
 
----Run one step; returns nil or the reason it failed.
+---Run one step; returns nil or the reason it failed, and what a `shot` made (`{ shot = path }`) or why it was skipped
+---(`{ skip = why }`).
 ---@param child table testing.rpc handle
 ---@param step Testing.Sheet.Step
 ---@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean }
 ---@return string|nil
+---@return { shot?: string, skip?: string }|nil
 local function run_step(child, step, ctx)
   if step.keys then
     -- an error the keys caused (`E492: Not an editor command`) fails the step; feed itself never raises
@@ -105,6 +107,23 @@ local function run_step(child, step, ctx)
       end
     end
     return require("testing.screen").hl_check(child.screen(), step.hl, resolved)
+  elseif step.shot then
+    -- the screen drawn as a page and photographed by the browser engine (`testing.sheet.shot`); without it a skip
+    local path, failure, skip = require("testing.sheet.shot").take(child.screen(), {
+      sheet = ctx.sheet,
+      size = ctx.size,
+      root = ctx.root,
+      name = step.shot,
+      out_dir = ctx.opts.out_dir,
+      browser = ctx.opts.browser,
+    })
+    if skip then
+      return nil, { skip = skip }
+    end
+    if failure then
+      return failure
+    end
+    return nil, { shot = path }
   end
   return nil
 end
@@ -222,9 +241,9 @@ function M.new(s, opts, ctx)
   end
 
   ---@param step Testing.Sheet.Step
-  ---@return { reason?: string, raised?: string, screen?: string[] }
+  ---@return { reason?: string, raised?: string, screen?: string[], shot?: string, skip?: string }
   function D.run(step)
-    local ok, why = pcall(run_step, child, step, {
+    local ok, why, made = pcall(run_step, child, step, {
       sheet = s,
       size = size,
       root = ctx.root,
@@ -237,6 +256,8 @@ function M.new(s, opts, ctx)
       out.raised = tostring(why)
     elseif why then
       out.reason = why
+    elseif made then
+      out.shot, out.skip = made.shot, made.skip
     end
     -- E3: what the child shows after the step; a stepped run only, the suite never pays for it, and a screen
     -- that cannot be read says nothing about the step

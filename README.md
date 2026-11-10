@@ -192,7 +192,8 @@ Known limits, not hidden:
   declares the snapshot directory for the cache by hand (`-- @cache-inputs TESTS/__snapshots__/`).
 - Test sheets ([docs/SHEETS.md](docs/SHEETS.md)) run live checks written as data through the RPC klicker and
   `testing sheets report` lists what is left for a person; the engines are RPC, browser and desktop windows (no
-  terminal byte stream yet), and the `judge` criteria are for a person, no AI reviewer. `testing sheets step` goes
+  terminal byte stream yet; the picture of an RPC sheet's screen is drawn and photographed by a browser, not taken
+  from a terminal), and the `judge` criteria are for a person, no AI reviewer. `testing sheets step` goes
   through a sheet step by step, for a client on stdin and stdout.
 - Not implemented at all: a test UI (tree, hover), adapters for other test frameworks. Keys for
   some of these exist in `.testing.lua` and are validated, but nothing acts on them.
@@ -389,6 +390,14 @@ summary: 1 pass, 1 fail, 1 skip (3 case(s)) in 0.00 s
 The plugin binds no keymap and registers no autocommand by default (`lint = { on_save = true }` adds the one
 that lints a written file). Every subcommand, flag and
 completion: [docs/BINDINGS.md](docs/BINDINGS.md).
+
+`:Testing sheet step <sheet>` goes through a test sheet beside the code, one key per step, with the screen of the
+child editor in the tile:
+
+![The sheet panel beside the code, paused before step 2, with the child's screen in the tile](assets/screenshots/sheet-panel.png)
+
+(The picture comes from a sheet: the `shot = "panel"` step of `TESTS/sheets/sheet-panel-live.sheet.lua` draws the
+child's screen and photographs it, [docs/SHEETS.md](docs/SHEETS.md).)
 
 ### Configuration
 

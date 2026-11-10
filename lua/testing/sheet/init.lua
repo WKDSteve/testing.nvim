@@ -91,6 +91,8 @@ M.ENGINE_ACTIONS = {
     ask = true,
     restart = true,
     hl = true,
+    -- the screen drawn as a page and photographed by the browser engine (`testing.sheet.shot`)
+    shot = true,
   },
   browser = {
     open = true,

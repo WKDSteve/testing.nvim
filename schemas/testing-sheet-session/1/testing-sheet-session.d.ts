@@ -66,7 +66,8 @@ export interface StepAfter extends Base {
   event: "step-after";
   size: string;
   n: number;
-  status: "pass" | "fail";
+  /** skip: the step could not be done here (an rpc `shot` without a browser); the others go on, the sheet ends as a skip. */
+  status: "pass" | "fail" | "skip";
   ms: number;
   reason?: string;
   /** The failure line as a normal run writes it. */

@@ -844,4 +844,109 @@ function M.check(name, shot, opts)
   return res
 end
 
+-- The colours of a cell without a highlight when the UI named none (Neovim's own default colour scheme).
+M.HTML_DEFAULT = { fg = "#e0e2ea", bg = "#14161b" }
+-- One cell: a box of one character width and one line height, so that a box-drawing character or a wide character
+-- of a fallback font cannot move the cells behind it.
+M.HTML_FONT = "'Cascadia Mono', Consolas, 'DejaVu Sans Mono', 'Liberation Mono', Menlo, monospace"
+M.HTML_CELL_PX = { font = 16, line = 20 }
+
+---@param text string
+---@return string
+local function html_escape(text)
+  return (
+    text:gsub('[&<>"]', { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;" })
+  )
+end
+
+---A colour of the screen as CSS, or nil (only `#rrggbb`: the text comes from the child's UI, never as-is into a page).
+---@param v any
+---@return string|nil
+local function css_colour(v)
+  return type(v) == "string" and v:match("^#%x%x%x%x%x%x$") or nil
+end
+
+---The screen as an HTML page: every cell with its character, colours and styles (bold, italic, underline, undercurl,
+---strikethrough) as `child.screen()` resolved them, the cursor as a block, one grid in `#screen`. The picture of an rpc
+---sheet's `shot` step is a browser's photograph of it (`testing.sheet.shot`); no terminal is involved, so the font is
+---the browser's (`HTML_FONT`), not the user's terminal font.
+---@param shot Testing.Screen.Shot A screen of `child.screen()` (`cells`, `hl_cell_attrs`, `hl`).
+---@param opts? { cursor?: boolean } `cursor = false` leaves the cursor out.
+---@return string html
+function M.html(shot, opts)
+  opts = opts or {}
+  local hl = shot.hl or {}
+  local default = hl[" "] or {}
+  local dfg = css_colour(default.fg) or M.HTML_DEFAULT.fg
+  local dbg = css_colour(default.bg) or M.HTML_DEFAULT.bg
+  local cells = shot.cells or {}
+  local marks = shot.hl_cell_attrs or shot.cell_attrs or {}
+  local size = shot.size or { rows = #cells, cols = cells[1] and #cells[1] or 0 }
+  local cur = opts.cursor ~= false and shot.cursor or nil
+  local rows = {}
+  for r = 1, size.rows do
+    local out = {}
+    local row = cells[r] or {}
+    local mark = marks[r] or ""
+    for c = 1, size.cols do
+      local ch = row[c]
+      if ch ~= "" then
+        local e = hl[mark:sub(c, c)] or default
+        local fg, bg = css_colour(e.fg) or dfg, css_colour(e.bg) or dbg
+        if cur and cur.row == r and cur.col == c then
+          fg, bg = bg, fg
+        end
+        local style = { "color:" .. fg, "background:" .. bg }
+        if e.bold then
+          style[#style + 1] = "font-weight:bold"
+        end
+        if e.italic then
+          style[#style + 1] = "font-style:italic"
+        end
+        local deco = {}
+        if e.underline then
+          deco[#deco + 1] = "underline"
+        end
+        if e.undercurl then
+          deco[#deco + 1] = "underline wavy"
+        end
+        if e.strikethrough then
+          deco[#deco + 1] = "line-through"
+        end
+        if #deco > 0 then
+          style[#style + 1] = "text-decoration:" .. table.concat(deco, " ")
+          local sp = css_colour(e.sp)
+          if sp then
+            style[#style + 1] = "text-decoration-color:" .. sp
+          end
+        end
+        -- a wide character takes its own cell and the next one (which is "")
+        local wide = row[c + 1] == "" and c < size.cols
+        out[#out + 1] = ('<span class="c%s" style="%s">%s</span>'):format(
+          wide and " w" or "",
+          table.concat(style, ";"),
+          html_escape((ch == nil or ch == "") and " " or ch)
+        )
+      end
+    end
+    rows[#rows + 1] = '<div class="r">' .. table.concat(out) .. "</div>"
+  end
+  return table.concat({
+    "<!doctype html>",
+    '<html><head><meta charset="utf-8"><style>',
+    ("html,body{margin:0;padding:0;background:%s}"):format(dbg),
+    ("#screen{display:inline-block;font-family:%s;font-size:%dpx;line-height:%dpx;white-space:pre}"):format(
+      M.HTML_FONT,
+      M.HTML_CELL_PX.font,
+      M.HTML_CELL_PX.line
+    ),
+    (".r{height:%dpx;display:flex}"):format(M.HTML_CELL_PX.line),
+    ".c{display:inline-block;width:1ch;overflow:hidden;text-align:center}",
+    ".w{width:2ch}",
+    '</style></head><body><div id="screen">',
+    table.concat(rows),
+    "</div></body></html>",
+  }, "\n")
+end
+
 return M

@@ -8,11 +8,14 @@ return function(H)
   local root = vim.fs.dirname(vim.fs.dirname(here))
   local files = sheet.files(root .. "/TESTS/sheets")
   H.ok(#files > 0, "there is a sheet")
+  -- the pictures of `shot` steps go to a temp folder: a run of the suite writes nothing into the checkout
+  local out_dir = vim.fn.tempname() .. "-sheets-out"
   for _, path in ipairs(files) do
     local s, err = sheet.load(path)
     H.ok(s ~= nil, "loads: " .. tostring(err))
     if s then
-      sheet.expect(H.ok, s, { root = root })
+      sheet.expect(H.ok, s, { root = root, out_dir = out_dir })
     end
   end
+  vim.fn.delete(out_dir, "rf")
 end

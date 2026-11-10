@@ -25,7 +25,7 @@ local M = {}
 ---@field note? string
 
 ---@class Testing.Sheet.StepResult: Testing.Sheet.NextStep
----@field status "pass"|"fail"
+---@field status "pass"|"fail"|"skip"
 ---@field ms integer
 ---@field reason? string Why the step failed.
 ---@field failure? string The failure line, as in `Testing.Sheet.Result.failures`.
@@ -192,6 +192,17 @@ function Session:step(answer)
   if out.shot then
     self.snapshots[#self.snapshots + 1] = "screenshot " .. out.shot
   end
+  if out.skip and not out.raised and not out.reason then
+    -- a step that could not be done here (an rpc `shot` without a browser): the others go on, the sheet is a skip
+    next_step.status, next_step.reason = "skip", out.skip
+    self.step_skips = self.step_skips or {}
+    self.step_skips[#self.step_skips + 1] = ("%s step %d, %s: %s"):format(
+      self.tag,
+      next_step.n,
+      sheet._describe(step),
+      out.skip
+    )
+  end
   local line
   if out.raised then
     line = ("%s: %s"):format(self.tag, out.raised)
@@ -234,6 +245,9 @@ function Session:result()
   elseif self.skipped then
     -- a missing prerequisite is information, never a green run
     result.status, result.skipped = "skip", self.skipped
+  elseif self.step_skips then
+    -- so is a step that was skipped (its picture is not there), whatever the other steps proved
+    result.status, result.skipped = "skip", table.concat(self.step_skips, "; ")
   elseif self.sheet.engine == "manual" then
     result.status = "manual"
   end

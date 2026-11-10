@@ -77,7 +77,12 @@ async function runStep(page, step, where) {
   } else if (step.shot !== undefined) {
     if (!existsSync(where.out_dir)) mkdirSync(where.out_dir, { recursive: true });
     const file = resolve(where.out_dir, `${where.id}.${step.shot}.${where.tag}.png`);
-    await page.screenshot({ path: file });
+    // `element`: only that element (the grid of an rpc sheet's screen, `testing.sheet.shot`), else the viewport
+    if (step.element !== undefined) {
+      await page.locator(step.element).screenshot({ path: file, timeout: 5000 });
+    } else {
+      await page.screenshot({ path: file });
+    }
     return file;
   }
   return undefined;
