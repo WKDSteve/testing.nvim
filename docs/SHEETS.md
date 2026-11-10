@@ -503,6 +503,18 @@ return {
 * A window on the runner is a question of its own: `testing sheets run --all --engine browser` leaves desktop sheets out of a
   CI job (a sheet that does not load stays in, it is red in every job).
 
+## Pitfalls when writing a sheet
+
+* A command that computes for a long time (`:Bindings check`) goes in as `input`: `keys` waits for an empty typeahead and
+  runs into the RPC timeout.
+* Without a message plugin (noice) a message of several lines becomes a hit-enter prompt that blocks the child editor:
+  raise `cmdheight` in the sheet's setup.
+* A text search in a chooser or list hits the first matching line, not the meant one: search for the field name at the
+  start of the line.
+* Temporary paths change on every run: mask them in a screen snapshot.
+* To run one sheet while you work on it, `testing sheets step <id> --run` is the quickest way; `sheets run --all` has no
+  filter for one sheet.
+
 ## Limits
 
 * The engines are RPC, browser and desktop; terminal byte streams are a later engine.
