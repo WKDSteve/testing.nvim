@@ -34,7 +34,9 @@
 ---   * the run's dependencies are on the child's runtimepath (`rtp`, `rtp_prepend` of the job).
 ---
 --- KILLING. A timeout kills the whole process TREE: a spec that spawned helpers (language servers,
---- `nvim --headless` workers) must not leave them behind. Windows: the process table is read first
+--- `nvim --headless` workers) must not leave them behind. Windows: without a process start where
+--- `testing.child.winproc` loads (each process opened, ended, then asked for its children; README.md "Killing");
+--- otherwise the process table is read first
 --- (one `powershell.exe` call, constant argv), then `taskkill /PID <pid> /T /F` (its exit code is
 --- checked: a failure kills the root at once), then every descendant of the snapshot is ended by pid
 --- (a double-hop orphan, whose parent died before the snapshot, escapes: see README.md "Killing"). POSIX: the child is started
@@ -55,6 +57,11 @@ local is_windows = require("testing.platform").is_windows()
 
 ---The platform switch of the kill path (a spec flips it to drive the Windows branch from anywhere).
 M.platform = { windows = is_windows }
+
+---The native process functions of the Windows kill (`testing.child.winproc`): nil = load them (they are used where they
+---exist), false = the PowerShell table and `taskkill` (a spec that drives that path), a table = a spec's stand-ins.
+---@type Testing.Winproc|false|nil
+M.winproc = nil
 
 ---Directory of this checkout's boot file.
 ---@return string
@@ -750,6 +757,29 @@ end
 ---@param done fun()
 local function kill_trees(hs, exec, pause, done)
   if M.platform.windows then
+    local winproc = M.winproc
+    if winproc == nil then
+      winproc = require("testing.child.winproc").load()
+    end
+    if winproc then
+      local roots = {}
+      for _, h in ipairs(hs) do
+        roots[#roots + 1] = {
+          pid = h.pid,
+          kill = function()
+            if h.uv_handle and not h.uv_handle:is_closing() then
+              local ok, r = pcall(vim.uv.process_kill, h.uv_handle, 9)
+              return ok and r == 0
+            end
+            return false
+          end,
+        }
+      end
+      if require("testing.child.winproc").kill_trees(winproc, roots) then
+        return done()
+      end
+      -- a process table could not be read natively: the slow way below looks once more (what has ended is skipped)
+    end
     read_table(exec, function(procs)
       local below = {}
       for _, h in ipairs(hs) do

@@ -55,7 +55,8 @@ return function(H)
       end
       return nil, "ESRCH: no such process", "ESRCH"
     end
-    child.platform.windows = true
+    -- the PowerShell table and taskkill (the way without the native functions of testing.child.winproc)
+    child.platform.windows, child.winproc = true, false
     local handle = {
       pid = 100,
       ended = false,
@@ -66,7 +67,7 @@ return function(H)
       },
     }
     local pok, err = pcall(child.kill_tree, handle)
-    child.platform.windows = vim.fn.has("win32") == 1
+    child.platform.windows, child.winproc = vim.fn.has("win32") == 1, nil
     vim.system, vim.uv.process_kill, vim.uv.kill = real_system, real_process_kill, real_kill
     ok(pok, "kill_tree does not raise: " .. tostring(err))
     return { calls = calls, root_killed = root_killed }

@@ -271,7 +271,9 @@ value snapshots (`a.snapshot`) yet.
   sandbox (what the first one wrote below its `stdpath` is there) and with `args` as its command line (also for
   later restarts). The step `restart` of a test sheet is this call ([SHEETS.md](SHEETS.md#a-sheet)).
 * `kill()`: kills the whole **process tree** and waits until it is gone (never longer than 10 s, then
-  the process is abandoned), removes the sandbox. Windows `taskkill /PID /T /F`; POSIX: the root is
+  the process is abandoned), removes the sandbox. Windows: each process is opened, ended and only then asked
+  for its children, without a process start (`testing.child.winproc`; where it cannot load, a PowerShell table and
+  `taskkill /PID /T /F`); POSIX: the root is
   frozen, its descendants are read from one `ps` call, the process group and every descendant get
   SIGKILL (a `jobstart`ed helper has a group of its own). A grandchild that was reparented before
   the walk is not found. Idempotent.

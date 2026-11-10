@@ -289,7 +289,8 @@ exist; LuaJIT's `jit.p` per case does not.
    descendants and then runs `taskkill /T /F`. A warm pool pays it once per member at shutdown and once per member
    that is discarded; a run with several timeouts pays it per timeout. The numbers belong to
    `testing.child.kill_tree`; a task for its owner: ask for the descendants with something cheaper than a
-   PowerShell start (or only when the root kill leaves something behind). What came after `/T` is gone since: a
+   PowerShell start (or only when the root kill leaves something behind). **Done 2026-11-10**: the tree is taken
+   without a process start where `testing.child.winproc` loads (see the end of this file). What came after `/T` is gone since: a
    `taskkill` start for every descendant of the snapshot (a second each, one after the other, even when `/T` had ended
    it) became a check whether the process still exists and, for a survivor only, one call for all of them (measured
    on a loaded Windows 11 machine, a child with one helper: 5.0 - 5.4 s before, 3.2 s after).
@@ -394,6 +395,13 @@ hand over to the repository's own) made every `git commit` of a fixture start fo
 `ci_hook_spec` already did for itself: the fixtures see the same configuration on every machine. Whole suite, same
 machine: 2682 s to 1931 s spec time (-28 %), 730 s to 538 s wall (-26 %); the files that make the most fixture commits
 halved (`ci_spec` 132 s to 53 s, `ci_suite_spec` 127 s to 56 s, `ci_verify_spec` 54 s to 22 s).
+
+**The tree kill started two processes per child editor.** Every `kill_tree` on Windows (the end of every RPC child of a
+sheet, of a pool member, every timeout) read the process table with PowerShell (1.1 s) and ended the tree with
+`taskkill` (0.7 s). `testing.child.winproc` does both inside the editor: Neovim's own process table
+(`nvim_get_proc_children`), the creation time and the kill through an opened process handle (FFI). A tree of `cmd` and
+the `ping` it started ends in about 20 ms. Whole suite, same machine: 1931 s to 1655 s spec time (-14 %), 538 s to
+473 s wall; no `powershell` or `taskkill` start is left in it.
 
 ## Rules checked
 

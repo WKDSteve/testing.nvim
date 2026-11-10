@@ -74,11 +74,12 @@ return function(H)
     vim.uv.kill = function()
       return nil, "ESRCH: no such process", "ESRCH" -- every process is gone after `/T`
     end
-    local was_windows = child.platform.windows
-    child.platform.windows = true
+    local was_windows, was_winproc = child.platform.windows, child.winproc
+    -- the PowerShell table and taskkill (the way without the native functions of testing.child.winproc)
+    child.platform.windows, child.winproc = true, false
     return calls,
       function()
-        child.platform.windows = was_windows
+        child.platform.windows, child.winproc = was_windows, was_winproc
         vim.system, vim.uv.process_kill, vim.uv.kill = real_system, real_process_kill, real_kill
       end
   end

@@ -142,8 +142,8 @@ found by `/T`, and a helper left behind by a child that ended normally is not ki
 process group is killed once the child is gone). It cannot hold the run any more, but it can keep
 the child's sandbox directory from being deleted.
 
-**Blocking, batching.** `kill_tree(h)` waits until the kills are done (the table read alone takes a second or
-more on Windows). Where the caller cannot go on without it (the editor quitting, a pool shut down) it is
+**Blocking, batching.** `kill_tree(h)` waits until the kills are done (milliseconds; on the PowerShell way of
+Windows, below, the table read alone takes a second or more). Where the caller cannot go on without it (the editor quitting, a pool shut down) it is
 `kill_trees(handles)`: ONE process table and, on Windows, ONE `taskkill /T` for all of them (`kill_all` and the pool
 use it). The supervisor of a run uses `kill_tree_async(h)` instead: the request is booked at once
 (`kill_requested_ms`, so the retry and abandon timers run), the table and the kills go on in callbacks, and the
@@ -151,7 +151,18 @@ requests of one tick (or made while a kill is going on) share one table, so one 
 supervision of the others for seconds. `VimLeavePre` needs the waiting form: callbacks do not run once the editor
 is leaving.
 
-**Windows, in detail.** There is no job object from Lua (the editor's LuaJIT has `ffi`, but a job with
+**Windows, without a process start** (`testing.child.winproc`, used where it loads: Windows, a 64-bit editor with
+`ffi`). Each root is opened (`OpenProcess`; while the handle is open, Windows does not give its number to another
+process), ended (its libuv handle, else `TerminateProcess` on the opened handle), and only THEN asked for its children
+(`nvim_get_proc_children`, Neovim's native table): a process that has ended starts no new one, so the list is complete
+when it is read. Each child is opened in turn and counts only when it is not older than its parent (creation times from
+`GetProcessTimes`); a process that cannot be opened is left alone with everything below it. All handles are closed at
+the end. About 20 ms for a tree, against about 1.9 s for the PowerShell table and `taskkill` (measured on Windows 11,
+2026-11-10). Where it does not load, or a table cannot be read natively, the kill takes the way below. (A child's libuv
+children usually end with it anyway: libuv puts every process it starts in a job object that kills them when the
+starting process ends.)
+
+**Windows, the PowerShell way, in detail.** There is no job object from Lua (the editor's LuaJIT has `ffi`, but a job with
 `KILL_ON_JOB_CLOSE` would also forbid the `CREATE_BREAKAWAY_FROM_JOB` that `detached` spawns of a spec
 use, and could not be verified on Linux/macOS CI; it was not built). Instead the kill reads the process
 table FIRST (one `powershell.exe` call, constant argv, no shell; `wmic` is gone from current Windows;
