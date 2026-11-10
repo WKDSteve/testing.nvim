@@ -503,13 +503,16 @@ end
 ---case-sensitive file system, while what is mounted there is a case-insensitive Windows folder), an entry below it
 ---is probed the same way.
 ---@param dir string Existing directory.
----@param fs? { stat: fun(path: string): table|nil, names: fun(dir: string): string[] } Seams for specs.
+---A link is no answer (a `tests -> TESTS` link on a case-sensitive file system is one inode under two names), and a
+---listing that holds both spellings is a case-sensitive file system (a case-insensitive one lists one).
+---@param fs? { stat: fun(path: string): table|nil, names: fun(dir: string): string[] } Seams for specs (`stat` does
+---not follow links: `type = "link"`).
 ---@return boolean
 function M.is_case_insensitive(dir, fs)
   fs = fs
     or {
       stat = function(p)
-        return uv.fs_stat(p)
+        return uv.fs_lstat(p)
       end,
       names = function(d)
         local out, h = {}, uv.fs_scandir(d)
@@ -544,6 +547,9 @@ function M.is_case_insensitive(dir, fs)
       return nil
     end
     local a, b = fs.stat(parent .. "/" .. base), fs.stat(parent .. "/" .. swapped)
+    if (a and a.type == "link") or (b and b.type == "link") then
+      return nil
+    end
     if not (a and b) then
       return a and false or nil
     end
@@ -558,7 +564,17 @@ function M.is_case_insensitive(dir, fs)
     return true
   end
   -- the entries below it are what the specs live in
-  for _, name in ipairs(fs.names(dir)) do
+  local names = fs.names(dir)
+  local listed = {}
+  for _, name in ipairs(names) do
+    listed[name] = true
+  end
+  for _, name in ipairs(names) do
+    if name ~= swap(name) and listed[swap(name)] then
+      return false
+    end
+  end
+  for _, name in ipairs(names) do
     local answer = probe(dir, name)
     if answer ~= nil then
       return answer

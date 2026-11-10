@@ -499,6 +499,9 @@ function M.resolve(raw)
   if #problems > 0 then
     return nil, problems
   end
+  -- what a container run proves depends on it (the network, the image): part of the hash, only where it is set, so
+  -- the proofs of pipelines without it keep their hash
+  digest_input.container = container
   local pipeline = {
     profiles = expanded,
     default = default --[[@as string]],

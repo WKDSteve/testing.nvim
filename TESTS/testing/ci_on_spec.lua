@@ -87,10 +87,10 @@ return function(H)
   )
   eq(
     vim.json.decode(
-      on._strip_jsonc('{ // a comment\n "image": "a/b:1", /* more */ "x": "//not", }')
+      on._strip_jsonc('{ // a comment\n "image": "a/b:1", /* more */ "x": "//not, }", }')
     ),
-    { image = "a/b:1", x = "//not" },
-    "devcontainer.json: comments and a trailing comma"
+    { image = "a/b:1", x = "//not, }" },
+    "devcontainer.json: comments and a trailing comma, never inside a string"
   )
 
   -- ---------------------------------------------------------------- a stand-in engine
@@ -98,7 +98,7 @@ return function(H)
     project("on", { ["TESTS/a_spec.lua"] = 'return function(H) H.ok(true, "fine") end\n' })
   local repo = vim.fs.basename(root)
   local calls = {}
-  ---@param o { image_exists?: integer, id?: string, verdict?: string, exit?: integer }
+  ---@param o { image_exists?: integer, id?: string, verdict?: string, exit?: integer, on_run?: function, run_code?: integer, run_stderr?: string }
   local function engine(o)
     calls = {}
     return {
@@ -112,6 +112,12 @@ return function(H)
         elseif argv[2] == "rm" then
           return { code = 0, stdout = "", stderr = "" }
         elseif argv[2] == "run" then
+          if o.on_run then
+            o.on_run(argv)
+          end
+          if o.run_code then
+            return { code = o.run_code, stdout = "", stderr = o.run_stderr or "" }
+          end
           local out_dir
           for i, a in ipairs(argv) do
             local host = argv[i - 1] == "-v" and a:match("^(.*):/out:rw$")
@@ -137,7 +143,7 @@ return function(H)
               steps = { { name = "suite", state = o.verdict == "green" and "green" or "red" } },
             })
           )
-          return { code = o.exit or 1, stdout = "inner output\n", stderr = "" }
+          return { code = o.exit or 1, stdout = "inner output\nTESTING_CI_OK\n", stderr = "" }
         end
         return { code = 1, stdout = "", stderr = "unexpected" }
       end,
@@ -278,6 +284,129 @@ return function(H)
     local res2 = run(engine({ verdict = "green", exit = 0 }), "--on=devcontainer")
     eq(res2.code, 0, "the devcontainer target (" .. res2.err .. ")")
     has(table.concat(run_argv(), " "), "example.org/dev:3", "runs in the devcontainer's image")
+  end
+
+  -- the review of 9ba2442: what a container run may claim, and what it must not do
+  do
+    local dir = require("testing.state").dir(root, { state_dir = state_dir })
+    local name = on.container_name(repo, "linux")
+    -- the inner sentinel is not this run's, the engine ends the container itself, a running one is never forced away
+    local res = run(engine({ verdict = "red", exit = 1 }), "--on=linux")
+    ok(
+      not res.out:find("[linux] TESTING_CI_OK", 1, true),
+      "the inner sentinel is not shown as this run's"
+    )
+    has(
+      table.concat(run_argv(), " "),
+      "--timeout ",
+      "the engine ends the container after the deadline"
+    )
+    for _, c in ipairs(calls) do
+      ok(
+        not (c[2] == "rm" and vim.tbl_contains(c, "--force")),
+        "a container of this name is never forced away first"
+      )
+    end
+
+    -- the checkout changes while the container runs (another session's edit): no proof for it
+    os.remove(dir .. "/ci-full.linux.json")
+    local changed = run(
+      engine({
+        verdict = "green",
+        exit = 0,
+        on_run = function()
+          write(root .. "/late.txt", "written while the container ran\n")
+        end,
+      }),
+      "--on=linux"
+    )
+    local kept = vim.json.decode(read(dir .. "/ci.linux.json") or "{}")
+    eq(
+      { kept.tree_changed, kept.verdict },
+      { true, "green-partial" },
+      "the document says the tree changed"
+    )
+    eq(read(dir .. "/ci-full.linux.json"), nil, "and it is no proof")
+    ok(not changed.out:find("TESTING_CI_OK", 1, true), "no sentinel for a partial run")
+    os.remove(root .. "/late.txt")
+
+    -- a usage error of `testing ci` is refused before any target runs (never an old document as this run's)
+    local refused = run(engine({ verdict = "green", exit = 0 }), "--on=host,linux", "--rev=HEAD")
+    eq(refused.code, 2, "--rev without --snapshot: a usage error")
+    eq(#calls, 0, "and no container was asked for")
+
+    -- the client gave up (its deadline): the container is ours and goes
+    local timed = run(engine({ run_code = 124 }), "--on=linux")
+    eq(timed.code, 3, "no document: infrastructure")
+    local forced = false
+    for _, c in ipairs(calls) do
+      forced = forced
+        or (c[2] == "rm" and vim.tbl_contains(c, "--force") and vim.tbl_contains(c, name))
+    end
+    ok(forced, "after the client's deadline the container is removed")
+
+    -- another run of this repository holds the name: said, not stopped
+    local busy = run(
+      engine({
+        run_code = 125,
+        run_stderr = 'the container name "' .. name .. '" is already in use',
+      }),
+      "--on=linux"
+    )
+    eq(busy.code, 3, "a busy name: infrastructure")
+    has(busy.err, "another run of " .. repo, "... says who has it")
+
+    -- verify reads: a devcontainer image that is not built is not built by verify
+    write(
+      root .. "/.devcontainer/devcontainer.json",
+      '{ "build": { "dockerfile": "Dockerfile" } }\n'
+    )
+    write(root .. "/.devcontainer/Dockerfile", "FROM scratch\n")
+    local vcalls = engine({ image_exists = 1 })
+    local vcode = cli.main({ "ci", "verify", "--root=" .. root, "--on=devcontainer" }, {
+      out = function() end,
+      err = function() end,
+      state_dir = state_dir,
+      color = false,
+      container = vcalls,
+    })
+    eq(vcode, 1, "verify --on=devcontainer without its image: not proven")
+    for _, c in ipairs(calls) do
+      ok(c[2] ~= "build", "and nothing was built")
+    end
+    -- an image name from devcontainer.json is a name, never an option of the engine
+    write(root .. "/.devcontainer/devcontainer.json", '{ "image": "--privileged" }\n')
+    local evil = run(engine({ verdict = "green", exit = 0 }), "--on=devcontainer")
+    eq(evil.code, 2, "an image that is not an image name: refused")
+    vim.fn.delete(root .. "/.devcontainer", "rf")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "no devcontainer")
+  end
+
+  -- lib.nvim checking itself: the dependency IS the repository, the mount of the repository stays
+  do
+    local lib = project("libself", { ["lua/lib/nvim/init.lua"] = "return {}\n" })
+    local saved = vim.env.LIB_NVIM_DIR
+    vim.env.LIB_NVIM_DIR = lib
+    local was = root
+    root = lib
+    local res = run(engine({ verdict = "green", exit = 0 }), "--on=linux")
+    root = was
+    vim.env.LIB_NVIM_DIR = saved
+    eq(res.code, 0, "the run of lib.nvim itself (" .. res.err .. ")")
+    local argv = table.concat(run_argv(), " ")
+    has(argv, lib .. ":/repo:ro", "the repository is mounted")
+    has(argv, "LIB_NVIM_DIR=/repo", "and lib.nvim is the repository")
+    ok(not argv:find(":/deps/lib.nvim:ro", 1, true), "no second mount of it")
+  end
+
+  -- the network is part of the pipeline's hash where it is set (a proof without it is not one with it)
+  do
+    local schema = require("testing.ci.schema")
+    local a = schema.resolve({ profiles = { full = { "suite" } } })
+    local b = schema.resolve({ profiles = { full = { "suite" } }, container = { network = true } })
+    ok(a.digest_input.container == nil, "without ci.container the hash is the old one")
+    eq(b.digest_input.container, { network = true }, "with it, it is part of the hash")
   end
 
   -- the falsification on a real engine: a spec that is red only on Linux is red with --on=linux

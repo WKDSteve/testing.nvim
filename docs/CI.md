@@ -412,7 +412,8 @@ The pipeline runs on each target in turn: `host` is this machine (the run withou
 image of [`containers/ci/Containerfile`](../containers/ci/Containerfile) (`localhost/testing-ci:1`: Debian bookworm,
 nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release), `devcontainer` the image of
 the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`, built once and tagged by the
-digest of the Dockerfile; it needs nvim and the tools of the steps). The engine is Podman (`testing.container`,
+digest of the Dockerfile and the `build` section, not of the files of the build context; it needs nvim and the tools
+of the steps). The engine is Podman (`testing.container`,
 `$TESTING_CONTAINER_ENGINE`); the image is built once, with the network:
 
 ```
@@ -434,17 +435,24 @@ ci = {
 }
 ```
 
-The report of each target is shown as it ran (the container's lines marked `[linux]`), then one table: a row per
-step, a column per target, the verdicts last. The exit code is the worst of the targets; the sentinel only when every
-target is green. Without the engine, its machine or the image a target is exit 3 with what to do (the targets before
+The report of each target is shown (the container's lines marked `[linux]`, when the container has ended), then one
+table: a row per step, a column per target, the verdicts last. The exit code is the worst of the targets; the sentinel
+only when every target ran its whole profile green (a partial run, a moved tree: none). A container run takes the
+machine's queue like a suite; the engine ends the container after the deadline of two hours (Podman's `--timeout`),
+also when the client that started it is gone. A container of the same name that is still running (another run of
+this repository) is never stopped: the target is exit 3 and says so. Without the engine, its machine or the image a target is exit 3 with what to do (the targets before
 it have run; a plain `testing ci` without `--on` never asks for the engine). `--on` does not go with `--snapshot`.
 
-**The proof is per target.** The document of a container run comes back with `target`, `image` (the id of the image:
-what was proven is the run in that image), `image_name` and the commit and tree of this checkout, and is kept beside
+**The proof is per target.** The container sees the living working tree, not a snapshot: the commit, tree and state
+of the checkout are read right before the container starts and again when it ended, and a change in between (an edit
+of another session, a commit) makes the document `tree_changed` (`green-partial`), which is no proof. The document of
+a container run comes back with `target`, `image` (the id of the image: what was proven is the run in that image),
+`image_name`, this machine's time and the commit and tree of this checkout, and is kept beside
 the host's: `ci.<target>.json`, and `ci-<profile>.<target>.json` for a complete run. `testing ci verify --on=linux`
 reads that proof, never the host's: the tree, the pipeline, the age and the image id of now (the engine is asked;
-without it the answer is `rejected`). The system, Neovim and the tool versions are the image's and are not compared
-with this machine. The host's `ci.json` carries the container documents of the run under `targets`.
+without it the answer is `rejected`; a devcontainer image that is not built is not built by `verify`). The system,
+Neovim and the tool versions are the image's and are not compared with this machine. `ci.container` (the network, the
+image) is part of the pipeline's hash where it is set. The host's `ci.json` carries the container documents of the run under `targets`.
 
 ## Land through the hosted CI: `testing ci land`
 

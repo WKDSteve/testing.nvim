@@ -15,7 +15,8 @@
 ---   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:1`: nvim, stylua, luacheck and git at
 ---                 the versions of the hosted CI), or `ci.container.image`
 ---   devcontainer  the image of the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`,
----                 built once and tagged by the digest of the Dockerfile); it must have nvim and the tools of the steps
+---                 built once and tagged by the digest of the Dockerfile and the build section); it must have nvim
+---                 and the tools of the steps
 ---
 --- Without the engine, its machine or the image the target is exit 3 with what to do; the targets before it have run.
 --- The document of each container run comes back, carries `target` and `image` (the image id: what the run proved is
@@ -82,7 +83,8 @@ local function without_on(argv)
 end
 M._without_on = without_on
 
----A comment-free JSON text of a devcontainer.json (JSONC: `//` and `/* */` outside strings, trailing commas).
+---A comment-free JSON text of a devcontainer.json (JSONC: `//` and `/* */` outside strings, trailing commas outside
+---strings).
 ---@param text string
 ---@return string
 local function strip_jsonc(text)
@@ -109,14 +111,24 @@ local function strip_jsonc(text)
     elseif text:sub(i, i + 1) == "/*" then
       local _, e = text:find("*/", i + 2, true)
       i = (e or n) + 1
+    elseif c == "," and text:find("^%s*[}%]]", i + 1) then
+      -- a trailing comma (only here, outside a string)
+      i = i + 1
     else
       out[#out + 1] = c
       i = i + 1
     end
   end
-  return (table.concat(out):gsub(",(%s*[}%]])", "%1"))
+  return table.concat(out)
 end
 M._strip_jsonc = strip_jsonc
+
+---An image reference, never anything an engine could read as an option (from `.testing.lua` or devcontainer.json).
+---@param v any
+---@return boolean
+local function image_name(v)
+  return type(v) == "string" and v:match("^[%w][%w%.%-_/:@]*$") ~= nil
+end
 
 ---@param repo string
 ---@param target string
@@ -125,16 +137,18 @@ function M.container_name(repo, target)
   return ("testing-ci-%s-%s"):format(repo:lower():gsub("[^%w%-]", "-"), target)
 end
 
----The image of a target, built when it is a devcontainer with a Dockerfile. Nil and why (and the exit: 2 a usage
----problem of the repository, 3 infrastructure).
+---The image of a target, built when it is a devcontainer with a Dockerfile (not with `opts.no_build`: `verify` reads,
+---it never builds). Nil and why (and the exit: 2 a usage problem of the repository, 3 infrastructure).
 ---@param target string
 ---@param root string
 ---@param pipeline table
 ---@param copts table `testing.container` options (engine, run).
+---@param opts? { no_build?: boolean }
 ---@return string|nil image
 ---@return string|nil why
 ---@return integer|nil exit
-function M.image_of(target, root, pipeline, copts)
+function M.image_of(target, root, pipeline, copts, opts)
+  opts = opts or {}
   local cfg = pipeline.container or {}
   if target == "linux" then
     return cfg.image or M.DEFAULT_IMAGE
@@ -154,7 +168,10 @@ function M.image_of(target, root, pipeline, copts)
   if not ok or type(conf) ~= "table" then
     return nil, ("%s is not JSON"):format(path), 2
   end
-  if type(conf.image) == "string" and conf.image ~= "" then
+  if conf.image ~= nil then
+    if not image_name(conf.image) then
+      return nil, ("%s: image is not an image name"):format(path), 2
+    end
     return conf.image
   end
   local build = type(conf.build) == "table" and conf.build or {}
@@ -171,14 +188,22 @@ function M.image_of(target, root, pipeline, copts)
   end
   local content = df:read("*a")
   df:close()
+  -- the Dockerfile and the build section name the image (the files of the context do not: a COPY of a changed file
+  -- needs a changed Dockerfile or build section to be seen, docs/CI.md)
   local tag = ("localhost/testing-devcontainer-%s:%s"):format(
     vim.fs.basename(root):lower():gsub("[^%w%-]", "-"),
-    vim.fn.sha256(content):sub(1, 12)
+    vim.fn.sha256(content .. "\0" .. require("lib.nvim.json.canonical").encode(build)):sub(1, 12)
   )
   local container = require("testing.container")
-  local here = container.available(vim.tbl_extend("force", copts, { image = tag }))
-  if here then
+  if container.available(vim.tbl_extend("force", copts, { image = tag })) then
     return tag
+  end
+  if opts.no_build then
+    return nil,
+      ("the devcontainer image %s is not built (testing ci --on=devcontainer builds it)"):format(
+        tag
+      ),
+      3
   end
   -- built once (the build may use the network; the run never does unless the pipeline says so)
   local res = container.build(tag, file, context, copts)
@@ -194,17 +219,21 @@ function M.image_of(target, root, pipeline, copts)
 end
 
 ---The checkouts a run in the container needs read-only, besides the repository: the runner's own and every
----dependency (lib.nvim always). `mounts` host -> container path, `env` the `$<NAME>_DIR` that point at them.
+---dependency (lib.nvim always). `mounts` host -> container path, `env` the `$<NAME>_DIR` that point at them. A
+---dependency that IS the repository or the runner (lib.nvim checking itself) points at that mount.
 ---@param root string
 ---@param pipeline table
 ---@return { mounts: table<string, string>, env: table<string, string>, runner: string }|nil
 ---@return string|nil why
 local function checkouts(root, pipeline)
   local deps = require("testing.deps")
+  local function same(a, b)
+    return vim.fs.normalize(a):lower() == vim.fs.normalize(b):lower()
+  end
   local mounts, env = { [root] = "/repo" }, {}
   local self = deps.self_dir()
   local runner = "/repo"
-  if vim.fs.normalize(self) ~= vim.fs.normalize(root) then
+  if not same(self, root) then
     mounts[self] = "/testing"
     runner = "/testing"
   end
@@ -217,9 +246,15 @@ local function checkouts(root, pipeline)
     return nil, failures[1]
   end
   for _, r in ipairs(resolved) do
-    local where = "/deps/" .. r.name:gsub("[^%w%._%-]", "_")
-    mounts[r.dir] = where
-    env[deps.env_name(r.name)] = where
+    if same(r.dir, root) then
+      env[deps.env_name(r.name)] = "/repo"
+    elseif same(r.dir, self) then
+      env[deps.env_name(r.name)] = runner
+    else
+      local where = "/deps/" .. r.name:gsub("[^%w%._%-]", "_")
+      mounts[r.dir] = where
+      env[deps.env_name(r.name)] = where
+    end
   end
   return { mounts = mounts, env = env, runner = runner }
 end
@@ -260,18 +295,27 @@ local function inner_options(argv)
 end
 M._inner_options = inner_options
 
+---@param a table
+---@param b table
+---@return boolean
+local function same_state(a, b)
+  return a.commit == b.commit and a.tree == b.tree and a.dirty == b.dirty
+end
+
 ---Run the pipeline in a container target. Exit code, the document (nil when the run left none) and the lines to
----report when it could not run.
+---report when it could not run. The facts of the checkout are read right before the container starts and again after
+---it ended: the container sees the living working tree, so a change in between (another session's edit, a commit)
+---makes the document `tree_changed`, and no proof is kept for it.
 ---@param target string
 ---@param argv string[] The arguments of `testing ci`.
 ---@param root string
 ---@param pipeline table
----@param facts table The git facts of this checkout (`testing.ci.internal.git_facts`).
 ---@param sv table
 ---@return integer exit
 ---@return table|nil doc
 ---@return string[] problems
-function M.run_target(target, argv, root, pipeline, facts, sv)
+function M.run_target(target, argv, root, pipeline, sv)
+  local ci = require("testing.ci")
   local container = require("testing.container")
   local copts = vim.deepcopy(sv.container or {})
   local image, why, code = M.image_of(target, root, pipeline, copts)
@@ -300,10 +344,22 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
   if not co then
     return 3, nil, { ("%s: %s"):format(target, cwhy) }
   end
-  local out_dir = vim.fs.normalize(vim.fn.tempname()) .. "-ci-" .. target
-  vim.fn.mkdir(out_dir .. "/state", "p")
   local repo = vim.fs.basename(root)
   local name = M.container_name(repo, target)
+  -- a heavy run: one at a time on this machine, as the host's suite (testing.queue)
+  local queue = require("testing.queue")
+  local queued, waited = queue.acquire(
+    sv.queue,
+    ("testing ci --on=%s of %s"):format(target, repo),
+    sv.err or function() end
+  )
+  if not queued then
+    return 3, nil, { ("%s: queue: %s"):format(target, tostring(waited)) }
+  end
+  local out_dir = vim.fs.normalize(vim.fn.tempname()) .. "-ci-" .. target
+  vim.fn.mkdir(out_dir .. "/state", "p")
+  -- a container of this name that an earlier run left when it had ended; a running one (another run of this
+  -- repository) is never stopped here
   container.remove(name, copts)
   local env = vim.tbl_extend("force", co.env, {
     [M.TARGET_ENV] = target,
@@ -331,9 +387,9 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
     "--json=/out/ci.json",
     "--no-agent",
   }
-  local rest = inner_options(argv)
-  -- the options of the outer run, before a `--` of the suite options
-  vim.list_extend(command, rest)
+  vim.list_extend(command, inner_options(argv))
+  local before = ci.internal.git_facts(root)
+  local started = os.date("!%Y-%m-%dT%H:%M:%SZ")
   local res = container.run(
     command,
     vim.tbl_extend("force", copts, {
@@ -346,11 +402,22 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
       user = "0",
       workdir = "/repo",
       timeout_ms = M.TIMEOUT_MS,
+      -- the engine ends the container itself after this long: a client that was killed leaves none behind
+      stop_after_s = math.floor(M.TIMEOUT_MS / 1000),
     })
   )
+  if res.code == 124 then
+    -- our client gave up: the container is ours and goes
+    container.remove(name, copts, true)
+  end
+  local after = ci.internal.git_facts(root)
+  queue.release(queued)
   local say = sv.out or function() end
   for line in ((res.stdout or "") .. (res.stderr or "")):gmatch("[^\r\n]+") do
-    say(("[%s] %s"):format(target, line))
+    -- the sentinels of the inner run are not this run's
+    if line ~= ci.SENTINEL and line ~= "TESTING_OK" then
+      say(("[%s] %s"):format(target, line))
+    end
   end
   local f = io.open(out_dir .. "/ci.json", "rb")
   local doc
@@ -362,14 +429,19 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
   vim.fn.delete(out_dir, "rf")
   if not doc then
     local tail = vim.trim(((res.stderr or "") ~= "" and res.stderr or res.stdout or ""):sub(-300))
-    local missing = res.code == 127 and " (is nvim in the image?)" or ""
+    local hint = res.code == 127 and " (is nvim in the image?)"
+      or (tail:find("already in use", 1, true) and (" (another run of %s is in %s: podman ps)"):format(
+        repo,
+        name
+      ))
+      or ""
     return 3,
       nil,
       {
         ("%s: the run in the container left no document (exit %d%s): %s"):format(
           target,
           res.code,
-          missing,
+          hint,
           tail
         ),
       }
@@ -377,10 +449,22 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
   doc.target = target
   doc.image = digest
   doc.image_name = image
-  -- the inner git sees a read-only mount of another owner (a worktree's .git file may not even resolve there)
-  doc.commit = facts.commit or vim.NIL
-  doc.tree = facts.tree or vim.NIL
-  doc.dirty = facts.dirty == nil and vim.NIL or facts.dirty
+  doc.repo = repo
+  -- this machine's clock and checkout: the inner git sees a read-only mount of another owner (a worktree's .git file
+  -- may not even resolve there), the container's clock may drift
+  doc.time = started
+  doc.commit = before.commit or vim.NIL
+  doc.tree = before.tree or vim.NIL
+  doc.dirty = before.dirty == nil and vim.NIL or before.dirty
+  if not same_state(before, after) then
+    doc.tree_changed = true
+    doc.partial = true
+    local why_partial = type(doc.partial_why) == "string" and (doc.partial_why .. ", ") or ""
+    doc.partial_why = why_partial .. "the checkout changed while the container ran"
+    if doc.verdict == "green" then
+      doc.verdict = "green-partial"
+    end
+  end
   local exit = tonumber(doc.exit) or res.code
   if exit < 0 or exit > 3 then
     exit = 3
@@ -389,7 +473,7 @@ function M.run_target(target, argv, root, pipeline, facts, sv)
 end
 
 ---Keep the document of a target beside the host's: `ci.<target>.json`, and the proof `ci-<profile>.<target>.json` for a
----complete green run (as `testing.ci` does for its own).
+---complete run (as `testing.ci` does for its own).
 ---@param doc table
 ---@param root string
 ---@param state_dir? string
@@ -467,6 +551,13 @@ function M.table(order, docs)
   return out
 end
 
+---@param path string
+---@return string|nil
+local function mtime_of(path)
+  local st = vim.uv.fs_stat(path)
+  return st and ("%d.%d"):format(st.mtime.sec, st.mtime.nsec) or nil
+end
+
 ---`testing ci --on=...` (after `testing.ci.parse`).
 ---@param argv string[] The arguments of `testing ci`.
 ---@param args table The parsed arguments (`args.on`).
@@ -476,6 +567,13 @@ end
 function M.main(argv, args, root, sv)
   local ci = require("testing.ci")
   local out, err = sv.out, sv.err
+  -- what `testing ci` refuses without --snapshot, refused before any target runs
+  for _, opt in ipairs({ "rev", "force", "with" }) do
+    if args[opt] then
+      err(("testing ci: --%s only goes with --snapshot"):format(opt))
+      return ci.EXIT_USAGE
+    end
+  end
   local pipeline, problems = require("testing.ci.schema").load(root)
   if not pipeline then
     for _, p in ipairs(problems or {}) do
@@ -484,7 +582,7 @@ function M.main(argv, args, root, sv)
     return ci.EXIT_USAGE
   end
   local state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p") or sv.state_dir
-  local facts = ci.internal.git_facts(root)
+  local dir = require("testing.state").dir(root, { state_dir = state_dir })
   local docs, exits, worst = {}, {}, 0
   local host_doc
   for _, target in ipairs(args.on) do
@@ -499,19 +597,22 @@ function M.main(argv, args, root, sv)
           end
         end,
       })
+      local stamp = mtime_of(dir .. "/ci.json")
       code = ci.main(without_on(argv), host_sv)
-      local dir = require("testing.state").dir(root, { state_dir = state_dir })
-      local f = io.open(dir .. "/ci.json", "rb")
-      if f then
-        local okd, d = pcall(vim.json.decode, f:read("*a"))
-        f:close()
-        host_doc = okd and type(d) == "table" and d or nil
+      -- only a document this run wrote: an early return leaves the last run's file, which is not this run
+      if mtime_of(dir .. "/ci.json") ~= stamp then
+        local f = io.open(dir .. "/ci.json", "rb")
+        if f then
+          local okd, d = pcall(vim.json.decode, f:read("*a"))
+          f:close()
+          host_doc = okd and type(d) == "table" and d or nil
+        end
       end
       doc = host_doc
     else
       out(("== on %s"):format(target))
       local why
-      code, doc, why = M.run_target(target, argv, root, pipeline, facts, sv)
+      code, doc, why = M.run_target(target, argv, root, pipeline, sv)
       for _, line in ipairs(why) do
         err("testing ci: " .. line)
       end
@@ -527,6 +628,9 @@ function M.main(argv, args, root, sv)
     worst = math.max(worst, code)
   end
   -- the host's document carries the container documents of this run
+  local function encode(d)
+    return require("lib.nvim.json.canonical").encode(d) .. "\n"
+  end
   if host_doc then
     host_doc.targets = {}
     for _, t in ipairs(args.on) do
@@ -534,13 +638,11 @@ function M.main(argv, args, root, sv)
         host_doc.targets[t] = docs[t] or { target = t, verdict = "infra", exit = exits[t] }
       end
     end
-    local dir = require("testing.state").dir(root, { state_dir = state_dir })
-    local text = require("lib.nvim.json.canonical").encode(host_doc) .. "\n"
-    require("lib.nvim.fs.write.atomic")(dir .. "/ci.json", text, { mkdirp = true })
+    require("lib.nvim.fs.write.atomic")(dir .. "/ci.json", encode(host_doc), { mkdirp = true })
     if args.json then
       require("lib.nvim.fs.write.atomic")(
         vim.fn.fnamemodify(args.json, ":p"),
-        text,
+        encode(host_doc),
         { mkdirp = true }
       )
     end
@@ -559,7 +661,7 @@ function M.main(argv, args, root, sv)
     end
     require("lib.nvim.fs.write.atomic")(
       vim.fn.fnamemodify(args.json, ":p"),
-      require("lib.nvim.json.canonical").encode(merged) .. "\n",
+      encode(merged),
       { mkdirp = true }
     )
   end
@@ -567,7 +669,13 @@ function M.main(argv, args, root, sv)
   for _, line in ipairs(M.table(args.on, docs)) do
     out(line)
   end
-  if worst == ci.EXIT_OK then
+  -- the sentinel: every target ran its whole profile green (never a partial one, never a moved tree)
+  local all_green = worst == ci.EXIT_OK
+  for _, t in ipairs(args.on) do
+    local d = docs[t]
+    all_green = all_green and type(d) == "table" and d.verdict == "green" and d.partial ~= true
+  end
+  if all_green then
     out(ci.SENTINEL)
   end
   return worst

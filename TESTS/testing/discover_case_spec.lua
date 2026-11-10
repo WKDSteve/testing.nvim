@@ -140,6 +140,47 @@ return function(H)
     )
   end
 
+  -- a link `tests -> TESTS` on a case-sensitive file system is one inode under two names: never case-insensitive
+  do
+    local function fs(tree, names)
+      return {
+        stat = function(p)
+          return tree[p]
+        end,
+        names = function()
+          return names
+        end,
+      }
+    end
+    local dir = { ino = 5, dev = 1, type = "directory" }
+    eq(
+      discover.is_case_insensitive(
+        "/r",
+        fs(
+          { ["/r"] = { ino = 1, dev = 0 }, ["/r/TESTS"] = dir, ["/r/tests"] = dir },
+          { "TESTS", "tests" }
+        )
+      ),
+      false,
+      "probe: a listing with both spellings is a case-sensitive file system"
+    )
+    eq(
+      discover.is_case_insensitive(
+        "/r",
+        fs(
+          {
+            ["/r"] = { ino = 1, dev = 0 },
+            ["/r/tests"] = { ino = 5, dev = 1, type = "link" },
+            ["/r/TESTS"] = dir,
+          },
+          { "tests" }
+        )
+      ),
+      false,
+      "probe: a link is no answer"
+    )
+  end
+
   -- without seams the probe of the real file system decides
   vim.fn.delete(root .. "/Dup", "rf")
   vim.fn.delete(root .. "/dup", "rf")

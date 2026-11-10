@@ -452,7 +452,9 @@ function M._check_target(args, sv, root, pipeline, names, doc, res, fail)
     rejected[#rejected + 1] = "the pipeline (`ci` section) differs from the one that was proven"
   end
   local copts = vim.deepcopy(sv.container or {})
-  local image, iwhy = require("testing.ci.on").image_of(target, root, pipeline, copts)
+  -- verify reads: a devcontainer image that is not built is no image of the proof, and nothing is built here
+  local image, iwhy =
+    require("testing.ci.on").image_of(target, root, pipeline, copts, { no_build = true })
   local id
   if image then
     copts.image = image

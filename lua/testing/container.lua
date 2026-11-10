@@ -27,6 +27,8 @@ local M = {}
 ---@field name? string `--name` of the container (it is removed when it ends: `--rm`).
 ---@field user? string `--user` (default: the image's).
 ---@field workdir? string `--workdir` (default: the image's).
+---@field stop_after_s? integer Podman's `--timeout`: the engine ends the container after this long, also when the client
+---that started it is gone.
 
 M.default_image = "localhost/testing-linux:1"
 
@@ -102,6 +104,10 @@ function M.argv(command, opts)
   if opts.workdir then
     vim.list_extend(argv, { "--workdir", opts.workdir })
   end
+  -- docker has no such option: its containers end with the client only through `--rm` and the kill of the client
+  if opts.stop_after_s and not engine(opts):match("docker[^/]*$") then
+    vim.list_extend(argv, { "--timeout", tostring(opts.stop_after_s) })
+  end
   for _, kind in ipairs({ { opts.mounts, "ro" }, { opts.writable, "rw" } }) do
     local map = kind[1] or {}
     local hosts = vim.tbl_keys(map)
@@ -145,13 +151,19 @@ function M.build(tag, file, context, opts)
   return runner(opts)({ engine(opts), "build", "--tag", tag, "--file", file, context })
 end
 
----Remove a container of this name that an earlier run left (a crash between `run` and `--rm`). Only a name the caller
----made itself (`testing-ci-<repo>-<target>`); a container that is not there is no error.
+---Remove a container of this name that an earlier run left when it ended (a crash between `run` and `--rm`). Only a
+---name the caller made itself (`testing-ci-<repo>-<target>`); a container that is not there is no error, and a running
+---one stays (another run of the same repository) unless `force`: the caller's own container, whose client gave up.
 ---@param name string
 ---@param opts? Testing.Container.Opts
-function M.remove(name, opts)
+---@param force? boolean
+function M.remove(name, opts, force)
   opts = opts or {}
-  runner(opts)({ engine(opts), "rm", "--force", "--ignore", name })
+  local argv = { engine(opts), "rm", "--ignore", name }
+  if force then
+    table.insert(argv, 3, "--force")
+  end
+  runner(opts)(argv)
 end
 
 ---Run `command` in a fresh container (no network, mounts read-only).
