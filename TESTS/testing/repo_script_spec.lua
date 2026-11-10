@@ -45,41 +45,41 @@ return function(H)
     end
   end
 
-  -- every `actions/checkout` step of the workflow says `persist-credentials: false`; the job that pushes keeps the token
-  local workflow = repo .. "/.github/workflows/ci.yml"
-  if vim.uv.fs_stat(workflow) == nil then
-    ok(true, "no workflow in this checkout: nothing to read")
-    return
-  end
-  local lines = vim.fn.readfile(workflow)
-  local job
+  -- every `actions/checkout` step of the workflows (the generated ci.yml and the hand-written lib-suite.yml) says
+  -- `persist-credentials: false`; the job that pushes keeps the token
   local checkouts = {}
-  for i, line in ipairs(lines) do
-    job = line:match("^  ([%w_%-]+):%s*$") or job
-    if line:match("^%s*%-%s+uses:%s*actions/checkout@") then
-      local indent = #line:match("^(%s*)")
-      local persists = false
-      for j = i + 1, #lines do
-        local nxt = lines[j]
-        local next_indent = #nxt:match("^(%s*)")
-        if nxt:match("%S") and next_indent <= indent then
-          break
+  for _, file in ipairs({ "ci.yml", "lib-suite.yml" }) do
+    local workflow = repo .. "/.github/workflows/" .. file
+    local lines = vim.uv.fs_stat(workflow) and vim.fn.readfile(workflow) or {}
+    local job
+    for i, line in ipairs(lines) do
+      job = line:match("^  ([%w_%-]+):%s*$") or job
+      if line:match("^%s*%-%s+uses:%s*actions/checkout@") then
+        local indent = #line:match("^(%s*)")
+        local persists = false
+        for j = i + 1, #lines do
+          local nxt = lines[j]
+          local next_indent = #nxt:match("^(%s*)")
+          if nxt:match("%S") and next_indent <= indent then
+            break
+          end
+          persists = persists or nxt:match("^%s*persist%-credentials:%s*false%s*$") ~= nil
         end
-        persists = persists or nxt:match("^%s*persist%-credentials:%s*false%s*$") ~= nil
+        checkouts[#checkouts + 1] = { job = file .. ":" .. tostring(job), persists = persists }
       end
-      checkouts[#checkouts + 1] = { job = job, persists = persists }
     end
   end
-  ok(#checkouts >= 6, "the workflow was read: " .. #checkouts .. " checkout steps")
-  for n, checkout in ipairs(checkouts) do
-    eq(
-      checkout.persists,
-      checkout.job ~= "publish-ci-verified",
-      ("checkout %d (job %s) gives the token up unless its job pushes"):format(
-        n,
-        tostring(checkout.job)
+  if vim.uv.fs_stat(repo .. "/.github/workflows/ci.yml") == nil then
+    ok(true, "no workflow in this checkout: nothing to read")
+  else
+    ok(#checkouts >= 6, "the workflows were read: " .. #checkouts .. " checkout steps")
+    for n, checkout in ipairs(checkouts) do
+      eq(
+        checkout.persists,
+        checkout.job ~= "ci.yml:publish-ci-verified",
+        ("checkout %d (job %s) gives the token up unless its job pushes"):format(n, checkout.job)
       )
-    )
+    end
   end
   -- A TERM to scripts/test.sh reaches nvim at once: with nvim in the foreground bash handled it only after nvim ended,
   -- so a stopped wrapper left the whole suite running. A fake `nvim` (first on the PATH) writes its pid and sleeps.
@@ -102,6 +102,8 @@ return function(H)
         "",
       }, "\n")
     )
+    -- executable, or bash on Linux and macOS passes over it and finds the real nvim (Git Bash does not ask)
+    vim.uv.fs_chmod(dir .. "/bin/nvim", tonumber("755", 8))
     write(
       dir .. "/probe.sh",
       table.concat({
