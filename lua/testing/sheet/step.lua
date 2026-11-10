@@ -145,7 +145,7 @@ M.NOTES_FILE = "notes.json"
 ---@field status string How the run ended (`pass`, `fail`, `aborted`, ...).
 ---@field notes Testing.SheetStep.Note[]
 
----Two roots of one project: on Windows the case of a folder name does not matter.
+---Two roots of one project: where the file system ignores case (Windows, macOS), so does this.
 ---@param a any
 ---@param b string
 ---@return boolean
@@ -153,7 +153,7 @@ local function same_root(a, b)
   if type(a) ~= "string" then
     return false
   end
-  if vim.fn.has("win32") == 1 then
+  if require("testing.platform").is_case_insensitive() then
     return a:lower() == b:lower()
   end
   return a == b
