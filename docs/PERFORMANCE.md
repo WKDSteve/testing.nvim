@@ -391,8 +391,10 @@ measured with a throwaway `minit` addition that logs every process a spec file s
 **The machine's git configuration ran in every fixture repository.** A global `core.hooksPath` (here: hooks that only
 hand over to the repository's own) made every `git commit` of a fixture start four shells (`pre-commit`,
 `prepare-commit-msg`, `commit-msg`, `post-commit`), 0.4 s each on Windows; a `git commit` of a fixture took 0.8 to 3.9 s.
-`TESTS/minimal_init.lua` now points `GIT_CONFIG_GLOBAL` at `TESTS/gitconfig` and sets `GIT_CONFIG_NOSYSTEM`, as
-`ci_hook_spec` already did for itself: the fixtures see the same configuration on every machine. Whole suite, same
+`TESTS/minimal_init.lua` now gives a spec's child editor a git configuration of its own (`GIT_CONFIG_GLOBAL`, written
+from the text in the minit, so it is part of every key and no key names the place of a checkout) and sets
+`GIT_CONFIG_NOSYSTEM`, as `ci_hook_spec` already did for itself: the fixtures see the same configuration on every
+machine. The runner's own process, which runs the minit for the keys, keeps the machine's configuration. Whole suite, same
 machine: 2682 s to 1931 s spec time (-28 %), 730 s to 538 s wall (-26 %); the files that make the most fixture commits
 halved (`ci_spec` 132 s to 53 s, `ci_suite_spec` 127 s to 56 s, `ci_verify_spec` 54 s to 22 s).
 

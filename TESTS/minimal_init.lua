@@ -19,10 +19,38 @@ if not lib then
 end
 vim.opt.rtp:append(lib.dir)
 
--- git of the specs: the fixture repositories see TESTS/gitconfig, not this machine's global and system configuration
--- (a global `core.hooksPath` cost a shell per hook on every fixture commit; the file says why). Set here, so that the
--- runner computes the keys with it too (`testing.cache.tools` hashes the configuration git reads).
-vim.env.GIT_CONFIG_GLOBAL = root .. "/TESTS/gitconfig"
-vim.env.GIT_CONFIG_NOSYSTEM = "1"
+-- git of the specs: the fixture repositories a spec makes see the configuration below, not this machine's global and
+-- system configuration. A global `core.hooksPath` ran a shell per hook on every `git commit` of a fixture (four per
+-- commit, about 0.4 s each on Windows), signing settings start ssh-keygen, `core.autocrlf` differs from machine to
+-- machine. A spec that needs a setting passes it with `-c` or `git config` in its repository.
+-- Only in a spec's child editor: the runner's own process runs this file too (for the keys; `testing.run.project` is
+-- loaded there), and its git works on the real checkout, which needs the machine's configuration (`safe.directory`,
+-- credentials, ...). The text is here, not in a file of the checkout, so that it is part of every key (this file is)
+-- and no key names the place of a checkout.
+if package.loaded["testing.run.project"] == nil then
+  local gitconfig = vim.fn.stdpath("data") .. "/testing-spec.gitconfig"
+  vim.fn.mkdir(vim.fn.stdpath("data"), "p")
+  local f = io.open(gitconfig, "wb")
+  if f then
+    f:write(table.concat({
+      "[core]",
+      "\tautocrlf = false",
+      "\tfscache = true",
+      "[init]",
+      "\tdefaultBranch = master",
+      "[user]",
+      "\tname = testing.nvim spec",
+      "\temail = spec@example.invalid",
+      "[commit]",
+      "\tgpgsign = false",
+      "[tag]",
+      "\tgpgsign = false",
+      "",
+    }, "\n"))
+    f:close()
+    vim.env.GIT_CONFIG_GLOBAL = gitconfig
+    vim.env.GIT_CONFIG_NOSYSTEM = "1"
+  end
+end
 
 return { root = root, lib = lib.dir }
