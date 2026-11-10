@@ -548,6 +548,41 @@ return function(H)
       text:find("Install ripgrep (Windows)", 1, true) < text:find("matrix.steps }}", 1, true),
       "packages: installed before the pipeline runs"
     )
+
+    -- a name of its own per package manager where they differ (poppler: poppler-utils on apt)
+    for _, pm in ipairs({ "apt", "brew", "choco" }) do
+      refused(
+        { name = "x", packages = { { name = "poppler", why = "a", [pm] = "a; b" } } },
+        ".packages[1]." .. pm,
+        "packages: the " .. pm .. " name is a package name too"
+      )
+    end
+    eq(
+      workflow.validate({
+        name = "x",
+        packages = { { name = "poppler", why = "a", apt = "poppler-utils" } },
+      }).packages[1].apt,
+      "poppler-utils",
+      "packages: an apt name of its own is kept"
+    )
+    local own = project(
+      "own-names",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "public", packages = { { name = "poppler", apt = "poppler-utils", why = "pdftotext" } } }'
+    )
+    local own_text, own_problems = workflow.render(own)
+    eq(own_problems, {}, "packages, own names: no problem")
+    has(
+      own_text,
+      "run: sudo apt-get install -y poppler-utils\n",
+      "packages, own names: apt takes its own"
+    )
+    has(own_text, "run: brew install poppler\n", "packages, own names: brew falls back to name")
+    has(
+      own_text,
+      "run: choco install poppler -y --no-progress\n",
+      "packages, own names: choco falls back to name"
+    )
   end
 
   vim.fn.delete(tmp, "rf")

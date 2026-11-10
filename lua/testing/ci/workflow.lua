@@ -69,6 +69,16 @@ M.LAYOUTS = { public = true, private = true, hosted = true }
 ---Environment names the pipeline step sets itself.
 local RESERVED_ENV = { CI_STEPS = true, CI_REPORT = true, CI_IR = true }
 
+---The keys of one entry of `ci.workflow.packages`.
+local PACKAGE_KEYS = { name = true, why = true, apt = true, brew = true, choco = true }
+
+---One word for a package manager: nothing a shell could read as its own.
+---@param v any
+---@return boolean
+local function is_package_name(v)
+  return type(v) == "string" and v:match("^[%w][%w._+-]*$") ~= nil and #v <= 64
+end
+
 ---Most packages a workflow installs: every one is a step of every hosted leg.
 M.MAX_PACKAGES = 8
 
@@ -94,7 +104,7 @@ local KEYS = {
 ---@field platform string[]
 ---@field node? { version: string, used_by: string }
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
----@field packages { name: string, why: string }[] Installed on every hosted leg (apt, brew, choco), never on a self-hosted one.
+---@field packages { name: string, why: string, apt?: string, brew?: string, choco?: string }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ), never on a self-hosted one.
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
@@ -240,11 +250,17 @@ function M.validate(raw)
           bad('.packages[%d]: expected { name = "ripgrep", why = "<one line>" }', i)
         else
           for k in pairs(p) do
-            if k ~= "name" and k ~= "why" then
+            if not PACKAGE_KEYS[k] then
               bad(".packages[%d]: unknown key %s", i, tostring(k))
             end
           end
-          if type(p.name) ~= "string" or not p.name:match("^[%w][%w._+-]*$") or #p.name > 64 then
+          -- a name of its own per package manager where they differ (poppler-utils on apt, poppler on brew and choco)
+          for _, pm in ipairs({ "apt", "brew", "choco" }) do
+            if p[pm] ~= nil and not is_package_name(p[pm]) then
+              bad('.packages[%d].%s: a package name, letters, digits, ".", "_", "+" and "-"', i, pm)
+            end
+          end
+          if not is_package_name(p.name) then
             -- one word for apt, brew and choco: nothing a shell could read as its own
             bad('.packages[%d].name: a package name, letters, digits, ".", "_", "+" and "-"', i)
           elseif seen[p.name] then
@@ -253,7 +269,8 @@ function M.validate(raw)
             bad(".packages[%d].why: one line of text, why the runs need it", i)
           else
             seen[p.name] = true
-            cfg.packages[#cfg.packages + 1] = { name = p.name, why = p.why }
+            cfg.packages[#cfg.packages + 1] =
+              { name = p.name, why = p.why, apt = p.apt, brew = p.brew, choco = p.choco }
           end
         end
       end
@@ -379,7 +396,7 @@ end
 ---The steps that install the packages of `ci.workflow.packages` on a hosted leg, one per system (apt, brew, choco): the
 ---name is checked to be one word nobody's shell reads as its own. Nothing for none, so a workflow without packages stays
 ---byte for byte what it was; never on a self-hosted leg (`matrix.hosted`), whose machine is not the workflow's to change.
----@param packages { name: string, why: string }[]
+---@param packages { name: string, why: string, apt?: string, brew?: string, choco?: string }[]
 ---@return string
 local function package_steps(packages)
   if #packages == 0 then
@@ -389,9 +406,9 @@ local function package_steps(packages)
   for _, p in ipairs(packages) do
     out[#out + 1] = "      # " .. p.name .. ": " .. p.why .. "\n"
     for _, sys in ipairs({
-      { "Linux", "sudo apt-get install -y " .. p.name },
-      { "macOS", "brew install " .. p.name },
-      { "Windows", "choco install " .. p.name .. " -y --no-progress" },
+      { "Linux", "sudo apt-get install -y " .. (p.apt or p.name) },
+      { "macOS", "brew install " .. (p.brew or p.name) },
+      { "Windows", "choco install " .. (p.choco or p.name) .. " -y --no-progress" },
     }) do
       out[#out + 1] = table.concat({
         "      - name: Install " .. p.name .. " (" .. sys[1] .. ")",

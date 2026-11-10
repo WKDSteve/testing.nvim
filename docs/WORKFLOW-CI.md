@@ -170,7 +170,7 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   `testing ci remote` puts each leg in its column and the publish job in none.
 - **Packages.** `packages` names programs the specs or test sheets need and a runner image lacks (`ripgrep`, for a sheet
   that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
-  macOS and `choco` on Windows (one name for all three), and never on the self-hosted leg, whose machine is not the
+  macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the
   workflow's to change. A name is a package name (letters, digits, `.`, `_`, `+`, `-`; nothing a shell would read as its
   own), `why` is one line above the steps, at most 8 packages. Without `packages` the file is what it was.
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
