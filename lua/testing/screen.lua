@@ -62,7 +62,10 @@ local MAX_DIFF_ROWS = 12
 ---@field attrs? string[]
 ---@field cells? string[][] One entry per screen column, `""` for the second cell of a wide character.
 ---@field cell_attrs? string[] One attribute letter per screen column.
----@field hl? table<string, Testing.Screen.Hl> What each attribute letter is (`child.screen()`; `" "` = no highlight).
+---@field hl? table<string, Testing.Screen.Hl> What each letter of `hl_attrs` is (`child.screen()`; `" "` = no highlight).
+---@field hl_attrs? string[] Like `attrs`, one letter per ATTRIBUTE (two groups that look the same have two).
+---@field hl_cell_attrs? string[] Like `cell_attrs`, by attribute.
+---@field look_groups? table<string, string[]> The groups drawn with each letter of `attrs` (a letter is a look).
 
 ---@class Testing.Screen.Hl
 ---@field groups string[] The highlight groups the attribute is made of (a linked group by its target).
@@ -345,8 +348,15 @@ function M.normalize(shot, opts)
     -- only the letters left after masking: a masked cell has no group either
     groups = {}
     for _, old in ipairs(order) do
-      local entry = shot.hl[old]
-      groups[#groups + 1] = { letter = letters[old], groups = entry and entry.groups or {} }
+      -- a letter of `attrs` is a look (`child.screen()`): all the groups drawn with it; a hand-made shot has `hl` only
+      local names = shot.look_groups and shot.look_groups[old]
+      if not names then
+        local entry = shot.hl[old]
+        names = entry and entry.groups
+      end
+      -- `?`: past the letters there are, the attribute is not known
+      groups[#groups + 1] =
+        { letter = letters[old], groups = names or (old == "?" and { "?" }) or {} }
     end
   end
   return {
@@ -409,9 +419,11 @@ function M.hl_cells(shot, where)
     for r, line in ipairs(shot.lines or {}) do
       local at = line:find(where.text, 1, true)
       if at then
-        -- `lines` has one character per cell (the second half of a wide one left out), `attrs` one letter each
-        local first = vim.fn.strchars(line:sub(1, at - 1)) + 1
-        local attrs = shot.attrs and shot.attrs[r] or ""
+        -- `lines` has one character per cell (the second half of a wide one left out, a combining character
+        -- with its base), the letters one each: count as `\zs` splits, not as strchars() does
+        local first = #vim.fn.split(line:sub(1, at - 1), [[\zs]]) + 1
+        local per_attr = shot.hl_attrs or shot.attrs
+        local attrs = per_attr and per_attr[r] or ""
         local chars = vim.fn.split(where.text, [[\zs]])
         for k, ch in ipairs(chars) do
           local i = first + k - 1
@@ -428,7 +440,8 @@ function M.hl_cells(shot, where)
   if not cells or not cells[c] then
     return nil, ("row %d, column %d is not on the screen"):format(r, c)
   end
-  local marks = shot.cell_attrs and shot.cell_attrs[r] or ""
+  local by_attr = shot.hl_cell_attrs or shot.cell_attrs
+  local marks = by_attr and by_attr[r] or ""
   for col = c, c + (where.cols or 1) - 1 do
     if cells[col] == nil then
       break

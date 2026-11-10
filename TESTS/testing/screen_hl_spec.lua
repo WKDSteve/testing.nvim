@@ -116,6 +116,27 @@ return function(H)
       not okn and tostring(errn):find("groups needs", 1, true) ~= nil,
       "groups of a screen without hl"
     )
+    -- past the 52 letters: `?` is an attribute that is not known, not one without a group
+    local many = screen.normalize(
+      { lines = { "xy" }, attrs = { "a?" }, hl = { a = { groups = { "A" } } } },
+      { groups = true }
+    )
+    eq(
+      many.groups[2],
+      { letter = "b", groups = { "?" } },
+      "an unknown attribute is ? in the groups block"
+    )
+    -- a combining character before the text is one cell, as in `lines`
+    local accent = {
+      lines = { "e\204\129 ok" },
+      attrs = { "  aa" },
+      hl = { a = { groups = { "Mine" } }, [" "] = { groups = {} } },
+    }
+    eq(
+      screen.hl_check(accent, { text = "ok", group = "Mine" }),
+      nil,
+      "a combining character is one cell"
+    )
   end
 
   -- 2. the shape of the step ------------------------------------------------------------------------------------------
@@ -183,6 +204,37 @@ return function(H)
       or shot.hl[shot.attrs[#shot.attrs]:sub(1, 1)]
     ok(status and #status.groups > 0, "a UI element has its group too: " .. vim.inspect(status))
     -- a restart numbers attributes anew: what the UI said before is not kept
+    -- two groups that look the same: one letter, as before ext_hlstate (old snapshots keep their letters), and the
+    -- check still tells them apart
+    c.lua([[
+      vim.api.nvim_set_hl(0, "TestingSameA", { fg = "#123456" })
+      vim.api.nvim_set_hl(0, "TestingSameB", { fg = "#123456" })
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { "aaa bbb" })
+      local ns = vim.api.nvim_create_namespace("same")
+      vim.api.nvim_buf_set_extmark(0, ns, 0, 0, { end_col = 3, hl_group = "TestingSameA" })
+      vim.api.nvim_buf_set_extmark(0, ns, 0, 4, { end_col = 7, hl_group = "TestingSameB" })
+    ]])
+    local same = c.screen()
+    eq(same.attrs[1]:sub(1, 1), same.attrs[1]:sub(5, 5), "the same look is the same letter")
+    eq(same.cell_attrs[1]:sub(1, 1), same.cell_attrs[1]:sub(5, 5), "... by column too")
+    ok(same.hl_attrs[1]:sub(1, 1) ~= same.hl_attrs[1]:sub(5, 5), "two attributes underneath")
+    eq(
+      screen.hl_check(same, { text = "aaa", group = "TestingSameA" }),
+      nil,
+      "the check knows the first"
+    )
+    eq(screen.hl_check(same, { text = "bbb", group = "TestingSameB" }), nil, "... and the second")
+    ok(screen.hl_check(same, { text = "bbb", group = "TestingSameA" }) ~= nil, "... apart")
+    eq(
+      (same.look_groups or {})[same.attrs[1]:sub(1, 1)],
+      { "TestingSameA", "TestingSameB" },
+      "the groups of a look"
+    )
+    has(
+      screen.render(screen.normalize(same, { groups = true })),
+      "TestingSameA+TestingSameB",
+      "the groups block names both"
+    )
     c.restart({ keep_sandbox = true })
     local again = c.screen()
     ok(type(again.hl) == "table", "after a restart the screen still says what its letters are")

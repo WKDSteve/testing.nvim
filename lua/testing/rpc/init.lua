@@ -1049,8 +1049,7 @@ local function build_child(S, opts)
     end
     local shot = call(S, "nvim_exec_lua", { "return " .. BOOT .. ".screen()", {} })
     if type(shot) == "table" then
-      shot.hl = M._hl_of(S, shot.attr_ids)
-      shot.attr_ids = nil
+      M._by_look(S, shot)
     end
     return shot
   end
@@ -1331,6 +1330,8 @@ function M._take_redraw(S, args)
             end
           end
           local entry = {
+            -- what the attribute looks like, all of it: the key the attribute table used before ext_hlstate
+            look = M._look_key(attrs, def[3]),
             groups = groups,
             fg = rgb(attrs.foreground),
             bg = rgb(attrs.background),
@@ -1350,6 +1351,82 @@ function M._take_redraw(S, args)
       end
     end
   end
+end
+
+---A table as one string, keys sorted: what an attribute looks like.
+---@param t any
+---@return string
+local function flat(t)
+  if type(t) ~= "table" then
+    return ""
+  end
+  local keys = vim.tbl_keys(t)
+  table.sort(keys, function(a, b)
+    return tostring(a) < tostring(b)
+  end)
+  local parts = {}
+  for _, k in ipairs(keys) do
+    parts[#parts + 1] = tostring(k) .. "=" .. tostring(t[k])
+  end
+  return table.concat(parts, ",")
+end
+
+---The look of an attribute: its rgb and cterm attributes.
+---@param rgb_attrs any
+---@param cterm_attrs any
+---@return string
+function M._look_key(rgb_attrs, cterm_attrs)
+  return flat(rgb_attrs) .. "|" .. flat(cterm_attrs)
+end
+
+local LOOK_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+---The letters of a screen by LOOK, as before `ext_hlstate`: with it the editor keeps one attribute per group, so two
+---groups that look the same would get two letters and every snapshot written before would differ. `attrs` and
+---`cell_attrs` get one letter per distinct look, in order of first appearance (by screen column); the letters per
+---attribute stay as `hl_attrs` / `hl_cell_attrs`, and `hl` says what each of those is. `look_groups[letter]` are the
+---groups drawn with a look, in order of first appearance.
+---@param S table
+---@param shot table The answer of `rpc_boot.screen` (`attr_ids` is taken out).
+function M._by_look(S, shot)
+  local ids = shot.attr_ids
+  shot.attr_ids = nil
+  shot.hl = M._hl_of(S, ids)
+  if type(ids) ~= "table" or type(shot.cell_attrs) ~= "table" then
+    return
+  end
+  local to_look, by_key, n, look_groups = { [" "] = " ", ["?"] = "?" }, {}, 0, {}
+  local function look_of(letter)
+    if to_look[letter] then
+      return to_look[letter]
+    end
+    local def = S.hl and S.hl[ids[letter]]
+    local key = def and def.look or ("id:" .. tostring(ids[letter]))
+    if not by_key[key] then
+      n = n + 1
+      by_key[key] = n <= #LOOK_LETTERS and LOOK_LETTERS:sub(n, n) or "?"
+    end
+    local look = by_key[key]
+    to_look[letter] = look
+    local groups = look_groups[look] or {}
+    for _, g in ipairs(shot.hl[letter] and shot.hl[letter].groups or {}) do
+      if not vim.tbl_contains(groups, g) then
+        groups[#groups + 1] = g
+      end
+    end
+    look_groups[look] = groups
+    return look
+  end
+  shot.hl_attrs, shot.hl_cell_attrs = shot.attrs, shot.cell_attrs
+  local cell_attrs, attrs = {}, {}
+  for r, row in ipairs(shot.cell_attrs) do
+    cell_attrs[r] = row:gsub(".", look_of)
+  end
+  for r, row in ipairs(shot.attrs or {}) do
+    attrs[r] = row:gsub(".", look_of)
+  end
+  shot.cell_attrs, shot.attrs = cell_attrs, attrs
+  shot.look_groups = look_groups
 end
 
 ---What each attribute letter of a screen is: `{ [letter] = { groups, fg, bg, sp, bold, ... } }`, the colours of a

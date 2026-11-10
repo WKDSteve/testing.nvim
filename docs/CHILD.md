@@ -149,12 +149,15 @@ started is still running", not a proof.
 Attaches a UI on first use (`size`), forces a redraw and reads the grid with `screenstring()` /
 `screenattr()`. `lines[r]` is row r (one character per cell), `text` the same with trailing blanks cut,
 `attrs[r]` one letter per cell: space = no highlight, otherwise one letter per **distinct** attribute in
-order of first appearance. `hl[letter]` says what a letter is: `groups` (the highlight groups the attribute is
-made of, a linked group by the group it ends in, as `ext_hlstate` names them), `fg`, `bg`, `sp` (`#rrggbb` as
-drawn: the default colours where the attribute has none, swapped for `reverse`) and the styles `bold`, `italic`,
-`underline`, `undercurl`, `strikethrough`, `reverse`; `hl[" "]` is a cell without a highlight. The UI is attached
-with `ext_linegrid` and `ext_hlstate`, and the harness keeps what its `hl_attr_define` events say (a restart starts
-that anew). `cursor` is the screen cursor (1-based).
+order of first appearance, one letter per **look** (two groups that look the same share a letter, as they always
+did). Underneath, `hl_attrs[r]` / `hl_cell_attrs[r]` have one letter per **attribute** (with `ext_hlstate` the editor
+keeps one per group), and `hl[letter]` says what such a letter is: `groups` (the highlight groups the attribute is
+made of, a linked group by the group it ends in), `fg`, `bg`, `sp` (`#rrggbb` as drawn: the default colours where
+the attribute has none, swapped for `reverse`) and the styles `bold`, `italic`, `underline`, `undercurl`,
+`strikethrough`, `reverse`; `hl[" "]` is a cell without a highlight. `look_groups[letter]` are the groups drawn with
+a letter of `attrs`. The UI is attached with `ext_linegrid` and `ext_hlstate`, and the harness keeps what its
+`hl_attr_define` events say (a restart starts that anew). The colours of a float with `winblend` or of the popup
+menu with `pumblend` are those before blending (the groups are right). `cursor` is the screen cursor (1-based).
 `cells[r]` and `cell_attrs[r]` are the same row by **screen column**: one entry per column, `""` (attribute
 `' '`) for the second cell of a wide character, so a column number means the same cell as on the screen.
 
@@ -217,9 +220,9 @@ placeholders in the text rows (this changes their width, not the width of the at
 `mode = false` leave those lines out.
 
 **Groups**: `groups = true` adds a block `--- groups` after the attributes, one line per letter with the groups it is
-made of (`a DiffText`, `b Comment+CursorLine`, `-` for none), so a snapshot also fails when a text keeps its look
-but loses its group. Only the letters left after masking are listed (a masked cell has no group). Without it the
-file is as before: old snapshots stay valid.
+made of: every group drawn with that look (`a DiffText`, `b Comment+CursorLine`, `-` for none, `?` past the 52
+letters), so a snapshot also fails when a text keeps its look but loses its group. Only the letters left after
+masking are listed (a masked cell has no group). Without it the file is as before: old snapshots stay valid.
 
 **A place, checked**: `screen.hl_check(shot, want, resolved)` checks every cell of `want.text` (its first appearance
 on the screen) or of `want.row`, `want.col` (`want.cols` wide) against `group`, `fg`, `bg`, `sp` and the styles; it

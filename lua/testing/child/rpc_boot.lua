@@ -475,8 +475,8 @@ local ATTR_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 ---A text grid of the screen. `lines[r]` is row r with one character per cell (a wide character's
 ---second cell is skipped); `attrs[r]` has one letter per cell: ' ' = no highlight, otherwise a letter
----per DISTINCT attribute in order of first appearance (attributes are comparable, not resolvable to a
----group: `vim.inspect_pos` names the groups of a buffer position).
+---per DISTINCT attribute in order of first appearance; `attr_ids` says which attribute a letter stands for, and the
+---parent (`testing.rpc`) knows from its UI what that attribute is made of and letters the screen by look.
 ---`cells[r]` and `cell_attrs[r]` are the same row by SCREEN COLUMN: one entry per column, `""` (and
 ---the attribute ' ') for the second cell of a wide character; `testing.screen` masks by column with them.
 ---Needs an attached UI (the parent attaches one before the first call): without a UI nvim does not
