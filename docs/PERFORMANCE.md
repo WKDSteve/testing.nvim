@@ -414,6 +414,15 @@ entry missed again in the next run: `bash --version` had hung for ten seconds wh
 from a silence. Windows, three runs on a fresh cache folder: 516 s (stores 133 files), then 284 s (132 from the cache,
 -45 %), 337 s (132 from the cache; the machine was busier).
 
+**The warm pool does not pay here.** Same commit, uncached, `--pool-reuse` against a child per file: WSL2 72 s against
+73 s, Windows 434 s against 450 s wall (spec time 1601 s against 1589 s). The start of a child editor is not what this
+suite waits for (its files wait for the editors and repositories they start themselves), and 18 files (WSL2) / 19
+(Windows) leave state the pool cannot reset (`guard pool` and `guard state` findings, an error under this repository's
+`guards.state = "error"`). `isolated = "file"` stays a child per file; those findings are a list of leaks for later, not
+a reason for the pool.
+
+**After all of it** (uncached, Windows, same machine): 730 s to 450 s wall (-38 %), 2682 s to 1589 s spec time (-41 %).
+
 ## Rules checked
 
 * **PERF-11 (memoization)**: nothing measured here repeats pure work per call; the stable hash of a path is
