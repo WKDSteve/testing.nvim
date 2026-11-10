@@ -1,0 +1,78 @@
+name: lib.nvim suite
+
+# Not part of the gate: ci.yml is generated from .testing.lua (`testing init --workflow=public`) and moves ci-verified;
+# this check of lib.nvim's whole suite through this runner stays apart, hand-written, as it was in ci.yml before.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: the token only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+
+  # M0 exit criterion kept as a regression check: lib.nvim's whole suite, unchanged, runs through
+  # testing.nvim's driver with the same verdict as lib.nvim's own TESTS/run.lua. Not part of the
+  # ci-verified gate yet: it has only been verified locally (Windows), and lib.nvim's suite
+  # touches git and the network, so it must prove stable on all three runners first.
+  lib-suite:
+    name: lib.nvim suite via testing.nvim (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/lib.nvim
+          path: .deps/lib.nvim
+          ref: ci-verified
+      # telemetry_wrap_spec.lua needs the real runtime-analysis.telemetry module on the runtimepath.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/runtime-analysis.nvim
+          path: .deps/runtime-analysis.nvim
+          ref: ci-verified
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: stable
+      # lib.nvim's git_spec.lua reads the checkout it runs in and expects the branch to be `main`
+      # (lib's own CI checks out main). The ci-verified checkout is on a branch of that other name,
+      # so give it the name the unchanged lib.nvim spec expects; the commit stays the same.
+      - name: Name the lib.nvim checkout's branch main
+        run: git -C .deps/lib.nvim checkout -B main
+      - name: Run the lib.nvim suite
+        env:
+          LIB_NVIM_DIR: ${{ github.workspace }}/.deps/lib.nvim
+          DRIVER: ${{ github.workspace }}/scripts/testing.lua
+          RTP_EXTRA: ${{ github.workspace }}/.deps/runtime-analysis.nvim
+          IR_FILE: ${{ runner.temp }}/lib-suite-ir.json
+        run: |
+          exec > >(tee -a "$RUNNER_TEMP/lib-suite-output.log") 2>&1
+          # The specs read the working directory as "this repository": run from the lib.nvim root.
+          cd .deps/lib.nvim
+          # --first-run: lib.nvim's own deps_spec tests the first-run float, the default would switch it off
+          nvim -n -i NONE --headless -u NONE -l "$DRIVER" . --first-run --rtp "$RTP_EXTRA" --json "$IR_FILE"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: failure()
+        with:
+          name: lib-suite-ir-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/lib-suite-ir.json
+            ${{ runner.temp }}/lib-suite-output.log
+          if-no-files-found: ignore
+          retention-days: 14

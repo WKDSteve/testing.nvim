@@ -97,12 +97,36 @@ return {
   -- proofs run.
   ci = {
     profiles = {
-      fast = { "stylua", "luacheck" },
-      full = { "fast", "suite", "conformance" },
+      -- workflow-in-sync: .github/workflows/ci.yml is the one `workflow` below gives (testing init --workflow=public)
+      fast = { "stylua", "luacheck", "workflow-in-sync" },
+      full = { "fast", "suite", "conformance", "contract" },
       strict = { "full", "luals" },
+    },
+    -- The GitHub workflow, generated: `testing init --workflow=public --force` writes it (docs/WORKFLOW-CI.md). The
+    -- suite of lib.nvim through this runner is not part of the gate and has its own workflow (lib-suite.yml).
+    workflow = {
+      name = "testing.nvim",
+      layout = "hosted",
+      -- the steps that depend on the platform: the hosted windows and macOS legs run only these
+      platform = { "suite", "conformance" },
+      node = { version = "22", used_by = "the Node contract check" },
+      checkouts = {
+        {
+          repo = "WKDSteve/lib.nvim",
+          ref = "ci-verified",
+          why = "lib.nvim is a hard runtime dependency the runner resolves itself (deps stays empty): .deps/lib.nvim.",
+        },
+      },
+      publish = { why = "Every repository of the fleet checks testing.nvim out at ci-verified." },
+      -- `testing ci land`: a check branch ci/** runs the hosted legs, main moves only once it is green there
+      land = true,
     },
     steps = {
       luacheck = { preset = "luacheck", args = { "lua", "TESTS", "scripts", "plugin" } },
+      ["workflow-in-sync"] = { preset = "workflow-in-sync" },
+      -- testing-export/1 from outside (schema, golden files, refused documents, TypeScript types); installs the dev
+      -- dependencies of contract/ on first use.
+      contract = { run = { "scripts/contract.sh" }, needs = { "node", "npm" } },
     },
   },
   -- What the specs of this repository start ON PURPOSE (their subject is the process driver): real child

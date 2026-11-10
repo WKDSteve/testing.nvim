@@ -188,7 +188,10 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   as soon as the file and `.testing.lua` disagree. It is opt-in: a repository without `ci.workflow` is not generated and
   not checked.
 - **First users.** rules.nvim and tasks.nvim: their hand-written workflows were the model; tasks.nvim's is generated
-  byte for byte, rules.nvim's differs only in the comment above the publish job.
+  byte for byte, rules.nvim's differs only in the comment above the publish job. testing.nvim's own workflow is
+  generated too (layout `hosted`, `land`, Node for its contract step, lib.nvim as a checkout since its `deps` stays
+  empty); the check of lib.nvim's suite through this runner, not part of the gate, has a hand-written file of its own
+  (`lib-suite.yml`).
 
 ### Why there is no `testing ci workflow`
 
