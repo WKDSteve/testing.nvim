@@ -217,6 +217,32 @@ return function(H)
   end
 
   do
+    -- Neovim's temp folder (`tempname()`) is new for every editor: the same failure under two of them is known
+    local function gio(dir, win)
+      return {
+        steps = {
+          step("suite", "red", {
+            f(
+              "TESTS/file_spec.lua",
+              183,
+              "trash failed: gio: file:///tmp/nvim.<USER>/"
+                .. dir
+                .. "/deletable.lua: not supported"
+            ),
+            f("TESTS/file_spec.lua", 190, [[C:\Temp\nvim.0\]] .. win .. [[\x.lua: locked]]),
+          }),
+        },
+      }
+    end
+    local r = baseline.classify(gio("pnjAMs/22", [[ab12CD\3]]), gio("k63ORx/5", [[zz99yy\41]]))
+    eq({ #r.new, #r.known, #r.fixed }, { 0, 2, 0 }, "temp folders: the same red spec is known")
+    local other = baseline.classify(gio("pnjAMs/22", [[ab12CD\3]]), {
+      steps = { step("suite", "red", { f("TESTS/file_spec.lua", 183, "trash failed: another") }) },
+    })
+    eq(#other.new, 2, "temp folders: another message is still new")
+  end
+
+  do
     -- a red step without findings is compared as a whole
     local head = { steps = { step("gate", "red"), step("other", "red") } }
     local base = { steps = { step("gate", "red") } }

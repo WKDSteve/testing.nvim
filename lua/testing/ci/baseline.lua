@@ -58,6 +58,8 @@ function M.key(step, f)
   -- `...nap/`), so a path in the text would tell the same finding apart between head and base
   text =
     text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>"):gsub(":%d+", ":#")
+  -- so does Neovim's own temp folder (`tempname()`: `.../nvim.<user>/<random>/<n>`), new for every editor
+  text = text:gsub("(nvim%.[^/\\%s]*)[/\\]%w+[/\\]%d+", "%1/<tempname>")
   return table.concat({ step, file, text }, "\0")
 end
 
