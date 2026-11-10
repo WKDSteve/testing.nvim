@@ -557,17 +557,11 @@ local function start(S, async_cb)
     end
   end
 
-  local env_allow = opts.env_allow
-  if opts.user_config then
-    -- the user's config reads the user's environment (`REPOS_DIR`, ...): all of it but `NVIM*`
-    env_allow = vim.list_extend(
-      vim.deepcopy(env_allow or {}),
-      vim.tbl_keys(opts.parent_env or vim.fn.environ())
-    )
-  end
   local e = child_mod.environment({
     parent_env = opts.parent_env,
-    env_allow = env_allow,
+    env_allow = opts.env_allow,
+    -- the user's config reads the user's environment (`REPOS_DIR`, ...): all of it but `NVIM*`
+    pass_env = opts.user_config ~= nil,
     extra_env = extra_env,
     deterministic = opts.deterministic,
     isolate_home = opts.isolate_home,

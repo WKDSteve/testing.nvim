@@ -148,6 +148,10 @@ return M
       sizes = { { rows = 10, cols = 60 } },
       steps = {
         { expect = "vim.g.user_config_mod == 42", note = "its init ran, its lua/ is found" },
+        {
+          expect = "vim.env.TESTING_UC_PROBE == 'from the caller'",
+          note = "the caller's environment, not the allow-list",
+        },
         { expect = ("vim.fs.normalize(vim.fn.stdpath('config')) == %q"):format(config) },
         { expect = "vim.g.user_plugin_dir_ran == true", note = "its plugin/ files" },
         { expect = "vim.g.pack_px == true", note = "the packages of its data folder" },
@@ -170,7 +174,9 @@ return M
       },
     }))
     s.path = root .. "/TESTS/sheets/uc.sheet.lua"
+    vim.env.TESTING_UC_PROBE = "from the caller"
     local res = sheet.run(s, { root = root, getenv = getenv, ci = false })
+    vim.env.TESTING_UC_PROBE = nil
     eq({ res.status, res.failures }, { "pass", {} }, "a sheet on the user's config runs")
     eq(tree(config), before_config, "the user's config is unchanged (lock file, folders)")
     eq(

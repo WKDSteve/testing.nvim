@@ -97,6 +97,7 @@ M.HOST_C_COMMAND =
 ---@field base? string Directory below which the sandbox is created (default: the parent's temp dir).
 ---@field name? string Sandbox directory name (default unique).
 ---@field deterministic? boolean `LANG`/`LC_ALL=C.UTF-8` and `TZ=UTC` are set (default true; `false`: the parent's are passed on).
+---@field pass_env? boolean The parent's whole environment but `NVIM*` instead of the allow-list (a child on the user's own config).
 ---@field isolate_home? boolean `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` point into the sandbox, `HOMEDRIVE`/`HOMEPATH` are removed (default false: the user's home, git needs the identity).
 ---@field guard? table Configuration of the guard layer (`testing.run.options.guard_config`, JSON-safe): installed in the child for the file (`testing.child.runner`). Nil: no guards.
 ---@field trace? boolean A child that times out or dies leaves a trace artifact (default true; the parent writes it, the job only carries the choice).
@@ -171,7 +172,12 @@ function M.environment(spec)
   local dirs, sandbox_vars, drop =
     env_mod.sandbox_env(sandbox, { isolate_home = spec.isolate_home == true })
 
-  local clean = env_mod.sanitize(spec.parent_env or vim.fn.environ(), { allow = spec.env_allow })
+  local parent = spec.parent_env or vim.fn.environ()
+  local allow = spec.env_allow
+  if spec.pass_env then
+    allow = vim.list_extend(vim.deepcopy(allow or {}), vim.tbl_keys(parent))
+  end
+  local clean = env_mod.sanitize(parent, { allow = allow })
   local env = clean.env
   if spec.deterministic ~= false then
     env_mod.apply_determinism(env)
