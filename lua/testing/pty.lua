@@ -108,7 +108,10 @@ function M.open(command, opts)
     name = ("testing-pty-%d-%d"):format(vim.uv.os_getpid(), counter),
     _opts = opts,
   }, Session)
-  self.raw_path = ("/tmp/%s.raw"):format(self.name)
+  -- on this machine the recording lives in this editor's temp folder (a spec may write there, its guard allows it);
+  -- through WSL in the distribution's /tmp
+  self.raw_path = #host(opts) == 0 and (vim.fn.tempname() .. "-" .. self.name .. ".raw")
+    or ("/tmp/%s.raw"):format(self.name)
   local quoted = {}
   for _, word in ipairs(command) do
     quoted[#quoted + 1] = "'" .. word:gsub("'", "'" .. string.char(92) .. "''") .. "'"
@@ -131,7 +134,7 @@ function M.open(command, opts)
   if res.code ~= 0 then
     return nil, "tmux new-session failed: " .. res.stderr
   end
-  res = tmux(self, { "pipe-pane", "-t", self.name, "-o", "cat >> " .. self.raw_path })
+  res = tmux(self, { "pipe-pane", "-t", self.name, "-o", "cat >> '" .. self.raw_path .. "'" })
   if res.code ~= 0 then
     self:close()
     return nil, "tmux pipe-pane failed: " .. res.stderr
@@ -189,6 +192,12 @@ end
 function Session:close()
   tmux(self, { "kill-session", "-t", self.name })
   local argv = host(self._opts)
+  if #argv == 0 then
+    -- the recording is a file of this machine, in this editor's temp folder: removed without a process (a spec's
+    -- process guard blocks an `rm` it was not told about, images.nvim's pty_osc1337_spec on Linux)
+    os.remove(self.raw_path)
+    return
+  end
   vim.list_extend(argv, { "rm", "-f", self.raw_path })
   runner(self._opts)(argv)
 end

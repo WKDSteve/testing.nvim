@@ -51,6 +51,21 @@ return function(H)
   session:send({ "a b" }, true)
   eq(calls[2][#lead + 4], "-l", "literal text uses -l")
 
+  -- close: the session goes; the recording is removed without a process on this machine (a spec's process guard
+  -- would block an `rm` it was not told about), through WSL with rm
+  calls = {}
+  session:close()
+  eq(calls[1][#lead + 1], "kill-session", "close ends the tmux session")
+  if windows then
+    eq(
+      calls[2],
+      { "wsl", "-d", "arch", "--exec", "rm", "-f", session.raw_path },
+      "close: rm through WSL"
+    )
+  else
+    eq(#calls, 1, "close: no process for the recording on this machine")
+  end
+
   -- raw() reads the recording in binary mode: a text-mode read folds CRLF into LF (on Windows)
   local binary
   local rec = assert(pty.open({ "x" }, {
