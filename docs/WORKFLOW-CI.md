@@ -208,6 +208,10 @@ generated workflow is therefore `testing init --workflow=public`, and only its c
 
 `testing ci remote` counts push runs only:
 
+- After `testing ci land` the legs ran on the check branch `ci/**`, and main's run of the same commit skipped them: the
+  green check run then stands for the commit, so every system still has its cell. A red run of main (a failed publish)
+  stays what is shown, and a red check run of an earlier land never hides a later run of main.
+
 - A system without a job is `-`, with no state in `--json`: no verdict, neither `ok` nor red. The summary counts the
   jobs that exist and says how many repositories have no macOS job: `fully green: 3 / 3 (no macos job: 1)`.
 - Red only on macOS is red, also for the exit code.

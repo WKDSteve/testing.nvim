@@ -113,6 +113,48 @@ return function(H)
       "pick: the push run wins over a newer pull_request run"
     )
     eq(remote.pick_run({ pr }, "CI"), nil, "pick: a pull_request run alone is no run")
+
+    -- testing ci land: the legs ran on ci/**, the later run of main skipped them; the check run stands for the commit
+    local function run(id, branch, at, conclusion)
+      return {
+        id = id,
+        name = "CI",
+        event = "push",
+        head_branch = branch,
+        created_at = at,
+        conclusion = conclusion,
+        status = conclusion and "completed" or "in_progress",
+      }
+    end
+    local check = run(10, "ci/x.nvim-abc", "2026-11-10T01:00:00Z", "success")
+    eq(
+      remote.pick_run({ run(11, "main", "2026-11-10T01:05:00Z", "success"), check }, "CI").id,
+      10,
+      "pick, land: the green check run, not main's run without legs"
+    )
+    eq(
+      remote.pick_run({ run(11, "main", "2026-11-10T01:05:00Z", nil), check }, "CI").id,
+      10,
+      "pick, land: also while main's run (publish) is still going"
+    )
+    eq(
+      remote.pick_run({ run(11, "main", "2026-11-10T01:05:00Z", "failure"), check }, "CI").id,
+      11,
+      "pick, land: a red run of main stays visible (a failed publish)"
+    )
+    eq(
+      remote.pick_run({
+        run(11, "main", "2026-11-10T01:05:00Z", "success"),
+        run(10, "ci/x.nvim-abc", "2026-11-10T01:00:00Z", "failure"),
+      }, "CI").id,
+      11,
+      "pick, land: a red check run never hides a later run of main"
+    )
+    eq(
+      remote.pick_run({ run(11, "main", "2026-11-10T01:05:00Z", "success") }, "CI").id,
+      11,
+      "pick: without a check run, main's run as before"
+    )
   end
 
   do
@@ -586,6 +628,40 @@ return function(H)
     7,
     "cache: one file per GitHub repository"
   )
+  -- a runs list stored before runs carried their branch (no version) is asked anew once, then cached again
+  do
+    for _, f in ipairs(vim.fn.glob(state .. "/testing/ci-remote/*.json", true, true)) do
+      local fh = assert(io.open(f, "rb"))
+      local stored = vim.json.decode(fh:read("*a"))
+      fh:close()
+      if type(stored.runs) == "table" then
+        stored.runs.v = nil
+      end
+      fh = assert(io.open(f, "wb"))
+      fh:write(vim.json.encode(stored))
+      fh:close()
+    end
+    run(vim.list_extend({ "--json" }, vim.deepcopy(all)))
+    local unversioned = {}
+    for _, r in ipairs(requests) do
+      if r.path == R .. "alpha.nvim/actions/runs" then
+        unversioned[#unversioned + 1] = r.etag or "none"
+      end
+    end
+    eq(unversioned, { "none" }, "cache: an unversioned runs list is asked without If-None-Match")
+    run(vim.list_extend({ "--json" }, vim.deepcopy(all)))
+    local again
+    for _, r in ipairs(requests) do
+      if r.path == R .. "alpha.nvim/actions/runs" then
+        again = r.etag
+      end
+    end
+    eq(
+      again,
+      '"runs-alpha"',
+      "cache: ... and the list stored then is versioned (conditional again)"
+    )
+  end
 
   -- a new run (a re-run: updated_at moved) fetches the jobs again
   API[R .. "alpha.nvim/actions/runs"].etag = '"runs-alpha-2"'

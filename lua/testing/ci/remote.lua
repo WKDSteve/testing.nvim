@@ -280,6 +280,7 @@ local function trim_run(raw)
     updated_at = text(raw.updated_at, 40),
     html_url = text(raw.html_url, 500),
     head_sha = text(raw.head_sha, 64),
+    head_branch = text(raw.head_branch, 200),
     event = text(raw.event, 40),
     run_attempt = type(raw.run_attempt) == "number" and raw.run_attempt or nil,
   }
@@ -331,14 +332,18 @@ local function trim_list(list, trim)
   return out
 end
 
+---The version of a stored runs list: 2 since runs carry `head_branch` (`testing ci land`, `pick_run`).
+M.RUNS_V = 2
+
 ---The newest run of `workflow` (by `created_at`, then id) that a push started; nil when there is none. The name is
 ---compared without case: the repositories spell their CI workflow `CI` and `ci`. A pull-request run of the same
----workflow on the same SHA (a fast-forward PR) is not the verdict of the commit on the branch.
+---workflow on the same SHA (a fast-forward PR) is not the verdict of the commit on the branch. After `testing ci land`
+---the green check run of the commit (branch `ci/**`) wins over main's run without legs, unless that one went red.
 ---@param runs table[]
 ---@param workflow string
 ---@return table|nil
 function M.pick_run(runs, workflow)
-  local best
+  local best, check
   workflow = workflow:lower()
   for _, r in ipairs(runs) do
     if r.name and r.name:lower() == workflow and r.event == "push" then
@@ -346,6 +351,23 @@ function M.pick_run(runs, workflow)
       if not best or key > best.key then
         best = { key = key, run = r }
       end
+      if
+        type(r.head_branch) == "string"
+        and r.head_branch:find("^ci/")
+        and (not check or key > check.key)
+      then
+        check = { key = key, run = r }
+      end
+    end
+  end
+  -- `testing ci land`: the legs ran on the check branch ci/**, and the later push of the same commit to main skipped
+  -- them (already verified); its run alone would show no system at all. The check branch's run then stands for the
+  -- commit when it was green, unless the run on main itself went red (a failed publish of ci-verified must stay
+  -- visible); a red check run of an earlier land never hides a later run of main.
+  if best and check and best.run ~= check.run and check.run.conclusion == "success" then
+    local c = best.run.conclusion
+    if c ~= "failure" and c ~= "cancelled" and c ~= "timed_out" and c ~= "startup_failure" then
+      return check.run
     end
   end
   return best and best.run
@@ -462,6 +484,7 @@ function M.classify(rec, run, jobs, non_gating, now)
     created_at = run.created_at,
     updated_at = run.updated_at,
     event = run.event,
+    branch = run.head_branch,
     attempt = run.run_attempt,
   }
   local notes = {}
@@ -615,7 +638,8 @@ local function read_cache(path)
   if type(doc.runs) == "table" and type(doc.runs.etag) == "string" then
     local list = trim_list(doc.runs.list, trim_run)
     if list then
-      out.runs = { etag = doc.runs.etag, list = list }
+      out.runs =
+        { etag = doc.runs.etag, list = list, v = doc.runs.v == M.RUNS_V and M.RUNS_V or nil }
     end
   end
   local j = doc.jobs
@@ -696,6 +720,11 @@ local function fetch(rec, ctx, done)
   local base = ("/repos/%s/%s/actions/runs"):format(rec.owner, rec.repo)
   -- the stored ETag belongs to the runs of the stored commit only
   local runs_cache = cache.sha == rec.sha and cache.runs or nil
+  -- a list stored before runs carried their branch (no `v`) cannot tell the check run of `testing ci land` from main's:
+  -- asked anew, once
+  if runs_cache and runs_cache.v ~= M.RUNS_V then
+    runs_cache = nil
+  end
   -- an older lib.nvim lets a throwing curl (none on PATH) through: that is this repository's error, not a crash
   local sent, send_err = pcall(
     ask,
@@ -713,13 +742,13 @@ local function fetch(rec, ctx, done)
         local runs
         if res.not_modified and runs_cache then
           runs = runs_cache.list
-          fresh.runs = { etag = res.etag or runs_cache.etag, list = runs }
+          fresh.runs = { etag = res.etag or runs_cache.etag, list = runs, v = M.RUNS_V }
         else
           runs = trim_list(type(res.data) == "table" and res.data.workflow_runs, trim_run)
           if not runs then
             return finish("GitHub answered the runs without a workflow_runs list")
           end
-          fresh.runs = res.etag and { etag = res.etag, list = runs } or nil
+          fresh.runs = res.etag and { etag = res.etag, list = runs, v = M.RUNS_V } or nil
         end
         local run = M.pick_run(runs, rec.workflow)
         if not run then
