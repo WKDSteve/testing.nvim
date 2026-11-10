@@ -317,7 +317,8 @@ the mirror (`flock`), since the second would check the dependencies out under th
 side (it proves Linux, the hook guards Windows): the hook runs its `fast` profile, seconds.
 WSL needs `nvim`, `git` and the tools of the pipeline (`stylua`, `luacheck`, at the versions of
 `testing.ci.workflow.TOOLS`) on its PATH; `~/.local/bin` is added (a shell started by `wsl.exe` reads no profile), so
-the release binaries can live there without `sudo`. A missing one ends the check as `infra`, as on Windows. What is
+the release binaries can live there without `sudo`: `wsl.exe -e bash scripts/wsl-tools.sh` installs stylua and
+luacheck at those versions and Node 22 (for testing.nvim's contract step), checksums checked. A missing one ends the check as `infra`, as on Windows. What is
 Windows-specific is checked by the windows leg of the hosted CI. Not with `--repos-root`.
 
 **`--quick`: each commit cheaply, the whole state once.** With `--quick` the suite at the commit runs only the spec

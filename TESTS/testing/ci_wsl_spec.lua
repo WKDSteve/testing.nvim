@@ -23,6 +23,22 @@ return function(H)
   local commit = require("testing.ci.commit")
 
   eq(wsl.wsl_path("E:/repos/x.nvim"), "/mnt/e/repos/x.nvim", "a Windows path as WSL sees it")
+
+  -- scripts/wsl-tools.sh installs the tools at the versions of the workflow table: one source for both
+  do
+    local this = vim.fs.normalize(debug.getinfo(1, "S").source:sub(2))
+    local repo = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(this)))
+    local f = assert(io.open(repo .. "/scripts/wsl-tools.sh", "rb"))
+    local text = f:read("*a")
+    f:close()
+    local tools = require("testing.ci.workflow").TOOLS
+    eq(text:match('STYLUA_VERSION="([^"]+)"'), tools.stylua, "wsl-tools.sh: stylua as in TOOLS")
+    eq(
+      text:match('LUACHECK_VERSION="([^"]+)"'),
+      tools.luacheck,
+      "wsl-tools.sh: luacheck as in TOOLS"
+    )
+  end
   eq(wsl.wsl_path("C:\\Users\\a b\\t"), "/mnt/c/Users/a b/t", "backslashes and a blank")
 
   -- the script
