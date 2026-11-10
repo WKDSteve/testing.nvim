@@ -1050,7 +1050,16 @@ local function spawn_lines(ctx, hasher, root)
   end
   if lines then
     for _, tool in ipairs({ "bash", "git", "nvim" }) do
-      lines[#lines + 1] = ("spawn tool %s=%s"):format(tool, tools.identity(tool, ctx.tools))
+      local id = tools.identity(tool, ctx.tools)
+      if not id then
+        lines, why =
+          nil,
+          ("tool %s: found, but it did not answer `--version` (its identity is unknown in this run)"):format(
+            tool
+          )
+        break
+      end
+      lines[#lines + 1] = ("spawn tool %s=%s"):format(tool, id)
     end
   end
   t[root] = { lines, why }

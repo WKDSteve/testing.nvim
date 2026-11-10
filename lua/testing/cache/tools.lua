@@ -36,47 +36,89 @@ M.GIT_ENV = {
   "XDG_CONFIG_HOME",
 }
 
----@type table<string, string>
+---The identity of each program asked in this process; `false`: the program is there but did not answer.
+---@type table<string, string|false>
 local memo = {}
 
----Output of a command, or nil when it cannot be run or fails.
+---How long one question to a program may take, in milliseconds. A program that does not answer is asked once more:
+---Git Bash on a loaded Windows machine once hung for the whole ten seconds of the old single question.
+M.ASK_MS = 5000
+
+---Output of a command; nil and `"silent"` when it did not answer in time (or could not be started although it is
+---there), nil and `"failed"` when it answered with an exit code other than 0.
 ---@param argv string[]
----@return string|nil
+---@return string|nil text
+---@return "silent"|"failed"|nil why
 local function output(argv)
   -- not from the project: on Windows a program is looked for in the working directory first, and a `git.exe` in the
   -- root of the project under test must not be what the key asks for its version
   local cwd = vim.fn.stdpath("data")
   local ok, res = pcall(function()
     return vim
-      .system(argv, { text = true, timeout = 10000, cwd = vim.fn.isdirectory(cwd) == 1 and cwd or nil })
-      :wait(11000)
+      .system(argv, { text = true, timeout = M.ASK_MS, cwd = vim.fn.isdirectory(cwd) == 1 and cwd or nil })
+      :wait(M.ASK_MS + 1000)
   end)
-  if not ok or type(res) ~= "table" or res.code ~= 0 then
-    return nil
+  -- `vim.system` ends a process that runs past `timeout` with SIGTERM and reports code 124
+  if not ok or type(res) ~= "table" or res.code == 124 or res.signal == 15 then
+    return nil, "silent"
+  end
+  if res.code ~= 0 then
+    return nil, "failed"
   end
   local text = (res.stdout or ""):gsub("\r", "")
   return text
 end
 
----@param text string|nil
+---`output`, and once more when the program did not answer.
+---@param argv string[]
+---@return string|nil text
+---@return "silent"|"failed"|nil why
+local function ask(argv)
+  local text, why = output(argv)
+  if why == "silent" then
+    text, why = output(argv)
+  end
+  return text, why
+end
+
+---Is the program on the PATH? (`<absent>` is a statement about this, never a guess from a missing answer.)
+---@param name string
+---@return boolean
+local function present(name)
+  local ok, executable = pcall(require, "lib.nvim.cross.executable")
+  if ok and type(executable) == "table" and type(executable.clear) == "function" then
+    -- the PATH of a run can change between two questions (a spec that puts stand-ins first): asked fresh
+    executable.clear(name)
+    return executable.exists(name)
+  end
+  return vim.fn.executable(name) == 1
+end
+
+---@param text string
 ---@return string
 local function first_line(text)
-  return text and vim.trim(text:match("^[^\n]*")) or "<absent>"
+  return vim.trim(text:match("^[^\n]*"))
 end
 
 ---@param name string
 ---@param lookup fun(name: string): string|nil
----@return string
+---@return string|nil  nil when git did not answer
 local function git_identity(name, lookup)
-  local version = first_line(output({ name, "--version" }))
-  if version == "<absent>" then
-    return version
+  local out = ask({ name, "--version" })
+  if not out then
+    return nil
   end
+  local version = first_line(out)
   -- the system and the global configuration (a `core.hookspath` there changed what a fixture repository does), with
-  -- where each line comes from; the configuration of the repository the runner happens to sit in is not asked
+  -- where each line comes from; the configuration of the repository the runner happens to sit in is not asked.
+  -- A scope without a file is `<none>` (git exits 1); a scope that did not answer leaves git without an identity.
   local config = {}
   for _, scope in ipairs({ "--system", "--global" }) do
-    config[#config + 1] = output({ name, "config", scope, "--list", "--show-origin" }) or "<none>"
+    local listed, why = ask({ name, "config", scope, "--list", "--show-origin" })
+    if why == "silent" then
+      return nil
+    end
+    config[#config + 1] = listed or "<none>"
   end
   local env = {}
   for _, var in ipairs(M.GIT_ENV) do
@@ -89,26 +131,33 @@ local function git_identity(name, lookup)
     .. require("testing.cache.hash").sha256(table.concat(env, "\0")):sub(1, 16)
 end
 
----What a program is, as a line of the key: its version, and for git also its configuration. Made once per process; `over`
----(a table from tool name to text, for specs) replaces it.
+---What a program is, as a line of the key: its version, and for git also its configuration; `<absent>` when it is not
+---on the PATH. Nil when it is there but did not answer `--version` (twice): then nothing is known about it, and a key
+---that would name it cannot be made (it would store a result under a line that the next run, with an answer, never
+---finds again). Made once per process; `over` (a table from tool name to text, for specs; `false` = did not answer)
+---replaces it.
 ---@param name string `git`, `bash` or `nvim`.
----@param over? table<string, string>
+---@param over? table<string, string|false>
 ---@param lookup? fun(name: string): string|nil  Environment lookup (default `vim.uv.os_getenv`).
----@return string
+---@return string|nil
 function M.identity(name, over, lookup)
-  if over and over[name] then
-    return over[name]
+  if over and over[name] ~= nil then
+    return over[name] or nil
   end
-  if memo[name] then
-    return memo[name]
+  local hit = memo[name]
+  if hit ~= nil then
+    return hit or nil
   end
   local text
-  if name == "git" then
+  if not present(name) then
+    text = "<absent>"
+  elseif name == "git" then
     text = git_identity(name, lookup or vim.uv.os_getenv)
   else
-    text = first_line(output({ name, "--version" }))
+    local out = ask({ name, "--version" })
+    text = out and first_line(out) or nil
   end
-  memo[name] = text
+  memo[name] = text or false
   return text
 end
 

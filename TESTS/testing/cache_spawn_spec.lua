@@ -65,6 +65,55 @@ return function(H)
     ok(away, "identity: ... from the data directory, not the project: " .. vim.inspect(cwds))
   end
 
+  -- a program that is there but does not answer has no identity (never `<absent>`, which says "not installed"): it is
+  -- asked once more, and a second silence is the answer for the whole process. Git Bash on a loaded Windows machine
+  -- once hung for the ten seconds of the old single question, and every vouched spec was stored under
+  -- `bash=<absent>`, a key the next run (with an answer) never found again.
+  do
+    local real_system, asked = vim.system, 0
+    local function stub(answers)
+      asked = 0
+      ---@diagnostic disable-next-line: duplicate-set-field
+      vim.system = function()
+        asked = asked + 1
+        local a = answers[math.min(asked, #answers)]
+        return {
+          wait = function()
+            return a
+          end,
+        }
+      end
+    end
+    local SILENT = { code = 124, signal = 15, stdout = "", stderr = "" }
+    local VERSION =
+      { code = 0, signal = 0, stdout = "GNU bash, version 5.2\r\nmore\n", stderr = "" }
+    -- `nvim` is on the PATH of every run (it runs this spec)
+    stub({ SILENT, VERSION })
+    tools.reset()
+    local once = tools.identity("nvim")
+    eq({ once, asked }, { "GNU bash, version 5.2", 2 }, "identity: a silence is asked once more")
+    stub({ SILENT })
+    tools.reset()
+    local silent = tools.identity("nvim")
+    local asked_first = asked
+    local again = tools.identity("nvim")
+    eq(
+      { silent, again, asked_first, asked },
+      { nil, nil, 2, 2 },
+      "identity: two silences, no identity, not asked again"
+    )
+    stub({ VERSION })
+    tools.reset()
+    eq(
+      tools.identity("does-not-exist-tool"),
+      "<absent>",
+      "identity: a program not on the PATH is <absent>"
+    )
+    eq(asked, 0, "identity: ... and it is not started")
+    vim.system = real_system
+    tools.reset()
+  end
+
   -- ---------------------------------------------------------------- the key lines
   local spawn_spec = "-- @cache-allow spawn\nreturn function(H)\n  H.ok(true, 'x')\nend\n"
   local A = "TESTS/proj/spawn_spec.lua"
@@ -127,6 +176,13 @@ return function(H)
     "... with its runtime directories"
   )
   eq(detail and detail.spawn_ok, true, "the detail says the processes are covered")
+  local silent_key, silent_why =
+    key_of(A, { tools = { git = "git 2.0|config a", bash = false, nvim = "NVIM 0.12" } })
+  eq(silent_key, nil, "a tool that did not answer: no key")
+  ok(
+    tostring(silent_why):find("tool bash: found, but it did not answer", 1, true) ~= nil,
+    "... and the reason names it: " .. tostring(silent_why)
+  )
 
   local plain_key, _, plain_parts, plain_detail = key_of(B)
   ok(plain_key ~= nil, "a spec without the vouching has a key")
