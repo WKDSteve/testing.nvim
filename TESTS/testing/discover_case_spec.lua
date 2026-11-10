@@ -91,6 +91,55 @@ return function(H)
     )
   end
 
+  -- a mount point: `/repo` of a container lies in the container's case-sensitive file system (`/REPO` is not there),
+  -- what is mounted there is a Windows folder (`TESTS` and `tests` are the same directory): the entries tell
+  do
+    local function fs(tree)
+      return {
+        stat = function(p)
+          return tree[p]
+        end,
+        names = function()
+          return { "lua", "TESTS" }
+        end,
+      }
+    end
+    local same = { ino = 7, dev = 1 }
+    eq(
+      discover.is_case_insensitive(
+        "/repo",
+        fs({
+          ["/repo"] = { ino = 1, dev = 0 },
+          ["/repo/lua"] = { ino = 2, dev = 1 },
+          ["/repo/LUA"] = { ino = 2, dev = 1 },
+        })
+      ),
+      true,
+      "probe: a case-insensitive folder mounted on a case-sensitive file system"
+    )
+    eq(
+      discover.is_case_insensitive(
+        "/repo",
+        fs({ ["/repo"] = { ino = 1, dev = 0 }, ["/repo/lua"] = { ino = 2, dev = 1 } })
+      ),
+      false,
+      "probe: a case-sensitive folder below it stays case-sensitive"
+    )
+    eq(
+      discover.is_case_insensitive(
+        "/repo",
+        fs({
+          ["/repo"] = { ino = 1, dev = 0 },
+          ["/repo/lua"] = { ino = 2, dev = 1 },
+          ["/repo/LUA"] = { ino = 3, dev = 1 },
+          ["/repo/TESTS"] = same,
+        })
+      ),
+      false,
+      "probe: two directories that differ in case only are two"
+    )
+  end
+
   -- without seams the probe of the real file system decides
   vim.fn.delete(root .. "/Dup", "rf")
   vim.fn.delete(root .. "/dup", "rf")

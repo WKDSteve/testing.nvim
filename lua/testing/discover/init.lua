@@ -499,29 +499,72 @@ end
 ---its last segment exists and is the very same directory (equal device and inode where the file system reports
 ---them). Two directories that differ only in case (a case-sensitive file system) are different inodes, so they are
 ---never merged. Nothing is ever lowercased blindly: the answer only decides whether paths are COMPARED case-folded.
+---When the directory's own name gives no answer (a mount point: `/repo` of a container lies in the container's
+---case-sensitive file system, while what is mounted there is a case-insensitive Windows folder), an entry below it
+---is probed the same way.
 ---@param dir string Existing directory.
+---@param fs? { stat: fun(path: string): table|nil, names: fun(dir: string): string[] } Seams for specs.
 ---@return boolean
-function M.is_case_insensitive(dir)
+function M.is_case_insensitive(dir, fs)
+  fs = fs
+    or {
+      stat = function(p)
+        return uv.fs_stat(p)
+      end,
+      names = function(d)
+        local out, h = {}, uv.fs_scandir(d)
+        while h and #out < 32 do
+          local name = uv.fs_scandir_next(h)
+          if not name then
+            break
+          end
+          out[#out + 1] = name
+        end
+        return out
+      end,
+    }
+  ---@param s string
+  ---@return string
+  local function swap(s)
+    return (
+      s:gsub("%a", function(c)
+        local lower = c:lower()
+        return c == lower and c:upper() or lower
+      end)
+    )
+  end
+  ---true / false when the two spellings answer, nil when this name cannot tell (no letter, or the swapped one is not
+  ---there while the name itself lies in another file system than what we ask about).
+  ---@param parent string
+  ---@param base string
+  ---@return boolean|nil
+  local function probe(parent, base)
+    local swapped = swap(base)
+    if swapped == base then
+      return nil
+    end
+    local a, b = fs.stat(parent .. "/" .. base), fs.stat(parent .. "/" .. swapped)
+    if not (a and b) then
+      return a and false or nil
+    end
+    if (a.ino or 0) ~= 0 and (b.ino or 0) ~= 0 and (a.ino ~= b.ino or a.dev ~= b.dev) then
+      return false
+    end
+    return true
+  end
   dir = slashes(dir):gsub("/+$", "")
   local parent, base = dir:match("^(.*)/([^/]+)$")
-  if not base then
-    return false
+  if base and probe(parent, base) then
+    return true
   end
-  local swapped = base:gsub("%a", function(c)
-    local lower = c:lower()
-    return c == lower and c:upper() or lower
-  end)
-  if swapped == base then
-    return false
+  -- the entries below it are what the specs live in
+  for _, name in ipairs(fs.names(dir)) do
+    local answer = probe(dir, name)
+    if answer ~= nil then
+      return answer
+    end
   end
-  local a, b = uv.fs_stat(dir), uv.fs_stat(parent .. "/" .. swapped)
-  if not (a and b) then
-    return false
-  end
-  if (a.ino or 0) ~= 0 and (b.ino or 0) ~= 0 and (a.ino ~= b.ino or a.dev ~= b.dev) then
-    return false
-  end
-  return true
+  return false
 end
 
 -- =========================================================
