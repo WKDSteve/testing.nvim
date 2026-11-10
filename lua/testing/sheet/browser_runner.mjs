@@ -48,7 +48,7 @@ async function waitFor(page, expression, timeout) {
 // Throws when the step fails; a `shot` answers with its file.
 async function runStep(page, step, where) {
   if (step.open !== undefined) {
-    await page.goto(target(step.open, where.root));
+    await page.goto(target(step.open, where.root), step.timeout ? { timeout: step.timeout } : {});
   } else if (step.press !== undefined) {
     await page.keyboard.press(step.press);
   } else if (step.click !== undefined) {
@@ -79,7 +79,7 @@ async function runStep(page, step, where) {
     const file = resolve(where.out_dir, `${where.id}.${step.shot}.${where.tag}.png`);
     // `element`: only that element (the grid of an rpc sheet's screen, `testing.sheet.shot`), else the viewport
     if (step.element !== undefined) {
-      await page.locator(step.element).screenshot({ path: file, timeout: 5000 });
+      await page.locator(step.element).screenshot({ path: file, timeout: step.timeout ?? 5000 });
     } else {
       await page.screenshot({ path: file });
     }

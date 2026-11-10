@@ -20,8 +20,13 @@ M.FILETYPE = "testing-sheet"
 ---The steps start below these lines.
 local HEADER = 4
 
-local ICON = { pass = "✓", fail = "✗", running = "▶", next = "▷", none = " " }
-local HL = { pass = "DiagnosticOk", fail = "DiagnosticError", running = "DiagnosticInfo" }
+local ICON = { pass = "✓", fail = "✗", skip = "⊘", running = "▶", next = "▷", none = " " }
+local HL = {
+  pass = "DiagnosticOk",
+  fail = "DiagnosticError",
+  skip = "DiagnosticWarn",
+  running = "DiagnosticInfo",
+}
 local ns = vim.api.nvim_create_namespace("testing.sheet.panel")
 local counter = 0
 

@@ -866,13 +866,42 @@ local function css_colour(v)
   return type(v) == "string" and v:match("^#%x%x%x%x%x%x$") or nil
 end
 
+---The look of one cell as CSS: colours, weight, slant, the lines. The strike goes on an inner box (`s`): one
+---`text-decoration` cannot hold a wavy underline and a straight strike, and a value it does not take drops all lines.
+---@param e table An entry of `shot.hl`.
+---@param fg string
+---@param bg string
+---@return string css, boolean strike
+local function cell_css(e, fg, bg)
+  local style = { "color:" .. fg, "background:" .. bg }
+  if e.bold then
+    style[#style + 1] = "font-weight:bold"
+  end
+  if e.italic then
+    style[#style + 1] = "font-style:italic"
+  end
+  local sp = css_colour(e.sp)
+  if e.underline or e.undercurl then
+    style[#style + 1] = "text-decoration-line:underline"
+    style[#style + 1] = "text-decoration-style:" .. (e.undercurl and "wavy" or "solid")
+    if sp then
+      style[#style + 1] = "text-decoration-color:" .. sp
+    end
+  end
+  return table.concat(style, ";"), e.strikethrough == true
+end
+
 ---The screen as an HTML page: every cell with its character, colours and styles (bold, italic, underline, undercurl,
 ---strikethrough) as `child.screen()` resolved them, the cursor as a block, one grid in `#screen`. The picture of an rpc
 ---sheet's `shot` step is a browser's photograph of it (`testing.sheet.shot`); no terminal is involved, so the font is
----the browser's (`HTML_FONT`), not the user's terminal font.
+---the browser's (`HTML_FONT`), not the user's terminal font. Neighbouring ASCII cells of the same look are one box of
+---their width (a 1000x1000 screen stays a page a browser loads), every other cell a box of its own (one character
+---width, two for a wide character), so a fallback font cannot move the cells behind it. A cell whose attribute the
+---screen could not name (`?`: more attributes than letters) is drawn with a dashed outline, never as plain text.
 ---@param shot Testing.Screen.Shot A screen of `child.screen()` (`cells`, `hl_cell_attrs`, `hl`).
 ---@param opts? { cursor?: boolean } `cursor = false` leaves the cursor out.
 ---@return string html
+---@return integer unknown The cells with an attribute the screen could not name.
 function M.html(shot, opts)
   opts = opts or {}
   local hl = shot.hl or {}
@@ -883,52 +912,78 @@ function M.html(shot, opts)
   local marks = shot.hl_cell_attrs or shot.cell_attrs or {}
   local size = shot.size or { rows = #cells, cols = cells[1] and #cells[1] or 0 }
   local cur = opts.cursor ~= false and shot.cursor or nil
+  local classes, rules, unknown = {}, {}, 0
+  ---@param css string
+  ---@return string
+  local function class_of(css)
+    local name = classes[css]
+    if not name then
+      name = "s" .. (#rules + 1)
+      classes[css] = name
+      rules[#rules + 1] = ("." .. name .. "{" .. css .. "}")
+    end
+    return name
+  end
   local rows = {}
   for r = 1, size.rows do
     local out = {}
     local row = cells[r] or {}
     local mark = marks[r] or ""
+    -- the open run of ASCII cells of one look
+    local run_class, run_strike, run_text = nil, false, {}
+    local function flush()
+      if run_class then
+        local text = html_escape(table.concat(run_text))
+        out[#out + 1] = ('<span class="c %s" style="width:%dch">%s</span>'):format(
+          run_class,
+          #run_text,
+          run_strike and ("<s>" .. text .. "</s>") or text
+        )
+      end
+      run_class, run_strike, run_text = nil, false, {}
+    end
     for c = 1, size.cols do
       local ch = row[c]
       if ch ~= "" then
-        local e = hl[mark:sub(c, c)] or default
+        ch = ch == nil and " " or ch
+        local letter = mark:sub(c, c)
+        local e = hl[letter]
+        local odd = e == nil and letter ~= "" and letter ~= " "
+        if odd then
+          unknown = unknown + 1
+        end
+        e = e or default
         local fg, bg = css_colour(e.fg) or dfg, css_colour(e.bg) or dbg
-        if cur and cur.row == r and cur.col == c then
+        local at_cursor = cur and cur.row == r and cur.col == c
+        if at_cursor then
           fg, bg = bg, fg
         end
-        local style = { "color:" .. fg, "background:" .. bg }
-        if e.bold then
-          style[#style + 1] = "font-weight:bold"
+        local css, strike = cell_css(e, fg, bg)
+        if odd then
+          css = css .. ";outline:1px dashed " .. fg .. ";outline-offset:-1px"
         end
-        if e.italic then
-          style[#style + 1] = "font-style:italic"
-        end
-        local deco = {}
-        if e.underline then
-          deco[#deco + 1] = "underline"
-        end
-        if e.undercurl then
-          deco[#deco + 1] = "underline wavy"
-        end
-        if e.strikethrough then
-          deco[#deco + 1] = "line-through"
-        end
-        if #deco > 0 then
-          style[#style + 1] = "text-decoration:" .. table.concat(deco, " ")
-          local sp = css_colour(e.sp)
-          if sp then
-            style[#style + 1] = "text-decoration-color:" .. sp
-          end
-        end
+        local class = class_of(css)
         -- a wide character takes its own cell and the next one (which is "")
         local wide = row[c + 1] == "" and c < size.cols
-        out[#out + 1] = ('<span class="c%s" style="%s">%s</span>'):format(
-          wide and " w" or "",
-          table.concat(style, ";"),
-          html_escape((ch == nil or ch == "") and " " or ch)
-        )
+        local plain = #ch == 1 and ch:byte() < 128 and not wide and not at_cursor and not odd
+        if plain and run_class == class then
+          run_text[#run_text + 1] = ch
+        else
+          flush()
+          if plain then
+            run_class, run_strike, run_text = class, strike, { ch }
+          else
+            local text = html_escape(ch)
+            out[#out + 1] = ('<span class="c %s%s">%s</span>'):format(
+              class,
+              wide and " w" or "",
+              strike and ("<s>" .. text .. "</s>") or text
+            )
+          end
+        end
       end
     end
+    flush()
     rows[#rows + 1] = '<div class="r">' .. table.concat(out) .. "</div>"
   end
   return table.concat({
@@ -943,10 +998,14 @@ function M.html(shot, opts)
     (".r{height:%dpx;display:flex}"):format(M.HTML_CELL_PX.line),
     ".c{display:inline-block;width:1ch;overflow:hidden;text-align:center}",
     ".w{width:2ch}",
+    "s{text-decoration:line-through}",
+    table.concat(rules, "\n"),
     '</style></head><body><div id="screen">',
+    -- no separator: under `white-space:pre` a line break between the rows would be a line of its own
     table.concat(rows),
     "</div></body></html>",
-  }, "\n")
+  }, "\n"),
+    unknown
 end
 
 return M

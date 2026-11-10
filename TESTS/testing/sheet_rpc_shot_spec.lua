@@ -28,7 +28,7 @@ return function(H)
 
   -- ---------------------------------------------------------------- the page of a screen
   do
-    local html = screen.html({
+    local html, unknown = screen.html({
       size = { rows = 2, cols = 4 },
       cursor = { row = 2, col = 1 },
       cells = { { "a", "<", "世", "" }, { "x", " ", " ", "&" } },
@@ -46,43 +46,42 @@ return function(H)
         [" "] = { groups = {}, fg = "#111111", bg = "#222222" },
       },
     })
+    eq(unknown, 0, "every attribute of this screen is known")
     has(
       html,
-      "color:#ff0000;background:#000000;font-weight:bold",
+      "{color:#ff0000;background:#000000;font-weight:bold}",
       "a cell has its colours and bold"
     )
     has(
       html,
-      "font-style:italic;text-decoration:underline wavy;text-decoration-color:#0000ff",
+      "font-style:italic;text-decoration-line:underline;text-decoration-style:wavy;text-decoration-color:#0000ff",
       "italic, undercurl, sp"
     )
     has(html, ">&lt;</span>", "the text is escaped")
     has(html, ">&amp;</span>", "... every character of it")
-    has(
-      html,
-      '<span class="c w" style="color:#111111;background:#222222">世</span>',
-      "a wide character takes two"
-    )
+    ok(html:find(' w">世</span>', 1, true) ~= nil, "a wide character takes two cells: " .. html)
     ok(
       not html:find("display:none", 1, true),
       "a colour that is not #rrggbb never reaches the page"
     )
-    has(html, "color:#111111;background:#123456", "... the default colour is taken instead")
+    has(html, "{color:#111111;background:#123456}", "... the default colour is taken instead")
+    has(html, "{color:#222222;background:#111111}", "the cursor is a block (colours swapped)")
+    has(html, '">x</span>', "... a box of its own")
     has(
       html,
-      'style="color:#222222;background:#111111">x</span>',
-      "the cursor is a block (colours swapped)"
+      'style="width:2ch">  </span>',
+      "neighbouring ASCII cells of one look are one box of their width"
     )
     has(
       html,
       "html,body{margin:0;padding:0;background:#222222}",
       "the page has the default background"
     )
-    local cells = 0
+    local boxes = 0
     for _ in html:gmatch('<span class="c') do
-      cells = cells + 1
+      boxes = boxes + 1
     end
-    eq(cells, 7, "one box per cell, none for the second half of a wide character")
+    eq(boxes, 6, "a box per look and run, none for the second half of a wide character")
     local nocur = screen.html({
       size = { rows = 1, cols = 1 },
       cursor = { row = 1, col = 1 },
@@ -90,11 +89,35 @@ return function(H)
       hl_cell_attrs = { " " },
       hl = {},
     }, { cursor = false })
-    has(
-      nocur,
-      'style="color:#e0e2ea;background:#14161b">x</span>',
-      "no cursor, Neovim's default colours"
-    )
+    has(nocur, "{color:#e0e2ea;background:#14161b}", "no cursor, Neovim's default colours")
+  end
+
+  -- a wavy underline and a strike together: both lines (one `text-decoration` value with both is dropped whole)
+  do
+    local html = screen.html({
+      size = { rows = 1, cols = 2 },
+      cells = { { "d", "e" } },
+      hl_cell_attrs = { "aa" },
+      hl = {
+        a = { groups = { "Deprecated" }, undercurl = true, strikethrough = true, sp = "#ff0000" },
+      },
+    })
+    has(html, "text-decoration-line:underline;text-decoration-style:wavy", "the wavy underline")
+    has(html, "<s>de</s>", "the strike on an inner box")
+    has(html, "s{text-decoration:line-through}", "drawn straight")
+    ok(not html:find("wavy line-through", 1, true), "never one value with both")
+  end
+
+  -- an attribute the screen could not name (`?`: more attributes than letters): counted and outlined, not plain
+  do
+    local html, unknown = screen.html({
+      size = { rows = 1, cols = 3 },
+      cells = { { "a", "b", "c" } },
+      hl_cell_attrs = { "?? " },
+      hl = { [" "] = { groups = {}, fg = "#111111", bg = "#222222" } },
+    })
+    eq(unknown, 2, "two cells with an attribute without a name")
+    has(html, "outline:1px dashed", "they are outlined in the picture")
   end
 
   -- ---------------------------------------------------------------- the step, with a stand-in browser runner
@@ -190,6 +213,47 @@ return function(H)
     )
   end
 
+  -- the page and the browser's folder are gone on every way out: after a picture, and after the browser engine raised
+  do
+    local shot = require("testing.sheet.shot")
+    local seen = {}
+    local real_browser = package.loaded["testing.sheet.browser"]
+    local fake = {
+      run = function(plan, bopts)
+        seen[#seen + 1] = { page = plan.steps[1].open, work = bopts.out_dir }
+        if #seen == 1 then
+          vim.fn.mkdir(bopts.out_dir, "p")
+          local file = bopts.out_dir .. "/x.png"
+          local f = assert(io.open(file, "wb"))
+          f:write(PNG)
+          f:close()
+          return { ok = true, status = "pass", failures = {}, snapshots = { "screenshot " .. file } }
+        end
+        error("the engine broke")
+      end,
+    }
+    package.loaded["testing.sheet.browser"] = fake
+    local small =
+      { size = { rows = 1, cols = 1 }, cells = { { "x" } }, hl_cell_attrs = { " " }, hl = {} }
+    local o = {
+      sheet = { id = "demo.clean" },
+      size = { rows = 1, cols = 1 },
+      root = root,
+      name = "c",
+      out_dir = root .. "/clean-out",
+    }
+    local made = shot.take(small, o)
+    local p2, failure = shot.take(small, o)
+    package.loaded["testing.sheet.browser"] = real_browser
+    ok(made ~= nil and vim.uv.fs_stat(made) ~= nil, "a picture: " .. tostring(made))
+    eq(p2, nil, "a browser engine that raises: no picture")
+    has(failure, "the engine broke", "... and the failure says why")
+    for i, s in ipairs(seen) do
+      eq(vim.uv.fs_stat(s.page), nil, ("the page is gone (%d)"):format(i))
+      eq(vim.uv.fs_stat(s.work), nil, ("the browser's folder is gone (%d)"):format(i))
+    end
+  end
+
   -- the real browser, where it is installed: a picture with the size of the grid
   local browser = require("testing.sheet.browser")
   local pw = browser.playwright_dir(root)
@@ -229,6 +293,28 @@ return function(H)
       local w, h = u32(head, 17), u32(head, 21)
       ok(w >= 40 * 6 and w <= 40 * 20, "as wide as 40 cells: " .. w)
       ok(h >= 10 * 16 and h <= 10 * 24, "as high as 10 lines: " .. h)
+      -- another screen is another picture: an empty or a constant picture would be the same twice
+      local function bytes(path)
+        local fh = io.open(path, "rb")
+        local all = fh and fh:read("*a") or ""
+        if fh then
+          fh:close()
+        end
+        return all
+      end
+      local first = bytes(png)
+      local other = the_sheet()
+      other.steps[1].lua =
+        "vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'a different text', 'and a line' })"
+      sheet.run(
+        other,
+        { root = root, ci = false, update = false, browser = { node = node, playwright_dir = pw } }
+      )
+      local second = bytes(png)
+      ok(
+        #first > 0 and #second > 0 and first ~= second,
+        "the picture shows the screen: other text, other bytes"
+      )
     end
   end
   vim.fn.delete(root, "rf")
