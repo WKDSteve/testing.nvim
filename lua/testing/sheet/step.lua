@@ -20,8 +20,17 @@ M.SCHEMA = "testing-sheet-session/1"
 M.USAGE =
   "usage: testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run] [--tasks <vault> [--tasks-cli <tasks.lua>]]"
 
+---The longest note, in bytes: one line of a task, not a document.
+M.MAX_NOTE = 1000
+
+---@class Testing.SheetStep.Note
+---@field size string
+---@field n integer
+---@field text string
+---@field time string UTC, `YYYY-MM-DDTHH:MM:SSZ`.
+
 ---@class Testing.SheetStep.Reader
----@field start fun(on_abort: fun()) Begin reading; `on_abort` fires as soon as `abort` or the end of stdin arrives.
+---@field start fun(on_abort: fun(), on_note?: fun(text: string)) Begin reading; `on_abort` fires as soon as `abort` or the end of stdin arrives, `on_note` as soon as a `note` arrives (a reader that has no live stdin hands it out through `next`).
 ---@field next fun(): string|nil The next command line (waits for it); nil at the end of stdin.
 ---@field stop fun()
 
@@ -33,23 +42,37 @@ M.USAGE =
 ---@field session_opts? table Merged into the options of the session (specs: `spawn`, `node`, ...).
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
 
+---The text of a `note <text>` command ("" for a bare `note`), nil for any other line. Control characters become blanks.
+---@param line string
+---@return string|nil
+function M.note_text(line)
+  if line ~= "note" and not line:match("^note%s") then
+    return nil
+  end
+  return vim.trim((line:sub(5):gsub("%c", " ")))
+end
+
 ---The commands from stdin, read without blocking the loop: an abort reaches a running step.
 ---@return Testing.SheetStep.Reader
 local function stdin_reader()
   local uv = vim.uv
   local lines, partial, eof = {}, "", false
-  local handle, abort_fn
+  local handle, abort_fn, note_fn
   local function push(line)
     line = vim.trim(line)
     if line == "abort" and abort_fn then
       abort_fn()
     end
-    if line ~= "" then
+    -- a note belongs to where the run stands when it arrives, not to the next stop: taken at once
+    local text = note_fn and M.note_text(line)
+    if text then
+      note_fn(text)
+    elseif line ~= "" then
       lines[#lines + 1] = line
     end
   end
   return {
-    start = function(on_abort)
+    start = function(on_abort, on_note)
       abort_fn = on_abort
       local kind = uv.guess_handle(0)
       if kind == "tty" then
@@ -69,6 +92,7 @@ local function stdin_reader()
         on_abort()
         return
       end
+      note_fn = on_note
       handle:read_start(function(_, data)
         if data then
           partial = partial .. data
@@ -97,6 +121,70 @@ local function stdin_reader()
         handle = nil
       end
     end,
+  }
+end
+
+---The folder of the last stepped run of a sheet (pictures of its steps, its notes), below `stdpath("cache")`.
+---@param id string
+---@return string
+function M.evidence_dir(id)
+  return ("%s/testing/sheet-evidence/%s"):format(
+    vim.fn.stdpath("cache"),
+    (id:gsub("[^%w._-]", "_"))
+  )
+end
+
+M.NOTES_FILE = "notes.json"
+
+---@class Testing.SheetStep.NotesDoc
+---@field id string
+---@field root string
+---@field date string Local date of the run, `YYYY-MM-DD`.
+---@field status string How the run ended (`pass`, `fail`, `aborted`, ...).
+---@field notes Testing.SheetStep.Note[]
+
+---The notes of the last stepped run of a sheet of this project, nil when it had none (or ran in another project).
+---@param root string
+---@param id string
+---@return Testing.SheetStep.NotesDoc|nil
+function M.last_notes(root, id)
+  local f = io.open(M.evidence_dir(id) .. "/" .. M.NOTES_FILE, "rb")
+  if not f then
+    return nil
+  end
+  local text = f:read(1024 * 1024) or ""
+  f:close()
+  local ok, doc = pcall(vim.json.decode, text)
+  if
+    not ok
+    or type(doc) ~= "table"
+    or doc.id ~= id
+    or doc.root ~= root
+    or type(doc.notes) ~= "table"
+    or #doc.notes == 0
+  then
+    return nil
+  end
+  local notes = {}
+  for _, n in ipairs(doc.notes) do
+    if
+      type(n) == "table"
+      and type(n.text) == "string"
+      and type(n.n) == "number"
+      and type(n.size) == "string"
+    then
+      notes[#notes + 1] = { size = n.size, n = n.n, text = n.text, time = tostring(n.time or "") }
+    end
+  end
+  if #notes == 0 then
+    return nil
+  end
+  return {
+    id = id,
+    root = root,
+    date = tostring(doc.date or ""),
+    status = tostring(doc.status or ""),
+    notes = notes,
   }
 end
 
@@ -350,10 +438,7 @@ function M.main(argv, sv, deps)
     steps[n] = { n = n, action = action, value = value, note = step.note }
   end
   -- One folder per sheet, emptied here: what a person looks at is the last run.
-  local evidence_dir = ("%s/testing/sheet-evidence/%s"):format(
-    vim.fn.stdpath("cache"),
-    (s.id:gsub("[^%w._-]", "_"))
-  )
+  local evidence_dir = M.evidence_dir(s.id)
   vim.fn.delete(evidence_dir, "rf")
   local opts = vim.tbl_extend("force", {
     root = root,
@@ -388,6 +473,26 @@ function M.main(argv, sv, deps)
   local mode, until_n = o.run and "continue" or "step", nil
   local stopped_once = false
   local answers, answered = {}, {}
+  ---@type Testing.SheetStep.Note[]
+  local notes = {}
+  -- the step the run stands before, else the one that ran last (set before a step, kept after it): where a note belongs
+  local pos ---@type { size: string, n: integer }|nil
+
+  ---@param text string
+  local function add_note(text)
+    if text == "" then
+      emit("error", { message = "note needs a text: note <text>" })
+    elseif #text > M.MAX_NOTE then
+      emit("error", { message = ("a note is at most %d bytes"):format(M.MAX_NOTE) })
+    elseif not pos then
+      emit("error", { message = "no step yet to put a note on" })
+    else
+      local note =
+        { size = pos.size, n = pos.n, text = text, time = os.date("!%Y-%m-%dT%H:%M:%SZ") }
+      notes[#notes + 1] = note
+      emit("note", vim.deepcopy(note))
+    end
+  end
 
   ---A question: waits for its answer. Nil when the run is to end.
   ---@param at Testing.Sheet.NextStep
@@ -401,9 +506,12 @@ function M.main(argv, sv, deps)
         session:cancel()
         return nil
       end
-      local plan = parse_command(cmd, at)
+      local note = M.note_text(cmd)
+      local plan = not note and parse_command(cmd, at) or nil
       local answer = parse_answer(cmd)
-      if plan and plan.break_n then
+      if note then
+        add_note(note)
+      elseif plan and plan.break_n then
         -- the panel does not wait for a stop to send a breakpoint: no error, and the question still stands
         o.breaks[plan.break_n] = not plan.clear or nil
       elseif answer then
@@ -443,8 +551,14 @@ function M.main(argv, sv, deps)
         session:cancel()
         return false
       end
-      local plan, err = parse_command(cmd, at)
-      if not plan then
+      local note = M.note_text(cmd)
+      local plan, err
+      if not note then
+        plan, err = parse_command(cmd, at)
+      end
+      if note then
+        add_note(note)
+      elseif not plan then
         emit("error", { message = err })
       elseif plan.abort then
         session:cancel()
@@ -463,13 +577,14 @@ function M.main(argv, sv, deps)
     if reader then
       reader.start(function()
         session:cancel()
-      end)
+      end, add_note)
     end
     while true do
       local at = session:peek()
       if not at then
         return
       end
+      pos = { size = at.size, n = at.n }
       emit("step-before", {
         size = at.size,
         n = at.n,
@@ -544,6 +659,19 @@ function M.main(argv, sv, deps)
   end
   local res = session:result()
   local verdict = res.status == "pass" or res.status == "fail" or res.status == "manual"
+  local run_date = os.date("%Y-%m-%d") --[[@as string]]
+  if #notes > 0 then
+    -- kept beside the pictures of the run, for `testing sheets report`; an aborted run's notes too
+    local doc = { id = s.id, root = root, date = run_date, status = res.status, notes = notes }
+    local wok, werr = require("lib.nvim.fs.write.atomic")(
+      evidence_dir .. "/" .. M.NOTES_FILE,
+      vim.json.encode(doc),
+      { mkdirp = true }
+    )
+    if not wok then
+      sv.err("testing sheets: the notes were not kept: " .. tostring(werr))
+    end
+  end
   if verdict and o.vault then
     local tasks = require("testing.sheet.tasks")
     local entries = require("testing.sheet.report").collect({ root }, { cases = {} })
@@ -553,6 +681,7 @@ function M.main(argv, sv, deps)
     for _, e in ipairs(entries) do
       e.result = res
       e.answered = answered
+      e.new_notes = #notes > 0 and { date = run_date, notes = notes } or nil
       e.case = {
         name = require("testing.sheet").spec_name(s),
         status = res.status == "fail" and "fail" or "pass",
@@ -576,6 +705,7 @@ function M.main(argv, sv, deps)
     ok = res.ok,
     verdict = verdict,
     answers = answers,
+    notes = #notes > 0 and notes or nil,
     failures = res.failures,
     snapshots = res.snapshots,
     skipped = res.skipped,

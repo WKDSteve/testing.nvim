@@ -25,6 +25,10 @@ local sheet_mod = require("testing.sheet")
 ---@field case? Testing.State.Case The last result of its spec case.
 ---@field stale? string Why that result is not current (the spec file changed, gone, ...).
 ---@field snapshots string[] Snapshot files of the sheet, relative to the root.
+---@field last_notes? Testing.SheetStep.NotesDoc The notes of its last stepped run (`testing sheets step`).
+---@field new_notes? { date: string, notes: Testing.SheetStep.Note[] } A stepped run that just ended: its notes go into the task.
+---@field answered? string[] Questions a stepped run that just ended answered yes.
+---@field task_missing? boolean
 
 ---@param p string
 ---@return string
@@ -133,7 +137,8 @@ end
 ---Read the sheets and last results of the projects. `opts.cases` (from `cases_from_ir`) replaces the
 ---editor's state; it says nothing about staleness (an IR is one run).
 ---@param roots string[]
----@param opts? { states?: table<string, Testing.State>, state_dir?: string, cases?: table<string, Testing.State.Case> }
+---`opts.notes_of` stands in for the notes of the last stepped run (specs).
+---@param opts? { states?: table<string, Testing.State>, state_dir?: string, cases?: table<string, Testing.State.Case>, notes_of?: fun(root: string, id: string): Testing.SheetStep.NotesDoc|nil }
 ---@return Testing.SheetReport.Entry[]
 function M.collect(roots, opts)
   opts = opts or {}
@@ -159,6 +164,7 @@ function M.collect(roots, opts)
       local e =
         { root = root, rel = rel, sheet = s, error = err, snapshots = snapshot_files(root, rel) }
       if s then
+        e.last_notes = (opts.notes_of or require("testing.sheet.step").last_notes)(root, s.id)
         e.case = (by_name or {})[sheet_mod.spec_name(s)]
         if e.case and st then
           local stale, why = state.is_stale(st, e.case.file)
@@ -272,6 +278,20 @@ function M.render(entries, opts)
     for _, e in ipairs(list) do
       out[#out + 1] = head(e, multi)
       body(e)
+      local run = e.last_notes
+      if run then
+        out[#out + 1] = ("  - notes of the stepped run on %s (%s):"):format(
+          one_line(run.date),
+          one_line(run.status)
+        )
+        for _, note in ipairs(run.notes) do
+          out[#out + 1] = ("    - step %d (%s): %s"):format(
+            note.n,
+            one_line(note.size),
+            one_line(note.text)
+          )
+        end
+      end
       if e.task_missing then
         out[#out + 1] = ("  - task %s is not an open task of the vault"):format(code(e.sheet.task))
       end

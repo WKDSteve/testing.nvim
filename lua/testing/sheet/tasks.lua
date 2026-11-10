@@ -235,10 +235,50 @@ local function state_key(e)
   return (key:gsub("[^%w_.%-]", "-"))
 end
 
+-- The heading of the notes of a stepped run in the block (German, as the vault is): one paragraph per run.
+M.NOTES_HEADING = "### Notizen aus dem Durchgang"
+
+---The notes paragraphs of a block, as they stand (a person may have added to them): from the first notes heading
+---outside a fence up to the `states` line, without the blank lines at its end. Empty when the block has none.
+---@param block string|nil
+---@return string[]
+function M.kept_notes(block)
+  if not block then
+    return {}
+  end
+  local lines, fenced = lines_of(block)
+  local out, inside = {}, false
+  for i, line in ipairs(lines) do
+    local t = trim(line)
+    if not fenced[i] and (t:sub(1, #M.STATES) == M.STATES or t == M.END) then
+      break
+    end
+    if not inside and not fenced[i] and t:sub(1, #M.NOTES_HEADING) == M.NOTES_HEADING then
+      inside = true
+    end
+    if inside then
+      out[#out + 1] = line
+    end
+  end
+  while #out > 0 and trim(out[#out]) == "" do
+    out[#out] = nil
+  end
+  return out
+end
+
+---A note on one line that cannot end the block or open a comment.
+---@param v any
+---@return string
+local function note_text(v)
+  return (one_line(v):gsub("<!%-%-", "<!-"))
+end
+
 ---The block for the sheets of one task. Paths always name their project (`ui.nvim/TESTS/...`): a task
 ---lives in a vault beside many projects, and the text must not depend on which roots a report was given.
+---The notes of earlier stepped runs (`kept`) stay as they are; an entry's `new_notes` (a stepped run that just
+---ended) adds a paragraph after them.
 ---@param entries Testing.SheetReport.Entry[] The sheets that name this task.
----@param opts? { ticked?: table<string, true> }
+---@param opts? { ticked?: table<string, true>, kept?: string[] }
 ---@return string
 function M.render_block(entries, opts)
   opts = opts or {}
@@ -281,6 +321,36 @@ function M.render_block(entries, opts)
           ", "
         )
     end
+  end
+  local kept = opts.kept or {}
+  local has_notes = #kept > 0
+  if has_notes then
+    out[#out + 1] = ""
+    vim.list_extend(out, kept)
+  end
+  for _, e in ipairs(entries) do
+    local run = e.new_notes
+    if run and #run.notes > 0 then
+      has_notes = true
+      out[#out + 1] = ""
+      out[#out + 1] = ("%s %s (%s)"):format(
+        M.NOTES_HEADING,
+        one_line(run.date),
+        e.sheet and code(e.sheet.id) or code(e.rel)
+      )
+      out[#out + 1] = ""
+      for _, note in ipairs(run.notes) do
+        out[#out + 1] = ("- Schritt %d (%s): %s"):format(
+          note.n,
+          one_line(note.size),
+          note_text(note.text)
+        )
+      end
+    end
+  end
+  if has_notes then
+    -- the states line stays a line of its own, never a lazy continuation of a note
+    out[#out + 1] = ""
   end
   local states = {}
   for _, e in ipairs(entries) do
@@ -456,14 +526,15 @@ function M.sync(entries, opts)
     else
       -- set_body refuses a carriage return; the engine keeps the line ending of the file itself
       local body = tostring(item.body or ""):gsub("\r\n?", "\n")
-      local ticked = M.ticked((M.extract(body)))
+      local old_block = M.extract(body)
+      local ticked = M.ticked(old_block)
       -- a question answered yes in a stepped run ticks its box; a no leaves it and makes the sheet red
       for _, e in ipairs(by_task[id]) do
         for _, text in ipairs(e.answered or {}) do
           ticked[one_line(text)] = true
         end
       end
-      local block = M.render_block(by_task[id], { ticked = ticked })
+      local block = M.render_block(by_task[id], { ticked = ticked, kept = M.kept_notes(old_block) })
       local new, aerr = M.apply(body, block)
       if not new then
         results[#results + 1] = { id = id, outcome = "failed", message = aerr }

@@ -592,12 +592,14 @@ sheet of the roots; `--json` writes the Result-IR, `--strict` makes a skip red.
 `testing sheets step {sheet} [--root <dir>] [--headed] [--delay <ms>]
 [--break <n>]... [--run]`: one sheet step by step. Events on stdout
 (testing-sheet-session/1, one JSON line each), commands on stdin (`next`,
-`continue`, `until <n>`, `abort`; closed stdin is `abort`). Writes nothing.
+`continue`, `until <n>`, `note <text>`, `abort`; closed stdin is `abort`). Writes
+nothing but the notes of the run (beside its pictures, for the report).
 0 green or a skip, 1 a step failed, 2 bad usage or refused, 3 aborted.
 See docs/SHEETS.md, "Step by step".
 
 `:Testing sheet step [{sheet}]` is the same in a buffer: n next, c continue,
-u until the cursor, b breakpoint, a abort, q close, y or n to a question.
+u until the cursor, b breakpoint, N note on the step, a abort, q close, y or n to
+a question.
 
 `testing sheets prompt draft --from-task {id}` / `prompt explain --task {id}`:
 a Markdown hand-over for an AI (draft a sheet from the task; explain a red

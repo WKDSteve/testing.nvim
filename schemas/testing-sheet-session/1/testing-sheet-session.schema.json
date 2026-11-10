@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-sheet-session/1/testing-sheet-session.schema.json",
   "title": "testing-sheet-session/1",
-  "description": "One line on stdout of `testing sheets step`: an event of a test sheet run step by step. The commands go the other way, one line each on stdin: `next`, `continue`, `until <n>`, `break <n>`, `clear <n>`, `answer yes|no [text]`, `abort`; closed stdin is `abort`. A reader ignores unknown events and fields and refuses a higher schema.",
+  "description": "One line on stdout of `testing sheets step`: an event of a test sheet run step by step. The commands go the other way, one line each on stdin: `next`, `continue`, `until <n>`, `break <n>`, `clear <n>`, `answer yes|no [text]`, `note <text>`, `abort`; closed stdin is `abort`. A reader ignores unknown events and fields and refuses a higher schema.",
   "type": "object",
   "required": ["schema", "event"],
   "properties": {
@@ -16,6 +16,7 @@
     { "if": { "properties": { "event": { "const": "step-after" } } }, "then": { "$ref": "#/$defs/stepAfter" } },
     { "if": { "properties": { "event": { "const": "paused" } } }, "then": { "$ref": "#/$defs/paused" } },
     { "if": { "properties": { "event": { "const": "ask" } } }, "then": { "$ref": "#/$defs/ask" } },
+    { "if": { "properties": { "event": { "const": "note" } } }, "then": { "$ref": "#/$defs/note" } },
     { "if": { "properties": { "event": { "const": "task" } } }, "then": { "$ref": "#/$defs/task" } },
     { "if": { "properties": { "event": { "const": "error" } } }, "then": { "$ref": "#/$defs/error" } },
     { "if": { "properties": { "event": { "const": "end" } } }, "then": { "$ref": "#/$defs/end" } }
@@ -125,6 +126,20 @@
         "text": { "type": "string" }
       }
     },
+    "noteItem": {
+      "type": "object",
+      "required": ["size", "n", "text", "time"],
+      "properties": {
+        "size": { "$ref": "#/$defs/tag" },
+        "n": { "$ref": "#/$defs/n" },
+        "text": { "type": "string", "minLength": 1 },
+        "time": { "description": "UTC, YYYY-MM-DDTHH:MM:SSZ.", "type": "string" }
+      }
+    },
+    "note": {
+      "description": "A note taken (`note <text>`): it belongs to the step the run stands before, else to the one that ran last. Taken at once, also while a step runs.",
+      "$ref": "#/$defs/noteItem"
+    },
     "task": {
       "description": "With --tasks: what became of the task's block, after a run that counts as a verdict.",
       "type": "object",
@@ -153,6 +168,7 @@
         "snapshots": { "$ref": "#/$defs/strings" },
         "skipped": { "type": "string" },
         "ms": { "type": "integer", "minimum": 0 },
+        "notes": { "description": "The notes of the run, when there are any.", "type": "array", "items": { "$ref": "#/$defs/noteItem" } },
         "answers": {
           "type": "array",
           "items": {

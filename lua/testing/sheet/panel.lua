@@ -7,6 +7,7 @@
 --- text (the child runs unseen, a browser or an app has its own window next to the editor).
 ---
 ---   n next   c continue   u until the cursor   b breakpoint   a abort   q close   y / n answer a question
+---   N note on the step where the run stands (any time, also while it runs)
 ---
 --- Breakpoints live here: `c` goes to the next one with `until`. They count for the size that runs. Closing the buffer
 --- aborts the run: its child sees its stdin close and cleans up.
@@ -33,6 +34,7 @@ local counter = 0
 ---@field doc? table The `start` event.
 ---@field size? string
 ---@field marks table<string, table<integer, table>> What each step of each size did.
+---@field notes table<string, table<integer, string[]>> The notes per size and step.
 ---@field at? integer The step that runs or runs next.
 ---@field running boolean
 ---@field paused? string Why it waits for a command.
@@ -100,11 +102,12 @@ function M.render(p, selected)
   local lines = {
     title,
     status_line(p),
-    "n next  c continue  u until cursor  b breakpoint  a abort  q close",
+    "n next  c continue  u until cursor  b breakpoint  N note  a abort  q close",
     "",
   }
   local hls = {}
   local marks = p.size and p.marks[p.size] or {}
+  local notes = p.size and p.notes and p.notes[p.size] or {}
   for _, step in ipairs(doc and doc.steps or {}) do
     local mark = marks[step.n]
     local state = mark and mark.status or "none"
@@ -120,6 +123,9 @@ function M.render(p, selected)
     )
     if mark and mark.ms then
       text = text .. ("  (%d ms)"):format(mark.ms)
+    end
+    if notes[step.n] then
+      text = text .. ("  [%d note%s]"):format(#notes[step.n], #notes[step.n] == 1 and "" or "s")
     end
     lines[#lines + 1] = text
     if HL[state] then
@@ -141,17 +147,20 @@ function M.render(p, selected)
     end
   end
 
-  -- the tile of the step under the cursor, else of the last one that did something
+  -- the tile of the step under the cursor, else of the last one that did something (or got a note)
   local step_n = selected
-  if not (step_n and marks[step_n]) then
+  if not (step_n and (marks[step_n] or notes[step_n])) then
     step_n = nil
     for n in pairs(marks) do
+      step_n = math.max(step_n or 0, n)
+    end
+    for n in pairs(notes) do
       step_n = math.max(step_n or 0, n)
     end
   end
   local step = doc and step_n and doc.steps[step_n]
   if step then
-    local mark = marks[step_n]
+    local mark = marks[step_n] or {}
     lines[#lines + 1] = ""
     lines[#lines + 1] = ("--- step %d, %s: %s"):format(
       step_n,
@@ -160,6 +169,9 @@ function M.render(p, selected)
     )
     if mark.reason then
       lines[#lines + 1] = "reason: " .. one_line(mark.reason, 400)
+    end
+    for _, note in ipairs(notes[step_n] or {}) do
+      lines[#lines + 1] = "note: " .. one_line(note, 400)
     end
     if mark.shot then
       lines[#lines + 1] = "screenshot: " .. tostring(mark.shot)
@@ -232,6 +244,12 @@ function M.on_event(p, ev)
     p.marks[ev.size] = p.marks[ev.size] or {}
     p.marks[ev.size][ev.n] = ev
     p.running = false
+  elseif ev.event == "note" then
+    p.notes = p.notes or {}
+    p.notes[ev.size] = p.notes[ev.size] or {}
+    local list = p.notes[ev.size][ev.n] or {}
+    list[#list + 1] = tostring(ev.text)
+    p.notes[ev.size][ev.n] = list
   elseif ev.event == "error" then
     require("testing.notify").get().warn("testing sheet: " .. tostring(ev.message))
     p.paused = p.pending_pause
@@ -315,6 +333,29 @@ function M.toggle_break(p, n)
   end
 end
 
+---A note on the step where the run stands; the run takes it at once, also while a step runs.
+---@param p Testing.Sheet.Panel
+---@param text? string Asked for when not given.
+---@return boolean sent
+function M.note(p, text)
+  if not p.proc or p.finished then
+    return false
+  end
+  local function put(t)
+    t = vim.trim((tostring(t or ""):gsub("%c", " ")))
+    if t == "" or not p.proc then
+      return false
+    end
+    pcall(p.proc.write, p.proc, "note " .. t .. "\n")
+    return true
+  end
+  if text then
+    return put(text)
+  end
+  vim.ui.input({ prompt = ("Note on step %d: "):format(p.at or 0) }, put)
+  return true
+end
+
 ---End the run: its stdin closes, and the child cleans up.
 ---@param p Testing.Sheet.Panel
 function M.abort(p)
@@ -348,6 +389,9 @@ local function map_keys(p)
   map("b", function()
     M.toggle_break(p)
   end, "breakpoint on the step under the cursor")
+  map("N", function()
+    M.note(p)
+  end, "note on the step where the run stands")
   map("a", function()
     M.abort(p)
   end, "abort the run")
@@ -452,6 +496,7 @@ function M.open(root, target, opts)
     opts = opts or {},
     buf = buf,
     marks = {},
+    notes = {},
     running = false,
     breaks = {},
     stderr = {},
