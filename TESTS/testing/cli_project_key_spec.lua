@@ -2,6 +2,10 @@
 -- `cache.project_key`, also when a spec of the run calls `cli.main` for another project (many specs of this suite do),
 -- which leaves the key of that project in the global behind. Before, such a suite stored every result in a folder named
 -- after the checkout path while its next run read the folder of the configured key: a whole suite without a single hit.
+-- It starts git (fixture repositories in the temp directory) and nothing else: the key holds git
+-- (`testing.cache.tools`) and, through the closure of `testing.cli`, every module of this runner a started editor loads
+-- (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok

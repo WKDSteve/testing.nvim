@@ -2,6 +2,10 @@
 -- files are phase 1, the tracker that says when phase 1 is over, the verdict facts (budget, on purpose), the arguments, and
 -- the run driver end to end (interim finding before the verdict, on stdout only for the terminal reporter, in the event
 -- stream, never a sentinel; a budget leaves `green-partial`, a red file stays red; the CI refusal).
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields
 

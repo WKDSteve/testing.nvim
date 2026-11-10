@@ -403,6 +403,17 @@ sheet, of a pool member, every timeout) read the process table with PowerShell (
 the `ping` it started ends in about 20 ms. Whole suite, same machine: 1931 s to 1655 s spec time (-14 %), 538 s to
 473 s wall; no `powershell` or `taskkill` start is left in it.
 
+**The cache stored only half of the suite.** A `--cached` run on a fresh cache folder stored 113 of 270 files (WSL2);
+80 files have a key but start `nvim`, `git` or `bash` through the runner they test, and the effects ledger kept them out.
+18 of them (the most expensive on Windows: `hooks_spec`, `stamp_run_spec`, `ci_spec`, `ci_commit_ops_spec`,
+`explain_spec`, ...) now vouch with `-- @cache-allow spawn`: they work on fixture projects in the temp directory, and
+their key holds the tools and, through the closure of `testing.cli`, every module of this runner (checked with
+`testing explain --parts`). Stored: 113 to 131 (WSL2), 133 (Windows). The first Windows measurement found every vouched
+entry missed again in the next run: `bash --version` had hung for ten seconds while the keys were made, the key said
+`bash=<absent>`, and the next run (with an answer) never found it; `testing.cache.tools` now asks twice and makes no key
+from a silence. Windows, three runs on a fresh cache folder: 516 s (stores 133 files), then 284 s (132 from the cache,
+-45 %), 337 s (132 from the cache; the machine was busier).
+
 ## Rules checked
 
 * **PERF-11 (memoization)**: nothing measured here repeats pure work per call; the stable hash of a path is

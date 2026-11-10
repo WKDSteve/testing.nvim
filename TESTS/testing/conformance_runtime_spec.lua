@@ -1,6 +1,9 @@
 -- TESTS/testing/conformance_runtime_spec.lua -- the runtime checks of the conformance suite (K1 runtime
 -- half, K2 .. K6, K8 .. K14) against REAL child editors: the conformant fixture plugin passes every one,
 -- a copy that breaks one rule per check fails exactly that check, with the finding that names it.
+-- It starts editors that run the files of fixture projects and nothing else: the key holds nvim (`testing.cache.tools`)
+-- and, through the closure of `testing.cli`, every module of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil -- the case body is the guard: a nil raises and fails the case
 return function(H)

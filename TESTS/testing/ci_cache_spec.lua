@@ -2,6 +2,10 @@
 -- absolute path (the same project in two checkouts has the same keys), the cache folder can be named by
 -- `cache.project_key` and placed by `--cache-dir` / TESTING_CACHE_HOME, so a restored folder is found on a runner
 -- with another checkout path, and a stamp made in one checkout verifies in the other.
+-- It starts git (fixture repositories in the temp directory) and nothing else: the key holds git
+-- (`testing.cache.tools`) and, through the closure of `testing.cli`, every module of this runner a started editor loads
+-- (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields
 

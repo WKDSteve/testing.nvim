@@ -2,6 +2,10 @@
 -- left out. The explanation is made from the SAME call that makes the key (one function), it names what changed
 -- since the stored entry (a file with its hashes, an environment variable by name, the configuration, the Neovim
 -- version), the file and line of what makes a spec uncacheable, and it changes nothing (display only).
+-- It starts bash (the scripts under test), git (fixture repositories in the temp directory), editors that run the files
+-- of fixture projects and nothing else: the key holds bash, git, nvim (`testing.cache.tools`) and, through the closure
+-- of `testing.cli`, every module of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields, cast-local-type, redundant-parameter
 

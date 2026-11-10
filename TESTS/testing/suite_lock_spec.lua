@@ -1,6 +1,9 @@
 -- TESTS/testing/suite_lock_spec.lua -- scripts/suite-lock.sh: a second full suite in the same checkout warns (two at
 -- once make the process specs time out), a lock of a dead pid or an old one is taken over silently, the holder
 -- releases its own lock and nobody else's, and the warning never stops a run.
+-- It starts bash (the scripts under test) and nothing else: the key holds bash (`testing.cache.tools`) and, through the
+-- closure of `testing.cli`, every module of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok

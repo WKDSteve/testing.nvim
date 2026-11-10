@@ -2,6 +2,10 @@
 -- run until --force, a dirty working tree does not change the result (and is not touched), `scripts/test.sh` hands its
 -- --state-dir in front of the subcommand, no snapshot is left behind (--keep names one), a red root commit is
 -- unclassified, and an unknown revision or a non-repository is exit 2. The verdicts are in ci_commit_run_spec.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 

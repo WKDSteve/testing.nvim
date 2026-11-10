@@ -2,6 +2,10 @@
 -- temporary directory, real keys): a stamp only after a complete green run; `verify` answers from the keys and says
 -- `verified` (exit 0, sentinel) ONLY when every file is proven; a partial proof, a changed file, an old stamp, a dirty
 -- tree, a forged or foreign stamp are never green.
+-- It starts git (fixture repositories in the temp directory) and nothing else: the key holds git
+-- (`testing.cache.tools`) and, through the closure of `testing.cli`, every module of this runner a started editor loads
+-- (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields, cast-local-type, redundant-parameter, duplicate-set-field, return-type-mismatch
 

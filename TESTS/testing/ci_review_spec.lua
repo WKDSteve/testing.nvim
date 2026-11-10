@@ -2,6 +2,10 @@
 -- presets that cannot drop their gate, a failed report is exit 3, the per-profile document, an early stop that
 -- still writes its document, a tree a step changed, ...). Split off ci_spec.lua for the per-file deadline; the
 -- helpers are the same.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 

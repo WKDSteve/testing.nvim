@@ -3,6 +3,9 @@
 -- (order-dependent cases, the degrade note), `--guard` / `.testing.lua` `guards` (a deprecation finding is a warning,
 -- an error, or nothing), and the reporters that carry the findings. The fs guard is switched off where it is not the
 -- subject: its snapshot of the user's real directories is the slow part of a run.
+-- It starts editors that run the files of fixture projects and nothing else: the key holds nvim (`testing.cache.tools`)
+-- and, through the closure of `testing.cli`, every module of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok

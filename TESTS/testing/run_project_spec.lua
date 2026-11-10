@@ -2,6 +2,10 @@
 -- on temp fixture projects: discovery + dialects + config + selection + order + timeouts + strict +
 -- reporters + history + the sentinel rules. Real discovery, real driver, real reporters; only the
 -- state directory is redirected into a temp dir.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 -- The clock only makes names and dates relative to now, or is a stopwatch behind a generous hang guard; no
 -- assertion depends on the time of day (reviewed 2026-11-03).

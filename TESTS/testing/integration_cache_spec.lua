@@ -3,6 +3,10 @@
 -- that did not change does not run and says so (never greener than a full run), a changed dependency re-runs
 -- exactly the spec that loads it, a red file is never stored, a damaged entry is a miss, and nothing is cached
 -- under a case selection or in CI.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields, cast-local-type
 

@@ -2,6 +2,10 @@
 -- IR, the sentinel only with `green`, the last green run of a red verdict, the agent reporter and how it is chosen
 -- (`--reporter`, `TESTING_REPORTER`, an agent environment handed down by the entry script), `--order priority`
 -- (the run order changes, the set and the IR order do not), and exit codes that are the same as before.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields
 

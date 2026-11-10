@@ -2,6 +2,10 @@
 -- real isolated driver and real children. The fixture is order dependent on purpose: it only passes when every
 -- case gets its own editor. Merged results are deterministic whatever `jobs` says; every other dialect degrades
 -- to a child per file, with a note.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok

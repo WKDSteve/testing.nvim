@@ -3,6 +3,10 @@
 -- recipe says on a real checkout: pre-push verifies or runs the suite, refuses a dirty tree and a push of something
 -- other than HEAD; pre-commit passes the exit code of the fast path on; the Claude stop hook blocks with exit 2 and
 -- hands testing.nvim's text to stderr.
+-- It starts bash (the scripts under test), git (fixture repositories in the temp directory) and nothing else: the key
+-- holds bash, git (`testing.cache.tools`) and, through the closure of `testing.cli`, every module of this runner a
+-- started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, inject-field, undefined-field, param-type-mismatch, missing-fields
 

@@ -1,6 +1,10 @@
 -- TESTS/testing/ci_verify_spec.lua -- `testing ci verify`: the proof of a complete green run over the tree (a reworded
 -- commit keeps it, a docs-only commit keeps the suite's stamp and reruns the rest, `--reuse`), and every way it is
 -- refused: no run, a red run, a changed spec, another pipeline or Neovim, a dirty tree, an old proof.
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 ---@diagnostic disable: need-check-nil, param-type-mismatch, missing-fields
 

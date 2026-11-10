@@ -2,6 +2,10 @@
 -- the IR, for a child editor per file: the guard configuration reaches the child (job `guard`) and what
 -- the guards found comes back in the cases; `deterministic` and `trace` do what the options say; a
 -- child that timed out or died leaves a trace artifact (and none with `trace = false`).
+-- It starts git (fixture repositories in the temp directory), editors that run the files of fixture projects and
+-- nothing else: the key holds git, nvim (`testing.cache.tools`) and, through the closure of `testing.cli`, every module
+-- of this runner a started editor loads (reviewed 2026-11-10).
+-- @cache-allow spawn
 
 return function(H)
   local ok = H.ok
