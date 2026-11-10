@@ -400,6 +400,52 @@ the trust store is trusted for the `.testing.lua` it was trusted with: a commit 
 (exit 2), because that file is what runs in the snapshot; `TESTING_TRUST_ROOTS`, `CI` and `TESTING_TRUST=1` trust the
 root whatever the file says. Refused on the workstation like every run.
 
+## On Linux and in the devcontainer: `testing ci --on`
+
+```
+testing ci --on=host,linux [the options of testing ci]
+testing ci --on=devcontainer
+testing ci verify --on=linux
+```
+
+The pipeline runs on each target in turn: `host` is this machine (the run without `--on`), `linux` a container of the
+image of [`containers/ci/Containerfile`](../containers/ci/Containerfile) (`localhost/testing-ci:1`: Debian bookworm,
+nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release), `devcontainer` the image of
+the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`, built once and tagged by the
+digest of the Dockerfile; it needs nvim and the tools of the steps). The engine is Podman (`testing.container`,
+`$TESTING_CONTAINER_ENGINE`); the image is built once, with the network:
+
+```
+podman build --tag localhost/testing-ci:1 containers/ci
+```
+
+In the container `testing ci` runs again on the repository, which is mounted **read-only** at `/repo` (the runner's
+checkout and every dependency checkout too, `$<NAME>_DIR` pointing at them); one output folder is writable (the
+document and the state of the inner run). The container has **no network** unless the pipeline says so, its name is
+`testing-ci-<repo>-<target>` and it is removed when it ends:
+
+```lua
+ci = {
+  profiles = { ... },
+  container = {
+    image = "localhost/my-ci:3",  -- the image of the `linux` target (default localhost/testing-ci:1)
+    network = true,               -- the container may use the network (default: none)
+  },
+}
+```
+
+The report of each target is shown as it ran (the container's lines marked `[linux]`), then one table: a row per
+step, a column per target, the verdicts last. The exit code is the worst of the targets; the sentinel only when every
+target is green. Without the engine, its machine or the image a target is exit 3 with what to do (the targets before
+it have run; a plain `testing ci` without `--on` never asks for the engine). `--on` does not go with `--snapshot`.
+
+**The proof is per target.** The document of a container run comes back with `target`, `image` (the id of the image:
+what was proven is the run in that image), `image_name` and the commit and tree of this checkout, and is kept beside
+the host's: `ci.<target>.json`, and `ci-<profile>.<target>.json` for a complete run. `testing ci verify --on=linux`
+reads that proof, never the host's: the tree, the pipeline, the age and the image id of now (the engine is asked;
+without it the answer is `rejected`). The system, Neovim and the tool versions are the image's and are not compared
+with this machine. The host's `ci.json` carries the container documents of the run under `targets`.
+
 ## Land through the hosted CI: `testing ci land`
 
 ```
@@ -1027,7 +1073,9 @@ Written after every run to the project's state directory (`ci.json` beside `runs
 canonical JSON, under the state lock; `--json=<file>` writes a copy. That includes a run that stopped before its first
 step (verdict `error` or `infra`, its `problems`, no steps), so an old green document never stays behind. A
 complete run (all its steps, not partial) is also `ci-<profile>.json`: the last complete run of that profile, which a
-`--step` run or another profile never replaces.
+`--step` run or another profile never replaces. A run in a container of `testing ci --on` adds
+`target`, `image` and `image_name`, and the host's document of such a run has `targets` (the document of each container
+target); see [On Linux and in the devcontainer](#on-linux-and-in-the-devcontainer-testing-ci---on).
 
 ```json
 {

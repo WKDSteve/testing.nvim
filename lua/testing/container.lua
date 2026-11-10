@@ -21,7 +21,12 @@ local M = {}
 ---@field run? fun(argv: string[]): Testing.Container.Result Injectable runner for specs.
 ---@field timeout_ms? integer Per call (default 120000).
 ---@field mounts? table<string, string> Host path -> container path, mounted read-only.
+---@field writable? table<string, string> Host path -> container path, mounted read-write (an output folder).
 ---@field env? table<string, string> Environment of the command.
+---@field network? boolean true: the container has the network (default: `--network none`).
+---@field name? string `--name` of the container (it is removed when it ends: `--rm`).
+---@field user? string `--user` (default: the image's).
+---@field workdir? string `--workdir` (default: the image's).
 
 M.default_image = "localhost/testing-linux:1"
 
@@ -84,11 +89,26 @@ end
 ---@return string[]
 function M.argv(command, opts)
   opts = opts or {}
-  local argv = { engine(opts), "run", "--rm", "--network", "none" }
-  local hosts = vim.tbl_keys(opts.mounts or {})
-  table.sort(hosts)
-  for _, host in ipairs(hosts) do
-    vim.list_extend(argv, { "-v", ("%s:%s:ro"):format(host, opts.mounts[host]) })
+  local argv = { engine(opts), "run", "--rm" }
+  if opts.network ~= true then
+    vim.list_extend(argv, { "--network", "none" })
+  end
+  if opts.name then
+    vim.list_extend(argv, { "--name", opts.name })
+  end
+  if opts.user then
+    vim.list_extend(argv, { "--user", opts.user })
+  end
+  if opts.workdir then
+    vim.list_extend(argv, { "--workdir", opts.workdir })
+  end
+  for _, kind in ipairs({ { opts.mounts, "ro" }, { opts.writable, "rw" } }) do
+    local map = kind[1] or {}
+    local hosts = vim.tbl_keys(map)
+    table.sort(hosts)
+    for _, host in ipairs(hosts) do
+      vim.list_extend(argv, { "-v", ("%s:%s:%s"):format(host, map[host], kind[2]) })
+    end
   end
   local names = vim.tbl_keys(opts.env or {})
   table.sort(names)
@@ -98,6 +118,40 @@ function M.argv(command, opts)
   argv[#argv + 1] = image(opts)
   vim.list_extend(argv, command)
   return argv
+end
+
+---The id (digest) of the image: what a proof of a run in it names. Nil and why when it cannot be asked.
+---@param opts? Testing.Container.Opts
+---@return string|nil id, string|nil why
+function M.digest(opts)
+  opts = opts or {}
+  local res = runner(opts)({ engine(opts), "image", "inspect", "--format", "{{.Id}}", image(opts) })
+  local id = res.code == 0 and vim.trim(res.stdout or ""):match("^[%w:]+$") or nil
+  if not id or id == "" then
+    return nil, ("%s image inspect %s: exit %d"):format(engine(opts), image(opts), res.code)
+  end
+  return id
+end
+
+---Build an image from a Dockerfile (`<engine> build --tag <tag> --file <file> <context>`; a build may use the
+---network). Exit code and output as `run`.
+---@param tag string
+---@param file string
+---@param context string
+---@param opts? Testing.Container.Opts
+---@return Testing.Container.Result
+function M.build(tag, file, context, opts)
+  opts = vim.tbl_extend("force", { timeout_ms = 30 * 60 * 1000 }, opts or {})
+  return runner(opts)({ engine(opts), "build", "--tag", tag, "--file", file, context })
+end
+
+---Remove a container of this name that an earlier run left (a crash between `run` and `--rm`). Only a name the caller
+---made itself (`testing-ci-<repo>-<target>`); a container that is not there is no error.
+---@param name string
+---@param opts? Testing.Container.Opts
+function M.remove(name, opts)
+  opts = opts or {}
+  runner(opts)({ engine(opts), "rm", "--force", "--ignore", name })
 end
 
 ---Run `command` in a fresh container (no network, mounts read-only).

@@ -20,6 +20,11 @@
 ---   expired      the proof is older than `--max-age` (default 7 days)
 ---   untrusted, partial, invalid, no-stamp   as for `testing verify`; `no-stamp` also: no complete run of the profile
 ---
+--- `--on=<target>` asks about a run in a container (`testing ci --on=linux|devcontainer`, `testing.ci.on`): its proof
+--- is `ci-<profile>.<target>.json`, separate from the host's. The system, Neovim and the tools are those of the image:
+--- what is compared instead is the id of the image now (the engine is asked; without it the answer is `rejected`), and
+--- the document is the proof of its tree (the suite's stamp lives in the container's state, as for a snapshot run).
+---
 --- Exit 0 only for `verified`, 1 for any other answer, 2 a usage or pipeline error, 3 an internal failure.
 
 local M = {}
@@ -32,11 +37,12 @@ M.DEFAULT_MAX_AGE = "7d"
 
 M.USAGE = table.concat({
   "usage: testing ci verify [--profile=<name>] [--json] [--allow-dirty] [--max-age=<7d>]",
-  "                         [--state-dir=<dir>] [--root=<dir>]",
+  "                         [--on=<host|linux|devcontainer>] [--state-dir=<dir>] [--root=<dir>]",
   "  --profile=<name>  the profile whose last complete run is the proof (default: ci.default)",
   "  --json            print the document testing-ci-verify/1 instead of lines (no sentinel in it)",
   "  --allow-dirty     accept a working tree with uncommitted changes",
   "  --max-age=<d>     the oldest proof accepted: 7d, 12h, 30m, 90s (default 7d)",
+  "  --on=<target>     the proof of a run in a container (testing ci --on=linux): ci-<profile>.<target>.json",
   "  --state-dir=<dir> where the document and the suite's stamp are (default: stdpath('state'))",
   "  --root=<dir>      the project root (default: the current directory)",
 }, "\n")
@@ -49,8 +55,9 @@ M.USAGE = table.concat({
 ---@field state_dir? string
 ---@field root string
 ---@field help boolean
+---@field on? string `--on=<target>`: the proof of a container run.
 
-local VALUED = { profile = true, ["max-age"] = true, ["state-dir"] = true, root = true }
+local VALUED = { profile = true, ["max-age"] = true, ["state-dir"] = true, root = true, on = true }
 
 ---@param argv string[] The arguments after `verify`.
 ---@return Testing.Ci.Verify.Args|nil args
@@ -90,6 +97,13 @@ function M.parse(argv)
   local _, why = require("testing.stamp").parse_age(args.max_age)
   if why then
     return nil, "--max-age: " .. why
+  end
+  if args.on then
+    local targets, bad = require("testing.ci.on").parse(args.on)
+    if not targets or #targets ~= 1 then
+      return nil, bad or "--on: one target"
+    end
+    args.on = targets[1] ~= "host" and targets[1] or nil
   end
   return args
 end
@@ -236,6 +250,7 @@ local function check(args, sv)
   local path = require("testing.state").dir(root, { state_dir = state_dir })
     .. "/ci-"
     .. profile
+    .. (args.on and ("." .. args.on) or "")
     .. ".json"
   local f = io.open(path, "rb")
   if not f then
@@ -256,6 +271,9 @@ local function check(args, sv)
     return fail("invalid", M.EXIT_NOT_PROVEN, bad)
   end
   res.proof_tree = doc.tree
+  if args.on then
+    return M._check_target(args, sv, root, pipeline, names, doc, res, fail)
+  end
 
   -- every process of our own is started now and collected together: git facts, the tool versions
   local facts = internal.git_facts(root)
@@ -396,6 +414,89 @@ local function check(args, sv)
       res.rerun[#res.rerun + 1] = p.step.name
     end
   end
+  return res
+end
+
+---The proof of a container run (`--on=<target>`): the tree, the pipeline, the image id, the age; nothing of this
+---machine's tools (they are the image's).
+---@param args Testing.Ci.Verify.Args
+---@param sv table
+---@param root string
+---@param pipeline table
+---@param names string[] The steps of the profile.
+---@param doc table
+---@param res Testing.Ci.Verify.Result
+---@param fail fun(status: string, exit: integer, reason?: string): Testing.Ci.Verify.Result
+---@return Testing.Ci.Verify.Result
+function M._check_target(args, sv, root, pipeline, names, doc, res, fail)
+  local target = args.on --[[@as string]]
+  if doc.target ~= target then
+    return fail(
+      "invalid",
+      M.EXIT_NOT_PROVEN,
+      ("the document is of %s, not of %s"):format(tostring(doc.target), target)
+    )
+  end
+  local facts = require("testing.ci").internal.git_facts(root)
+  res.tree = facts.tree
+  if facts.tree == nil then
+    return fail(
+      "invalid",
+      M.EXIT_NOT_PROVEN,
+      "no git tree to compare (not a repository, no commit)"
+    )
+  end
+  local rejected = {}
+  local sha = vim.fn.sha256(require("lib.nvim.json.canonical").encode(pipeline.digest_input))
+  if doc.pipeline_sha ~= sha then
+    rejected[#rejected + 1] = "the pipeline (`ci` section) differs from the one that was proven"
+  end
+  local copts = vim.deepcopy(sv.container or {})
+  local image, iwhy = require("testing.ci.on").image_of(target, root, pipeline, copts)
+  local id
+  if image then
+    copts.image = image
+    id, iwhy = require("testing.container").digest(copts)
+  end
+  if not id then
+    rejected[#rejected + 1] = ("the image of %s cannot be asked: %s"):format(target, tostring(iwhy))
+  elseif id ~= doc.image then
+    rejected[#rejected + 1] = ("image: proof in %s, now %s"):format(tostring(doc.image), id)
+  end
+  if #rejected > 0 then
+    res.status = "rejected"
+    vim.list_extend(res.reasons, rejected)
+    return res
+  end
+  if facts.dirty ~= false and not args.allow_dirty then
+    return fail("dirty", M.EXIT_NOT_PROVEN, "git status is not empty (--allow-dirty overrules)")
+  end
+  local max_age = require("testing.stamp").parse_age(args.max_age) --[[@as integer]]
+  local age = age_of(doc.time)
+  if age == nil or age < -300 then
+    return fail(
+      "invalid",
+      M.EXIT_NOT_PROVEN,
+      "the document has no valid time (or one in the future)"
+    )
+  end
+  if age > max_age then
+    return fail(
+      "expired",
+      M.EXIT_NOT_PROVEN,
+      ("the proof is %d s old, the limit is %s"):format(age, args.max_age)
+    )
+  end
+  if doc.tree == facts.tree then
+    res.status, res.exit = "verified", M.EXIT_OK
+    return res
+  end
+  res.status = "changed"
+  res.reasons[#res.reasons + 1] = ("tree %s, the proof is for %s"):format(
+    short(facts.tree),
+    short(doc.tree)
+  )
+  vim.list_extend(res.rerun, names)
   return res
 end
 

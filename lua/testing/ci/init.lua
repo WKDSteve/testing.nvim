@@ -37,6 +37,7 @@ M.SENTINEL = "TESTING_CI_OK"
 
 M.USAGE = table.concat({
   "usage: testing ci [--profile=<name>] [--step=<a,b>] [--keep-going] [--reuse] [--agent|--no-agent] [--json=<file>]",
+  "                  [--on=<host,linux,devcontainer>]",
   "       testing ci verify [--profile=<name>] [--json] [--allow-dirty] [--max-age=<7d>] [--root=<dir>]",
   "       testing ci commit <rev>... | --range=<a>..<b> [--base=<rev>] [--force] [--keep] [--json=<file>] ...",
   "       testing ci --repos=<a,b> | --repos-root=<dir> | --repos-file=<list> [--force] [--jobs=<n>] ...",
@@ -50,6 +51,8 @@ M.USAGE = table.concat({
   "  --profile=<name>  the profile to run (default: ci.default)",
   "  --step=<a,b>      only these steps (a partial run: no proof, no sentinel)",
   "  --keep-going      run every step even after a red one",
+  "  --on=<a,b>        where the pipeline runs, one after the other: host (this machine, the default), linux (a",
+  "                    container of containers/ci/Containerfile, Podman), devcontainer (the repository's image)",
   "  --reuse           skip the suite when its stamp still verifies (a docs-only change reruns the other steps)",
   "  --snapshot        run on a snapshot of HEAD (the working tree is not touched) and keep the proof for `ci verify`",
   "  --rev=<rev>       with --snapshot: the commit to run on instead of HEAD (what a pre-push hook is pushing)",
@@ -86,6 +89,7 @@ M.USAGE = table.concat({
 ---@field root string
 ---@field suite_args string[]
 ---@field help boolean
+---@field on? string[] `--on=<a,b>`: the targets (`testing.ci.on`); nil is the host alone.
 
 local VALUED = {
   profile = true,
@@ -98,6 +102,7 @@ local VALUED = {
   events = true,
   rev = true,
   with = true,
+  on = true,
 }
 
 ---@param argv string[] The arguments after `ci`.
@@ -145,6 +150,12 @@ function M.parse(argv)
         args.state_dir = value
       elseif key == "with" then
         args.with = vim.split(value, ",", { trimempty = true })
+      elseif key == "on" then
+        local targets, bad = require("testing.ci.on").parse(value)
+        if not targets then
+          return nil, bad
+        end
+        args.on = targets
       else
         args[key] = value
       end
@@ -1150,6 +1161,14 @@ function M.main(argv, sv)
     bad_root_events.close()
     return M.EXIT_USAGE
   end
+  -- containers too: each target runs the pipeline in turn (testing.ci.on); `--on=host` alone is a plain run
+  if args.on and not (#args.on == 1 and args.on[1] == "host") then
+    if args.snapshot then
+      err("testing ci: --on with a container target does not go with --snapshot")
+      return M.EXIT_USAGE
+    end
+    return require("testing.ci.on").main(argv, args, root, sv)
+  end
   if args.snapshot then
     return require("testing.ci.snapshot_run").main(args, root, sv)
   end
@@ -1339,6 +1358,13 @@ function M.main(argv, sv)
 
   -- every process of our own is started now and collected later: git facts and the tool versions
   local facts = git_facts(root)
+  -- the run inside a container of `testing ci --on=<target>`: the repository is read-only there (no .ci-last.json)
+  local target = vim.uv.os_getenv(require("testing.ci.on").TARGET_ENV)
+  if target and target ~= "" then
+    facts.legacy_ignored = false
+  else
+    target = nil
+  end
   local versions = start_versions(planned)
 
   -- the agent report replaces the streamed output: verdict first, then only the findings
@@ -1561,6 +1587,8 @@ function M.main(argv, sv)
     steps = steps_doc,
     -- the steps that were derived from the repository (no `ci` profiles of its own) and why
     derived = pipeline.derived or vim.NIL,
+    -- where it ran: nil on the host, the target of `testing ci --on` in its container
+    target = target or vim.NIL,
   }
 
   -- the reports: a report that could not be written is exit 3 (as for a run), and the document says so

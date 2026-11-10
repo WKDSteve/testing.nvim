@@ -74,6 +74,7 @@ local NAME = "^[%a_][%w_%-]*$"
 ---@field profiles table<string, string[]> Each profile expanded into step names, in order, without duplicates.
 ---@field default string
 ---@field digest_input table What the pipeline hash is taken over (the resolved definition).
+---@field container? { image?: string, network?: boolean } `ci.container` (`testing ci --on=...`, `testing.ci.on`).
 
 ---@param v any
 ---@return string
@@ -322,6 +323,40 @@ local function resolve_step(step_name, raw, problems)
   })
 end
 
+---`ci.container`: how `testing ci --on=linux|devcontainer` runs (`testing.ci.on`): `image` replaces the image of the
+---`linux` target, `network = true` gives the container the network (default: none). Nil for an absent section.
+---@param raw any
+---@param problems string[]
+---@return { image?: string, network?: boolean }|nil
+local function container_of(raw, problems)
+  if raw == nil then
+    return nil
+  end
+  if type(raw) ~= "table" then
+    problems[#problems + 1] = ("ci.container: expected a table, got %s"):format(show(raw))
+    return nil
+  end
+  for key, v in pairs(raw) do
+    if key == "image" then
+      -- an image reference, never anything an engine could read as an option
+      if type(v) ~= "string" or not v:match("^[%w][%w%.%-_/:@]*$") then
+        problems[#problems + 1] = ("ci.container.image: expected an image name, got %s"):format(
+          show(v)
+        )
+      end
+    elseif key == "network" then
+      if type(v) ~= "boolean" then
+        problems[#problems + 1] = ("ci.container.network: expected true or false, got %s"):format(
+          show(v)
+        )
+      end
+    else
+      problems[#problems + 1] = ("unknown key 'ci.container.%s'"):format(tostring(key))
+    end
+  end
+  return { image = raw.image, network = raw.network }
+end
+
 ---Validate a `ci` section and resolve it into a pipeline.
 ---@param raw any The value of `ci` in `.testing.lua`.
 ---@return Testing.Ci.Pipeline|nil pipeline
@@ -333,7 +368,13 @@ function M.resolve(raw)
   end
   for key in pairs(raw) do
     -- `workflow` is read by `testing init --workflow=public` (testing.ci.workflow), not by the pipeline
-    if key ~= "profiles" and key ~= "default" and key ~= "steps" and key ~= "workflow" then
+    if
+      key ~= "profiles"
+      and key ~= "default"
+      and key ~= "steps"
+      and key ~= "workflow"
+      and key ~= "container"
+    then
       problems[#problems + 1] = ("unknown key 'ci.%s'"):format(tostring(key))
     end
   end
@@ -454,11 +495,16 @@ function M.resolve(raw)
     }
   end
   ---@type Testing.Ci.Pipeline
+  local container = container_of(raw.container, problems)
+  if #problems > 0 then
+    return nil, problems
+  end
   local pipeline = {
     profiles = expanded,
     default = default --[[@as string]],
     steps = steps,
     digest_input = digest_input,
+    container = container,
   }
   return pipeline, problems
 end
@@ -476,7 +522,8 @@ function M.check(v)
 end
 
 ---The keys of a section that adjusts the derived pipeline (no `profiles`).
-local DERIVED_KEYS = { skip = true, steps = true, default = true, workflow = true }
+local DERIVED_KEYS =
+  { skip = true, steps = true, default = true, workflow = true, container = true }
 
 ---The pipeline of a project: its `ci` section, or the one derived from the repository (`testing.ci.derive`) when the
 ---section is absent or has no `profiles`. Such a section only adjusts what is derived: `skip` (names to leave out),
@@ -516,7 +563,7 @@ function M.load(root)
   local problems = {}
   for key in pairs(raw) do
     if not DERIVED_KEYS[key] then
-      problems[#problems + 1] = ("unknown key 'ci.%s' (a section without `profiles` takes skip, steps, default)"):format(
+      problems[#problems + 1] = ("unknown key 'ci.%s' (a section without `profiles` takes skip, steps, default, container)"):format(
         tostring(key)
       )
     end
@@ -581,6 +628,7 @@ function M.load(root)
   if raw.default ~= nil then
     section.default = raw.default
   end
+  section.container = raw.container
   local pipeline, resolve_problems = M.resolve(section)
   if not pipeline then
     return nil, resolve_problems

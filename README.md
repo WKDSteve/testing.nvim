@@ -295,6 +295,9 @@ runs); `assertions = "warn"` keeps their verdict and the terminal lists them.
   `module 'lib.nvim.fs.write.atomic' not found`; `:checkhealth testing` names the missing module and
   these commits.
 
+- Optional: [Podman](https://podman.io) for `testing ci --on=linux` (the pipeline in a Linux container, the image of
+  `containers/ci`) and the container checks of the suite; without it those are a reported skip or exit `3`.
+
 The command-line runner looks for lib.nvim in four places, in this order: `$LIB_NVIM_DIR`,
 `<repo>/.deps/lib.nvim`, a sibling `../lib.nvim`, `stdpath("data")/lazy/lib.nvim`. If none holds it, it
 prints all four and exits with `3`.
