@@ -45,10 +45,11 @@ local memo = {}
 M.ASK_MS = 5000
 
 ---Output of a command; nil and `"silent"` when it did not answer in time (or could not be started although it is
----there), nil and `"failed"` when it answered with an exit code other than 0.
+---there), nil, `"failed"` and the exit code when it answered with an exit code other than 0.
 ---@param argv string[]
 ---@return string|nil text
 ---@return "silent"|"failed"|nil why
+---@return integer|nil code
 local function output(argv)
   -- not from the project: on Windows a program is looked for in the working directory first, and a `git.exe` in the
   -- root of the project under test must not be what the key asks for its version
@@ -63,7 +64,7 @@ local function output(argv)
     return nil, "silent"
   end
   if res.code ~= 0 then
-    return nil, "failed"
+    return nil, "failed", res.code
   end
   local text = (res.stdout or ""):gsub("\r", "")
   return text
@@ -73,12 +74,28 @@ end
 ---@param argv string[]
 ---@return string|nil text
 ---@return "silent"|"failed"|nil why
+---@return integer|nil code
 local function ask(argv)
-  local text, why = output(argv)
+  local text, why, code = output(argv)
   if why == "silent" then
-    text, why = output(argv)
+    text, why, code = output(argv)
   end
-  return text, why
+  return text, why, code
+end
+
+---The program a spec of this name really starts: bash is the one `lib.nvim.cross.bash` finds (Git Bash on Windows,
+---never the WSL launcher that comes first on the PATH there), the others the name on the PATH. Nil when there is none.
+---@param name string
+---@return string|nil
+local function program_path(name)
+  if name == "bash" then
+    local ok, cross = pcall(require, "lib.nvim.cross.bash")
+    if ok and type(cross) == "table" and type(cross.find) == "function" then
+      local found_ok, path = pcall(cross.find)
+      return found_ok and path or nil
+    end
+  end
+  return nil
 end
 
 ---Is the program on the PATH? (`<absent>` is a statement about this, never a guess from a missing answer.)
@@ -111,14 +128,21 @@ local function git_identity(name, lookup)
   local version = first_line(out)
   -- the system and the global configuration (a `core.hookspath` there changed what a fixture repository does), with
   -- where each line comes from; the configuration of the repository the runner happens to sit in is not asked.
-  -- A scope without a file is `<none>` (git exits 1); a scope that did not answer leaves git without an identity.
+  -- A scope without a file is `<none>` (git exits 1); another exit code (a configuration git cannot read, exit 128) is a
+  -- line of its own, never `<none>`; a scope that did not answer leaves git without an identity.
   local config = {}
   for _, scope in ipairs({ "--system", "--global" }) do
-    local listed, why = ask({ name, "config", scope, "--list", "--show-origin" })
+    local listed, why, code = ask({ name, "config", scope, "--list", "--show-origin" })
     if why == "silent" then
       return nil
     end
-    config[#config + 1] = listed or "<none>"
+    if listed then
+      config[#config + 1] = listed
+    elseif code == 1 then
+      config[#config + 1] = "<none>"
+    else
+      config[#config + 1] = ("<failed: exit %s>"):format(tostring(code))
+    end
   end
   local env = {}
   for _, var in ipairs(M.GIT_ENV) do
@@ -132,10 +156,11 @@ local function git_identity(name, lookup)
 end
 
 ---What a program is, as a line of the key: its version, and for git also its configuration; `<absent>` when it is not
----on the PATH. Nil when it is there but did not answer `--version` (twice): then nothing is known about it, and a key
----that would name it cannot be made (it would store a result under a line that the next run, with an answer, never
----finds again). Made once per process; `over` (a table from tool name to text, for specs; `false` = did not answer)
----replaces it.
+---there; `<failed: exit N>` when it answered `--version` with an error (a stable answer is a line). Nil when it is there
+---but did not answer (twice): then nothing is known about it, and a key that would name it cannot be made (it would
+---store a result under a line that the next run, with an answer, never finds again). bash is the one
+---`lib.nvim.cross.bash` finds, the one the specs start. Made once per process; `over` (a table from tool name to text,
+---for specs; `false` = did not answer) replaces it.
 ---@param name string `git`, `bash` or `nvim`.
 ---@param over? table<string, string|false>
 ---@param lookup? fun(name: string): string|nil  Environment lookup (default `vim.uv.os_getenv`).
@@ -149,13 +174,18 @@ function M.identity(name, over, lookup)
     return hit or nil
   end
   local text
-  if not present(name) then
+  local exe = program_path(name)
+  if not exe and not present(name) then
     text = "<absent>"
   elseif name == "git" then
     text = git_identity(name, lookup or vim.uv.os_getenv)
   else
-    local out = ask({ name, "--version" })
-    text = out and first_line(out) or nil
+    local out, why, code = ask({ exe or name, "--version" })
+    if out then
+      text = first_line(out)
+    elseif why == "failed" then
+      text = ("<failed: exit %s>"):format(tostring(code))
+    end
   end
   memo[name] = text or false
   return text

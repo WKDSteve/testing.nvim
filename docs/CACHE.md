@@ -230,8 +230,10 @@ closure of `require`s cannot show:
 - `spawn tool <name>=<identity>` for `bash`, `git` and `nvim` (`testing.cache.tools`): the version line, for git also a
   digest of the system and global configuration (`git config --system|--global --list --show-origin`: a `core.hookspath` or
   a `user.*` changes what a fixture repository does) and one of the `GIT_*` variables that decide that (`HOME`,
-  `XDG_CONFIG_HOME`, `GIT_CONFIG_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, ...). A program that is not on the `PATH` is
-  `<absent>`. One that is there but does not answer (`--version` or git's configuration, asked twice, 5 s each) has no
+  `XDG_CONFIG_HOME`, `GIT_CONFIG_*`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, ...). `bash` is the one `lib.nvim.cross.bash`
+  finds (Git Bash on Windows, never the WSL launcher that comes first on the `PATH` there): the one a spec starts. A
+  program that is not there is `<absent>`; one that answers with an error is `<failed: exit N>` (a stable answer is a
+  line), and so is a git configuration git cannot read (no file at all is `<none>`). One that is there but does not answer (`--version` or git's configuration, asked twice, 5 s each) has no
   identity, and the spec has no key in that run: a line made up from the silence would store the result under a key the
   next run, which gets an answer, never finds (Git Bash on a loaded Windows machine once hung for ten seconds).
 

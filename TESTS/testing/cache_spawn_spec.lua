@@ -110,6 +110,55 @@ return function(H)
       "identity: a program not on the PATH is <absent>"
     )
     eq(asked, 0, "identity: ... and it is not started")
+    -- an error is a stable answer: a line of its own (not "no identity", which would never let the spec be cached)
+    stub({ { code = 2, signal = 0, stdout = "", stderr = "no" } })
+    tools.reset()
+    eq(
+      { tools.identity("nvim"), asked },
+      { "<failed: exit 2>", 1 },
+      "identity: an error is a line, asked once"
+    )
+    vim.system = real_system
+    tools.reset()
+  end
+
+  -- bash is the one lib.nvim.cross.bash finds (the specs start that one; on Windows the PATH names the WSL launcher
+  -- first), and git's configuration that cannot be read (exit 128) is not the same line as no configuration (exit 1)
+  do
+    local real_system, real_cross = vim.system, package.loaded["lib.nvim.cross.bash"]
+    local started = {}
+    local config_code = { ["--system"] = 1, ["--global"] = 1 }
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(argv)
+      started[#started + 1] = argv[1]
+      local res = { code = 0, signal = 0, stdout = "version 1\n", stderr = "" }
+      if argv[2] == "config" then
+        res = { code = config_code[argv[3]], signal = 0, stdout = "", stderr = "" }
+      end
+      return {
+        wait = function()
+          return res
+        end,
+      }
+    end
+    package.loaded["lib.nvim.cross.bash"] = {
+      find = function()
+        return "C:/Git/usr/bin/bash.exe"
+      end,
+    }
+    tools.reset()
+    eq(tools.identity("bash"), "version 1", "identity: bash answers")
+    eq(started, { "C:/Git/usr/bin/bash.exe" }, "identity: ... the bash cross.bash finds is asked")
+    tools.reset()
+    local none = tools.identity("git")
+    config_code["--global"] = 128
+    tools.reset()
+    local broken = tools.identity("git")
+    ok(
+      none ~= nil and broken ~= nil and none ~= broken,
+      "identity: an unreadable configuration is another key line"
+    )
+    package.loaded["lib.nvim.cross.bash"] = real_cross
     vim.system = real_system
     tools.reset()
   end
