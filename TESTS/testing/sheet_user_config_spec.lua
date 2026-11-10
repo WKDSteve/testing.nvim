@@ -154,7 +154,16 @@ require("lazy").setup({
       return ({ TESTING_USER_CONFIG = "user/nvim", TESTING_USER_DATA = "user/nvim-data" })[n]
     end)
     vim.fn.chdir(cwd)
-    eq(rel and { rel.config, rel.data }, { config, data }, "a relative path is made absolute")
+    -- compared as real paths: on macOS the temp folder `/var/...` is `/private/var/...` from inside it
+    local function real(p)
+      return p and vim.fs.normalize(vim.uv.fs_realpath(p) or p)
+    end
+    eq(
+      rel and { real(rel.config), real(rel.data) },
+      { real(config), real(data) },
+      "a relative path is made absolute"
+    )
+    ok(rel and rel.config:match("^%a:/") or rel.config:sub(1, 1) == "/", "... absolute")
   end
 
   -- 2. the shape --------------------------------------------------------------------------------------------------------
