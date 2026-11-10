@@ -175,6 +175,86 @@ return function(H)
     eq(plain[#plain].notes, nil, "no notes, no field")
   end
 
+  -- 1b. every engine: the note is the run's, not the engine's ------------------------------------------------------------
+  do
+    local nvim = vim.v.progpath:gsub("\\", "/")
+    local driver = write(
+      "note_driver.lua",
+      [[
+while true do
+  local line = io.stdin:read("*l")
+  if not line then break end
+  local cmd = vim.json.decode(line)
+  io.stdout:write(vim.json.encode({ schema = "testing-sheet-driver/1", ok = true }), "\n")
+  io.stdout:flush()
+  if cmd.cmd == "close" then break end
+end
+]]
+    )
+    write("note_app.lua", "vim.wait(120000)\n")
+    write(".testing.lua", "return { sheets = { apps = " .. vim.inspect({
+      window = {
+        run = { nvim, "--headless", "-u", "NONE", "-l", "note_app.lua" },
+        window = "demo",
+      },
+    }) .. " } }\n")
+    write(
+      "TESTS/sheets/browser.sheet.lua",
+      [[return {
+  id = "note.browser",
+  title = "Browser",
+  engine = "browser",
+  sizes = { { rows = 7, cols = 9 } },
+  steps = { { press = "a" }, { press = "b" } },
+}
+]]
+    )
+    write(
+      "TESTS/sheets/desk.sheet.lua",
+      [[return {
+  id = "note.desk",
+  title = "Desktop",
+  engine = "desktop",
+  app = "window",
+  steps = { { wait = "a" }, { click = "b" } },
+}
+]]
+    )
+    write(
+      "TESTS/sheets/hand.sheet.lua",
+      [[return {
+  id = "note.hand",
+  title = "By hand",
+  engine = "manual",
+  steps = { { ask = "Is the icon there?" }, { ask = "Does it start?" } },
+}
+]]
+    )
+    local driven = {
+      session_opts = {
+        driver_argv = { nvim, "--headless", "-u", "NONE", "-l", driver },
+        driver_margin_ms = 60000,
+        driver_stop_ms = 2000,
+      },
+    }
+    for _, c in ipairs({
+      { id = "note.browser", deps = driven, commands = { "next", "note in the page", "continue" } },
+      { id = "note.desk", deps = driven, commands = { "next", "note in the window", "continue" } },
+      {
+        id = "note.hand",
+        commands = { "answer yes", "note at the question", "answer yes" },
+      },
+    }) do
+      local code, events, errs = step_run({ c.id, "--root", root }, c.commands, c.deps)
+      local last = events[#events] or {}
+      eq({ code, last.event }, { 0, "end" }, c.id .. ": the run ends green (" .. errs .. ")")
+      local notes = of(events, "note")
+      eq(#notes, 1, c.id .. ": the note is taken")
+      eq(notes[1] and notes[1].n, 2, c.id .. ": ... on the step the run stands before")
+      eq(#(last.notes or {}), 1, c.id .. ": ... and end has it")
+    end
+  end
+
   -- 2. kept for the report -----------------------------------------------------------------------------------------------
   do
     eq(step_cli.last_notes(root, "note.walk"), nil, "the last run had no notes: nothing kept")
