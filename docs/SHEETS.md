@@ -70,6 +70,41 @@ an optional plugin: each expression is evaluated in the child before the first s
 truthy makes the sheet a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. An
 expression that raises fails the sheet.
 
+### The user's installed config (`config = "user"`)
+
+`config = "user"` (rpc sheets, no `minit`) starts the child on the **installed config** instead of the project's
+minimal init, for what only shows with it: a key of the config, a plugin's setup as it is, the leader:
+
+```lua
+return {
+  id = "nvim-config.smoke",
+  title = "The installed config starts with its plugins",
+  config = "user",
+  steps = {
+    { wait = "package.loaded['lazy'] ~= nil", timeout = 10000 },
+    { expect = "#require('lazy').plugins() > 10" },
+    { expect = "not vim.fn.execute('messages'):find('E%d+:')" },
+  },
+}
+```
+
+* `stdpath('config')` is the real config (on the runtimepath with its `after/`, its `init.lua` or `init.vim` is the
+  init); the installed plugins are seen through links in the sandbox data folder: lazy.nvim's `lazy`, `lazy-rocks`,
+  the `site/pack`, `site/parser`, `site/parser-info` and `site/queries` of tree-sitter and `mason`. State, cache,
+  the rest of data and temp stay in the sandbox.
+* **Read only for lazy.nvim**: its `setup` gets `install.missing = false`, `checker.enabled = false` and
+  `change_detection.enabled = false`, and its lock file is a copy in the sandbox; testing.nvim and lib.nvim stay on the
+  runtimepath also when lazy.nvim resets it. A plugin that fetches something **missing** by itself (a parser of
+  tree-sitter's `ensure_installed`, a tool of mason) writes into the user's folder through the link, as the user's own
+  editor would; a config that installs another way is not stopped.
+* Where: `$TESTING_USER_CONFIG` and `$TESTING_USER_DATA`, else the platform's places (`%LOCALAPPDATA%\nvim` and
+  `nvim-data`; `$XDG_CONFIG_HOME/nvim` and `$XDG_DATA_HOME/nvim`, else below `~`). The child gets the caller's
+  whole environment (but `NVIM*`): a config reads its own variables.
+* **A skip, never green**, on CI (`CI` set) and where there is no `init.lua`/`init.vim`; the reason says which.
+  The workstation rule and the trust gate of the project root are those of every sheet.
+* A real config starts and draws slower: one call may take 30 s, the start 60 s. `settle` rarely fits (a config
+  keeps timers running); `wait` for what the step needs. `v:errmsg` is set by a `silent!` too: look at `:messages`.
+
 The file is read as **data**: `load` with an empty environment, so a sheet cannot call anything while it is
 read (a sheet that touches `os` does not load). What runs is the Lua of its steps, inside the child editor.
 `load` checks the shape and names the field of a mistake (`steps[3] has two actions (keys and lua)`).

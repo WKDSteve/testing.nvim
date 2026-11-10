@@ -156,6 +156,7 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field task? string
 ---@field engine "rpc"|"manual"|"browser"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
+---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
 ---@field steps Testing.Sheet.Step[]
@@ -222,6 +223,7 @@ local SHEET_KEYS = {
   requires = "table",
   app = "string",
   args = "table",
+  config = "string",
 }
 
 ---@param v any
@@ -665,6 +667,17 @@ function M.validate(s)
     local aerr = M.check_args(s.args, "args")
     if aerr then
       return nil, aerr
+    end
+  end
+  if s.config ~= nil then
+    if s.config ~= "user" then
+      return nil, 'config: "user" (the installed config of the user, read only)'
+    end
+    if s.engine ~= "rpc" then
+      return nil, "config belongs to an rpc sheet"
+    end
+    if s.minit then
+      return nil, 'config = "user" runs the user\'s init: no minit'
     end
   end
   if s.app then

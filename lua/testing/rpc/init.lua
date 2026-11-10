@@ -51,6 +51,7 @@ M.QUIT_MS = 10000
 ---@field root? string Working directory and base of `<REPO>` (default: the current directory).
 ---@field args? string[] Arguments after the editor's own (`+cmd`, a file): the command line of the child, no shell.
 ---@field minit? string Absolute path of the project's minimal init (run as the `-u` init).
+---@field user_config? Testing.UserConfig The user's installed config instead of `minit`, read only (`testing.child.user_config`).
 ---@field rtp_prepend? string[] Directories put first on the child's runtimepath (default: this checkout and lib.nvim).
 ---@field rtp? string[] Directories appended to the child's runtimepath.
 ---@field env_allow? string[] Extra environment names (see `testing.child.env`).
@@ -556,9 +557,17 @@ local function start(S, async_cb)
     end
   end
 
+  local env_allow = opts.env_allow
+  if opts.user_config then
+    -- the user's config reads the user's environment (`REPOS_DIR`, ...): all of it but `NVIM*`
+    env_allow = vim.list_extend(
+      vim.deepcopy(env_allow or {}),
+      vim.tbl_keys(opts.parent_env or vim.fn.environ())
+    )
+  end
   local e = child_mod.environment({
     parent_env = opts.parent_env,
-    env_allow = opts.env_allow,
+    env_allow = env_allow,
     extra_env = extra_env,
     deterministic = opts.deterministic,
     isolate_home = opts.isolate_home,
@@ -573,12 +582,30 @@ local function start(S, async_cb)
       return false, ("cannot create %s: %s"):format(dir, tostring(err))
     end
   end
+  local minit = opts.minit
+  if opts.user_config then
+    -- the user's config on top of the sandbox, read only (`testing.child.user_config`)
+    local prepared, perr = require("testing.child.user_config").prepare(
+      opts.user_config,
+      e.sandbox,
+      e.dirs.data,
+      prepend,
+      require("testing.platform").is_windows()
+    )
+    if not prepared then
+      return false, perr
+    end
+    for key, value in pairs(prepared.env) do
+      e.env[key] = require("testing.platform").is_windows() and (value:gsub("/", "\\")) or value
+    end
+    minit = prepared.init
+  end
   local job_file = e.sandbox .. "/job.json"
   local text, jerr = require("lib.nvim.json").encode({
     version = 1,
     rtp_prepend = prepend,
     rtp = opts.rtp or {},
-    minit = opts.minit,
+    minit = minit,
     disable_first_run = opts.disable_first_run ~= false,
     defer_plugins = opts.defer_plugins == true,
     error_file = e.sandbox .. "/boot-error.txt",

@@ -11,6 +11,11 @@
 
 local M = {}
 
+-- `config = "user"`: one call and the start of a child on the user's whole config (measured: the first draw of a
+-- config with 50 plugins took 6 s on Windows)
+M.USER_CALL_TIMEOUT_MS = 30000
+M.USER_BOOT_TIMEOUT_MS = 60000
+
 ---@param v any
 ---@return string
 local function shown(v)
@@ -159,9 +164,25 @@ function M.new(s, opts, ctx)
   function D.open_size(new_size)
     size = new_size
     local tag = ("%dx%d"):format(size.cols, size.rows)
+    local user
+    if s.config == "user" then
+      -- the user's installed config, read only; where there is none (CI) the sheet is a skip, never green
+      local why
+      user, why = opts.user_config, nil
+      if not user then
+        user, why = require("testing.child.user_config").locate(opts.getenv)
+      end
+      if not user then
+        return { skip = why }
+      end
+    end
     local spawn = vim.tbl_extend("force", {
       root = ctx.root,
-      minit = minit,
+      minit = not user and minit or nil,
+      user_config = user,
+      -- a real config with all its plugins starts and draws slower than a minimal init
+      call_timeout_ms = user and M.USER_CALL_TIMEOUT_MS or nil,
+      boot_timeout_ms = user and M.USER_BOOT_TIMEOUT_MS or nil,
       size = size,
       guard = false,
       args = M.command_line(s.args, size),
