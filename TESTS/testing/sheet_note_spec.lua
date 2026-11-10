@@ -437,8 +437,128 @@ end
     has(text, " 2 lua b  [1 note]", "the step line counts its notes")
     has(text, "--- step 2, lua: b\nnote: looks right", "the tile shows the note under the step")
     has(lines[3], "N note", "the key is in the help line")
+    sent = nil
+    ok(not panel.note(p, ("x"):rep(step_cli.MAX_NOTE + 1)), "a note that is too long is not sent")
+    eq(sent, nil, "... nothing reaches the run")
+
+    -- an error of a note while the run goes on leaves it running; only a refused command restores the pause
+    p.paused, p.running, p.pending_pause = "start", false, nil
+    ok(panel.continue(p), "c")
+    panel.on_event(p, { schema = panel.SCHEMA, event = "step-before", size = "80x24", n = 2 })
+    panel.on_event(
+      p,
+      { schema = panel.SCHEMA, event = "error", message = "a note is at most 1000 bytes" }
+    )
+    eq({ p.paused, p.running }, { nil, true }, "a refused note does not bring back the old pause")
+    p.paused, p.running = "step", false
+    ok(panel.until_step(p, 2) == false, "(until to an earlier step is refused before sending)")
+    ok(panel.next(p), "n")
+    panel.on_event(p, { schema = panel.SCHEMA, event = "error", message = "unknown command" })
+    eq(p.paused, "step", "a refused command leaves the run paused")
+
     p.finished = { status = "pass", ms = 1, failures = {} }
     ok(not panel.note(p, "late"), "no note after the end")
+  end
+
+  -- 6. limits, the comment, the case of a root -------------------------------------------------------------------------
+  do
+    local max = step_cli.MAX_NOTES
+    step_cli.MAX_NOTES = 2
+    local _, capped = step_run(
+      { "note.walk", "--root", root },
+      { "note a", "note b", "note c", "continue" }
+    )
+    step_cli.MAX_NOTES = max
+    eq(#of(capped, "note"), 2, "at most MAX_NOTES notes in a run")
+    has((of(capped, "error")[1] or {}).message, "at most 2 notes", "... the next one is refused")
+
+    bodies["x/notes"] = "The task.\n"
+    step_run(
+      { "note.walk", "--root", root, "--tasks", "vault" },
+      { "note <!--- hidden --> and <!---- more", "continue" },
+      { call = memory_call }
+    )
+    local block = tasks.extract(bodies["x/notes"])
+    for line in block:gmatch("[^\n]+") do
+      if line:find("<!--", 1, true) then
+        ok(line:match("^<!%-%- testing:sheets:") ~= nil, "no comment opens in a note: " .. line)
+      end
+    end
+
+    if vim.fn.has("win32") == 1 then
+      step_run({ "note.walk", "--root", root }, { "note case", "continue" })
+      ok(
+        step_cli.last_notes(root:upper(), "note.walk") ~= nil,
+        "Windows: the case of a root does not matter"
+      )
+    end
+  end
+
+  -- 7. the real stdin: a note comes at once, also while a step runs -------------------------------------------------
+  do
+    write(
+      "TESTS/sheets/slow.sheet.lua",
+      [[return {
+  id = "note.slow",
+  title = "Slow",
+  steps = { { lua = "vim.g.a = 1" }, { lua = "vim.uv.sleep(1500)" }, { lua = "vim.g.b = 1" } },
+}
+]]
+    )
+    local events, partial, proc = {}, "", nil
+    local sent_during = false
+    proc = vim.system({
+      vim.v.progpath,
+      "-n",
+      "-i",
+      "NONE",
+      "--headless",
+      "-u",
+      "NONE",
+      "-l",
+      repo .. "/scripts/testing.lua",
+      "sheets",
+      "step",
+      "note.slow",
+      "--root",
+      root,
+    }, {
+      stdin = true,
+      text = true,
+      env = { TESTING_TRUST_ROOTS = root, NVIM_MACHINE_ROLE = "" },
+      stdout = function(_, data)
+        partial = partial .. (data or "")
+        for line in partial:gmatch("([^\n]*)\n") do
+          local okj, ev = pcall(vim.json.decode, line)
+          if okj and type(ev) == "table" then
+            events[#events + 1] = ev
+            if ev.event == "paused" and ev.reason == "start" then
+              proc:write("continue\n")
+            elseif ev.event == "step-before" and ev.n == 2 and not sent_during then
+              sent_during = true
+              proc:write("note while it settles\n")
+            end
+          end
+        end
+        partial = partial:match("([^\n]*)$") or ""
+      end,
+    })
+    local done = proc:wait(120000)
+    eq(done.code, 0, "the real run ends green (" .. tostring(done.stderr) .. ")")
+    local names, note_n = {}, nil
+    for _, ev in ipairs(events) do
+      names[#names + 1] = ev.event .. (ev.n and (":" .. ev.n) or "")
+      if ev.event == "note" then
+        note_n = ev.n
+      end
+    end
+    eq(note_n, 2, "the note is taken during step 2, not at a later stop (there is none)")
+    local at_note = vim.fn.index(names, "note:2")
+    local after_two = vim.fn.index(names, "step-after:2")
+    ok(
+      at_note >= 0 and at_note < after_two,
+      "... before the step ends: " .. table.concat(names, " ")
+    )
   end
 
   vim.fn.delete(root, "rf")

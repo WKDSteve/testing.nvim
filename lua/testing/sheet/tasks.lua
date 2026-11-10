@@ -270,7 +270,12 @@ end
 ---@param v any
 ---@return string
 local function note_text(v)
-  return (one_line(v):gsub("<!%-%-", "<!-"))
+  local s, n = one_line(v), 1
+  -- `<!---` would become `<!--` again in a single pass: until none is left
+  while n > 0 do
+    s, n = s:gsub("<!%-%-", "<!-")
+  end
+  return s
 end
 
 ---The block for the sheets of one task. Paths always name their project (`ui.nvim/TESTS/...`): a task

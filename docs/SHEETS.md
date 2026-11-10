@@ -323,7 +323,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `until <n>` | runs on and stops before step `n` of a size |
 | `break <n>`, `clear <n>` | sets or removes a breakpoint, as `--break` does, in every size; the run stays paused |
 | `answer yes\|no [text]` | answers a question; a no fails the step, with the text as its reason |
-| `note <text>` | a note on the step the run stands before (after a failure: the failed one), one line of at most 1000 bytes; taken at once, also while a step runs or under `continue`; the run stays where it is |
+| `note <text>` | a note on the step the run stands before (after a failure: the failed one), one line of at most 1000 bytes, at most 200 notes in a run; taken at once, also while a step runs or under `continue`; the run stays where it is |
 | `abort` | ends the run at once |
 
 * Closed stdin is `abort`, and so is a client that dies or stops reading stdout: nothing stays behind. An abort reaches a

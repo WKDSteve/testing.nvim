@@ -22,6 +22,8 @@ M.USAGE =
 
 ---The longest note, in bytes: one line of a task, not a document.
 M.MAX_NOTE = 1000
+---The most notes of one run: the file of the run, the page of testing-desktop and the task stay small.
+M.MAX_NOTES = 200
 
 ---@class Testing.SheetStep.Note
 ---@field size string
@@ -143,6 +145,20 @@ M.NOTES_FILE = "notes.json"
 ---@field status string How the run ended (`pass`, `fail`, `aborted`, ...).
 ---@field notes Testing.SheetStep.Note[]
 
+---Two roots of one project: on Windows the case of a folder name does not matter.
+---@param a any
+---@param b string
+---@return boolean
+local function same_root(a, b)
+  if type(a) ~= "string" then
+    return false
+  end
+  if vim.fn.has("win32") == 1 then
+    return a:lower() == b:lower()
+  end
+  return a == b
+end
+
 ---The notes of the last stepped run of a sheet of this project, nil when it had none (or ran in another project).
 ---@param root string
 ---@param id string
@@ -159,7 +175,7 @@ function M.last_notes(root, id)
     not ok
     or type(doc) ~= "table"
     or doc.id ~= id
-    or doc.root ~= root
+    or not same_root(doc.root, root)
     or type(doc.notes) ~= "table"
     or #doc.notes == 0
   then
@@ -486,6 +502,8 @@ function M.main(argv, sv, deps)
       emit("error", { message = ("a note is at most %d bytes"):format(M.MAX_NOTE) })
     elseif not pos then
       emit("error", { message = "no step yet to put a note on" })
+    elseif #notes >= M.MAX_NOTES then
+      emit("error", { message = ("at most %d notes in a run"):format(M.MAX_NOTES) })
     else
       local note =
         { size = pos.size, n = pos.n, text = text, time = os.date("!%Y-%m-%dT%H:%M:%SZ") }

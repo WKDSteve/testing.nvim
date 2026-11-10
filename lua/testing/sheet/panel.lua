@@ -235,10 +235,13 @@ function M.on_event(p, ev)
     end
   elseif ev.event == "step-before" then
     p.size, p.at, p.paused, p.running = ev.size, ev.n, nil, true
+    p.pending_pause = nil -- the command was taken
   elseif ev.event == "paused" then
     p.size, p.at, p.paused, p.running = ev.size, ev.n, ev.reason, false
+    p.pending_pause = nil
   elseif ev.event == "ask" then
     p.size, p.at, p.paused, p.running, p.question = ev.size, ev.n, "ask", false, ev.text
+    p.pending_pause = nil
   elseif ev.event == "step-after" then
     p.question = nil
     p.marks[ev.size] = p.marks[ev.size] or {}
@@ -252,9 +255,12 @@ function M.on_event(p, ev)
     p.notes[ev.size][ev.n] = list
   elseif ev.event == "error" then
     require("testing.notify").get().warn("testing sheet: " .. tostring(ev.message))
-    p.paused = p.pending_pause
+    -- only a refused command leaves the run where it was; any other error (a note) changes nothing of where it stands
+    if p.pending_pause then
+      p.paused, p.running, p.pending_pause = p.pending_pause, false, nil
+    end
   elseif ev.event == "end" then
-    p.finished, p.paused, p.running = ev, nil, false
+    p.finished, p.paused, p.running, p.pending_pause = ev, nil, false, nil
     local say = require("testing.notify").get()
     local text = ("testing sheet %s: %s"):format(
       p.doc and p.doc.id or p.target,
@@ -343,6 +349,13 @@ function M.note(p, text)
   end
   local function put(t)
     t = vim.trim((tostring(t or ""):gsub("%c", " ")))
+    local limit = require("testing.sheet.step").MAX_NOTE
+    if #t > limit then
+      require("testing.notify")
+        .get()
+        .warn(("testing sheet: a note is at most %d bytes"):format(limit))
+      return false
+    end
     if t == "" or not p.proc then
       return false
     end
