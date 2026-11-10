@@ -88,20 +88,26 @@ return {
 }
 ```
 
-* `stdpath('config')` is the real config (on the runtimepath with its `after/`, its `init.lua` or `init.vim` is the
-  init); the installed plugins are seen through links in the sandbox data folder: lazy.nvim's `lazy`, `lazy-rocks`,
-  the `site/pack`, `site/parser`, `site/parser-info` and `site/queries` of tree-sitter and `mason`. State, cache,
-  the rest of data and temp stay in the sandbox.
-* **Read only for lazy.nvim**: its `setup` gets `install.missing = false`, `checker.enabled = false` and
-  `change_detection.enabled = false`, and its lock file is a copy in the sandbox; testing.nvim and lib.nvim stay on the
-  runtimepath also when lazy.nvim resets it. A plugin that fetches something **missing** by itself (a parser of
-  tree-sitter's `ensure_installed`, a tool of mason) writes into the user's folder through the link, as the user's own
-  editor would; a config that installs another way is not stopped.
-* Where: `$TESTING_USER_CONFIG` and `$TESTING_USER_DATA`, else the platform's places (`%LOCALAPPDATA%\nvim` and
-  `nvim-data`; `$XDG_CONFIG_HOME/nvim` and `$XDG_DATA_HOME/nvim`, else below `~`). The child gets the caller's
-  whole environment (but `NVIM*`): a config reads its own variables.
-* **A skip, never green**, on CI (`CI` set) and where there is no `init.lua`/`init.vim`; the reason says which.
-  The workstation rule and the trust gate of the project root are those of every sheet.
+* `stdpath('config')` is the real config, seen through a link in the sandbox config folder (`XDG_CONFIG_HOME` stays
+  the sandbox's, so what other tools write there stays in it); on the runtimepath with its `after/`, its `init.lua`
+  or `init.vim` is the init. The installed plugins are seen through links in the sandbox data folder: lazy.nvim's
+  `lazy` and `lazy-rocks`, the `site/pack`, `site/parser`, `site/parser-info` and `site/queries` of tree-sitter and
+  the installed tools of mason (`packages`, `bin`, `share`, `opt`; its `registries` is a copy, mason rewrites it on
+  a start). State, cache, the rest of data and temp stay in the sandbox.
+* **Read only for lazy.nvim's start**: its `setup` gets `install.missing = false`, `checker.enabled = false` and
+  `change_detection.enabled = false` (in every form, `setup(spec, opts)` and `setup({ spec = ... })`), and its lock
+  file is a copy in the sandbox; testing.nvim and lib.nvim stay on the runtimepath when lazy.nvim resets it, behind
+  the plugins (a config that loads its own lib.nvim gets that one). Not stopped: a plugin that fetches something
+  **missing** by itself (a parser of tree-sitter's `ensure_installed`, a tool of mason) writes into the user's folder
+  through the link, as the user's own editor would; so does a step that runs `:Lazy sync`, `update`, `clean` or
+  `build`, and a config that installs another way.
+* Where: `$TESTING_USER_CONFIG` and `$TESTING_USER_DATA` (made absolute), else the platform's places
+  (`%LOCALAPPDATA%\nvim` and `nvim-data`; `$XDG_CONFIG_HOME/nvim` and `$XDG_DATA_HOME/nvim`, else below `~`). The
+  child gets the caller's whole environment, its `NVIM_*` variables too (`NVIM_MACHINE_ROLE`); only `NVIM` and
+  `NVIM_LISTEN_ADDRESS` (the calling editor) stay out, `NVIM_APPNAME` and `NVIM_LOG_FILE` are the harness's. The
+  determinism of every child holds: `TZ=UTC` and a C locale.
+* **A skip, never green**, on CI (`CI` set, not `0` or `false`) and where there is no `init.lua`/`init.vim`; the
+  reason says which. The workstation rule and the trust gate of the project root are those of every sheet.
 * A real config starts and draws slower: one call may take 30 s, the start 60 s. `settle` rarely fits (a config
   keeps timers running); `wait` for what the step needs. `v:errmsg` is set by a `silent!` too: look at `:messages`.
 

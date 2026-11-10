@@ -179,6 +179,15 @@ function M.environment(spec)
   end
   local clean = env_mod.sanitize(parent, { allow = allow })
   local env = clean.env
+  if spec.pass_env then
+    -- the user's own `NVIM*` variables too (`NVIM_MACHINE_ROLE`: the workstation rule of a config), only not what
+    -- points at the calling editor; `NVIM_APPNAME` and `NVIM_LOG_FILE` are the harness's
+    for var, value in pairs(parent) do
+      if env_mod.is_denied(var) and not env_mod.HARNESS_NVIM[var:upper()] then
+        env[var] = value
+      end
+    end
+  end
   if spec.deterministic ~= false then
     env_mod.apply_determinism(env)
   end

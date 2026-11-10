@@ -1,45 +1,61 @@
 ---@module 'testing.child.user_config'
--- @cache-env CI TESTING_USER_CONFIG TESTING_USER_DATA
+-- @cache-env CI TESTING_USER_CONFIG TESTING_USER_DATA HOME USERPROFILE LOCALAPPDATA XDG_CONFIG_HOME XDG_DATA_HOME
 ---@brief A child editor on the user's installed config, read only (`config = "user"` of a test sheet).
 ---@description
---- The child keeps its sandbox (state, cache, the rest of data, temp) and gets the real config on top:
+--- The child keeps its sandbox (state, cache, the rest of data and config, temp) and gets the real config on top:
 ---
---- * `stdpath('config')` is the user's config (`XDG_CONFIG_HOME` + `NVIM_APPNAME` of the child), on the
----   runtimepath with its `after/`; its `init.lua` (or `init.vim`) is the init of the child.
+--- * `stdpath('config')` is a link in the sandbox config folder to the user's config (`NVIM_APPNAME` of the child is
+---   its folder name): on the runtimepath with its `after/`, its `init.lua` (or `init.vim`) is the init of the child.
+---   `XDG_CONFIG_HOME` stays the sandbox's, so what other tools write there (lazygit, gh) stays in it.
 --- * The plugins are the installed ones: `lazy`, `lazy-rocks`, `site/pack`, the parsers and queries of `site/` and
----   `mason` of the sandbox data folder are links to the user's (a junction on Windows), so the init finds lazy.nvim,
----   the tree-sitter parsers and the installed tools where it looks for them and downloads nothing.
---- * The environment is the caller's (the variables a config reads, `REPOS_DIR` and the like), not the allow-list of a
----   spec's child; `NVIM*` stays out, the sandbox variables win.
---- * Read only: `require("lazy")` gets lazy.nvim with a `setup` that turns off installing missing plugins, the
----   checker and the change detection, and writes its lock file to a copy in the sandbox. What a plugin writes below
----   `stdpath('data')`, `stdpath('state')` or `stdpath('cache')` stays in the sandbox. The runtimepath keeps
----   testing.nvim and lib.nvim, also when lazy.nvim resets it.
+---   the installed tools of mason (`packages`, `bin`, `share`, `opt`) in the sandbox data folder are links to the
+---   user's (a junction on Windows); mason's `registries` is a copy (mason refreshes it on a start whose cache does
+---   not know the last refresh, and the cache is the sandbox's).
+--- * The environment is the caller's (the variables a config reads: `REPOS_DIR`, `NVIM_MACHINE_ROLE`, ...), not the
+---   allow-list of a spec's child; only what points at the calling editor stays out (`NVIM`, `NVIM_LISTEN_ADDRESS`),
+---   and the harness sets `NVIM_APPNAME` and `NVIM_LOG_FILE`. The determinism of every child holds (`TZ=UTC`, a C
+---   locale).
+--- * Read only for lazy.nvim's start: `require("lazy")` gets lazy.nvim with a `setup` that turns off installing missing
+---   plugins, the checker and the change detection, and writes its lock file to a copy in the sandbox. The runtimepath
+---   keeps testing.nvim and lib.nvim, also when lazy.nvim resets it (behind the plugins: a config that loads its own
+---   lib.nvim sees that one).
 --- * Where it is: `$TESTING_USER_CONFIG` / `$TESTING_USER_DATA`, else the default places of the platform. On CI
----   (`CI` set) and without an `init.lua`/`init.vim` there the sheet is a skip with the reason, never green.
+---   (`CI` set, not `0` or `false`) and without an `init.lua`/`init.vim` the sheet is a skip with the reason.
 ---
---- The links point into the user's folders: only lazy.nvim's switches keep them unchanged. A plugin that fetches what
---- is MISSING by itself (a tree-sitter parser of `ensure_installed`, a tool of mason) writes there through the link,
---- as the user's own editor would; a config that installs or updates another way (a plugin manager of its own, a
---- `git pull` in its init) is not stopped either.
+--- The links point into the user's folders. What fetches something MISSING by itself (a tree-sitter parser of
+--- `ensure_installed`, a tool of mason) writes there, as the user's own editor would; so does a step that runs
+--- `:Lazy sync`, `update`, `clean` or `build`, and a config that installs another way (a plugin manager of its own,
+--- a `git pull` in its init).
 
 local M = {}
 
 M.CONFIG_ENV = "TESTING_USER_CONFIG"
 M.DATA_ENV = "TESTING_USER_DATA"
 ---The folders of the user's data folder the child sees through links (relative to it).
-M.LINKS =
-  { "lazy", "lazy-rocks", "site/pack", "site/parser", "site/parser-info", "site/queries", "mason" }
+M.LINKS = {
+  "lazy",
+  "lazy-rocks",
+  "site/pack",
+  "site/parser",
+  "site/parser-info",
+  "site/queries",
+  "mason/packages",
+  "mason/bin",
+  "mason/share",
+  "mason/opt",
+}
+---The folders of the user's data folder the child gets a copy of: they are written on a plain start.
+M.COPIES = { "mason/registries" }
 
 ---@class Testing.UserConfig
----@field config string The user's config folder (`stdpath('config')` of the child).
+---@field config string The user's config folder.
 ---@field data string The user's data folder (where the plugins are).
 ---@field init string Its `init.lua` or `init.vim`.
 
 ---@param p string
 ---@return string
 local function norm(p)
-  return (vim.fs.normalize(p):gsub("/+$", ""))
+  return (vim.fs.normalize(vim.fn.fnamemodify(vim.fs.normalize(p), ":p")):gsub("/+$", ""))
 end
 
 ---@param p string
@@ -62,8 +78,7 @@ function M.locate(getenv, is_windows)
     local v = getenv(name)
     return (v ~= nil and v ~= "") and v or nil
   end
-  local ci = env("CI")
-  if ci and ci ~= "0" and ci:lower() ~= "false" then
+  if require("testing.run.fast").in_ci(env("CI") or "") then
     return nil, 'on CI a sheet never reads a user\'s config (config = "user")'
   end
   local config, data = env(M.CONFIG_ENV), env(M.DATA_ENV)
@@ -81,6 +96,7 @@ function M.locate(getenv, is_windows)
   if not config or not data then
     return nil, ("no user config: set %s and %s"):format(M.CONFIG_ENV, M.DATA_ENV)
   end
+  -- absolute: a junction needs an absolute target, and the child runs in the project root
   config, data = norm(config), norm(data)
   for _, name in ipairs({ "init.lua", "init.vim" }) do
     if is_file(config .. "/" .. name) then
@@ -101,7 +117,10 @@ end
 ---@param is_windows boolean
 ---@return string
 function M.child_data(sandbox_data, appname, is_windows)
-  return norm(sandbox_data) .. "/" .. appname .. (is_windows and "-data" or "")
+  return (vim.fs.normalize(sandbox_data):gsub("/+$", ""))
+    .. "/"
+    .. appname
+    .. (is_windows and "-data" or "")
 end
 
 -- The init of the child: the runtimepath of the config, the read-only lazy.nvim, then the user's init.
@@ -112,23 +131,15 @@ vim.opt.rtp:prepend(cfg.site)
 vim.opt.packpath:prepend(cfg.site)
 vim.opt.rtp:prepend(cfg.config)
 vim.opt.rtp:append(cfg.config .. "/after")
-package.preload["lazy"] = function(name)
-  package.preload[name] = nil
-  local mod
-  for i = 2, #package.loaders do
-    local loader = package.loaders[i](name)
-    if type(loader) == "function" then
-      mod = loader(name)
-      break
-    end
-  end
-  if type(mod) ~= "table" or type(mod.setup) ~= "function" then
+-- lazy.nvim's switches, set on whatever form `setup` is called with (lazy's own rule: a first table with `spec` IS the
+-- options, the second argument is not read)
+local function read_only(mod)
+  if type(mod) ~= "table" or type(mod.setup) ~= "function" or mod.__testing_read_only then
     return mod
   end
   local setup = mod.setup
   mod.setup = function(spec, opts)
-    -- `setup(opts)` with `opts.spec` and `setup(spec, opts)`
-    local as_opts = opts == nil and type(spec) == "table" and spec.spec ~= nil
+    local as_opts = type(spec) == "table" and spec.spec ~= nil
     local o = as_opts and spec or (opts or {})
     o.install = vim.tbl_extend("force", o.install or {}, { missing = false })
     o.checker = vim.tbl_extend("force", o.checker or {}, { enabled = false })
@@ -143,9 +154,29 @@ package.preload["lazy"] = function(name)
     end
     return setup(spec, o)
   end
-  package.loaded[name] = mod
+  mod.__testing_read_only = true
   return mod
 end
+-- A searcher in front of the others, not a preload: a preload that cannot find lazy.nvim yet (a bootstrap's
+-- `pcall(require, "lazy")` before it is on the runtimepath) would have to raise, and a raising loader leaves require's
+-- mark behind ("loop or previous error"). This one says nothing then, and require says "not found" as always.
+local function searcher(name)
+  if name ~= "lazy" then
+    return nil
+  end
+  for _, other in ipairs(package.loaders) do
+    if other ~= searcher then
+      local loader = other(name)
+      if type(loader) == "function" then
+        return function(...)
+          return read_only(loader(...))
+        end
+      end
+    end
+  end
+  return nil
+end
+table.insert(package.loaders, 1, searcher)
 if cfg.init:match("%%.vim$") then
   vim.cmd.source(vim.fn.fnameescape(cfg.init))
 else
@@ -153,36 +184,90 @@ else
 end
 ]=]
 
----Make the sandbox of a child ready for the user's config: the links, the copy of the lock file and the init.
+---A link to a folder (a junction on Windows), unless there is one already (a sandbox that is kept).
+---@param real string
+---@param link string
+---@return boolean ok, string|nil err
+local function link_dir(real, link)
+  local ok, err = require("lib.nvim.fs.mkdirp")(vim.fs.dirname(link))
+  if not ok then
+    return false, ("cannot create %s: %s"):format(vim.fs.dirname(link), tostring(err))
+  end
+  if vim.uv.fs_lstat(link) then
+    return true
+  end
+  local made, lerr = vim.uv.fs_symlink(real, link, { dir = true, junction = true })
+  if not made then
+    return false, ("cannot link %s to %s: %s"):format(link, real, tostring(lerr))
+  end
+  return true
+end
+
+---Copy a folder, unless the copy is there already.
+---@param from string
+---@param to string
+---@return boolean ok, string|nil err
+local function copy_dir(from, to)
+  if vim.uv.fs_stat(to) then
+    return true
+  end
+  local mkdirp = require("lib.nvim.fs.mkdirp")
+  local ok, err = mkdirp(to)
+  if not ok then
+    return false, ("cannot create %s: %s"):format(to, tostring(err))
+  end
+  for name, kind in vim.fs.dir(from, { depth = 50 }) do
+    local src, dst = from .. "/" .. name, to .. "/" .. name
+    if kind == "directory" then
+      ok, err = mkdirp(dst)
+    elseif kind == "file" then
+      ok, err = vim.uv.fs_copyfile(src, dst)
+    end
+    if not ok then
+      return false, ("cannot copy %s: %s"):format(src, tostring(err))
+    end
+  end
+  return true
+end
+
+---Make the sandbox of a child ready for the user's config: the links, the copies and the init.
 ---@param user Testing.UserConfig
 ---@param sandbox string The child's sandbox folder.
----@param sandbox_data string Its `XDG_DATA_HOME`.
+---@param dirs { config: string, data: string } Its `XDG_CONFIG_HOME` and `XDG_DATA_HOME`.
 ---@param keep string[] Folders that stay on the runtimepath (testing.nvim, lib.nvim).
 ---@param is_windows boolean
 ---@return { init: string, env: table<string, string> }|nil, string|nil err
-function M.prepare(user, sandbox, sandbox_data, keep, is_windows)
-  local mkdirp = require("lib.nvim.fs.mkdirp")
+function M.prepare(user, sandbox, dirs, keep, is_windows)
   local appname = vim.fs.basename(user.config)
-  local data = M.child_data(sandbox_data, appname, is_windows)
+  -- stdpath('config') is `<sandbox config>/<appname>`: a link to the user's config
+  local config = (vim.fs.normalize(dirs.config):gsub("/+$", "")) .. "/" .. appname
+  local ok, err = link_dir(user.config, config)
+  if not ok then
+    return nil, err
+  end
+  local data = M.child_data(dirs.data, appname, is_windows)
   for _, rel in ipairs(M.LINKS) do
     local real = user.data .. "/" .. rel
     local st = vim.uv.fs_stat(real)
     if st and st.type == "directory" then
-      local link = data .. "/" .. rel
-      local ok, err = mkdirp(vim.fs.dirname(link))
+      ok, err = link_dir(real, data .. "/" .. rel)
       if not ok then
-        return nil, ("cannot create %s: %s"):format(vim.fs.dirname(link), tostring(err))
+        return nil, err
       end
-      if not vim.uv.fs_lstat(link) then
-        local made, lerr = vim.uv.fs_symlink(real, link, { dir = true, junction = true })
-        if not made then
-          return nil, ("cannot link %s to %s: %s"):format(link, real, tostring(lerr))
-        end
+    end
+  end
+  for _, rel in ipairs(M.COPIES) do
+    local real = user.data .. "/" .. rel
+    local st = vim.uv.fs_stat(real)
+    if st and st.type == "directory" then
+      ok, err = copy_dir(real, data .. "/" .. rel)
+      if not ok then
+        return nil, err
       end
     end
   end
   local site = data .. "/site"
-  local ok, err = mkdirp(site)
+  ok, err = require("lib.nvim.fs.mkdirp")(site)
   if not ok then
     return nil, ("cannot create %s: %s"):format(site, tostring(err))
   end
@@ -197,8 +282,8 @@ function M.prepare(user, sandbox, sandbox_data, keep, is_windows)
   end
   local init = sandbox .. "/user_init.lua"
   local text = WRAPPER:format(vim.json.encode({
-    config = user.config,
-    init = user.init,
+    config = config,
+    init = config .. "/" .. vim.fs.basename(user.init),
     site = site,
     lockfile = lockfile,
     keep = keep,
@@ -209,13 +294,7 @@ function M.prepare(user, sandbox, sandbox_data, keep, is_windows)
   end
   f:write(text)
   f:close()
-  return {
-    init = init,
-    env = {
-      XDG_CONFIG_HOME = vim.fs.dirname(user.config),
-      NVIM_APPNAME = appname,
-    },
-  }
+  return { init = init, env = { NVIM_APPNAME = appname } }
 end
 
 return M

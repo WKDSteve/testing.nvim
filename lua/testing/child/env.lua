@@ -99,6 +99,11 @@ M.ALLOW = {
 ---@type string[]
 M.ALLOW_PREFIX = { "LC_" }
 
+---The `NVIM*` variables a child on the user's own config (`pass_env`) still does not get from the caller: they point
+---at the calling editor (`NVIM`, `NVIM_LISTEN_ADDRESS`) or the harness sets them (`NVIM_APPNAME`, `NVIM_LOG_FILE`).
+M.HARNESS_NVIM =
+  { NVIM = true, NVIM_LISTEN_ADDRESS = true, NVIM_APPNAME = true, NVIM_LOG_FILE = true }
+
 ---Never passed on, whatever the project asks for: they point at the editor that runs the tests.
 ---@param name string
 ---@return boolean

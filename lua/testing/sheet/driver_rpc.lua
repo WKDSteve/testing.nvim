@@ -168,10 +168,7 @@ function M.new(s, opts, ctx)
     if s.config == "user" then
       -- the user's installed config, read only; where there is none (CI) the sheet is a skip, never green
       local why
-      user, why = opts.user_config, nil
-      if not user then
-        user, why = require("testing.child.user_config").locate(opts.getenv)
-      end
+      user, why = require("testing.child.user_config").locate(opts.getenv)
       if not user then
         return { skip = why }
       end

@@ -582,7 +582,7 @@ local function start(S, async_cb)
     local prepared, perr = require("testing.child.user_config").prepare(
       opts.user_config,
       e.sandbox,
-      e.dirs.data,
+      { config = e.dirs.config, data = e.dirs.data },
       prepend,
       require("testing.platform").is_windows()
     )

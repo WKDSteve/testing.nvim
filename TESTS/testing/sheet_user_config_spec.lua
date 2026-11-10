@@ -48,6 +48,10 @@ require("lazy").setup({ { "x/y" } }, {
   performance = { rtp = { reset = true } },
 })
 vim.g.user_config_mod = require("myconf").value
+-- as mason does on a start whose cache does not know the last refresh: the registry is written again
+local mason = vim.fn.stdpath("data") .. "/mason"
+vim.g.mason_tool = vim.uv.fs_stat(mason .. "/packages/tool/tool.txt") ~= nil
+vim.fn.writefile({ "refreshed" }, mason .. "/registries/r/registry.json")
 ]]
   )
   write(config .. "/lua/myconf.lua", "return { value = 42 }\n")
@@ -58,6 +62,10 @@ vim.g.user_config_mod = require("myconf").value
     [[
 local M = {}
 function M.setup(spec, opts)
+  -- lazy.nvim's rule: a first table with `spec` is the options, the second argument is not read
+  if type(spec) == "table" and spec.spec then
+    opts = spec
+  end
   vim.g.fake_lazy = {
     missing = opts.install.missing,
     checker = opts.checker.enabled,
@@ -80,6 +88,26 @@ return M
   )
   write(data .. "/site/pack/p/start/px/plugin/px.lua", "vim.g.pack_px = true\n")
   write(data .. "/other/keep.txt", "not linked\n")
+  write(data .. "/mason/packages/tool/tool.txt", "an installed tool\n")
+  write(data .. "/mason/registries/r/registry.json", "the registry\n")
+
+  -- a second config: a bootstrap that asks for lazy.nvim before it is on the runtimepath, and setup({ spec = ... }, {})
+  local config2 = base .. "/user2/nvim"
+  write(
+    config2 .. "/init.lua",
+    [[
+vim.g.early_lazy = pcall(require, "lazy")
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+vim.opt.rtp:prepend(lazypath)
+require("lazy").setup({
+  spec = { { "x/y" } },
+  install = { missing = true },
+  checker = { enabled = true },
+  change_detection = { enabled = true },
+  performance = { rtp = { reset = false } },
+}, {})
+]]
+  )
 
   ---Every file below a folder with its size and time: what a run must not change.
   local function tree(dir)
@@ -120,6 +148,13 @@ return M
     end)
     has(ci, "on CI a sheet never reads a user's config", "never on CI")
     eq(uc.child_data("/s/data", "nvim", true), "/s/data/nvim-data", "the data folder of the child")
+    local cwd = vim.fn.getcwd()
+    vim.fn.chdir(base)
+    local rel = uc.locate(function(n)
+      return ({ TESTING_USER_CONFIG = "user/nvim", TESTING_USER_DATA = "user/nvim-data" })[n]
+    end)
+    vim.fn.chdir(cwd)
+    eq(rel and { rel.config, rel.data }, { config, data }, "a relative path is made absolute")
   end
 
   -- 2. the shape --------------------------------------------------------------------------------------------------------
@@ -152,7 +187,23 @@ return M
           expect = "vim.env.TESTING_UC_PROBE == 'from the caller'",
           note = "the caller's environment, not the allow-list",
         },
-        { expect = ("vim.fs.normalize(vim.fn.stdpath('config')) == %q"):format(config) },
+        {
+          expect = ("vim.fs.normalize(vim.uv.fs_realpath(vim.fn.stdpath('config'))) == vim.fs.normalize(vim.uv.fs_realpath(%q))"):format(
+            config
+          ),
+          note = "stdpath('config') is the user's config",
+        },
+        {
+          expect = ("not vim.fs.normalize(vim.env.XDG_CONFIG_HOME):find(%q, 1, true)"):format(
+            base .. "/user"
+          ),
+          note = "what other tools write to XDG_CONFIG_HOME stays in the sandbox",
+        },
+        {
+          expect = "vim.env.NVIM_UC_PROBE == 'role' and vim.env.NVIM_LISTEN_ADDRESS == nil",
+          note = "the user's NVIM_* variables, not what points at the caller",
+        },
+        { expect = "vim.g.mason_tool == true", note = "the installed tools of mason" },
         { expect = "vim.g.user_plugin_dir_ran == true", note = "its plugin/ files" },
         { expect = "vim.g.pack_px == true", note = "the packages of its data folder" },
         {
@@ -175,8 +226,10 @@ return M
     }))
     s.path = root .. "/TESTS/sheets/uc.sheet.lua"
     vim.env.TESTING_UC_PROBE = "from the caller"
+    vim.env.NVIM_UC_PROBE = "role"
+    vim.env.NVIM_LISTEN_ADDRESS = "\\\\.\\pipe\\the-caller"
     local res = sheet.run(s, { root = root, getenv = getenv, ci = false })
-    vim.env.TESTING_UC_PROBE = nil
+    vim.env.TESTING_UC_PROBE, vim.env.NVIM_UC_PROBE, vim.env.NVIM_LISTEN_ADDRESS = nil, nil, nil
     eq({ res.status, res.failures }, { "pass", {} }, "a sheet on the user's config runs")
     eq(tree(config), before_config, "the user's config is unchanged (lock file, folders)")
     eq(
@@ -184,6 +237,32 @@ return M
       before_data,
       "the user's data is unchanged (no plugin installed, nothing written)"
     )
+
+    -- the second config: lazy's own rule for `setup({ spec = ... }, {})`, and an early require is "not found"
+    local before2 = tree(config2)
+    local s2 = assert(sheet.validate({
+      id = "uc.second",
+      title = "setup with spec",
+      config = "user",
+      sizes = { { rows = 10, cols = 60 } },
+      steps = {
+        { expect = "vim.g.early_lazy == false", note = "require before the bootstrap: not found" },
+        {
+          expect = "vim.g.fake_lazy.missing == false and vim.g.fake_lazy.checker == false and vim.g.fake_lazy.change == false",
+          note = "setup({ spec = ... }, {}): the switches reach lazy.nvim",
+        },
+      },
+    }))
+    local res2 = sheet.run(s2, {
+      root = root,
+      ci = false,
+      getenv = function(n)
+        return ({ TESTING_USER_CONFIG = config2, TESTING_USER_DATA = data })[n]
+      end,
+    })
+    eq({ res2.status, res2.failures }, { "pass", {} }, "the second config runs")
+    eq(tree(config2), before2, "its config is unchanged")
+    eq(tree(data), before_data, "and the data still")
 
     -- 4. no config: a skip with the reason, never green
     local skipped = sheet.run(s, {
