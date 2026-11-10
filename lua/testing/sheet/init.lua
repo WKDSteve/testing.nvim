@@ -34,7 +34,12 @@
 ---   wait = expr   poll a Lua expression in the child until it is truthy (`timeout` ms, default 2000)
 ---   expect = expr a Lua expression in the child must be truthy now
 ---   screen = name compare the screen with a snapshot (`testing.screen`; `masks`, `cursor`, `mode`
----                 pass through); the name gets the size: `float.80x24`
+---                 pass through, `groups = true` adds the highlight group of each attribute letter);
+---                 the name gets the size: `float.80x24`
+---   hl = { ... }  how a place on the screen is drawn: `text = s` (its first appearance, every cell of it) or
+---                 `row`, `col` (`cols` wide), and what must hold: `group` (by name or the group a link
+---                 ends in), `fg`, `bg`, `sp` (`#rrggbb`), `bold`, `italic`, `underline`, `undercurl`,
+---                 `strikethrough`, `reverse`
 ---   restart = true  quit the child as a person does (`:qall!`, `VimLeavePre` runs) and start it again in the
 ---                 same sandbox (its stdpath and temp directories stay), the UI attached again; `args = { ... }`
 ---                 on the step is the command line of this start, without it the sheet's `args`
@@ -71,6 +76,7 @@ M.ACTIONS = {
   "set",
   "ask",
   "restart",
+  "hl",
 }
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
@@ -84,6 +90,7 @@ M.ENGINE_ACTIONS = {
     screen = true,
     ask = true,
     restart = true,
+    hl = true,
   },
   browser = {
     open = true,
@@ -198,6 +205,8 @@ local STEP_KEYS = {
   ignore_errmsg = "boolean",
   restart = "boolean",
   args = "table",
+  hl = "table",
+  groups = "boolean",
 }
 local SHEET_KEYS = {
   id = "string",
@@ -427,8 +436,17 @@ local function check_step(step, i, engine)
   if step.timeout and action ~= "wait" then
     return at .. ": timeout belongs to a wait step"
   end
-  if (step.masks or step.cursor ~= nil or step.mode ~= nil) and action ~= "screen" then
-    return at .. ": masks, cursor and mode belong to a screen step"
+  if
+    (step.masks or step.cursor ~= nil or step.mode ~= nil or step.groups ~= nil)
+    and action ~= "screen"
+  then
+    return at .. ": masks, cursor, mode and groups belong to a screen step"
+  end
+  if action == "hl" then
+    local herr = M.check_hl(step.hl, at .. ".hl")
+    if herr then
+      return herr
+    end
   end
   if action == "screen" and not step.screen:match("^[%w][%w_%-]*$") then
     return at .. ".screen: letters, digits, '_' and '-'"
@@ -471,6 +489,74 @@ local function check_step(step, i, engine)
     if aerr then
       return aerr
     end
+  end
+  return nil
+end
+
+local HL_KEYS = {
+  text = "string",
+  row = "number",
+  col = "number",
+  cols = "number",
+  group = "string",
+  fg = "string",
+  bg = "string",
+  sp = "string",
+  bold = "boolean",
+  italic = "boolean",
+  underline = "boolean",
+  undercurl = "boolean",
+  strikethrough = "boolean",
+  reverse = "boolean",
+}
+
+---The table of an `hl` step: one place (`text`, or `row` and `col`) and at least one thing that must hold.
+---@param hl table
+---@param at string
+---@return string|nil err
+function M.check_hl(hl, at)
+  for k, v in pairs(hl) do
+    local want = HL_KEYS[k]
+    if not want then
+      return ("%s: unknown field %s"):format(at, tostring(k))
+    end
+    if type(v) ~= want then
+      return ("%s.%s must be a %s"):format(at, k, want)
+    end
+  end
+  if (hl.text ~= nil) == (hl.row ~= nil) then
+    return at .. ": a place is text = s or row = n, col = n (one of them)"
+  end
+  if hl.text == "" then
+    return at .. ".text must not be empty"
+  end
+  if hl.text and (hl.col or hl.cols) then
+    return at .. ": col and cols belong to row"
+  end
+  if hl.row and not hl.col then
+    return at .. ": row needs col"
+  end
+  for _, k in ipairs({ "row", "col", "cols" }) do
+    if hl[k] ~= nil and not pos_int(hl[k], 10000) then
+      return ("%s.%s must be a whole number from 1"):format(at, k)
+    end
+  end
+  if hl.group == "" then
+    return at .. ".group must not be empty"
+  end
+  for _, k in ipairs({ "fg", "bg", "sp" }) do
+    if hl[k] and not hl[k]:match("^#%x%x%x%x%x%x$") then
+      return ("%s.%s must be a colour #rrggbb"):format(at, k)
+    end
+  end
+  local checks = 0
+  for k in pairs(hl) do
+    if k ~= "text" and k ~= "row" and k ~= "col" and k ~= "cols" then
+      checks = checks + 1
+    end
+  end
+  if checks == 0 then
+    return at .. ": nothing to check (group, fg, bg, sp or a style)"
   end
   return nil
 end
@@ -681,6 +767,26 @@ end
 function M.value_text(v)
   if type(v) ~= "table" then
     return v
+  end
+  if v.name == nil and (v.text ~= nil or v.row ~= nil) then
+    -- an `hl` step: the place, then what must hold, in a fixed order
+    local parts = {
+      v.text and ("%q"):format(v.text) or ("%d,%d"):format(v.row, v.col or 1),
+    }
+    if v.cols then
+      parts[1] = parts[1] .. ("+%d"):format(v.cols)
+    end
+    for _, k in ipairs({ "group", "fg", "bg", "sp" }) do
+      if v[k] ~= nil then
+        parts[#parts + 1] = ("%s=%s"):format(k, v[k])
+      end
+    end
+    for _, k in ipairs(require("testing.screen").HL_STYLES) do
+      if v[k] ~= nil then
+        parts[#parts + 1] = (v[k] and "" or "not ") .. k
+      end
+    end
+    return table.concat(parts, " ")
   end
   local parts = { tostring(v.name) }
   if v.state ~= nil then

@@ -489,6 +489,7 @@ function M.screen()
   vim.cmd("redraw")
   local rows, cols = vim.o.lines, vim.o.columns
   local lines, attrs, letters, nletters = {}, {}, {}, 0
+  local attr_ids = vim.empty_dict()
   local grid, grid_attrs = {}, {}
   for r = 1, rows do
     local cells, marks = {}, {}
@@ -503,6 +504,8 @@ function M.screen()
           letters[a] = ATTR_LETTERS:sub(nletters, nletters)
           if letters[a] == "" then
             letters[a] = "?"
+          else
+            attr_ids[letters[a]] = a
           end
         end
         mark = letters[a]
@@ -532,6 +535,8 @@ function M.screen()
     text = table.concat(trimmed, "\n"),
     cells = grid,
     cell_attrs = grid_attrs,
+    -- which attribute each letter stands for: the parent knows from its UI what the attribute is made of
+    attr_ids = attr_ids,
   }
 end
 

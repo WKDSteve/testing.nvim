@@ -82,6 +82,7 @@ local function run_step(child, step, ctx)
       masks = step.masks,
       cursor = step.cursor,
       mode = step.mode,
+      groups = step.groups,
       update = ctx.opts.update,
       ci = ctx.opts.ci,
     })
@@ -89,9 +90,35 @@ local function run_step(child, step, ctx)
     if not res.ok then
       return res.message
     end
+  elseif step.hl then
+    local resolved
+    if step.hl.group then
+      -- the UI names the group a link ends in: follow the links of the group asked for, in the child
+      resolved = child.lua(M.RESOLVE_GROUP, step.hl.group)
+      if resolved == nil then
+        return ("there is no highlight group %s"):format(step.hl.group)
+      end
+    end
+    return require("testing.screen").hl_check(child.screen(), step.hl, resolved)
   end
   return nil
 end
+
+-- In the child: the group `...` ends in after its links, nil when it is not defined.
+M.RESOLVE_GROUP = [[
+local name = ...
+if vim.fn.hlexists(name) == 0 then
+  return nil
+end
+for _ = 1, 100 do
+  local ok, def = pcall(vim.api.nvim_get_hl, 0, { name = name, create = false })
+  if not ok or type(def) ~= "table" or not def.link then
+    return name
+  end
+  name = def.link
+end
+return name
+]]
 
 ---The command line of a start: the sheet's (or a restart's) arguments after one that gives the editor the sheet's
 ---size, as a terminal does. What they run at startup (`+LastSession`) lays its windows out for that size; without

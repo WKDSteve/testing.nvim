@@ -94,7 +94,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `feed(keys, {remap=, typed=})` | `nvim_feedkeys` with `x`: the typeahead is drained before it returns; `<Esc>` names are translated; mappings apply |
 | `mouse(button, action, mods, row, col, grid?)` | `nvim_input_mouse`; 0-based screen cells |
 | `settle(timeout_ms, {raise=, rounds=, interval_ms=})` | wait until idle: `true`, or `false, why` |
-| `screen()` | `{ size, cursor, mode, lines, attrs, text, cells, cell_attrs }`; compare it with a file through `testing.screen` |
+| `screen()` | `{ size, cursor, mode, lines, attrs, text, cells, cell_attrs, hl }`; compare it with a file through `testing.screen`, check a place with `screen.hl_check` |
 | `notifies({clear=})`, `prompts({clear=})` | what the child notified / what it answered with "cancelled" |
 | `messages()` | the lines of `:messages` |
 | `effects()` | the guard's ledger `{ spawned, network, fs_outside_tmp }` (empty without a guard) |
@@ -149,8 +149,12 @@ started is still running", not a proof.
 Attaches a UI on first use (`size`), forces a redraw and reads the grid with `screenstring()` /
 `screenattr()`. `lines[r]` is row r (one character per cell), `text` the same with trailing blanks cut,
 `attrs[r]` one letter per cell: space = no highlight, otherwise one letter per **distinct** attribute in
-order of first appearance. Attributes are comparable, not resolvable to a highlight group (use
-`vim.inspect_pos` in the child for a buffer position). `cursor` is the screen cursor (1-based).
+order of first appearance. `hl[letter]` says what a letter is: `groups` (the highlight groups the attribute is
+made of, a linked group by the group it ends in, as `ext_hlstate` names them), `fg`, `bg`, `sp` (`#rrggbb` as
+drawn: the default colours where the attribute has none, swapped for `reverse`) and the styles `bold`, `italic`,
+`underline`, `undercurl`, `strikethrough`, `reverse`; `hl[" "]` is a cell without a highlight. The UI is attached
+with `ext_linegrid` and `ext_hlstate`, and the harness keeps what its `hl_attr_define` events say (a restart starts
+that anew). `cursor` is the screen cursor (1-based).
 `cells[r]` and `cell_attrs[r]` are the same row by **screen column**: one entry per column, `""` (attribute
 `' '`) for the second cell of a wide character, so a column number means the same cell as on the screen.
 
@@ -211,6 +215,16 @@ letters are given again after masking, so a masked clock with a highlight of its
 of everything behind it. `roots = { repo =, home =, tmp =, state = }` (`<REPO>`, `<HOME>`, `<TMP>`, `<STATE>`) and `replace = { { from =, to = } }` put
 placeholders in the text rows (this changes their width, not the width of the attribute rows); `cursor = false`,
 `mode = false` leave those lines out.
+
+**Groups**: `groups = true` adds a block `--- groups` after the attributes, one line per letter with the groups it is
+made of (`a DiffText`, `b Comment+CursorLine`, `-` for none), so a snapshot also fails when a text keeps its look
+but loses its group. Only the letters left after masking are listed (a masked cell has no group). Without it the
+file is as before: old snapshots stay valid.
+
+**A place, checked**: `screen.hl_check(shot, want, resolved)` checks every cell of `want.text` (its first appearance
+on the screen) or of `want.row`, `want.col` (`want.cols` wide) against `group`, `fg`, `bg`, `sp` and the styles; it
+returns nil or one line: `row 3, cell 5 ("c") has groups DiffAdd, fg #a0ffa0; expected group DiffText`. `resolved`
+is the group `want.group` ends in after its links (a sheet asks the child for it).
 
 Make screens comparable across machines with the child's options: a fixed `size` per snapshot (name it in the
 snapshot name, `confirm.80x24`; a name is letters, digits, `_`, `-` and inner dots, up to 100 characters, and neither ends in a dot nor starts with a Windows device name such as `con` or `nul.x`, because the name becomes a file name on every platform), the deterministic locale and time zone (default), and a colour scheme the

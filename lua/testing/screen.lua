@@ -35,6 +35,10 @@
 ---   `testing run --update-snapshots` sets; the variable reaches child editors).
 --- * `expect(ok_fn, name, shot, opts)` hands the verdict to the harness (`H.ok`, a collecting
 ---   `a.ok`, ...); `check(name, shot, opts)` raises instead (busted style specs).
+--- * `opts.groups = true` adds `--- groups` to the file: the highlight groups of each attribute letter left after
+---   masking (`shot.hl`, from `child.screen()`). Without it a file is as before.
+--- * `hl_check(shot, want, resolved)` checks how a place is drawn (`text` or `row`/`col`; `group`, colours, styles):
+---   nil or the failure line. `hl_cells` finds the cells of a place.
 ---
 --- Cache: the files are read by this module, not by the spec, but the cache key of a spec that loads this module
 --- (a literal `require`) contains the snapshot folder of that spec by itself. Files of another spec's folder, or read
@@ -58,6 +62,19 @@ local MAX_DIFF_ROWS = 12
 ---@field attrs? string[]
 ---@field cells? string[][] One entry per screen column, `""` for the second cell of a wide character.
 ---@field cell_attrs? string[] One attribute letter per screen column.
+---@field hl? table<string, Testing.Screen.Hl> What each attribute letter is (`child.screen()`; `" "` = no highlight).
+
+---@class Testing.Screen.Hl
+---@field groups string[] The highlight groups the attribute is made of (a linked group by its target).
+---@field fg? string `#rrggbb` as drawn.
+---@field bg? string
+---@field sp? string
+---@field bold? boolean
+---@field italic? boolean
+---@field underline? boolean
+---@field undercurl? boolean
+---@field strikethrough? boolean
+---@field reverse? boolean
 
 ---@class Testing.Screen.Opts
 ---@field masks? (string|table)[] Lua patterns, `{ text = s }`, `{ pattern = p }` or `{ row, col?, rows?, cols? }`.
@@ -70,6 +87,7 @@ local MAX_DIFF_ROWS = 12
 ---@field file? string The spec file (default: found on the call stack, the nearest `*_spec.lua`).
 ---@field update? boolean Rewrite a differing file (default: `TESTING_UPDATE_SNAPSHOTS`).
 ---@field ci? boolean Missing files fail instead of being written (default: `CI`).
+---@field groups? boolean Add the highlight groups of each attribute letter (`--- groups`; needs `shot.hl`).
 
 ---@class Testing.Screen.Norm
 ---@field size { rows: integer, cols: integer }
@@ -77,6 +95,7 @@ local MAX_DIFF_ROWS = 12
 ---@field mode? string
 ---@field text string[]
 ---@field attrs string[]
+---@field groups? { letter: string, groups: string[] }[] With `opts.groups`: in the order of the letters.
 
 ---@class Testing.Screen.Result
 ---@field ok boolean
@@ -288,7 +307,7 @@ function M.normalize(shot, opts)
     end
   end
   local reps = replacements(opts)
-  local letters, n = {}, 0
+  local letters, n, order = {}, 0, {}
   local text, attrs = {}, {}
   for r = 1, nrows do
     local g = grid[r]
@@ -301,6 +320,7 @@ function M.normalize(shot, opts)
           if not letters[m] then
             n = n + 1
             letters[m] = n <= #LETTERS and LETTERS:sub(n, n) or "?"
+            order[#order + 1] = m
           end
           m = letters[m]
         end
@@ -314,12 +334,28 @@ function M.normalize(shot, opts)
     text[r] = (row:gsub("%s+$", ""))
     attrs[r] = (table.concat(a):gsub("%s+$", ""))
   end
+  local groups
+  if opts.groups then
+    if type(shot.hl) ~= "table" then
+      error(
+        "testing.screen: groups needs a screen that says what its letters are (child.screen())",
+        2
+      )
+    end
+    -- only the letters left after masking: a masked cell has no group either
+    groups = {}
+    for _, old in ipairs(order) do
+      local entry = shot.hl[old]
+      groups[#groups + 1] = { letter = letters[old], groups = entry and entry.groups or {} }
+    end
+  end
   return {
     size = { rows = nrows, cols = ncols },
     cursor = opts.cursor ~= false and shot.cursor or nil,
     mode = opts.mode ~= false and shot.mode or nil,
     text = text,
     attrs = attrs,
+    groups = groups,
   }
 end
 
@@ -347,7 +383,143 @@ function M.render(norm)
   for r, row in ipairs(norm.attrs) do
     out[#out + 1] = fmt:format(r, row)
   end
+  if norm.groups then
+    out[#out + 1] = "--- groups"
+    for _, g in ipairs(norm.groups) do
+      out[#out + 1] = ("%s %s"):format(
+        g.letter,
+        #g.groups > 0 and table.concat(g.groups, "+") or "-"
+      )
+    end
+  end
   return table.concat(out, "\n") .. "\n"
+end
+
+-- The checks of an `hl` step besides `group`: colours and styles of a cell as drawn.
+M.HL_COLORS = { "fg", "bg", "sp" }
+M.HL_STYLES = { "bold", "italic", "underline", "undercurl", "strikethrough", "reverse" }
+
+---The cells an `hl` step looks at: `{ row, col, ch, letter }` per cell, or nil and why.
+---@param shot Testing.Screen.Shot
+---@param where { text?: string, row?: integer, col?: integer, cols?: integer }
+---@return table[]|nil cells, string|nil err
+function M.hl_cells(shot, where)
+  local out = {}
+  if where.text then
+    for r, line in ipairs(shot.lines or {}) do
+      local at = line:find(where.text, 1, true)
+      if at then
+        -- `lines` has one character per cell (the second half of a wide one left out), `attrs` one letter each
+        local first = vim.fn.strchars(line:sub(1, at - 1)) + 1
+        local attrs = shot.attrs and shot.attrs[r] or ""
+        local chars = vim.fn.split(where.text, [[\zs]])
+        for k, ch in ipairs(chars) do
+          local i = first + k - 1
+          local letter = attrs:sub(i, i)
+          out[#out + 1] = { row = r, col = i, ch = ch, letter = letter ~= "" and letter or " " }
+        end
+        return out
+      end
+    end
+    return nil, ("%q is not on the screen"):format(where.text)
+  end
+  local r, c = where.row, where.col or 1
+  local cells = shot.cells and shot.cells[r]
+  if not cells or not cells[c] then
+    return nil, ("row %d, column %d is not on the screen"):format(r, c)
+  end
+  local marks = shot.cell_attrs and shot.cell_attrs[r] or ""
+  for col = c, c + (where.cols or 1) - 1 do
+    if cells[col] == nil then
+      break
+    end
+    if cells[col] ~= "" then -- the second half of a wide character is its first half's
+      local letter = marks:sub(col, col)
+      out[#out + 1] =
+        { row = r, col = col, ch = cells[col], letter = letter ~= "" and letter or " " }
+    end
+  end
+  return out
+end
+
+---What a cell is drawn with, in one line: `groups DiffText, fg #ff0000, bold`.
+---@param e Testing.Screen.Hl
+---@return string
+local function hl_text(e)
+  local parts = { "groups " .. (#e.groups > 0 and table.concat(e.groups, "+") or "-") }
+  for _, k in ipairs(M.HL_COLORS) do
+    if e[k] then
+      parts[#parts + 1] = ("%s %s"):format(k, e[k])
+    end
+  end
+  for _, k in ipairs(M.HL_STYLES) do
+    if e[k] then
+      parts[#parts + 1] = k
+    end
+  end
+  return table.concat(parts, ", ")
+end
+
+---Check an `hl` step against a screen: every cell of the place must be drawn with the group (by name, or the group a
+---linked one ends in) and have the colours and styles asked for. Nil when it holds, else the failure line.
+---@param shot Testing.Screen.Shot
+---@param want table The `hl` table of the step.
+---@param resolved? string The group `want.group` ends in after its links (asked of the child).
+---@return string|nil
+function M.hl_check(shot, want, resolved)
+  if type(shot.hl) ~= "table" then
+    return "the screen does not say what its highlights are (a child of an older testing.nvim)"
+  end
+  local cells, err = M.hl_cells(shot, want)
+  if not cells then
+    return err
+  end
+  if #cells == 0 then
+    return "no cell to look at"
+  end
+  for _, cell in ipairs(cells) do
+    local e = shot.hl[cell.letter]
+    if not e then
+      return ("row %d, cell %d (%q): its attribute is not known (more than %d on the screen?)"):format(
+        cell.row,
+        cell.col,
+        cell.ch,
+        #LETTERS
+      )
+    end
+    local wrong = {}
+    if want.group then
+      local names = e.groups or {}
+      if
+        not vim.tbl_contains(names, want.group)
+        and not (resolved and vim.tbl_contains(names, resolved))
+      then
+        wrong[#wrong + 1] = "group "
+          .. want.group
+          .. ((resolved and resolved ~= want.group) and (" (= " .. resolved .. ")") or "")
+      end
+    end
+    for _, k in ipairs(M.HL_COLORS) do
+      if want[k] and (e[k] or ""):lower() ~= want[k]:lower() then
+        wrong[#wrong + 1] = ("%s %s"):format(k, want[k])
+      end
+    end
+    for _, k in ipairs(M.HL_STYLES) do
+      if want[k] ~= nil and (e[k] == true) ~= want[k] then
+        wrong[#wrong + 1] = (want[k] and "" or "not ") .. k
+      end
+    end
+    if #wrong > 0 then
+      return ("row %d, cell %d (%q) has %s; expected %s"):format(
+        cell.row,
+        cell.col,
+        cell.ch,
+        hl_text(e),
+        table.concat(wrong, ", ")
+      )
+    end
+  end
+  return nil
 end
 
 ---@param p string

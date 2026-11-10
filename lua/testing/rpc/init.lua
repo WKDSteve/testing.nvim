@@ -89,6 +89,8 @@ M.QUIT_MS = 10000
 ---@field trace_artifact? { kind: string, path: string }
 ---@field api_params? table<string, string[]>
 ---@field ui boolean
+---@field hl table<integer, table> What the attached UI was told about each attribute id (`hl_attr_define`).
+---@field default_colors? { fg?: string, bg?: string } The default colours of the attached UI (`default_colors_set`).
 ---@field boot? table
 ---@field generation integer
 ---@field async table<integer, fun(message: string)> Asynchronous calls waiting for an answer (failed when the process ends).
@@ -514,6 +516,8 @@ local function start(S, async_cb)
   local opts = S.opts
   S.generation = S.generation + 1
   S.kill_reason, S.trace_artifact, S.api_params, S.ui, S.boot = nil, nil, nil, false, nil
+  -- what the attached UI was told about attributes: a new process numbers them anew
+  S.hl, S.default_colors = {}, nil
   S.stdin_closed, S.death_output = nil, nil
   S.async = {}
   S.notifies, S.prompts = {}, {}
@@ -635,8 +639,12 @@ local function start(S, async_cb)
     end,
     -- libuv callback (fast context): tables only
     on_notify = function(method, args)
+      if method == "redraw" then
+        M._take_redraw(S, args)
+        return
+      end
       if method ~= "testing:event" then
-        return -- `redraw` of an attached UI and the like
+        return
       end
       local kind, payload = args[1], args[2]
       if type(payload) ~= "table" then
@@ -834,6 +842,7 @@ local function new_state(opts)
     prompts = {},
     async = {},
     ui = false,
+    hl = {},
     generation = 0,
   } --[[@as Testing.Rpc.State]]
 end
@@ -1030,10 +1039,20 @@ local function build_child(S, opts)
     sync()
     if not S.ui then
       local size = opts.size or {}
-      call(S, "nvim_ui_attach", { size.cols or 80, size.rows or 24, vim.empty_dict() })
+      -- ext_hlstate: every attribute comes with the highlight groups it is made of (`hl_attr_define`)
+      call(
+        S,
+        "nvim_ui_attach",
+        { size.cols or 80, size.rows or 24, { ext_linegrid = true, ext_hlstate = true } }
+      )
       S.ui = true
     end
-    return call(S, "nvim_exec_lua", { "return " .. BOOT .. ".screen()", {} })
+    local shot = call(S, "nvim_exec_lua", { "return " .. BOOT .. ".screen()", {} })
+    if type(shot) == "table" then
+      shot.hl = M._hl_of(S, shot.attr_ids)
+      shot.attr_ids = nil
+    end
+    return shot
   end
 
   ---`vim.notify` calls the child made, oldest first: `{ msg, level, level_name }`. Kept by the parent:
@@ -1279,6 +1298,85 @@ local function build_child(S, opts)
   end
 
   return child --[[@as Testing.Rpc.Child]]
+end
+
+---The colour of an attribute (`foreground` of `hl_attr_define`) as `#rrggbb`.
+---@param v any
+---@return string|nil
+local function rgb(v)
+  return type(v) == "number" and ("#%06x"):format(v) or nil
+end
+
+-- The style keys of an attribute that a sheet may ask for.
+local STYLES = { "bold", "italic", "underline", "undercurl", "strikethrough", "reverse" }
+
+---Take the `redraw` batch of the attached UI: only what says what an attribute is made of. Fast context: tables only.
+---@param S table
+---@param args any
+function M._take_redraw(S, args)
+  if type(args) ~= "table" then
+    return
+  end
+  for _, batch in ipairs(args) do
+    if type(batch) == "table" and batch[1] == "hl_attr_define" then
+      for i = 2, #batch do
+        local def = batch[i]
+        if type(def) == "table" and type(def[1]) == "number" then
+          local attrs, info = type(def[2]) == "table" and def[2] or {}, def[4]
+          local groups = {}
+          for _, item in ipairs(type(info) == "table" and info or {}) do
+            local name = type(item) == "table" and (item.hi_name or item.ui_name)
+            if type(name) == "string" and name ~= "" and not vim.tbl_contains(groups, name) then
+              groups[#groups + 1] = name
+            end
+          end
+          local entry = {
+            groups = groups,
+            fg = rgb(attrs.foreground),
+            bg = rgb(attrs.background),
+            sp = rgb(attrs.special),
+            reverse = attrs.reverse == true,
+          }
+          for _, k in ipairs(STYLES) do
+            entry[k] = attrs[k] == true or nil
+          end
+          S.hl[def[1]] = entry
+        end
+      end
+    elseif type(batch) == "table" and batch[1] == "default_colors_set" then
+      local last = batch[#batch]
+      if type(last) == "table" then
+        S.default_colors = { fg = rgb(last[1]), bg = rgb(last[2]) }
+      end
+    end
+  end
+end
+
+---What each attribute letter of a screen is: `{ [letter] = { groups, fg, bg, sp, bold, ... } }`, the colours of a
+---cell as drawn (the default colours where the attribute has none). Nil when the child did not say which attribute a
+---letter stands for (an older boot).
+---@param S table
+---@param attr_ids any `{ [letter] = id }` of `rpc_boot.screen`.
+---@return table<string, table>|nil
+function M._hl_of(S, attr_ids)
+  if type(attr_ids) ~= "table" then
+    return nil
+  end
+  local out = {}
+  local default = S.default_colors or {}
+  for letter, id in pairs(attr_ids) do
+    local def = S.hl and S.hl[id] or {}
+    local e = vim.deepcopy(def)
+    e.groups = e.groups or {}
+    e.fg, e.bg = e.fg or default.fg, e.bg or default.bg
+    if e.reverse then
+      e.fg, e.bg = e.bg, e.fg
+    end
+    out[letter] = e
+  end
+  -- a cell without a highlight: no group, the default colours
+  out[" "] = { groups = {}, fg = default.fg, bg = default.bg }
+  return out
 end
 
 ---Start a child.
