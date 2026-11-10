@@ -136,15 +136,35 @@ export XDG_CACHE_HOME="$scratch/cache"
 export TESTING_TRUST=1
 
 # No `exec`: the trap must remove the scratch directory afterwards.
+# nvim runs in the background and is waited for: with nvim in the foreground bash handles a TERM/INT/HUP only after
+# nvim ended, so a stopped wrapper left the whole suite running (orphans that held the queue and the machine). The
+# signal is passed on to nvim; on Windows nvim's own children go with it (libuv puts them in a kill-on-close job).
+nvim_pid=""
+# shellcheck disable=SC2329 # called from the traps below
+forward() {
+  if [ -n "$nvim_pid" ]; then
+    kill -TERM "$nvim_pid" 2>/dev/null || true
+    wait "$nvim_pid" 2>/dev/null || true
+  fi
+  exit "$1"
+}
+trap 'forward 130' INT
+trap 'forward 143' TERM
+trap 'forward 129' HUP
+run_nvim() {
+  nvim "$@" <&0 &
+  nvim_pid=$!
+  wait "$nvim_pid"
+}
 if [ "${1:-}" = "conformance" ]; then
   shift
-  nvim -n -i NONE --headless -u NONE -l scripts/testing.lua conformance . "$@"
+  run_nvim -n -i NONE --headless -u NONE -l scripts/testing.lua conformance . "$@"
   exit $?
 fi
 if [ "${1:-}" = "fast" ]; then
   shift
   [ -z "$real_state" ] || set -- --state-dir "$real_state" "$@"
-  nvim -n -i NONE --headless -u NONE -l scripts/testing.lua fast . ${cache_args[@]+"${cache_args[@]}"} "$@"
+  run_nvim -n -i NONE --headless -u NONE -l scripts/testing.lua fast . ${cache_args[@]+"${cache_args[@]}"} "$@"
   exit $?
 fi
 if [ "${1:-}" = "ci" ]; then
@@ -174,10 +194,10 @@ if [ "${1:-}" = "ci" ]; then
       state_args=()
       ;;
   esac
-  nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci ${sub[@]+"${sub[@]}"} ${state_args[@]+"${state_args[@]}"} "$@" ${suite_cache[@]+"${suite_cache[@]}"}
+  run_nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci ${sub[@]+"${sub[@]}"} ${state_args[@]+"${state_args[@]}"} "$@" ${suite_cache[@]+"${suite_cache[@]}"}
   exit $?
 fi
 # the real state directory goes first, a `--state-dir` of the caller after it wins
 [ -z "$real_state" ] || set -- --state-dir "$real_state" "$@"
-nvim -n -i NONE --headless -u NONE -l scripts/testing.lua . ${cache_args[@]+"${cache_args[@]}"} ${plain_defaults[@]+"${plain_defaults[@]}"} "$@"
+run_nvim -n -i NONE --headless -u NONE -l scripts/testing.lua . ${cache_args[@]+"${cache_args[@]}"} ${plain_defaults[@]+"${plain_defaults[@]}"} "$@"
 exit $?

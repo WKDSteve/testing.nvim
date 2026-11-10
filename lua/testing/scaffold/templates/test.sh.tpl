@@ -174,10 +174,30 @@ export XDG_STATE_HOME="$scratch/state"
 export XDG_CACHE_HOME="$scratch/cache"
 
 # No `exec`: the trap must remove the scratch directory afterwards (`set -e` keeps the exit code).
+# nvim runs in the background and is waited for: with nvim in the foreground bash handles a TERM/INT/HUP only after
+# nvim ended, so a stopped wrapper left the whole suite running (orphans that held the queue and the machine). The
+# signal is passed on to nvim; on Windows nvim's own children go with it (libuv puts them in a kill-on-close job).
+nvim_pid=""
+# shellcheck disable=SC2329 # called from the traps below
+forward() {
+  if [ -n "$nvim_pid" ]; then
+    kill -TERM "$nvim_pid" 2>/dev/null || true
+    wait "$nvim_pid" 2>/dev/null || true
+  fi
+  exit "$1"
+}
+trap 'forward 130' INT
+trap 'forward 143' TERM
+trap 'forward 129' HUP
+run_nvim() {
+  nvim "$@" <&0 &
+  nvim_pid=$!
+  wait "$nvim_pid"
+}
 # `scripts/test.sh surface --from ir.json --baseline surface.baseline.json`: the surface regression gate (docs/SURFACE.md)
 if [ "${1:-}" = "surface" ]; then
   shift
-  nvim -n -i NONE --headless -u NONE -l "$DRIVER" surface . "$@"
+  run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" surface . "$@"
   exit $?
 fi
 # `scripts/test.sh lint [...]`: the lint checks of the pipeline on the changed files (docs/CI.md of testing.nvim), in the
@@ -185,13 +205,13 @@ fi
 # suite lock; the working directory is the repository's root (the `cd` above).
 if [ "${1:-}" = "lint" ]; then
   shift
-  nvim -n -i NONE --headless -u NONE -l "$DRIVER" lint "$@"
+  run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" lint "$@"
   exit $?
 fi
 # `scripts/test.sh conformance`: the conformance suite K1..K16 in the same environment (docs/CONFORMANCE.md of testing.nvim)
 if [ "${1:-}" = "conformance" ]; then
   shift
-  nvim -n -i NONE --headless -u NONE -l "$DRIVER" conformance . "$@"
+  run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" conformance . "$@"
   exit $?
 fi
 # `scripts/test.sh ci [--profile=fast] [...]`: the pipeline of the `ci` section, or the one derived from the repository
@@ -208,9 +228,9 @@ if [ "${1:-}" = "ci" ]; then
     list | hook) ;;
     *) ci_args=(--state-dir "$real_state") ;;
   esac
-  nvim -n -i NONE --headless -u NONE -l "$DRIVER" ci ${ci_args[@]+"${ci_args[@]}"} "$@"
+  run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" ci ${ci_args[@]+"${ci_args[@]}"} "$@"
   exit $?
 fi
 # the real state directory goes first, an `--state-dir` of the caller after it wins
 [[ -z "$real_state" ]] || set -- --state-dir "$real_state" "$@"
-nvim -n -i NONE --headless -u NONE -l "$DRIVER" run .@@RUN_ARGS|raw@@ "$@"
+run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" run .@@RUN_ARGS|raw@@ "$@"

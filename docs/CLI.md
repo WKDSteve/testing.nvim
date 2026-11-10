@@ -74,6 +74,10 @@ plan has a risk (a block that could not be carried over, a dependency it cannot 
 changes (they would be gone for good); `--force` writes it anyway. `.testing.lua`, the CI job and the lint
 configuration are never touched.
 
+Example of such a fix (2026-11-10): `scripts/test.sh` starts nvim in the background and waits for it, so a TERM, INT or
+HUP to the script reaches nvim at once (on Windows nvim's children go with it). A script from before stops only after
+nvim ended: stopping it left the suite running. `testing init --update --write` brings it.
+
 Kept from the existing files: the dependencies (the `DEPS=(...)` line of `scripts/test.sh`, else `deps` read from the
 TEXT of `.testing.lua`, which is never executed here), the plugin name (`plugin` of `.testing.lua`, else detected),
 the `--sentinel '<NAME>'` of the run line, a `scripts/test.sh` that does not export `NVIM_APPNAME` on purpose (with

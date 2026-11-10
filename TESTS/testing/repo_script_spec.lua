@@ -81,4 +81,52 @@ return function(H)
       )
     )
   end
+  -- A TERM to scripts/test.sh reaches nvim at once: with nvim in the foreground bash handled it only after nvim ended,
+  -- so a stopped wrapper left the whole suite running. A fake `nvim` (first on the PATH) writes its pid and sleeps.
+  if bash ~= "" then
+    local dir = vim.fs.normalize(vim.fn.tempname()) .. "-sig"
+    vim.fn.mkdir(dir .. "/bin", "p")
+    local function write(path, text)
+      local f = assert(io.open(path, "wb"))
+      f:write(text)
+      f:close()
+    end
+    write(
+      dir .. "/bin/nvim",
+      table.concat({
+        "#!/usr/bin/env bash",
+        -- the stdpath questions of the script get an answer, the run itself waits
+        'case " $* " in *" --cmd "*) printf %s "$FAKE_DIR/std"; exit 0 ;; esac',
+        'echo $$ > "$FAKE_DIR/pid"',
+        "exec sleep 30",
+        "",
+      }, "\n")
+    )
+    write(
+      dir .. "/probe.sh",
+      table.concat({
+        -- Git Bash: a C:/ path in PATH would be cut at its colon
+        'bin="$FAKE_DIR/bin"; if command -v cygpath >/dev/null 2>&1; then bin="$(cygpath -u "$bin")"; fi',
+        'export PATH="$bin:$PATH"',
+        'bash "$1" --file x >/dev/null 2>&1 &',
+        "b=$!",
+        'for _ in $(seq 1 150); do [ -s "$FAKE_DIR/pid" ] && break; sleep 0.1; done',
+        '[ -s "$FAKE_DIR/pid" ] || { echo no-start; kill -KILL "$b"; exit 0; }',
+        'p=$(cat "$FAKE_DIR/pid")',
+        'kill -TERM "$b"',
+        'for _ in $(seq 1 50); do kill -0 "$p" 2>/dev/null || { echo gone; exit 0; }; sleep 0.1; done',
+        'echo alive; kill -KILL "$p" 2>/dev/null; exit 0',
+        "",
+      }, "\n")
+    )
+    local res = vim
+      .system({ bash, dir .. "/probe.sh", script }, { cwd = repo, env = { FAKE_DIR = dir }, text = true })
+      :wait(60000)
+    eq(
+      vim.trim(res.stdout or ""),
+      "gone",
+      "a TERM to the script ends its nvim: " .. (res.stderr or "")
+    )
+    vim.fn.delete(dir, "rf")
+  end
 end

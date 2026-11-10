@@ -261,6 +261,15 @@ return function(H)
   end
   has(sh, "DEPS=('testing.nvim' 'lib.nvim')", "test.sh resolves the runner and the dependencies")
   has(sh, 'run . "$@"', "test.sh hands every argument to the driver")
+  -- a TERM/INT/HUP to the script reaches nvim (behaviour: repo_script_spec runs the dogfood copy for real)
+  has(sh, "trap 'forward 143' TERM", "test.sh passes a TERM on to nvim")
+  has(sh, "trap 'forward 130' INT", "test.sh passes an INT on to nvim")
+  for line in sh:gmatch("[^\n]+") do
+    ok(
+      not line:match('^%s*nvim .*%-l "%$DRIVER"'),
+      "test.sh starts the driver through run_nvim, never in the foreground: " .. line
+    )
+  end
   has(sh, "myplug-tests", "the run gets a throwaway NVIM_APPNAME")
   has(
     sh,
