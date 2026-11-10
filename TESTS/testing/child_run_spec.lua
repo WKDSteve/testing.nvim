@@ -280,7 +280,9 @@ end
     ["TESTS/2_after_spec.lua"] = 'return function(H) H.ok(true, "ran after the hang") end\n',
   }, { "TESTS/1_hang_spec.lua", "TESTS/2_after_spec.lua" })
   local t1 = vim.uv.hrtime()
-  local rep5 = S.run(root5, e5, { timeouts = { file_ms = 800 }, grace_ms = 400 })
+  -- the deadline has to leave the child time to start its grandchild and write pids.txt on a loaded machine: the tree
+  -- kill takes milliseconds since it reads no PowerShell table (that second once gave the child its time by accident)
+  local rep5 = S.run(root5, e5, { timeouts = { file_ms = 3000 }, grace_ms = 400 })
   local waited_ms = (vim.uv.hrtime() - t1) / 1e6
   eq(
     S.statuses(rep5),
@@ -303,11 +305,13 @@ end
   ok(child_pid ~= nil and grand_pid ~= nil, "both pids are numbers")
   -- the tree kill is asynchronous and slow on a loaded Windows machine (other editors, a virus scanner): the wait ends as
   -- soon as both are gone, so a long limit costs nothing when it is quick
-  vim.wait(20000, function()
-    return not S.alive(child_pid) and not S.alive(grand_pid)
-  end, 50)
-  eq(S.alive(child_pid), false, "the child process is gone")
-  eq(S.alive(grand_pid), false, "and so is the process it started (no zombie)")
+  if child_pid and grand_pid then
+    vim.wait(20000, function()
+      return not S.alive(child_pid) and not S.alive(grand_pid)
+    end, 50)
+    eq(S.alive(child_pid), false, "the child process is gone")
+    eq(S.alive(grand_pid), false, "and so is the process it started (no zombie)")
+  end
 
   -- ===================================================================
   -- 5a. an ORPHAN that holds the child's pipes: a spec leaves a helper behind that inherited stdout and
