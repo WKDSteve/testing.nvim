@@ -167,14 +167,11 @@ return function(H)
     eq(
       discover.is_case_insensitive(
         "/r",
-        fs(
-          {
-            ["/r"] = { ino = 1, dev = 0 },
-            ["/r/tests"] = { ino = 5, dev = 1, type = "link" },
-            ["/r/TESTS"] = dir,
-          },
-          { "tests" }
-        )
+        fs({
+          ["/r"] = { ino = 1, dev = 0 },
+          ["/r/tests"] = { ino = 5, dev = 1, type = "link" },
+          ["/r/TESTS"] = dir,
+        }, { "tests" })
       ),
       false,
       "probe: a link is no answer"
