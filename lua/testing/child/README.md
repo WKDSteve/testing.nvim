@@ -152,12 +152,16 @@ supervision of the others for seconds. `VimLeavePre` needs the waiting form: cal
 is leaving.
 
 **Windows, without a process start** (`testing.child.winproc`, used where it loads: Windows, a 64-bit editor with
-`ffi`). Each root is opened (`OpenProcess`; while the handle is open, Windows does not give its number to another
-process), ended (its libuv handle, else `TerminateProcess` on the opened handle), and only THEN asked for its children
+`ffi`). Only roots whose libuv handle is still open take part (that handle keeps their number; a root that ended
+before an asynchronous kill ran is not looked up by its number). The table is read for every root first: when it cannot
+be read, nothing is touched and the PowerShell way below takes the living trees. Then each root is opened
+(`OpenProcess`; while the handle is open, Windows does not give its number to another process), ended (its libuv handle,
+else `TerminateProcess` on the opened handle), waited for (at most 200 ms) and only THEN asked for its children
 (`nvim_get_proc_children`, Neovim's native table): a process that has ended starts no new one, so the list is complete
 when it is read. Each child is opened in turn and counts only when it is not older than its parent (creation times from
-`GetProcessTimes`); a process that cannot be opened is left alone with everything below it. All handles are closed at
-the end. About 20 ms for a tree, against about 1.9 s for the PowerShell table and `taskkill` (measured on Windows 11,
+`GetProcessTimes`, 100 ns) AND the table still names it as that parent's child after it was opened (between the first
+look and the open, a child can end and its number go to a stranger). A process that cannot be opened is left alone with
+everything below it, and so is the part of a tree whose table cannot be read later. All handles are closed at the end. About 20 ms for a tree, against about 1.9 s for the PowerShell table and `taskkill` (measured on Windows 11,
 2026-11-10). Where it does not load, or a table cannot be read natively, the kill takes the way below. (A child's libuv
 children usually end with it anyway: libuv puts every process it starts in a job object that kills them when the
 starting process ends.)

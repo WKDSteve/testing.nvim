@@ -764,21 +764,25 @@ local function kill_trees(hs, exec, pause, done)
     if winproc then
       local roots = {}
       for _, h in ipairs(hs) do
-        roots[#roots + 1] = {
-          pid = h.pid,
-          kill = function()
-            if h.uv_handle and not h.uv_handle:is_closing() then
-              local ok, r = pcall(vim.uv.process_kill, h.uv_handle, 9)
-              return ok and r == 0
-            end
-            return false
-          end,
-        }
+        -- only a root whose libuv handle is still open: that handle keeps its number from going to another process.
+        -- A root that ended in the meantime (an asynchronous kill runs a tick later) is not looked up by its number.
+        if not h.ended and h.uv_handle and not h.uv_handle:is_closing() then
+          roots[#roots + 1] = {
+            pid = h.pid,
+            kill = function()
+              if not h.uv_handle:is_closing() then
+                local ok, r = pcall(vim.uv.process_kill, h.uv_handle, 9)
+                return ok and r == 0
+              end
+              return false
+            end,
+          }
+        end
       end
       if require("testing.child.winproc").kill_trees(winproc, roots) then
         return done()
       end
-      -- a process table could not be read natively: the slow way below looks once more (what has ended is skipped)
+      -- a process table could not be read natively: nothing was touched, the slow way below takes the living trees
     end
     read_table(exec, function(procs)
       local below = {}
