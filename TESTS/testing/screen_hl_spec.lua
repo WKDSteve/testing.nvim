@@ -245,7 +245,7 @@ return function(H)
       "a group that is not defined"
     )
     table.remove(s.steps, 3)
-    local green = sheet.run(s, { root = root })
+    local green = sheet.run(s, { root = root, ci = false }) -- writes the snapshot, also where CI is set
     eq(
       { green.status, green.failures },
       { "pass", {} },
