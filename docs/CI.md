@@ -461,7 +461,9 @@ Whether a cadence saves anything is a question of numbers, not of impressions. E
 appends one JSON line to `metrics.jsonl` (`testing.metrics`): its kind (`suite`, `suite-partial`, `ci`, `ci-commit`,
 `ci-commit-quick`, `land`), repository, commit, machine, system, duration, the wait in the queue (whole milliseconds), the verdict, the
 duration of each step (`ci`, `ci-commit`) and for a suite the spec files selected, from the cache and run. No secret,
-no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--json` gives `testing-stats/1`.
+no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--json` gives `testing-stats/1`. A push needs no line of its own: with
+`--repos-root=<dir>` the stats read each checkout's reflog of `origin/main` (one "update by push" entry per push,
+`testing ci land` too) and show the runs per push, the number the CI cadence (one full run per push) is about.
 
 - Where: `$TESTING_METRICS_FILE`, else `%LOCALAPPDATA%\testing\metrics.jsonl` on Windows, `$XDG_DATA_HOME/testing/` or
   `~/.local/share/testing/` elsewhere: read from the environment, not from `stdpath()`, which `scripts/test.sh` points

@@ -4,13 +4,14 @@
 ---@brief `testing stats`: what the heavy runs of this machine cost, from the lines of `testing.metrics`.
 ---@description
 --- ```
---- testing stats [--since=<YYYY-MM-DD|<n>d>] [--repo=<name>] [--json] [--file=<metrics.jsonl>]
+--- testing stats [--since=<YYYY-MM-DD|<n>d>] [--repo=<name>] [--repos-root=<dir>] [--json] [--file=<metrics.jsonl>]
 --- ```
 ---
 --- Per kind of run (`suite`, `suite-partial`, `ci`, `ci-commit`, `ci-commit-quick`, `land`): how many, the machine
 --- minutes in all, the median duration, the wait in the queue, the verdicts; per day the runs and machine minutes; per
 --- repository the same; for the suites the share of spec files that came from the cache; for `land` the median time
---- until landed. `--json` prints the document `testing-stats/1` (what the history page of testing-desktop reads). It
+--- until landed. With `--repos-root` also the pushes: each repository's reflog of `refs/remotes/origin/main` has an
+--- "update by push" entry per push (a `testing ci land` too), so runs per push need no record of their own. `--json` prints the document `testing-stats/1` (what the history page of testing-desktop reads). It
 --- only reads: allowed on the workstation too.
 
 local M = {}
@@ -18,9 +19,10 @@ local M = {}
 M.SCHEMA = "testing-stats/1"
 
 M.USAGE = table.concat({
-  "usage: testing stats [--since=<YYYY-MM-DD|<n>d>] [--repo=<name>] [--json] [--file=<metrics.jsonl>]",
+  "usage: testing stats [--since=<YYYY-MM-DD|<n>d>] [--repo=<name>] [--repos-root=<dir>] [--json] [--file=<metrics.jsonl>]",
   "  --since=<day>|<n>d  only runs from that day (UTC) on, or of the last n days",
   "  --repo=<name>       only runs of one repository (its directory name)",
+  "  --repos-root=<dir>  also the pushes of each repository below <dir> (its reflog of origin/main): runs per push",
   "  --json              the document testing-stats/1 instead of the table",
   "  --file=<path>       another metrics file (default: the one the runs write, testing.metrics)",
 }, "\n")
@@ -141,6 +143,69 @@ function M.aggregate(entries, opts)
   return doc
 end
 
+---The pushes of a checkout: the epoch seconds of the "update by push" entries in its reflog of
+---`refs/remotes/<remote>/<branch>` (every `git push` of that branch writes one, `testing ci land` too).
+---@param dir string
+---@param git? fun(argv: string[], dir: string): integer, string Replaced by a spec.
+---@return integer[]
+function M.pushes(dir, git)
+  git = git
+    or function(argv, cwd)
+      local ok, res = pcall(function()
+        return vim.system(vim.list_extend({ "git" }, argv), { cwd = cwd, text = true }):wait(30000)
+      end)
+      if not ok or not res then
+        return 127, ""
+      end
+      return res.code or 1, res.stdout or ""
+    end
+  local code, out = git({
+    "reflog",
+    "show",
+    "--date=unix",
+    "--format=%gd %gs",
+    "refs/remotes/origin/main",
+    "--",
+  }, dir)
+  local list = {}
+  if code ~= 0 then
+    return list
+  end
+  for line in out:gmatch("[^\n]+") do
+    local ts, what = line:match("@{(%d+)} (.*)$")
+    if ts and what == "update by push" then
+      list[#list + 1] = tonumber(ts) --[[@as integer]]
+    end
+  end
+  return list
+end
+
+---Add the pushes of each repository of `doc` (a checkout `<root>/<name>`) to it: `pushes` and `runs_per_push` per
+---repository, and in all.
+---@param doc table `testing-stats/1`
+---@param root string
+---@param since? string `YYYY-MM-DD` (UTC)
+---@param git? fun(argv: string[], dir: string): integer, string
+function M.add_pushes(doc, root, since, git)
+  local total, runs = 0, 0
+  for name, rr in pairs(doc.repos) do
+    local dir = vim.fs.joinpath(root, name)
+    if vim.uv.fs_stat(dir .. "/.git") then
+      local n = 0
+      for _, ts in ipairs(M.pushes(dir, git)) do
+        if not since or os.date("!%Y-%m-%d", ts) >= since then
+          n = n + 1
+        end
+      end
+      rr.pushes = n
+      rr.runs_per_push = n > 0 and round1(rr.runs / n) or vim.NIL
+      total, runs = total + n, runs + rr.runs
+    end
+  end
+  doc.pushes = total
+  doc.runs_per_push = total > 0 and round1(runs / total) or vim.NIL
+end
+
 ---@param map table<string, any>
 ---@return string[]
 local function sorted_keys(map)
@@ -217,6 +282,30 @@ function M.lines(doc)
     add(("%-10s %5d %9.1f"):format(day, doc.days[day].runs, doc.days[day].minutes))
   end
   add("")
+  if doc.pushes ~= nil then
+    add(
+      ("pushes: %d, runs per push: %s (runs of the repositories with a checkout)"):format(
+        doc.pushes,
+        doc.runs_per_push == vim.NIL and "-" or ("%.1f"):format(doc.runs_per_push)
+      )
+    )
+    add("")
+    add(("%-24s %5s %9s %6s %9s"):format("repository", "runs", "minutes", "pushes", "runs/push"))
+    for _, repo in ipairs(sorted_keys(doc.repos)) do
+      local r = doc.repos[repo]
+      add(
+        ("%-24s %5d %9.1f %6s %9s"):format(
+          repo,
+          r.runs,
+          r.minutes,
+          r.pushes and tostring(r.pushes) or "-",
+          (r.runs_per_push == nil or r.runs_per_push == vim.NIL) and "-"
+            or ("%.1f"):format(r.runs_per_push)
+        )
+      )
+    end
+    return out
+  end
   add(("%-24s %5s %9s"):format("repository", "runs", "minutes"))
   for _, repo in ipairs(sorted_keys(doc.repos)) do
     add(("%-24s %5d %9.1f"):format(repo, doc.repos[repo].runs, doc.repos[repo].minutes))
@@ -251,6 +340,8 @@ function M.main(argv, sv)
       opts.repo = value
     elseif key == "file" and value ~= "" then
       file = value
+    elseif key == "repos-root" and value ~= "" then
+      opts.repos_root = value
     else
       sv.err("testing stats: unknown argument " .. a)
       sv.err(M.USAGE)
@@ -275,6 +366,9 @@ function M.main(argv, sv)
   end
   local entries, broken = metrics.read(file)
   local doc = M.aggregate(entries, opts)
+  if opts.repos_root then
+    M.add_pushes(doc, opts.repos_root, opts.since, sv.git)
+  end
   doc.file = file
   doc.broken = broken
   if json then

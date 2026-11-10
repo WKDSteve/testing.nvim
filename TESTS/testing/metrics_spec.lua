@@ -239,5 +239,53 @@ return function(H)
   entries = metrics.read(wired.path)
   eq(entries[3] and entries[3].kind, "suite-partial", "wiring: a selected suite is suite-partial")
 
+  -- pushes: the "update by push" entries of a checkout's reflog of origin/main, nothing else (a fetch, a reset)
+  local reflog = table.concat({
+    "origin/main@{1794265010} update by push",
+    "origin/main@{1794218239} fetch: fast-forward",
+    "origin/main@{1794075456} update by push",
+    "origin/main@{1700000000} update by push",
+    "",
+  }, "\n")
+  local asked
+  local function fake_git(argv, dir)
+    asked = { argv = argv, dir = dir }
+    return 0, reflog
+  end
+  eq(
+    stats.pushes("/r", fake_git),
+    { 1794265010, 1794075456, 1700000000 },
+    "pushes: only the pushes, as epoch seconds"
+  )
+  ok(vim.tbl_contains(asked.argv, "refs/remotes/origin/main"), "pushes: the reflog of origin/main")
+  eq(
+    stats.pushes("/r", function()
+      return 128, ""
+    end),
+    {},
+    "pushes: no reflog, no pushes"
+  )
+  -- per repository below a root; only a directory with .git counts, --since cuts the old ones
+  local root = tmp .. "/repos"
+  vim.fn.mkdir(root .. "/a.nvim/.git", "p")
+  local pdoc = stats.aggregate({
+    { ts = "2026-11-10T01:00:00Z", kind = "ci-commit", repo = "a.nvim", duration_ms = 1000 },
+    { ts = "2026-11-10T02:00:00Z", kind = "land", repo = "a.nvim", duration_ms = 1000 },
+    { ts = "2026-11-10T03:00:00Z", kind = "land", repo = "a.nvim", duration_ms = 1000 },
+    { ts = "2026-11-10T03:00:00Z", kind = "ci", repo = "gone.nvim", duration_ms = 1000 },
+  })
+  stats.add_pushes(pdoc, root, "2026-11-01", fake_git)
+  eq(pdoc.repos["a.nvim"].pushes, 2, "pushes: --since leaves the push of 2023 out")
+  eq(pdoc.repos["a.nvim"].runs_per_push, 1.5, "pushes: runs per push of a repository")
+  eq(pdoc.repos["gone.nvim"].pushes, nil, "pushes: a repository without a checkout has none")
+  eq(pdoc.pushes, 2, "pushes: in all")
+  eq(pdoc.runs_per_push, 1.5, "pushes: runs per push counts only repositories with a checkout")
+  local ptext = table.concat(stats.lines(pdoc), "\n")
+  ok(ptext:find("pushes: 2, runs per push: 1.5", 1, true) ~= nil, "pushes: the table says it")
+  ok(
+    not table.concat(stats.lines(stats.aggregate(pdoc and {} or {})), "\n"):find("pushes", 1, true),
+    "pushes: without --repos-root nothing about pushes"
+  )
+
   vim.fn.delete(tmp, "rf")
 end
