@@ -19,4 +19,10 @@ if not lib then
 end
 vim.opt.rtp:append(lib.dir)
 
+-- git of the specs: the fixture repositories see TESTS/gitconfig, not this machine's global and system configuration
+-- (a global `core.hooksPath` cost a shell per hook on every fixture commit; the file says why). Set here, so that the
+-- runner computes the keys with it too (`testing.cache.tools` hashes the configuration git reads).
+vim.env.GIT_CONFIG_GLOBAL = root .. "/TESTS/gitconfig"
+vim.env.GIT_CONFIG_NOSYSTEM = "1"
+
 return { root = root, lib = lib.dir }

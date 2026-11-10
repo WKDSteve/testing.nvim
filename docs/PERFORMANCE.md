@@ -370,6 +370,31 @@ of them (a headless editor still derives `&term` from `TERM`, `has("clipboard")`
 terminals with another `TERM`. The lines are one per variable now (`child-env NAME=<hash>`), so `testing explain` names
 the variable that changed instead of saying that "the child environment" did.
 
+### Where the suite's own time goes on Windows (2026-11)
+
+The whole suite of this repository, uncached (`TESTING_PLAIN=1 scripts/test.sh`, `--jobs 4`, Windows 11, 12 cores, a
+self-hosted runner of another repository busy on the same machine): 730 s wall, 2682 s spec time (the sum over the
+files), 269 files. The same commit in WSL2 on the same PC: 71 s wall, 260 s spec time. The pool is 92 % busy, so the
+wall time follows the sum, not one long file: splitting a large file shortens nothing here. Where the time goes was
+measured with a throwaway `minit` addition that logs every process a spec file starts (`vim.uv.spawn`, `vim.fn.system`,
+`jobstart`) with its wall time:
+
+| started by the spec files | processes | time | per process |
+| --- | ---: | ---: | ---: |
+| `nvim` (runner children of fixture projects, RPC children of sheets and pools) | 732 | 935 s | 1.3 s |
+| `git` | 3026 | 631 s | 0.2 s |
+| `powershell` (the process table of `testing.child.kill_tree`) | 177 | 190 s | 1.1 s |
+| `bash` (generated hooks and test scripts) | 64 | 181 s | 2.8 s |
+| `taskkill` (the same kill) | 178 | 126 s | 0.7 s |
+
+**The machine's git configuration ran in every fixture repository.** A global `core.hooksPath` (here: hooks that only
+hand over to the repository's own) made every `git commit` of a fixture start four shells (`pre-commit`,
+`prepare-commit-msg`, `commit-msg`, `post-commit`), 0.4 s each on Windows; a `git commit` of a fixture took 0.8 to 3.9 s.
+`TESTS/minimal_init.lua` now points `GIT_CONFIG_GLOBAL` at `TESTS/gitconfig` and sets `GIT_CONFIG_NOSYSTEM`, as
+`ci_hook_spec` already did for itself: the fixtures see the same configuration on every machine. Whole suite, same
+machine: 2682 s to 1931 s spec time (-28 %), 730 s to 538 s wall (-26 %); the files that make the most fixture commits
+halved (`ci_spec` 132 s to 53 s, `ci_suite_spec` 127 s to 56 s, `ci_verify_spec` 54 s to 22 s).
+
 ## Rules checked
 
 * **PERF-11 (memoization)**: nothing measured here repeats pure work per call; the stable hash of a path is
