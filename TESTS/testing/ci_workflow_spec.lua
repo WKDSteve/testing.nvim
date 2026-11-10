@@ -585,5 +585,73 @@ return function(H)
     )
   end
 
+  -- min_nvim: one more hosted ubuntu leg on the promised minimum, only the suite; nothing changes without the key ------
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    local base = { name = "x", layout = "hosted" }
+    local function with(min)
+      return vim.tbl_extend("force", base, { min_nvim = min })
+    end
+    refused(with("0.11.4"), ".min_nvim: expected", "min_nvim: a table")
+    refused(with({ version = "v0.11.4", why = "a" }), ".min_nvim.version", "min_nvim: no v")
+    refused(with({ version = "stable", why = "a" }), ".min_nvim.version", "min_nvim: a release")
+    refused(with({ version = "0.11.4" }), ".min_nvim.why", "min_nvim: a reason")
+    refused(
+      with({ version = "0.11.4", why = "a", x = 1 }),
+      "unknown key x",
+      "min_nvim: no other key"
+    )
+    refused(
+      { name = "x", layout = "public", min_nvim = { version = "0.11.4", why = "a" } },
+      'only with layout = "hosted"',
+      "min_nvim: hosted only"
+    )
+
+    local plain_root = project(
+      "min-plain",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "hosted" }'
+    )
+    local min_root = project(
+      "min-leg",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "hosted", min_nvim = { version = "0.11.4", why = "README badge" } }'
+    )
+    local plain = workflow.render(plain_root)
+    local text, problems = workflow.render(min_root)
+    eq(problems, {}, "min_nvim: no problem")
+    has(
+      text,
+      ',{"name":"ubuntu-min","runs-on":"ubuntu-latest","hosted":true,"steps":"--step=suite","nvim":"0.11.4"}]\') }}\n',
+      "min_nvim: the leg ends the matrix"
+    )
+    has(
+      text,
+      "nvim: v0.11.4 (README badge)",
+      "min_nvim: a comment names the version (a spec can find it)"
+    )
+    has(
+      text,
+      "version: v${{ matrix.nvim || '" .. workflow.TOOLS.nvim .. "' }}\n",
+      "min_nvim: the setup step takes the leg's version"
+    )
+    ok(
+      not text:find("nvim" .. workflow.TOOLS.nvim .. "-", 1, true),
+      "min_nvim: no cache key is left on the fixed version"
+    )
+    has(text, "nvim${{ matrix.nvim || '", "min_nvim: the cache keys carry the leg's version")
+    has(
+      plain,
+      "version: v" .. workflow.TOOLS.nvim .. "\n",
+      "min_nvim: without the key the setup step is unchanged"
+    )
+    ok(not plain:find("ubuntu-min", 1, true), "min_nvim: without the key there is no extra leg")
+    ok(not plain:find("matrix.nvim", 1, true), "min_nvim: ... and no matrix.nvim")
+  end
+
   vim.fn.delete(tmp, "rf")
 end

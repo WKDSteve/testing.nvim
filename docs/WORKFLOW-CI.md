@@ -152,6 +152,7 @@ ci = {
     packages = { { name = "ripgrep", why = "<one line: what the runs need it for>" } },   -- optional: programs of the hosted legs
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
     land = true,                                   -- optional: `testing ci land` (layouts public and hosted)
+    min_nvim = { version = "0.11.4", why = "<what promises it>" },   -- optional (hosted): a leg on the minimum
     timeout = 30,                                  -- optional: minutes of a leg
   },
 }
@@ -184,6 +185,10 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   `already-verified` looks for a green run of the same commit on such a branch. When `testing ci land` then moves main
   to that commit, the legs are skipped and only `publish-ci-verified` runs (when there is one): the commit is not tested twice. Without the
   key the file is byte for byte what it was. See docs/CI.md, "Land through the hosted CI".
+- **`min_nvim`** (layout `hosted`): one more hosted ubuntu leg, `ubuntu-min`, runs only the suite on the promised
+  minimum Neovim (`version` without a "v"). The setup step and the cache keys then take the version of the leg
+  (`matrix.nvim`), and a comment above the matrix names it (`nvim: v0.11.4`, which a spec of the repository can look
+  for). `testing ci remote` puts the leg in the ubuntu column. Without the key the file is byte for byte what it was.
 - **Kept in sync.** The preset step `workflow-in-sync` runs the `--check`: a repository that names it in a profile is red
   as soon as the file and `.testing.lua` disagree. It is opt-in: a repository without `ci.workflow` is not generated and
   not checked.

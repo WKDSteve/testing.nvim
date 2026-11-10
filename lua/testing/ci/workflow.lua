@@ -84,6 +84,7 @@ M.MAX_PACKAGES = 8
 
 local KEYS = {
   name = true,
+  min_nvim = true,
   layout = true,
   platform = true,
   node = true,
@@ -318,6 +319,27 @@ function M.validate(raw)
       )
     else
       cfg.land = raw.land
+    end
+  end
+  if raw.min_nvim ~= nil then
+    local m = raw.min_nvim
+    if type(m) ~= "table" then
+      bad('.min_nvim: expected { version = "0.11.4", why = "<what promises it>" }')
+    else
+      for k in pairs(m) do
+        if k ~= "version" and k ~= "why" then
+          bad(".min_nvim: unknown key %s", tostring(k))
+        end
+      end
+      if type(m.version) ~= "string" or not m.version:match("^%d+%.%d+%.%d+$") then
+        bad('.min_nvim.version: a release like "0.11.4" (no "v", no "stable")')
+      elseif not is_text(m.why) then
+        bad(".min_nvim.why: one line of text, what promises that version")
+      elseif (raw.layout or "public") ~= "hosted" then
+        bad('.min_nvim: only with layout = "hosted" (the extra leg is a hosted ubuntu runner)')
+      else
+        cfg.min_nvim = { version = m.version, why = m.why }
+      end
     end
   end
   if raw.timeout ~= nil then
@@ -838,7 +860,53 @@ function M.render_cfg(cfg, deps, opts)
   if not text then
     return nil, { tostring(err) }
   end
+  if cfg.min_nvim then
+    text = M.with_min_nvim(text, cfg.min_nvim)
+  end
   return text, {}
+end
+
+---`ci.workflow.min_nvim`: one more hosted ubuntu leg, `ubuntu-min`, runs the suite on the promised minimum version.
+---Only the text of a workflow WITH the key changes: the leg joins the matrix, the setup step and the cache key take the
+---version of the leg (`matrix.nvim`, unset on the other legs), and a comment line names the version
+---(`nvim: v0.11.4`, which a spec of the repository can look for).
+---@param text string The rendered workflow (layout hosted).
+---@param min { version: string, why: string }
+---@return string
+function M.with_min_nvim(text, min)
+  local leg = ('{"name":"ubuntu-min","runs-on":"ubuntu-latest","hosted":true,"steps":"--step=suite","nvim":"%s"}'):format(
+    min.version
+  )
+  local version = ("${{ matrix.nvim || '%s' }}"):format(M.TOOLS.nvim)
+  ---Replace the first plain `old` at or after `from`; it must be there.
+  local function swap(old, new, what, from)
+    local at = text:find(old, from or 1, true)
+    assert(at, "min_nvim: " .. what .. " was not found")
+    text = text:sub(1, at - 1) .. new .. text:sub(at + #old)
+    return at
+  end
+  -- the leg joins the end of the matrix line, a comment above it names the version
+  local include = swap("        include: ", "        include: ", "the matrix line")
+  swap("]') }}\n", "," .. leg .. "]') }}\n", "the end of the matrix line", include)
+  local note = M.wrap(
+    ("ubuntu-min: the suite on the promised minimum, nvim: v%s (%s). It runs only the suite: the tools come from the full leg."):format(
+      min.version,
+      min.why
+    ),
+    "        # "
+  )
+  swap("        include: ", note .. "        include: ", "the matrix line")
+  swap(
+    "\n          version: v" .. M.TOOLS.nvim .. "\n",
+    "\n          version: v" .. version .. "\n",
+    "the setup step"
+  )
+  -- every cache key (restore, restore-keys, save) carries the version of the leg
+  local plain = "nvim" .. M.TOOLS.nvim .. "-"
+  while text:find(plain, 1, true) do
+    swap(plain, "nvim" .. version .. "-", "a cache key")
+  end
+  return text
 end
 
 ---A unified diff of two texts (`have` the file, `want` the generated one).
