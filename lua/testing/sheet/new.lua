@@ -18,7 +18,7 @@
 local M = {}
 
 M.USAGE =
-  "usage: testing sheets new --from-task <area/slug> [--repo <dir>] [--vault <dir>] [--tasks-cli <tasks.lua>] [--name <file-name>]"
+  "usage: testing sheets new (--from-task <area/slug> [--feature <id>] | --feature <id>) [--repo <dir>] [--vault <dir>] [--tasks-cli <tasks.lua>] [--name <file-name>]"
 M.MAX_JUDGE = 30
 M.MAX_TEXT = 300 -- characters of a title or a judge entry (a sheet loads up to 256 KiB)
 
@@ -91,21 +91,33 @@ function M.id_of(slug)
 end
 
 ---The text of the draft sheet.
----@param task { id: string, title: string, sheet_id: string }
+---@param task { id?: string, title: string, sheet_id: string, feature?: string }
 ---@param judge string[]
 ---@return string
 function M.render(task, judge)
   local q = function(s)
     return ("%q"):format(s)
   end
+  local from = task.id and ("--from-task " .. task.id) or ("--feature " .. task.feature)
+  if task.id and task.feature then
+    from = from .. " --feature " .. task.feature
+  end
   local out = {
-    "-- Live check as a test sheet, drafted by `testing sheets new --from-task " .. task.id .. "`.",
+    "-- Live check as a test sheet, drafted by `testing sheets new " .. from .. "`.",
     "-- DRAFT: the steps are a skeleton. Write what a person would do (docs/SHEETS.md of testing.nvim),",
     "-- run the spec once to write the snapshot, review it, then drop the DRAFT note below.",
     "return {",
     "  id = " .. q(task.sheet_id) .. ",",
-    "  title = " .. q(task.title) .. ",",
-    "  task = " .. q(task.id) .. ",",
+  }
+  if task.feature then
+    -- a feature sheet: what the user of the functionality sees, not what one command returns (docs/SHEETS.md)
+    out[#out + 1] = "  feature = " .. q(task.feature) .. ","
+  end
+  out[#out + 1] = "  title = " .. q(task.title) .. ","
+  if task.id then
+    out[#out + 1] = "  task = " .. q(task.id) .. ","
+  end
+  vim.list_extend(out, {
     '  engine = "rpc",',
     '  notes = "DRAFT: generated from the task; the steps are a skeleton",',
     "  steps = {",
@@ -114,7 +126,7 @@ function M.render(task, judge)
     "    { settle = 2000 },",
     '    { screen = "start" },',
     "  },",
-  }
+  })
   if #judge > 0 then
     out[#out + 1] = "  judge = {"
     for _, j in ipairs(judge) do
@@ -159,6 +171,7 @@ function M.main(argv, sv, deps)
     local a = argv[i]
     local key = ({
       ["--from-task"] = "id",
+      ["--feature"] = "feature",
       ["--repo"] = "repo",
       ["--vault"] = "vault",
       ["--tasks-cli"] = "cli",
@@ -177,8 +190,12 @@ function M.main(argv, sv, deps)
     i = i + 2
   end
   -- only the characters of a task id: it is written into a comment line of the sheet
-  if not o.id or not o.id:match("^[%w_.%-]+/[%w_.%-]+$") then
-    sv.err("testing sheets: --from-task <area/slug> is required\n" .. M.USAGE)
+  if o.id and not o.id:match("^[%w_.%-]+/[%w_.%-]+$") then
+    sv.err("testing sheets: --from-task <area/slug>: an id of the vault\n" .. M.USAGE)
+    return 2
+  end
+  if not o.id and not o.feature then
+    sv.err("testing sheets: --from-task <area/slug> or --feature <id> is required\n" .. M.USAGE)
     return 2
   end
   if o.name and not o.name:match("^[%w][%w_.%-]*$") then
@@ -186,6 +203,46 @@ function M.main(argv, sv, deps)
     return 2
   end
   local repo = vim.fs.normalize(vim.fn.fnamemodify(o.repo or vim.fn.getcwd(), ":p")):gsub("/+$", "")
+  -- the functionality comes from the catalog: an id it does not know is a typo, not a new feature
+  local feature
+  if o.feature then
+    local features = require("testing.sheet.features")
+    local catalog, cerr = features.load(repo)
+    if not catalog then
+      sv.err(
+        "testing sheets: --feature: " .. (cerr or ("no feature catalog (" .. features.FILE .. ")"))
+      )
+      return 2
+    end
+    feature = features.by_id(catalog)[o.feature]
+    if not feature then
+      sv.err(
+        ("testing sheets: --feature: %s is not in %s"):format(
+          tostring(o.feature):sub(1, 80),
+          features.FILE
+        )
+      )
+      return 2
+    end
+  end
+  if not o.id then
+    -- a feature sheet without a task: the catalog's title, one judge entry that says what the user should get
+    local name = o.name and o.name:gsub("%.sheet%.lua$", "") or M.id_of(feature.id)
+    return M.write(
+      repo,
+      name,
+      {
+        title = cut(feature.title),
+        sheet_id = M.id_of(name),
+        feature = feature.id,
+      },
+      { cut("The user gets what the feature promises: " .. feature.title) },
+      sv,
+      {
+        what = "the feature " .. feature.id,
+      }
+    )
+  end
   local call = deps.call
   if not call then
     local vault, verr = M.find_vault(repo, o.vault, deps.getenv or vim.uv.os_getenv)
@@ -211,10 +268,28 @@ function M.main(argv, sv, deps)
   local slug = type(t.slug) == "string" and t.slug ~= "" and t.slug or o.id:match("/(.+)$")
   -- the file name and the id go together: a second sheet of the same task (--name) is a case of its own
   local name = o.name and o.name:gsub("%.sheet%.lua$", "") or M.id_of(slug)
-  local task = { id = o.id, title = cut(title ~= "" and title or o.id), sheet_id = M.id_of(name) }
+  local task = {
+    id = o.id,
+    -- a feature sheet is named by its functionality: the catalog's title
+    title = feature and cut(feature.title) or cut(title ~= "" and title or o.id),
+    sheet_id = M.id_of(name),
+    feature = feature and feature.id,
+  }
+  local judge = M.acceptance(type(doc.body) == "string" and doc.body or "")
+  return M.write(repo, name, task, judge, sv, { what = "the acceptance of " .. o.id })
+end
+
+---Write the draft `TESTS/sheets/<name>.sheet.lua` exclusively and check that it loads; exit code as `main`.
+---@param repo string
+---@param name string
+---@param task { id?: string, title: string, sheet_id: string, feature?: string }
+---@param judge string[]
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@param o { what: string } Where the judge entries came from, for the message.
+---@return integer
+function M.write(repo, name, task, judge, sv, o)
   local rel = "TESTS/sheets/" .. name .. ".sheet.lua"
   local path = repo .. "/" .. rel
-  local judge = M.acceptance(type(doc.body) == "string" and doc.body or "")
   local text = M.render(task, judge)
   vim.fn.mkdir(vim.fs.dirname(path), "p")
   -- created exclusively: a sheet that exists (or appears meanwhile, or is a symlink) is never written over
@@ -245,11 +320,11 @@ function M.main(argv, sv, deps)
     return 3
   end
   sv.out(
-    ("testing sheets: wrote %s (DRAFT, %d judge entr%s from the acceptance of %s)"):format(
+    ("testing sheets: wrote %s (DRAFT, %d judge entr%s from %s)"):format(
       rel,
       #judge,
       #judge == 1 and "y" or "ies",
-      o.id
+      o.what
     )
   )
   return 0

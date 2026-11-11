@@ -14,6 +14,7 @@ return {
   id = "ui.option-float",                -- stable; the spec case is called `sheet:<id>`
   title = ":UI option float",
   task = "ui.nvim/try-the-ui-option-float-in-a-real-session",   -- optional: where the check comes from
+  feature = "ui.option-float",           -- optional: the functionality it checks (TESTS/sheets/features.lua)
   engine = "rpc",                        -- "rpc" (default) or "manual"
   minit = "TESTS/minimal_init.lua",      -- default; relative to the project root
   sizes = { { rows = 24, cols = 80 } },  -- one run per size (default 24x80)
@@ -69,7 +70,49 @@ steps = {
 `requires = { { lua = "<expr>", reason = "<n/a text>" } }` (rpc sheets) lists what the child editor must have, for example
 an optional plugin: each expression is evaluated in the child before the first step, and the first one that is not
 truthy makes the sheet a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. An
-expression that raises fails the sheet.
+expression that raises fails the sheet. **Under CI** (`CI` set and not `0`/`false`) the skip of a sheet **with**
+`feature` is **red**: the workflow provides what `requires` asks for (`ci.workflow.checkouts` below `.deps/`), so a skip
+there is a mistake of the provision, not a machine without the plugin. Outside CI it stays `n/a`; a sheet without
+`feature` stays a skip everywhere.
+
+## Feature sheets and the catalog (`feature`, `TESTS/sheets/features.lua`)
+
+A sheet checks one command; a **feature sheet** checks one functionality as its user meets it: a realistic start (a
+file in a project, the cursor where it would be, the other window open), what the user does (the key, not the command),
+and what they see (`screen`, the text of the float) plus the effect. Mechanically it is a sheet like any other; it says
+which functionality it checks with `feature = "<id>"` (the form of an `id`; one functionality per sheet, a functionality
+may have several sheets). Sheets without it stay valid; the report lists them as "without a feature".
+
+The functionalities of a repository are a **catalog**, `TESTS/sheets/features.lua`, read as data like a sheet (empty
+environment, the size and instruction limits):
+
+```lua
+return {
+  {
+    id = "hover.http-preview",
+    title = "A hover over an http(s) link shows status, title and description of the page",
+    surface = { "command:Hover show", "config:links.fetch" },  -- optional: the entries it rests on
+    docs = "docs/FEATURES/links.md",                             -- optional: where it is described
+  },
+}
+```
+
+`id` is unique and has the form of a sheet id, `title` is one line (at most 300 characters); a mistake is refused with
+the entry and the field named (`[2].title is required`). A repository without the file has no catalog and nothing is said
+about features. What uses it: the section "Features" of the report (below), `testing sheets new --feature`, and K16 (a
+`feature` the catalog does not know is a warning).
+
+### Stubs in sheets
+
+A feature that fetches something (a page behind a link) does not open a connection in a sheet. The child's guard stays
+strict; the network is a stub in a `lua` step: `package.loaded["lib.nvim.net.curl"] = { fetch_raw = function(url, request,
+cb) ... end }`, answering through `vim.schedule` (asynchronous like the original, so the `wait` of the sheet is honest) and
+writing each request to `_G.requests` for an `expect`. The answers are data in `TESTS/sheets/fixtures/http/<name>.lua`
+(`{ status, status_text, headers, body }`), the hosts are `example.test` (a reserved name that never reaches the real
+network), and nothing recorded with credentials goes into the repository. Why no local server: it would need a process
+and a connection for the whole suite of the repository (`guard_allow.spawn`, `network`), a program per repository and a
+port, and it is slower and flakier under load. The real transport is the business of the specs of the library; a sheet
+keeps one `manual` line for it ("once with the real network: the title comes").
 
 ### The user's installed config (`config = "user"`)
 
@@ -119,7 +162,8 @@ read (a sheet that touches `os` does not load). What runs is the Lua of its step
 ## A sheet from a task (`testing sheets new`)
 
 ```
-testing sheets new --from-task <area/slug> [--repo <dir>] [--vault <dir>] [--tasks-cli <tasks.lua>] [--name <file>]
+testing sheets new --from-task <area/slug> [--feature <id>] [--repo <dir>] [--vault <dir>] [--tasks-cli <tasks.lua>] [--name <file>]
+testing sheets new --feature <id> [--repo <dir>] [--name <file>]
 ```
 
 reads the live-check task through tasks.nvim (`call task`) and writes a **draft** `TESTS/sheets/<slug>.sheet.lua`
@@ -136,6 +180,10 @@ into the repository (default the current directory):
   section do not count; fences and headings are read as CommonMark does. A task without boxes gets one entry
   from its title.
 * `notes` and the header comment say `DRAFT`: drop them once the steps are real and the snapshot is reviewed.
+* `--feature <id>` makes it a feature sheet: `feature` is set and the `title` is the catalog's. The id must be in
+  `TESTS/sheets/features.lua` (a typo is exit 2, so is a repository without a catalog). Without `--from-task` no task
+  is read: the id and the file are named after the feature (or `--name`), there is no `task`, and `judge` has one entry
+  from the catalog's title.
 
 An existing sheet is **never overwritten** (exit 2; `--name` writes another file): the file is created
 exclusively, so one that appears meanwhile is not written over either. The written file is loaded right away; a
@@ -187,6 +235,13 @@ staleness (it is one run); several `--from` files are merged by case name.
 | Review inbox | the automated part is green and the sheet has `judge` criteria: the criteria as checkboxes and the snapshot files to look at |
 | Manual | the `manual` steps (of a manual sheet, or of a green sheet without `judge`) |
 | Automated | green, nothing left for a person |
+
+With a feature catalog the list ends with a section per root, **Features (<repo>): n of m with a sheet**: each
+functionality with a sheet, worst first, with its state and that of each of its sheets
+(`` - **hover.copy** – green: green `hover.copy-register` ``); the state of a functionality is the worst of its sheets (red > stale > never > skipped > inbox
+> manual > green; a red sheet names its message); then each functionality without a sheet, the sheets without a
+feature, and a `feature` the catalog does not know (with the sheet's file: a finding, not red). A catalog that does not
+load is said in its place. The section is in the Markdown only: the block in the tasks (`--tasks`) stays as it is.
 
 Under a sheet whose last stepped run (`testing sheets step`) took notes, the list adds them: `notes of the stepped
 run on <date> (<status>):` and one item per note (`step <n> (<size>): <text>`), also for a run that was aborted.

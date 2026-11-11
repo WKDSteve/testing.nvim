@@ -58,6 +58,21 @@ return function(H)
       refused({ id = "a/b", title = "T", steps = { { keys = "x" } } }, "id", "id with a slash")
       refused({ id = "a", steps = { { keys = "x" } } }, "title", "title is required")
       refused(
+        { id = "a", title = "T", feature = "a/b", steps = { { keys = "x" } } },
+        "feature",
+        "a feature with a slash"
+      )
+      refused(
+        { id = "a", title = "T", feature = 1, steps = { { keys = "x" } } },
+        "feature must be a string",
+        "a feature that is no string"
+      )
+      eq(
+        sheet.validate({ id = "a", title = "T", feature = "x.y-z", steps = { { keys = "x" } } }).feature,
+        "x.y-z",
+        "a feature of the form of an id is kept"
+      )
+      refused(
         { id = "a", title = "T", steps = { { keys = "x" } }, colour = 1 },
         "unknown field colour",
         "an unknown field is named"
@@ -303,6 +318,31 @@ return function(H)
         sheet.run(req, { root = root, ci = false, update = false }).status,
         "pass",
         "a met requirement runs the sheet"
+      )
+      -- a feature sheet skipped by `requires` under CI: red (the workflow provides the checkouts); outside CI a skip
+      local feat = vim.deepcopy(req)
+      feat.feature = "demo.view"
+      feat.requires = { { lua = "false", reason = "plugin X is not beside it" } }
+      local under_ci = function(name)
+        return name == "CI" and "true" or nil
+      end
+      local rc = sheet.run(feat, { root = root, ci = true, update = false, getenv = under_ci })
+      eq({ rc.ok, rc.status }, { false, "fail" }, "a feature sheet skipped under CI is red")
+      has(rc.failures[1], "skipped under CI (plugin X is not beside it)", "the failure says why")
+      local off = function(name)
+        return name == "CI" and "false" or nil
+      end
+      eq(
+        sheet.run(feat, { root = root, ci = false, update = false, getenv = off }).status,
+        "skip",
+        "CI=false: a skip as before"
+      )
+      local plain = vim.deepcopy(feat)
+      plain.feature = nil
+      eq(
+        sheet.run(plain, { root = root, ci = true, update = false, getenv = under_ci }).status,
+        "skip",
+        "a sheet without a feature stays a skip under CI"
       )
 
       -- args and restart: the child starts with the sheet's command line; a restart quits it as a person does

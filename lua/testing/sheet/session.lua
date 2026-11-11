@@ -1,4 +1,5 @@
 ---@module 'testing.sheet.session'
+-- @cache-env CI
 ---@brief One run of a test sheet, one step at a time: open, peek, step, close.
 ---@description
 --- `testing.sheet.run` is the loop over this for the rpc engine, `testing sheets step` the same loop with a client
@@ -15,6 +16,14 @@
 --- sets a flag); a `wait` step sees it at its next poll, a browser step at once, anything else when it returns.
 
 local M = {}
+
+---Whether this runs on a CI service (`CI` set and not `0`/`false`): there a `requires` skip of a feature sheet is red.
+---@param getenv? fun(name: string): string|nil Replaced by a spec (default `os.getenv`).
+---@return boolean
+function M.under_ci(getenv)
+  local v = (getenv or os.getenv)("CI")
+  return v ~= nil and v ~= "" and v ~= "0" and v:lower() ~= "false"
+end
 
 ---@class Testing.Sheet.NextStep
 ---@field size string The size as a tag: `80x24`.
@@ -242,6 +251,16 @@ function Session:result()
     result.ok, result.status = false, "aborted"
   elseif #self.failures > 0 then
     result.ok, result.status = false, "fail"
+  elseif self.skipped and self.sheet.feature and M.under_ci(self.opts.getenv) then
+    -- a feature sheet in CI: the checkouts of the workflow provide what `requires` asks for, so a skip there is a
+    -- mistake of the provision, not a machine that lacks a plugin
+    result.ok, result.status = false, "fail"
+    result.failures = {
+      ("feature sheet %s is skipped under CI (%s): the workflow provides what `requires` asks for"):format(
+        self.sheet.id,
+        self.skipped
+      ),
+    }
   elseif self.skipped then
     -- a missing prerequisite is information, never a green run
     result.status, result.skipped = "skip", self.skipped

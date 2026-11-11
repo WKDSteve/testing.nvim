@@ -9,6 +9,8 @@
 ---   * a sheet that cannot be read or does not load                    -> `error`
 ---   * a sheet without `task`                                          -> `warn`
 ---   * a task that is neither open nor in its area's Backlog (or no id) -> `error`
+---   * a `feature` the catalog `TESTS/sheets/features.lua` does not know -> `warn` (no catalog: nothing is said)
+---   * a catalog that does not load                                    -> `error`
 ---
 --- The tasks are looked up through tasks.nvim's engine (`tasks-export/1`), never in the vault's files: ONE
 --- `call order` for the ids of all open tasks, then every page of `call finished` of each area that still has a
@@ -123,6 +125,7 @@ function M.run(ctx)
   local sheet = require("testing.sheet")
   local findings = {}
   local wanted, order = {}, {}
+  local featured = {}
   for _, rel in ipairs(rels) do
     local text, rerr = ctx.fs:read(rel)
     local s, lerr
@@ -147,12 +150,55 @@ function M.run(ctx)
         'the sheet names no task (`task = "<area>/<slug>"`)',
         rel
       )
-    else
+    end
+    if s and s.feature then
+      featured[#featured + 1] = { rel = rel, feature = s.feature }
+    end
+    if s and s.task then
       if not wanted[s.task] then
         wanted[s.task] = {}
         order[#order + 1] = s.task
       end
       table.insert(wanted[s.task], rel)
+    end
+  end
+  -- the functionality a sheet names is one of the catalog: a typo is a warning, like a sheet without a task. Without a
+  -- catalog there is nothing to compare with
+  if #featured > 0 then
+    local features = require("testing.sheet.features")
+    local text, rerr = ctx.fs:read(features.FILE)
+    if not text and rerr ~= "not found" then
+      findings[#findings + 1] = util.finding(
+        "K16",
+        "sheet",
+        "error",
+        "the feature catalog cannot be read: " .. tostring(rerr),
+        features.FILE
+      )
+    elseif text then
+      local catalog, cerr = features.load_text(text, features.FILE)
+      if not catalog then
+        findings[#findings + 1] = util.finding(
+          "K16",
+          "sheet",
+          "error",
+          "the feature catalog does not load: " .. (tostring(cerr):match("^[^\n]*") or "?"),
+          features.FILE
+        )
+      else
+        local known = features.by_id(catalog)
+        for _, f in ipairs(featured) do
+          if not known[f.feature] then
+            findings[#findings + 1] = util.finding(
+              "K16",
+              "sheet",
+              "warn",
+              ("feature %s is not in %s"):format(f.feature, features.FILE),
+              f.rel
+            )
+          end
+        end
+      end
     end
   end
   local notes = { ("%d sheet(s), %d task(s) named"):format(#rels, #order) }

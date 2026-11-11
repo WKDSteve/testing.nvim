@@ -240,9 +240,157 @@ local function sub_items(out, list, depth)
   end
 end
 
+-- ── features ────────────────────────────────────────────────────────────────
+
+---The states of a functionality, worst first: a functionality has the worst state of its sheets.
+M.FEATURE_STATES = { "red", "stale", "never", "skipped", "inbox", "manual", "green" }
+local RANK = {}
+for i, s in ipairs(M.FEATURE_STATES) do
+  RANK[s] = i
+end
+
+---What a sheet says about its functionality.
+---@param e Testing.SheetReport.Entry
+---@return string state One of `M.FEATURE_STATES`.
+function M.feature_state(e)
+  local s = e.sheet
+  if not s then
+    return "red"
+  end
+  if s.engine == "manual" then
+    return "manual"
+  end
+  if not e.case then
+    return "never"
+  end
+  if e.stale then
+    return "stale"
+  end
+  if e.case.status == "skip" then
+    return "skipped"
+  end
+  if e.case.status ~= "pass" then
+    return "red"
+  end
+  if #s.judge > 0 then
+    return "inbox"
+  end
+  if #s.manual > 0 then
+    return "manual"
+  end
+  return "green"
+end
+
+---The feature catalog of each project (`testing.sheet.features`): `{ catalog }`, `{ error }`, or nothing (no file).
+---@param roots string[]
+---@return table<string, { catalog?: Testing.Sheet.Feature[], error?: string }>
+function M.catalogs(roots)
+  local out = {}
+  for _, r in ipairs(roots) do
+    local root = norm(r)
+    local catalog, err = require("testing.sheet.features").load(root)
+    if catalog or err then
+      out[root] = { catalog = catalog, error = err }
+    end
+  end
+  return out
+end
+
+---The section "Features" of one project.
+---@param out string[]
+---@param root string
+---@param cat { catalog?: Testing.Sheet.Feature[], error?: string }
+---@param entries Testing.SheetReport.Entry[] Of this project.
+local function features_section(out, root, cat, entries)
+  local name = vim.fs.basename(root)
+  out[#out + 1] = ""
+  if not cat.catalog then
+    out[#out + 1] = ("## Features (%s): the catalog does not load"):format(one_line(name))
+    out[#out + 1] = ""
+    out[#out + 1] = "- " .. one_line(cat.error or "?")
+    return
+  end
+  local known = require("testing.sheet.features").by_id(cat.catalog)
+  local of, without, unknown = {}, {}, {}
+  for _, e in ipairs(entries) do
+    local s = e.sheet
+    if s and s.feature and known[s.feature] then
+      of[s.feature] = of[s.feature] or {}
+      table.insert(of[s.feature], e)
+    elseif s and s.feature then
+      unknown[#unknown + 1] = ("%s (%s)"):format(code(s.feature), code(e.rel))
+    elseif s then
+      without[#without + 1] = code(s.id)
+    end
+  end
+  local covered = 0
+  for _, f in ipairs(cat.catalog) do
+    covered = covered + (of[f.id] and 1 or 0)
+  end
+  out[#out + 1] = ("## Features (%s): %d of %d with a sheet"):format(
+    one_line(name),
+    covered,
+    #cat.catalog
+  )
+  out[#out + 1] = ""
+  -- the ones with a sheet first, worst first, then the catalog's order; then the ones without
+  local listed = {}
+  for i, f in ipairs(cat.catalog) do
+    local list = of[f.id]
+    if list then
+      local worst = "green"
+      local parts = {}
+      table.sort(list, function(a, b)
+        local ra, rb = RANK[M.feature_state(a)], RANK[M.feature_state(b)]
+        if ra ~= rb then
+          return ra < rb
+        end
+        return a.sheet.id < b.sheet.id
+      end)
+      for _, e in ipairs(list) do
+        local st = M.feature_state(e)
+        if RANK[st] < RANK[worst] then
+          worst = st
+        end
+        local detail = st == "red"
+            and e.case
+            and e.case.message
+            and (": " .. one_line(e.case.message))
+          or ""
+        parts[#parts + 1] = ("%s %s%s"):format(st, code(e.sheet.id), detail)
+      end
+      listed[#listed + 1] = {
+        rank = RANK[worst],
+        i = i,
+        line = ("- **%s** – %s: %s"):format(one_line(f.id), worst, table.concat(parts, ", ")),
+      }
+    end
+  end
+  table.sort(listed, function(a, b)
+    if a.rank ~= b.rank then
+      return a.rank < b.rank
+    end
+    return a.i < b.i
+  end)
+  for _, l in ipairs(listed) do
+    out[#out + 1] = l.line
+  end
+  for _, f in ipairs(cat.catalog) do
+    if not of[f.id] then
+      out[#out + 1] = ("- %s – no sheet (%s)"):format(one_line(f.id), one_line(f.title))
+    end
+  end
+  if #without > 0 then
+    out[#out + 1] = "- sheets without a feature: " .. table.concat(without, ", ")
+  end
+  if #unknown > 0 then
+    out[#out + 1] = "- unknown feature of a sheet: " .. table.concat(unknown, ", ")
+  end
+end
+
 ---The Markdown list.
 ---@param entries Testing.SheetReport.Entry[]
----@param opts? { title?: string, date?: string }
+---@param opts? { title?: string, date?: string, catalogs?: table<string, { catalog?: Testing.Sheet.Feature[], error?: string }> }
 ---@return string
 function M.render(entries, opts)
   opts = opts or {}
@@ -343,6 +491,27 @@ function M.render(entries, opts)
     out[#out + 1] = "  - green"
       .. (e.case and e.case.duration_ms and (" (" .. e.case.duration_ms .. " ms)") or "")
   end)
+  -- the functionalities of each project with a catalog, in the order the projects came
+  local order, by_root = {}, {}
+  for _, e in ipairs(entries) do
+    if not by_root[e.root] then
+      by_root[e.root] = {}
+      order[#order + 1] = e.root
+    end
+    table.insert(by_root[e.root], e)
+  end
+  for root in pairs(opts.catalogs or {}) do
+    if not by_root[root] then
+      by_root[root] = {}
+      order[#order + 1] = root
+    end
+  end
+  for _, root in ipairs(order) do
+    local cat = (opts.catalogs or {})[root]
+    if cat then
+      features_section(out, root, cat, by_root[root])
+    end
+  end
   return table.concat(out, "\n") .. "\n"
 end
 
@@ -464,6 +633,8 @@ function M.main(argv, sv, deps)
   end
   local text = M.render(entries, {
     date = os.date("!%Y-%m-%d") --[[@as string]],
+    -- the Markdown only: the task block (`testing.sheet.tasks`) stays as it is
+    catalogs = M.catalogs(roots),
   })
   if not out_file then
     sv.out((text:gsub("\n$", "")))

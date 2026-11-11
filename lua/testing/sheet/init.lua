@@ -122,6 +122,8 @@ M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
 M.MAX_BYTES = 256 * 1024
 M.MAX_LOAD_INSTRUCTIONS = 1000000
+---The form of an `id`, a `feature` and an id of the feature catalog.
+M.ID_PATTERN = "^[%w][%w_.%-]*$"
 
 ---@class Testing.Sheet.Step
 ---@field keys? string
@@ -156,6 +158,8 @@ M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---@field id string
 ---@field title string
 ---@field task? string
+---@field feature? string The functionality of the plugin this sheet checks, an `id` of the repository's feature
+---catalog (`TESTS/sheets/features.lua`, `testing.sheet.features`); a sheet with it is a feature sheet.
 ---@field engine "rpc"|"manual"|"browser"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
 ---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
@@ -226,6 +230,7 @@ local SHEET_KEYS = {
   app = "string",
   args = "table",
   config = "string",
+  feature = "string",
 }
 
 ---@param v any
@@ -581,11 +586,15 @@ function M.validate(s)
       return nil, ("%s must be a %s"):format(k, want)
     end
   end
-  if not s.id or not s.id:match("^[%w][%w_.%-]*$") then
+  if not s.id or not s.id:match(M.ID_PATTERN) then
     return nil, "id: letters, digits, '_', '-', '.'"
   end
   if not s.title or s.title == "" then
     return nil, "title is required"
+  end
+  -- only the form: what it means is the catalog's, and a sheet loads without it
+  if s.feature ~= nil and not s.feature:match(M.ID_PATTERN) then
+    return nil, "feature: letters, digits, '_', '-', '.' (an id of TESTS/sheets/features.lua)"
   end
   s.engine = s.engine or "rpc"
   if not M.ENGINES[s.engine] then
@@ -717,23 +726,24 @@ function M.load(path)
   return s, nil
 end
 
----Read the text of a sheet as data (empty environment) and validate it; `name` stands for the file in messages.
+---Run the text of a data file (a sheet, the feature catalog) with an empty environment and under the instruction
+---limit, and return what it returns; `name` stands for the file in messages, `what` names it in the message of a loop.
 ---@param text string
 ---@param name string
----@return Testing.Sheet|nil sheet, string|nil err
-function M.load_text(text, name)
+---@param what string
+---@return any value, string|nil err
+function M.load_data(text, name, what)
   if #text > M.MAX_BYTES then
     return nil, ("%s is larger than %d bytes"):format(name, M.MAX_BYTES)
   end
-  local path = name
-  local chunk, perr = load(text, "@" .. path, "t", {})
+  local chunk, perr = load(text, "@" .. name, "t", {})
   if not chunk then
     return nil, tostring(perr)
   end
   -- data never needs a million instructions: a loop in a sheet (an AI's draft too) ends instead of hanging the reader
   local old_hook, old_mask, old_count = debug.gethook()
   debug.sethook(function()
-    error(("%s: reading the sheet takes too long (a loop?)"):format(path), 0)
+    error(("%s: reading the %s takes too long (a loop?)"):format(name, what), 0)
   end, "", M.MAX_LOAD_INSTRUCTIONS)
   local ok, value = pcall(chunk)
   if old_hook then
@@ -744,6 +754,19 @@ function M.load_text(text, name)
   if not ok then
     return nil, tostring(value) -- already starts with `<path>:<line>:` (the chunk name)
   end
+  return value, nil
+end
+
+---Read the text of a sheet as data (empty environment) and validate it; `name` stands for the file in messages.
+---@param text string
+---@param name string
+---@return Testing.Sheet|nil sheet, string|nil err
+function M.load_text(text, name)
+  local value, derr = M.load_data(text, name, "sheet")
+  if derr then
+    return nil, derr
+  end
+  local path = name
   local s, err = M.validate(value)
   if not s then
     return nil, ("%s: %s"):format(path, err)

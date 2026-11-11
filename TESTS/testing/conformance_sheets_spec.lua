@@ -241,5 +241,44 @@ return function(H)
     eq(rbroken.status, "fail", "no vault, but a sheet that does not load: still a failure")
     local notes = table.concat(rbroken.notes, "\n")
     has(notes, "not looked up", "the note says the tasks were not looked up")
+
+    -- ===================================================================
+    -- 6. features: a `feature` the catalog does not know is a warning; without a catalog nothing is said; a catalog
+    -- that does not load is an error
+    local function feature_sheet(root, name, feature)
+      S.write(
+        root .. "/TESTS/sheets/" .. name .. ".sheet.lua",
+        ('return { id = %q, title = %q, task = "a/open-task", feature = %q, engine = "manual", manual = { "look" } }\n'):format(
+          name,
+          name,
+          feature
+        )
+      )
+    end
+    local fr = S.new_repo()
+    feature_sheet(fr, "known", "x.view")
+    feature_sheet(fr, "typo", "x.veiw")
+    local fcall = engine({ ["a/open-task"] = true }, {}, 10)
+    local rno = S.check(run(fr, { call = fcall }), "K16")
+    eq(#rno.findings, 0, "no catalog: no word about features")
+    S.write(
+      fr .. "/TESTS/sheets/features.lua",
+      'return { { id = "x.view", title = "The view shows the rows" } }\n'
+    )
+    local rfeat = S.check(run(fr, { call = fcall }), "K16")
+    eq(#rfeat.findings, 1, "one finding: the typo")
+    eq(rfeat.findings[1].file, "TESTS/sheets/typo.sheet.lua", "on the sheet with the typo")
+    eq(rfeat.findings[1].level, "warn", "a warning, not a failure")
+    has(
+      rfeat.findings[1].message,
+      "feature x.veiw is not in TESTS/sheets/features.lua",
+      "it names both"
+    )
+    ok(rfeat.status ~= "fail", "the check does not fail on a typo: " .. tostring(rfeat.status))
+    S.write(fr .. "/TESTS/sheets/features.lua", "return { { id = 'x.view' } }\n")
+    local rcat = S.check(run(fr, { call = fcall }), "K16")
+    eq(rcat.status, "fail", "a catalog that does not load fails the check")
+    eq(rcat.findings[1].file, "TESTS/sheets/features.lua", "on the catalog")
+    has(rcat.findings[1].message, "[1].title is required", "naming the field")
   end)
 end
