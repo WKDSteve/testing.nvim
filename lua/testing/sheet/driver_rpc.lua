@@ -1,4 +1,7 @@
 ---@module 'testing.sheet.driver_rpc'
+-- @cache-env CI
+-- (a live sheet reads `CI` and the variables it names, through `testing.sheet.live`; it runs only with
+-- `testing sheets run --live`, never in a suite, so no spec result depends on their values)
 ---@brief Engine "rpc" of a test sheet as a driver: a child editor per size, one step at a time, in this process.
 ---@description
 --- The other engines are processes that speak `testing-sheet-driver/1`; this one needs no process of its own, the
