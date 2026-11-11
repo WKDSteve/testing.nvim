@@ -236,7 +236,13 @@ return function(H)
   )
 
   -- ---------------------------------------------------------------- --no-cache: the analysis index stays off the disk
-  vim.fn.delete(tmp .. "/cache", "rf")
+  -- cache.clear, not deleting the folder: the hasher of this process keeps its entries in memory, and whether it
+  -- hashed again (and so wrote the index) depended on the time since the files changed (the racy rule): on a loaded
+  -- machine it reused them and wrote nothing (a flake). RACY_SECONDS = 0 pins the slow case on every machine.
+  local hash = require("testing.cache.hash")
+  local racy_before = hash.RACY_SECONDS
+  hash.RACY_SECONDS = 0
+  require("testing.cache").clear({ root = root, cache_dir = tmp .. "/cache" })
   local plain = run(root, { "--changed", "--no-cache" })
   eq(plain.code, 0, "--changed --no-cache: " .. plain.err)
   eq(
@@ -251,6 +257,7 @@ return function(H)
     1,
     "without --no-cache the index is written (the check above is not blind)"
   )
+  hash.RACY_SECONDS = racy_before
 
   -- ---------------------------------------------------------------- the listing shows the selection
   local listed = run(root, { "--changed", "--list" })
