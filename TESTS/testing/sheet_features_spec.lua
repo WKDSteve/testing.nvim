@@ -191,6 +191,12 @@ return function(H)
     "from the files of the root"
   )
   has(table.concat(out, "\n"), "- **p.copy** – manual: manual `copy`", "a manual sheet")
+  -- a linked worktree of the repository (its .git file points into <main>/.git/worktrees/): the repository's name
+  vim.fn.mkdir(root .. "/.git/worktrees/topic", "p")
+  local wt = tmp .. "/p.nvim-topic"
+  write("p.nvim-topic/.git", "gitdir: " .. root .. "/.git/worktrees/topic\n")
+  local named = report.render({}, { catalogs = { [wt] = { catalog = c } } })
+  has(named, "## Features (p.nvim): 0 of 3 with a sheet", "a worktree is named by its repository")
 
   -- ── sheets new --feature ─────────────────────────────────────────────
   local new = require("testing.sheet.new")

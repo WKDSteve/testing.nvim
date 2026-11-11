@@ -302,7 +302,8 @@ end
 ---@param cat { catalog?: Testing.Sheet.Feature[], error?: string }
 ---@param entries Testing.SheetReport.Entry[] Of this project.
 local function features_section(out, root, cat, entries)
-  local name = vim.fs.basename(root)
+  -- the repository, also from a worktree of it (`testing.metrics.repo_name`)
+  local name = require("testing.metrics").repo_name(root)
   out[#out + 1] = ""
   if not cat.catalog then
     out[#out + 1] = ("## Features (%s): the catalog does not load"):format(one_line(name))
