@@ -3,9 +3,10 @@
     "data_classes",
     "fleet",
     "manifest",
+    "metrics",
     "repo"
   ],
-  "digest": "sha256:4e39a4b8684719fe",
+  "digest": "sha256:f0d6b0bdc53594f9",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -13,30 +14,30 @@
   },
   "files": [
     {
-      "bytes": 5581,
+      "bytes": 5596,
       "path": "fleet.json",
-      "sha256": "187a64c8d46c9482fee2013989f20347376070f472ebb6b5352772294bed6992"
+      "sha256": "17e2fbf4a99d40d541cb694dafcd38778b17ab80ccdddda1753e4409a6aa61ab"
     },
     {
-      "bytes": 3093,
+      "bytes": 3127,
       "path": "repos/alpha.nvim-356bf237c7fc.json",
-      "sha256": "04442599d749bd727f8deea5b481b0307bdf542788b269b7c2105c75b5c12803"
+      "sha256": "c393a1a142e3ed42470359ef67a7e0770b0280e4e77911eb380ab02eb115843f"
     },
     {
-      "bytes": 5218,
+      "bytes": 7075,
       "path": "repos/beta.nvim-ac6d3a4ece7f.json",
-      "sha256": "a811da1ae31dda7462596709a6a00fc80a34b23da768b36068ebbc103a54c1a5"
+      "sha256": "329f12ee6754faec21c78761d0f3aceee387b33dac9ff9293a4892232704aa9e"
     },
     {
-      "bytes": 1361,
+      "bytes": 1395,
       "path": "repos/gamma.nvim-bed2b5150df9.json",
-      "sha256": "8887b08468aa5d80f5a1f98533e62ac203373b07a3b2c8694d66cfd58578f127"
+      "sha256": "b4328e7fc736f71bdecaa77b2799aeba4c65492a6a43b28146c440c5a44004a1"
     }
   ],
   "form": "export",
   "generated_at": "2026-10-31T12:00:00Z",
   "kind": "manifest",
   "plugin": "testing.nvim",
-  "rev": "rev:6415b6",
+  "rev": "rev:9e088e",
   "schema": "testing-export/1"
 }

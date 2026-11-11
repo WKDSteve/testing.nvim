@@ -214,6 +214,166 @@ local function sorted_keys(map)
   return keys
 end
 
+-- ── the part `metrics` of testing-export/1 ───────────────────────────────────
+
+---The kinds of run a document names; a line of another kind counts as `other` (the file is untrusted).
+---@type table<string, true>
+M.EXPORT_KINDS = {
+  suite = true,
+  ["suite-partial"] = true,
+  ci = true,
+  ["ci-commit"] = true,
+  ["ci-commit-quick"] = true,
+  land = true,
+}
+
+---Days of the part `metrics` (ending at the last run, not at the clock).
+M.EXPORT_DAYS = 90
+
+---A verdict as a document names it: a short word, else `other`.
+---@param v any
+---@return string
+local function verdict_word(v)
+  if type(v) == "string" and #v <= 32 and v:match("^[a-z][a-z0-9%-]*$") then
+    return v
+  end
+  return "other"
+end
+
+---@param map table<string, integer>
+---@param name string
+---@return { [string]: any }[]
+local function counted(map, name)
+  local list = {}
+  for _, key in ipairs(sorted_keys(map)) do
+    list[#list + 1] = { [name] = key, n = map[key] }
+  end
+  return list
+end
+
+---The part `metrics` of the document of one repository (testing-export/1, capability `metrics`): what its heavy runs on
+---this machine cost, from the lines of `testing.metrics` whose `repo` is the repository's directory name. The days end
+---at the last run, not at the clock, and the pushes are counted from the day of the first run on: an export without a
+---new run or push stays the same bytes.
+---@param entries table[] The lines of `testing.metrics.read`.
+---@param name string The directory name of the repository.
+---@param pushes? fun(): integer[]|nil The epoch seconds of its pushes (`M.pushes`), asked only when there is a line;
+---nil or a nil answer: not known.
+---@return table|nil part nil: no line of this repository.
+---@return string line What the `rev` of the document follows.
+function M.export_part(entries, name, pushes)
+  local metrics = require("testing.metrics")
+  local mine = {}
+  for _, e in ipairs(entries) do
+    if
+      e.repo == name
+      and type(e.ts) == "string"
+      and e.ts:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$")
+    then
+      mine[#mine + 1] = e
+    end
+  end
+  if #mine == 0 then
+    return nil, "metrics:0"
+  end
+  table.sort(mine, function(a, b)
+    return a.ts < b.ts
+  end)
+  local first, last = mine[1].ts, mine[#mine].ts
+  local y, mo, d = last:match("^(%d+)%-(%d+)%-(%d+)")
+  local noon = os.time({
+    year = tonumber(y) --[[@as integer]],
+    month = tonumber(mo) --[[@as integer]],
+    day = tonumber(d) --[[@as integer]],
+    hour = 12,
+  })
+  local cut = os.date("!%Y-%m-%d", noon - (M.EXPORT_DAYS - 1) * 86400) --[[@as string]]
+  local kinds, days = {}, {}
+  local cache = { selected = 0, cached = 0, ran = 0 }
+  local total, backfilled = 0, 0
+  for _, e in ipairs(mine) do
+    local kind = M.EXPORT_KINDS[e.kind] and e.kind or "other"
+    local dur = math.max(0, metrics.seconds_of(e, "duration"))
+    local wait = math.max(0, metrics.seconds_of(e, "wait"))
+    local k = kinds[kind]
+    if not k then
+      k = { runs = 0, seconds = 0, durations = {}, wait = 0, waited = 0, verdicts = {} }
+      kinds[kind] = k
+    end
+    k.runs = k.runs + 1
+    k.seconds = k.seconds + dur
+    k.durations[#k.durations + 1] = dur
+    if wait > 0 then
+      k.wait, k.waited = k.wait + wait, k.waited + 1
+    end
+    local v = verdict_word(e.verdict)
+    k.verdicts[v] = (k.verdicts[v] or 0) + 1
+    total = total + dur
+    local day = e.ts:sub(1, 10)
+    if day >= cut then
+      local dd = days[day] or { runs = 0, seconds = 0 }
+      dd.runs, dd.seconds = dd.runs + 1, dd.seconds + dur
+      days[day] = dd
+    end
+    if (kind == "suite" or kind == "suite-partial") and type(e.files) == "table" then
+      cache.selected = cache.selected + math.max(0, tonumber(e.files.selected) or 0)
+      cache.cached = cache.cached + math.max(0, tonumber(e.files.cached) or 0)
+      cache.ran = cache.ran + math.max(0, tonumber(e.files.ran) or 0)
+    end
+    if type(e.note) == "string" and e.note:find("^backfilled") then
+      backfilled = backfilled + 1
+    end
+  end
+  local kind_list = {}
+  for _, kind in ipairs(sorted_keys(kinds)) do
+    local k = kinds[kind]
+    kind_list[#kind_list + 1] = {
+      kind = kind,
+      runs = k.runs,
+      minutes = round1(k.seconds / 60),
+      median_s = round1(median(k.durations) or 0),
+      wait_minutes = round1(k.wait / 60),
+      waited = k.waited,
+      verdicts = counted(k.verdicts, "verdict"),
+    }
+  end
+  local day_list = {}
+  for _, day in ipairs(sorted_keys(days)) do
+    day_list[#day_list + 1] =
+      { day = day, runs = days[day].runs, minutes = round1(days[day].seconds / 60) }
+  end
+  local n_push = vim.NIL
+  local push_list = pushes and pushes() or nil
+  if push_list then
+    local count = 0
+    for _, ts in ipairs(push_list) do
+      if os.date("!%Y-%m-%d", ts) >= first:sub(1, 10) then
+        count = count + 1
+      end
+    end
+    n_push = count
+  end
+  local part = {
+    runs = #mine,
+    minutes = round1(total / 60),
+    first = first,
+    last = last,
+    backfilled = backfilled,
+    kinds = kind_list,
+    days = day_list,
+    cache = {
+      selected = cache.selected,
+      cached = cache.cached,
+      ran = cache.ran,
+      hit_rate = cache.selected > 0 and round1(100 * cache.cached / cache.selected) or vim.NIL,
+    },
+    pushes = n_push,
+    runs_per_push = (n_push ~= vim.NIL and n_push > 0) and round1(#mine / n_push) or vim.NIL,
+  }
+  return part,
+    ("metrics:%d:%s:%s"):format(#mine, last, n_push == vim.NIL and "-" or tostring(n_push))
+end
+
 ---The table for a terminal.
 ---@param doc table
 ---@return string[]

@@ -51,13 +51,22 @@ M.ENGINE_VERSION = "0.1.0-dev"
 
 ---What this engine writes; sorted.
 ---@type string[]
-M.CAPABILITIES = { "data_classes", "fleet", "manifest", "repo" }
+M.CAPABILITIES = { "data_classes", "fleet", "manifest", "metrics", "repo" }
 
 ---What `testing call hello` says this engine answers: the capabilities of its documents, the findings
 ---(`testing-finding/1`), `hello` itself and the request on stdin (`--params=-`); sorted.
 ---@type string[]
-M.HELLO_CAPABILITIES =
-  { "data_classes", "finding", "fleet", "hello", "manifest", "params", "remote_token", "repo" }
+M.HELLO_CAPABILITIES = {
+  "data_classes",
+  "finding",
+  "fleet",
+  "hello",
+  "manifest",
+  "metrics",
+  "params",
+  "remote_token",
+  "repo",
+}
 
 ---The kinds a reader of this version knows.
 ---@type table<string, true>
@@ -149,6 +158,7 @@ end
 ---@field key fun(dir: string): string
 ---@field shallow fun(dir: string): boolean
 ---@field head fun(dir: string): Testing.Export.Head|nil
+---@field pushes fun(dir: string): integer[]
 ---@field remote fun(repos: { dir: string, from_root: boolean }[], opts: { state_dir: string }): table[], table
 
 ---What `prefetch` found per directory (the answers of the five git questions of a repository), or nil: asked one by
@@ -251,6 +261,12 @@ M.deps = {
     end
     table.sort(roots)
     return roots[1]
+  end,
+  ---The pushes of a checkout (`testing.stats.pushes`: its reflog of origin/main), for the part `metrics`.
+  ---@param dir string
+  ---@return integer[]
+  pushes = function(dir)
+    return require("testing.stats").pushes(dir)
   end,
   ---The key of a repository (`M.repo_key` of its identity).
   ---@param dir string
@@ -1099,6 +1115,9 @@ end
 ---@field previous? fun(path: string): string|nil `export` only: the text of a file of the export folder as it is now
 ---(nil: none). A document whose digest did not change keeps that file's `generated_at` and `engine`, so an
 ---unchanged state is the same bytes (no git diff in a results repository).
+---@field metrics_file? string|false The metrics of the heavy runs (`testing.metrics`) the part `metrics` of each
+---repository reads; nil: the user's file (`TESTING_METRICS_FILE`, else the data folder; `TESTING_METRICS=off` reads
+---none), false: none (the part is null). A spec always names its own file or false.
 ---@field no_local? boolean Read no local result (`last.json`, `last_green.json`, `ci.json`): `local`, `last_green`,
 ---`ci_local`, `counts` are `null`, `cases_red` is 0 and `local_read` is false. The workstation, where nothing runs.
 ---@field classes? table The export form only: the options of `lib.nvim.data_classes.load` (`path`, `dir`, `env`, `os`);
@@ -1356,6 +1375,58 @@ local function history_of(dir, opts)
     ("history:%d:%s"):format(#entries, last and last.run or "-")
 end
 
+---The lines of the metrics file of one build, read once (reset by `protect`).
+---@type { path: string|false, entries: table[] }|nil
+local metrics_cache
+
+---The lines of the metrics file an export reads (`opts.metrics_file`), once per build.
+---@param opts Testing.Export.Opts
+---@return table[]
+local function metrics_entries(opts)
+  local path = opts.metrics_file
+  if path == nil then
+    local metrics = require("testing.metrics")
+    -- the reading side: a CI service or a heavy run around the export does not stop the reading, `off` does
+    local m = metrics.from_env(function(name)
+      if name == "CI" or name == require("testing.queue").TOKEN_ENV then
+        return nil
+      end
+      return os.getenv(name)
+    end)
+    path = m and m.path or false
+  end
+  if metrics_cache and metrics_cache.path == path then
+    return metrics_cache.entries
+  end
+  local entries = {}
+  if path then
+    local ok, read = pcall(require("testing.metrics").read, path)
+    entries = ok and read or {}
+  end
+  metrics_cache = { path = path, entries = entries }
+  return entries
+end
+
+---The part `metrics` of a repository (`testing.stats.export_part`).
+---@param dir string
+---@param opts Testing.Export.Opts
+---@return table|vim.NIL metrics NIL: no line of this repository, or the local results were not read (the workstation).
+---@return string line What the `rev` of the document follows.
+local function metrics_of(dir, opts)
+  if opts.no_local == true then
+    return NIL, "metrics:off"
+  end
+  local part, line = require("testing.stats").export_part(
+    metrics_entries(opts),
+    vim.fs.basename(dir),
+    function()
+      local ok, list = pcall(M.deps.pushes, dir)
+      return ok and type(list) == "table" and list or nil
+    end
+  )
+  return part or NIL, line
+end
+
 ---@param dir string
 ---@param row table
 ---@param src Testing.Export.Sources
@@ -1385,7 +1456,9 @@ local function build_repo(dir, row, src, opts, remote_info)
   doc.remote = remote_info
   local history, history_line = history_of(dir, opts)
   doc.history = history
-  return seal(doc, { src.rev, history_line })
+  local metrics, metrics_line = metrics_of(dir, opts)
+  doc.metrics = metrics
+  return seal(doc, { src.rev, history_line, metrics_line })
 end
 
 ---Run `fn` with the secrets of the environment read once; an error becomes `nil, message`.
@@ -1399,8 +1472,11 @@ local function protect(fn)
   secrets_cache = nil
   secrets_cache = M.secrets()
   tokens_cache = {}
+  local outer_metrics = metrics_cache
+  metrics_cache = nil
   local ok, res, err, kind = pcall(fn)
   secrets_cache, tokens_cache = outer, outer_tokens
+  metrics_cache = outer_metrics
   -- the git answers of a prefetch are the state of this build only
   prefetched = nil
   if not ok then

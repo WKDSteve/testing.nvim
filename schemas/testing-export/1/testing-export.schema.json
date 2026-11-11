@@ -458,6 +458,81 @@
       },
       "additionalProperties": false
     },
+    "metrics": {
+      "description": "What the heavy runs of this repository cost on this machine (`testing stats`, docs/CI.md \"Metrics\"), from the lines of metrics.jsonl whose repo is the directory name. The days end at the last run, not at the clock, and the pushes are counted from the day of the first run on, so an export without a new run or push stays the same. Capability metrics.",
+      "type": "object",
+      "required": ["runs", "minutes", "first", "last", "backfilled", "kinds", "days", "cache", "pushes", "runs_per_push"],
+      "properties": {
+        "runs": { "$ref": "#/$defs/count" },
+        "minutes": { "description": "Machine minutes of all runs.", "type": "number", "minimum": 0 },
+        "first": { "$ref": "#/$defs/time" },
+        "last": { "$ref": "#/$defs/time" },
+        "backfilled": { "description": "Lines entered afterwards (a measurement from before the metrics were written), part of runs.", "$ref": "#/$defs/count" },
+        "kinds": {
+          "description": "Per kind of run, sorted by kind. other: a kind this version does not know.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/metrics_kind" }
+        },
+        "days": {
+          "description": "The days with a run of the 90 days that end at the last run, oldest first.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["day", "runs", "minutes"],
+            "properties": {
+              "day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "runs": { "$ref": "#/$defs/count" },
+              "minutes": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "cache": {
+          "description": "The spec files of the suite runs (suite, suite-partial): selected, taken from the cache, run. hit_rate in percent, null without a selected file.",
+          "type": "object",
+          "required": ["selected", "cached", "ran", "hit_rate"],
+          "properties": {
+            "selected": { "$ref": "#/$defs/count" },
+            "cached": { "$ref": "#/$defs/count" },
+            "ran": { "$ref": "#/$defs/count" },
+            "hit_rate": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0, "maximum": 100 }] }
+          },
+          "additionalProperties": false
+        },
+        "pushes": {
+          "description": "Pushes of main since the day of the first run (the reflog of origin/main of this checkout); null: not known.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/count" }]
+        },
+        "runs_per_push": { "oneOf": [{ "type": "null" }, { "type": "number", "minimum": 0 }] }
+      },
+      "additionalProperties": false
+    },
+    "metrics_kind": {
+      "type": "object",
+      "required": ["kind", "runs", "minutes", "median_s", "wait_minutes", "waited", "verdicts"],
+      "properties": {
+        "kind": { "enum": ["suite", "suite-partial", "ci", "ci-commit", "ci-commit-quick", "land", "other"] },
+        "runs": { "$ref": "#/$defs/count" },
+        "minutes": { "type": "number", "minimum": 0 },
+        "median_s": { "type": "number", "minimum": 0 },
+        "wait_minutes": { "description": "Minutes waited in the queue of heavy runs.", "type": "number", "minimum": 0 },
+        "waited": { "description": "Runs that waited.", "$ref": "#/$defs/count" },
+        "verdicts": {
+          "description": "How often each verdict, sorted. other: a verdict that is no short word.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["verdict", "n"],
+            "properties": {
+              "verdict": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+              "n": { "$ref": "#/$defs/count" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "repo_doc": {
       "type": "object",
       "required": ["schema", "plugin", "kind", "form", "generated_at", "engine", "rev", "digest", "capabilities", "repo", "cases", "cases_red", "cases_omitted", "notes", "remote", "history"],
@@ -489,6 +564,10 @@
         "history": {
           "description": "The log of the runs of this repository (`testing history`), newest first: what ran when with which result. The statistics end at the last run, so an export without a new run stays the same. null: the local results were not read (the workstation).",
           "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/history" }]
+        },
+        "metrics": {
+          "description": "What the heavy runs of this repository cost on this machine (capability metrics; an engine without it leaves the field out). null: no run recorded for it, or the local results were not read (the workstation).",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/metrics" }]
         },
         "notes": {
           "description": "Why a source of the state could not be used (redacted).",

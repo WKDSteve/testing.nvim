@@ -81,7 +81,7 @@ end
 
 ---Build the fleet below `base`.
 ---@param base string
----@return { areas: string, root: string, state: string, alpha: string, beta: string, gamma: string, vault: string, home_file: string }
+---@return { metrics: string, areas: string, root: string, state: string, alpha: string, beta: string, gamma: string, vault: string, home_file: string }
 function M.build(base)
   local root = base .. "/fleet"
   local state = base .. "/state"
@@ -291,7 +291,79 @@ function M.build(base)
     areas,
     M.areas({ ["alpha.nvim"] = "public", ["beta.nvim"] = "internal", ["gamma.nvim"] = "internal" })
   )
+  -- the metrics of the heavy runs (testing.metrics), never the user's file: beta has runs, alpha and gamma none
+  local metrics = base .. "/metrics/metrics.jsonl"
+  M.write(metrics, table.concat({
+    json.encode({
+      v = 1,
+      ts = "2026-10-29T09:00:00Z",
+      kind = "ci-commit",
+      repo = "beta.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_s = 600,
+      verdict = "clean",
+      note = "backfilled: a measurement",
+    }),
+    json.encode({
+      v = 1,
+      ts = "2026-10-31T10:00:00Z",
+      kind = "suite",
+      repo = "beta.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 90000,
+      wait_ms = 30000,
+      verdict = "green",
+      files = { selected = 40, cached = 30, ran = 10 },
+    }),
+    json.encode({
+      v = 1,
+      ts = "2026-10-31T10:30:00Z",
+      kind = "suite-partial",
+      repo = "beta.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 30000,
+      verdict = "green-partial",
+      files = { selected = 10, cached = 10, ran = 0 },
+    }),
+    json.encode({
+      v = 1,
+      ts = "2026-10-31T11:00:00Z",
+      kind = "land",
+      repo = "beta.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 300000,
+      verdict = "landed",
+    }),
+    -- a kind and a verdict this version does not know: counted, never named
+    json.encode({
+      v = 1,
+      ts = "2026-10-31T11:10:00Z",
+      kind = "C:/Users/someone/odd",
+      repo = "beta.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 1000,
+      verdict = "Not A Word",
+    }),
+    -- another repository, and the vault: never in a document of beta
+    json.encode({
+      v = 1,
+      ts = "2026-10-31T11:20:00Z",
+      kind = "suite",
+      repo = "notes-vault",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 5000,
+      verdict = "green",
+    }),
+    "not json",
+  }, "\n") .. "\n")
   return {
+    metrics = metrics,
     areas = areas,
     root = root,
     state = state,
@@ -363,6 +435,7 @@ function M.install(opts)
     engine_info = export.engine_info,
     key = export.deps.key,
     head = export.deps.head,
+    pushes = export.deps.pushes,
     remote_deps = remote.deps,
   }
   if not opts.no_clock then
@@ -383,6 +456,11 @@ function M.install(opts)
   }
   export.deps.head = function(dir)
     return vim.deepcopy(HEADS[vim.fs.basename(dir)])
+  end
+  -- beta was pushed twice: once before its first run (not counted), once after
+  local PUSHES = { ["beta.nvim"] = { M.TS - 5 * 86400, M.TS - 600 } }
+  export.deps.pushes = function(dir)
+    return vim.deepcopy(PUSHES[vim.fs.basename(dir)] or {})
   end
   local function git(dir, args)
     local name = vim.fs.basename(dir)
@@ -436,6 +514,7 @@ function M.install(opts)
     export.engine_info = saved.engine_info
     export.deps.key = saved.key
     export.deps.head = saved.head
+    export.deps.pushes = saved.pushes
     remote.deps = saved.remote_deps
   end
 end
@@ -448,6 +527,7 @@ function M.opts(fx, extra)
   return vim.tbl_extend("force", {
     repos_roots = { fx.root },
     state_dir = fx.state,
+    metrics_file = fx.metrics,
     remote = true,
     classes = { path = fx.areas },
   }, extra or {})

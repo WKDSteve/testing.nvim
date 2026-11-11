@@ -360,7 +360,7 @@ Every document starts with the same fields:
 | `engine` | `{ version, git, nvim }` of testing.nvim. |
 | `rev` | What the sources looked like (`last.json`, `last_green.json`, `ci.json` with the paths of this machine replaced by their placeholders, the CI run). |
 | `digest` | `sha256:<16 hex>` of the content **without** `generated_at` and `engine`: two documents of an unchanged state have the same digest, whenever and wherever they were made. The manifest's `rev` and `digest` follow the path and digest of each of its files, not their bytes (which hold `generated_at`). |
-| `capabilities` | What this engine writes (`data_classes`, `fleet`, `manifest`, `repo`); a client shows only what is listed. `data_classes`: the fleet carries `excluded_by` and `classes`, fleet and repo carry `local_read`. |
+| `capabilities` | What this engine writes (`data_classes`, `fleet`, `manifest`, `metrics`, `repo`); a client shows only what is listed. `data_classes`: the fleet carries `excluded_by` and `classes`, fleet and repo carry `local_read`. `metrics`: a repo document carries `metrics`. |
 | `root` | Only in the local form: the repos root (fleet, when exactly one `--repos-root` was named) or the repository (repo). |
 
 The bytes are canonical (`lib.nvim.json.canonical`): keys sorted by byte value, no whitespace (stdout, the form that is
@@ -419,7 +419,20 @@ The row of one repository as `repo`, and its red cases (`fail`, `error`, `timeou
 as `cases[]`: `id`, `file`, `line`, `status`, `name`, `describe`, `duration_ms`, `flaky`, `message`, `expected`,
 `actual` (line breaks kept), `fails[{ line, msg }]`, `fails_total`. At most 500 cases; `cases_red` counts all,
 `cases_omitted` those left out (both `0` when `local_read` is false: required integers of version 1, read as unknown). `notes` says why a source of the state could
-not be used.
+not be used. `history` is the log of its runs (`testing history`).
+
+`metrics` (capability `metrics`) is what the heavy runs of this repository cost on this machine (docs/CI.md,
+"Metrics"): the lines of `metrics.jsonl` whose `repo` is the directory name, summed up like `testing stats` does.
+`runs`, `minutes` (machine minutes), `first`, `last`, `backfilled` (lines entered afterwards, part of `runs`),
+`kinds[{ kind, runs, minutes, median_s, wait_minutes, waited, verdicts[{ verdict, n }] }]` sorted by kind (a kind this
+version does not know is `other`, a verdict that is no short word is `other`: the file is untrusted),
+`days[{ day, runs, minutes }]` (the days with a run of the 90 days that end at the last run), `cache = { selected,
+cached, ran, hit_rate }` (the spec files of the suite runs; `hit_rate` in percent or `null`), `pushes` (pushes of main
+since the day of the first run, from the checkout's reflog of `origin/main`; `null`: not known) and `runs_per_push`.
+Like `history` it ends at the last run and the first day, not at the clock: an export without a new run or push is the
+same bytes. `null`: no run recorded for it, or `local_read` is false. Which file: `$TESTING_METRICS_FILE`, else the
+user's data folder; `TESTING_METRICS=off` exports none (a suite's children have it, so a spec never reads the user's
+file).
 
 ### `manifest`
 

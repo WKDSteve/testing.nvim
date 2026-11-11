@@ -3,12 +3,13 @@
     "data_classes",
     "fleet",
     "manifest",
+    "metrics",
     "repo"
   ],
   "cases": [],
   "cases_omitted": 0,
   "cases_red": 0,
-  "digest": "sha256:4e12d75848c554cc",
+  "digest": "sha256:f539f453741ad6ab",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -39,6 +40,7 @@
   },
   "kind": "repo",
   "local_read": true,
+  "metrics": null,
   "notes": [],
   "plugin": "testing.nvim",
   "remote": {
@@ -128,6 +130,6 @@
     },
     "name": "alpha.nvim"
   },
-  "rev": "rev:a9936d",
+  "rev": "rev:9de9b6",
   "schema": "testing-export/1"
 }

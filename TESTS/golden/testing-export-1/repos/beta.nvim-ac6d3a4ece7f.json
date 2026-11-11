@@ -3,6 +3,7 @@
     "data_classes",
     "fleet",
     "manifest",
+    "metrics",
     "repo"
   ],
   "cases": [
@@ -48,7 +49,7 @@
   ],
   "cases_omitted": 0,
   "cases_red": 2,
-  "digest": "sha256:f596fe2b65102823",
+  "digest": "sha256:39292db45a6226f1",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",
@@ -137,6 +138,105 @@
   },
   "kind": "repo",
   "local_read": true,
+  "metrics": {
+    "backfilled": 1,
+    "cache": {
+      "cached": 40,
+      "hit_rate": 80,
+      "ran": 10,
+      "selected": 50
+    },
+    "days": [
+      {
+        "day": "2026-10-29",
+        "minutes": 10,
+        "runs": 1
+      },
+      {
+        "day": "2026-10-31",
+        "minutes": 7,
+        "runs": 4
+      }
+    ],
+    "first": "2026-10-29T09:00:00Z",
+    "kinds": [
+      {
+        "kind": "ci-commit",
+        "median_s": 600,
+        "minutes": 10,
+        "runs": 1,
+        "verdicts": [
+          {
+            "n": 1,
+            "verdict": "clean"
+          }
+        ],
+        "wait_minutes": 0,
+        "waited": 0
+      },
+      {
+        "kind": "land",
+        "median_s": 300,
+        "minutes": 5,
+        "runs": 1,
+        "verdicts": [
+          {
+            "n": 1,
+            "verdict": "landed"
+          }
+        ],
+        "wait_minutes": 0,
+        "waited": 0
+      },
+      {
+        "kind": "other",
+        "median_s": 1,
+        "minutes": 0,
+        "runs": 1,
+        "verdicts": [
+          {
+            "n": 1,
+            "verdict": "other"
+          }
+        ],
+        "wait_minutes": 0,
+        "waited": 0
+      },
+      {
+        "kind": "suite",
+        "median_s": 90,
+        "minutes": 1.5,
+        "runs": 1,
+        "verdicts": [
+          {
+            "n": 1,
+            "verdict": "green"
+          }
+        ],
+        "wait_minutes": 0.5,
+        "waited": 1
+      },
+      {
+        "kind": "suite-partial",
+        "median_s": 30,
+        "minutes": 0.5,
+        "runs": 1,
+        "verdicts": [
+          {
+            "n": 1,
+            "verdict": "green-partial"
+          }
+        ],
+        "wait_minutes": 0,
+        "waited": 0
+      }
+    ],
+    "last": "2026-10-31T11:10:00Z",
+    "minutes": 17,
+    "pushes": 1,
+    "runs": 5,
+    "runs_per_push": 5
+  },
   "notes": [],
   "plugin": "testing.nvim",
   "remote": {
@@ -218,6 +318,6 @@
     },
     "name": "beta.nvim"
   },
-  "rev": "rev:b6f5e2",
+  "rev": "rev:0abd02",
   "schema": "testing-export/1"
 }

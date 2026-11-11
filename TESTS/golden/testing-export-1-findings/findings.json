@@ -3,9 +3,10 @@
     "data_classes",
     "fleet",
     "manifest",
+    "metrics",
     "repo"
   ],
-  "digest": "sha256:46e8252afa9a1040",
+  "digest": "sha256:3f9b90ff671bc731",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",

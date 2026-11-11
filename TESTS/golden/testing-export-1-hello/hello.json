@@ -5,6 +5,7 @@
     "fleet",
     "hello",
     "manifest",
+    "metrics",
     "params",
     "remote_token",
     "repo"

@@ -531,6 +531,8 @@ no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--js
   service (`CI` set) records nothing. `TESTING_METRICS=off` turns it off by hand.
 - Not the same as `testing history`: that is the log of results of one project (green or red, flaky cases);
   `testing stats` is the cost of the machine across repositories.
+- In the export: `testing export` puts the sums of each repository into its document of `testing-export/1` (`metrics`,
+  capability `metrics`, docs/OUTPUT-FORMATS.md), which the history page of testing-desktop shows.
 
 ## Prove HEAD without the working tree: `testing ci --snapshot`
 
