@@ -15,7 +15,7 @@
 ---     deterministically instead of blocking the RPC request for ever. `prompts = "real"` leaves them
 ---     alone (a spec that answers them through `child.input`). When the guard module
 ---     (`testing.guard`) is present it owns the prompt guard (answers, stack traces); the capture here
----     is then off.
+---     is then off, unless the guard's own prompt guard is `off`.
 ---   * the guard hook: if `testing.guard` exists, `guard.install(cfg)` is called ONCE (a missing module
 ---     is fine, an install that raises is an error of the spawn). What it returns is kept as the guard
 ---     handle: `guard_call(method, args)` forwards to it (`begin_case`, `end_case`, `collect`,
@@ -198,7 +198,14 @@ function M.install(opts)
       state.guard = "installed"
     end
   end
-  if state.prompts == "cancel" and state.guard ~= "installed" then
+  -- the guard owns the prompts only when its prompt guard is on (a live sheet's guard watches the network alone)
+  local guards = type(opts.guard) == "table"
+      and type(opts.guard.guards) == "table"
+      and opts.guard.guards
+    or {}
+  local prompt_off = guards.prompt == "off"
+    or (type(guards.prompt) == "table" and guards.prompt.mode == "off")
+  if state.prompts == "cancel" and (state.guard ~= "installed" or prompt_off) then
     capture_prompts()
   end
   if opts.track_schedule ~= false then

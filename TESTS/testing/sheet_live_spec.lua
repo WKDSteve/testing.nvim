@@ -191,6 +191,21 @@ return function(H)
     ok(not text:find(SECRET, 1, true), "no value in the snapshot")
     has(text, "key <TESTING_LIVE_PROBE>", "... the masked row")
 
+    -- input() and confirm() answer "cancelled" in a live child too, as in every sheet: its guard watches the network
+    -- alone, so it does not own the prompts
+    local started = vim.uv.hrtime()
+    local asked = sheet.run(
+      assert(sheet.validate(base({
+        steps = {
+          { lua = "vim.g.a = vim.fn.input('name? ')" },
+          { expect = "vim.g.a == ''" },
+        },
+      }))),
+      { root = root, ci = true, live = true, getenv = getenv }
+    )
+    eq(asked.status, "pass", "input() is cancelled: " .. vim.inspect(asked.failures))
+    ok((vim.uv.hrtime() - started) / 1e6 < 8000, "... at once, not at a timeout")
+
     -- the guard: a host the sheet does not name is blocked and fails the step; the named one goes through
     local curl = vim.fn.executable("curl") == 1
     local g = sheet.run(
