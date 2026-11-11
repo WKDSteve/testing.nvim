@@ -48,5 +48,24 @@ return function(H)
   vim.fn.mkdir(tmp .. "/plain", "p")
   eq(metrics.repo_name(tmp .. "/plain"), "plain", "no git")
 
+  -- the export of a worktree reads the lines of its main checkout
+  local file = tmp .. "/metrics.jsonl"
+  write(file, vim.json.encode({
+    v = 1,
+    ts = "2026-11-01T10:00:00Z",
+    kind = "suite",
+    repo = "proj.nvim",
+    duration_ms = 60000,
+    verdict = "green",
+  }) .. "\n")
+  local doc, err = require("testing.export").repo(wt, {
+    form = "local",
+    state_dir = tmp .. "/state",
+    metrics_file = file,
+  })
+  ok(doc ~= nil, "export of a worktree: " .. tostring(err))
+  eq(doc and type(doc.metrics), "table", "export of a worktree: the lines of its repository")
+  eq(doc and type(doc.metrics) == "table" and doc.metrics.runs, 1, "export of a worktree: one run")
+
   vim.fn.delete(tmp, "rf")
 end

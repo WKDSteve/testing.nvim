@@ -1418,7 +1418,8 @@ local function metrics_of(dir, opts)
   end
   local part, line = require("testing.stats").export_part(
     metrics_entries(opts),
-    vim.fs.basename(dir),
+    -- the name the lines carry: a worktree counts for its main checkout (`metrics.repo_name`)
+    require("testing.metrics").repo_name(dir),
     function()
       local ok, list = pcall(M.deps.pushes, dir)
       return ok and type(list) == "table" and list or nil
