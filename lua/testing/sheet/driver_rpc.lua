@@ -48,7 +48,7 @@ end
 ---(`{ skip = why }`).
 ---@param child table testing.rpc handle
 ---@param step Testing.Sheet.Step
----@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean, screen: fun(): table }
+---@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean, screen: fun(): table, on_restart?: fun() }
 ---@return string|nil
 ---@return { shot?: string, skip?: string, measure?: Testing.Sheet.Measure }|nil
 local function run_step(child, step, ctx)
@@ -152,6 +152,9 @@ local function run_step(child, step, ctx)
     })
     -- the UI first again: the editor lays out its windows for the size of its UI
     child.screen()
+    if ctx.on_restart then
+      ctx.on_restart()
+    end
   elseif step.screen then
     local name = ("%s.%dx%d"):format(step.screen, ctx.size.cols, ctx.size.rows)
     local res = require("testing.screen").compare(name, ctx.screen(), {
@@ -347,6 +350,13 @@ function M.new(s, opts, ctx)
       opts = opts,
       snapshots = ctx.snapshots,
       cancelled = ctx.cancelled,
+      -- a new editor has a new guard: a live sheet opens its case again, or the network goes unwatched
+      on_restart = function()
+        if live then
+          child.guard.begin_case({ id = s.id, name = s.title })
+          blocked_seen = 0
+        end
+      end,
       -- what a screen, hl or snapshot step sees: masked in a live sheet
       screen = function()
         local shot = child.screen()

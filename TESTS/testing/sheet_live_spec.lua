@@ -215,6 +215,20 @@ return function(H)
       has(gf, "step 3", "... at its step, the named host went through")
       has(gf, "reached what it does not name", "... and says why")
       has(gf, "example.org", "... naming it")
+      -- a restart starts a new editor with a new guard: it watches all the same
+      local r = sheet.run(
+        assert(sheet.validate(base({
+          steps = {
+            { restart = true },
+            {
+              lua = "pcall(vim.system, { 'curl', '-sS', '--max-time', '3', 'https://example.org/' })",
+            },
+          },
+        }))),
+        { root = root, ci = true, live = true, getenv = getenv }
+      )
+      eq(r.status, "fail", "after a restart another host still fails the sheet")
+      has(table.concat(r.failures, "\n"), "reached what it does not name", "... and says why")
     else
       print("n/a  no curl on this machine: the guard part is not checked")
     end
