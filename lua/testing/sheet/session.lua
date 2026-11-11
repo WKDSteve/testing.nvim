@@ -251,9 +251,14 @@ function Session:result()
     result.ok, result.status = false, "aborted"
   elseif #self.failures > 0 then
     result.ok, result.status = false, "fail"
-  elseif self.skipped and self.sheet.feature and M.under_ci(self.opts.getenv) then
+  elseif
+    self.skipped
+    and self.sheet.feature
+    and not self.sheet.live
+    and M.under_ci(self.opts.getenv)
+  then
     -- a feature sheet in CI: the checkouts of the workflow provide what `requires` asks for, so a skip there is a
-    -- mistake of the provision, not a machine that lacks a plugin
+    -- mistake of the provision, not a machine that lacks a plugin (a live sheet never runs on CI, on purpose)
     result.ok, result.status = false, "fail"
     result.failures = {
       ("feature sheet %s is skipped under CI (%s): the workflow provides what `requires` asks for"):format(

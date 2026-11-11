@@ -150,6 +150,17 @@ return function(H)
       sheet.run(assert(sheet.validate(base())), { root = root, ci = true, getenv = getenv })
     eq(plain.status, "skip", "without --live: a skip")
     has(plain.skipped, "runs only with", "... that says why")
+    -- a feature sheet that is skipped on CI is red (the workflow provides what it needs), a live one is not
+    local on_ci = sheet.run(assert(sheet.validate(base({ feature = "f.x" }))), {
+      root = root,
+      ci = true,
+      live = true,
+      getenv = function(name)
+        return name == "CI" and "true" or getenv(name)
+      end,
+    })
+    eq(on_ci.status, "skip", "a live feature sheet on CI is a skip, not red")
+    has(on_ci.skipped, "never runs on CI", "... and says why")
 
     local s = assert(sheet.validate(base({
       steps = {
