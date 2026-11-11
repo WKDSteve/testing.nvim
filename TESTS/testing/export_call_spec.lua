@@ -426,6 +426,43 @@ return function(H)
     eq(rp.code, 0, "repo by key: exit 0: " .. rp.err)
     eq(rp.doc.kind, "repo", "repo by key: kind")
     eq(rp.doc.repo.key, alpha, "repo by key: that repository")
+    -- the metrics file comes as a parameter too: the hub's child has no LOCALAPPDATA to find it by
+    local beta_key
+    for _, row in ipairs(r.doc.repos) do
+      if row.name == "beta.nvim" then
+        beta_key = row.key
+      end
+    end
+    local rm = hub(
+      "repo",
+      vim.json.encode({
+        repo = beta_key,
+        export = true,
+        state_dir = fx.state,
+        areas = fx.areas,
+        metrics = fx.metrics,
+      })
+    )
+    eq(rm.code, 0, "repo with metrics: exit 0: " .. rm.err)
+    local part = rm.doc and rm.doc.metrics
+    eq(type(part), "table", "repo with metrics: the part is there")
+    eq(type(part) == "table" and part.runs, 5, "repo with metrics: the lines of beta")
+    local rn = hub(
+      "repo",
+      vim.json.encode({ repo = beta_key, export = true, state_dir = fx.state, areas = fx.areas })
+    )
+    eq(rn.code, 0, "repo without metrics: exit 0: " .. rn.err)
+    eq(
+      rn.doc and rn.doc.metrics,
+      vim.NIL,
+      "repo without metrics: the child finds no file of its own (TESTING_METRICS=off)"
+    )
+    eq(
+      hub("repo", vim.json.encode({ repo = beta_key, metrics = "../x/metrics.jsonl" })).code,
+      2,
+      "metrics must be a whole path"
+    )
+    eq(hub("fleet", vim.json.encode({ metrics = fx.metrics })).code, 2, "fleet takes no metrics")
     local fd =
       hub("finding", vim.json.encode({ repo = alpha, state_dir = fx.state, areas = fx.areas }))
     eq(fd.code, 0, "finding by key: exit 0: " .. fd.err)

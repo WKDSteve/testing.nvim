@@ -462,6 +462,7 @@ stdin (`--params=<json>` takes it inline), alone, in place of the options:
 | --- | --- | --- | --- |
 | `state_dir` | whole path | fleet, repo, finding | the state folder (as `--state-dir`) |
 | `areas` | whole path | fleet, repo (with `export`), finding | the `areas.json` of the data classes; without it the child asks its own (none: nothing is released) |
+| `metrics` | whole path | repo | the `metrics.jsonl` of the heavy runs, for the part `metrics`; without it the file the child's environment names (a hub's child has none: `metrics` is `null`) |
 | `export` | boolean | fleet, repo | the export form (as `--export`) |
 | `remote` | boolean | fleet, repo | ask the CI adapter (as `--remote`) |
 | `github_token` | a GitHub token | fleet, repo, with `remote` | the token the adapter takes before `$TESTING_GITHUB_TOKEN` and `gh auth token`, for a child without an environment. Only on stdin (`--params=-`): inline it is refused, there is no switch. In no document, no message, no cache; redacted as `<TOKEN>` like every token of the adapter. `hello` names it as the capability `remote_token`. |

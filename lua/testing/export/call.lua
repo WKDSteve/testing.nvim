@@ -26,8 +26,8 @@
 --- (what this engine is, `testing.export.hello`), then `call <method> --params=-` with one JSON object on stdin
 --- instead of the switches (`M.PARAMS`). The engine is its child with an allow-listed environment: the repositories
 --- root comes in `$TESTING_REPOS_ROOT` (what `fleet` reads when it is given no root, and where `repo` and `finding`
---- look for `params.repo`, a key of `fleet`), and the state folder and the data classes (`state_dir`, `areas`) as
---- parameters, never through the environment, since the child cannot find them by itself.
+--- look for `params.repo`, a key of `fleet`), and the state folder, the data classes and the metrics file (`state_dir`,
+--- `areas`, `metrics`) as parameters, never through the environment, since the child cannot find them by itself.
 
 local M = {}
 
@@ -52,6 +52,7 @@ M.REMOTE_MAX_AGE_MAX = 86400
 M.PARAMS = {
   state_dir = { type = "string", methods = { fleet = true, repo = true, finding = true } },
   areas = { type = "string", methods = { fleet = true, repo = true, finding = true } },
+  metrics = { type = "string", methods = { repo = true } },
   export = { type = "boolean", methods = { fleet = true, repo = true } },
   remote = { type = "boolean", methods = { fleet = true, repo = true } },
   github_token = { type = "string", methods = { fleet = true, repo = true } },
@@ -84,7 +85,8 @@ M.USAGE = table.concat({
   "  --state-dir=<dir>   the state directory (default: stdpath('state'))",
   "  --params=-|<json>   the request as one JSON object (on stdin with -), alone, in place of the options:",
   "                      state_dir, areas (the areas.json of the data classes), export, remote, include, exclude",
-  "                      (fleet), repo (a key of fleet below $TESTING_REPOS_ROOT; repo, finding), fp (finding);",
+  "                      (fleet), repo (a key of fleet below $TESTING_REPOS_ROOT; repo, finding), fp (finding),",
+  "                      metrics (the metrics.jsonl of the heavy runs; repo);",
   "                      with remote also github_token (on stdin only) and remote_max_age (whole seconds)",
   "  $TESTING_REPOS_ROOT the repositories root of fleet when it is given none",
   "  stdout: one line of canonical JSON; runs nothing (--remote: the adapter's ETag cache)",
@@ -106,6 +108,7 @@ M.USAGE = table.concat({
 ---@field help boolean
 ---@field params? string `--params`: `-` (stdin) or the JSON text itself.
 ---@field areas? string `params.areas`: the `areas.json` of the data classes.
+---@field metrics? string `params.metrics`: the metrics file of the heavy runs (`testing.metrics`), for the part `metrics`.
 ---@field repo? string `params.repo`: the key of a repository below the repositories root.
 
 local VALUED = {
@@ -285,7 +288,7 @@ function M.apply_params(args, text)
       end
     elseif type(v) ~= spec.type then
       return nil, ("%s must be a %s"):format(k, spec.type)
-    elseif k == "state_dir" or k == "areas" then
+    elseif k == "state_dir" or k == "areas" or k == "metrics" then
       if not whole_path(v) then
         return nil, ("%s must be a whole path, without .. and control characters"):format(k)
       end
@@ -493,6 +496,8 @@ function M.main(argv, sv)
     remote = args.remote,
     github_token = args.github_token,
     remote_max_age = args.remote_max_age,
+    -- the metrics of the caller (`params.metrics`, repo); nil: the file the environment names
+    metrics_file = args.metrics,
     -- the data classes of the caller's `areas.json` (`params.areas`); nil: this device's own file
     classes = args.areas and { path = args.areas } or nil,
     -- a shallow clone (its key differs from a full clone's): on stderr, never in the document
