@@ -119,6 +119,39 @@ return function(H)
     has(why, "--file needs a value", "args: ... said so")
   end
 
+  -- ----------------------------------------------------------- fix passes
+
+  do
+    local passes = 0
+    local function once(changes)
+      return function()
+        passes = passes + 1
+        return changes[passes] or {}, nil
+      end
+    end
+    local changed, problem = lint.fix_until_settled(once({ { "a.lua" }, { "a.lua", "b.lua" } }))
+    eq(
+      { changed, problem, passes },
+      { { "a.lua", "b.lua" }, nil, 3 },
+      "fix passes: until a pass changes nothing"
+    )
+    passes = 0
+    changed, problem =
+      lint.fix_until_settled(once({ { "a.lua" }, { "a.lua" }, { "a.lua" }, { "a.lua" } }), 3)
+    eq({ changed, passes }, { { "a.lua" }, 3 }, "fix passes: never more than the limit")
+    has(problem, "after 3 passes", "fix passes: ... and says that it did not settle")
+    passes = 0
+    changed, problem = lint.fix_until_settled(function()
+      passes = passes + 1
+      return { "a.lua" }, "exit 2"
+    end)
+    eq(
+      { changed, problem, passes },
+      { { "a.lua" }, "exit 2", 1 },
+      "fix passes: a failing pass stops"
+    )
+  end
+
   -- ------------------------------------------------------------- projects
 
   local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-lint"
@@ -400,10 +433,23 @@ elseif tool == "stylua" then
         end
       end
       local text = read(f) or ""
+      local staged = tonumber(text:match("STAGED:(%d)") or "")
       if not skip and text:find("SYNTAX ERROR", 1, true) then
         -- a file stylua cannot parse: an error without a `Diff in` line, nothing is written
         emit("error: could not format " .. f)
         code = 1
+      elseif not skip and staged then
+        -- a file that needs `staged` more passes (stylua formats some files in two): one step per pass
+        if staged > 0 then
+          if check then
+            emit("Diff in " .. f .. ":")
+            code = 1
+          else
+            local fh = io.open(f, "wb")
+            fh:write((text:gsub("STAGED:%d", "STAGED:" .. (staged - 1), 1)))
+            fh:close()
+          end
+        end
       elseif not skip and text:find("  ", 1, true) then
         if check then
           emit("Diff in " .. f .. ":")
@@ -637,6 +683,33 @@ os.exit(code)
     has(fix_all.out, "fixed: lua/proj/new.lua", "stylua --fix --all: the terminal report names it")
     local nofix = run(ignore, "luacheck", "--fix", "--all", "--no-agent")
     has(nofix.out, "luacheck: no --fix", "luacheck --fix: said so")
+
+    -- a formatter that needs a second pass (stylua 2.5 did on two specs on 2026-11-09): --fix runs it until a pass
+    -- changes nothing, at most lint.FIX_ROUNDS times, and says so when it never settles
+    local staged = project("stylua-staged", {})
+    local staged_file = staged .. "/lua/proj/staged.lua"
+    write(staged_file, "-- STAGED:2\n")
+    local two = run(staged, "stylua", "--fix", "--all", "--json")
+    eq(two.code, 0, "stylua --fix: green after two passes (" .. two.err .. ")")
+    eq(
+      check_of(two.doc, "stylua").fixed,
+      { "lua/proj/staged.lua" },
+      "stylua --fix: names the file once"
+    )
+    eq(read(staged_file), "-- STAGED:0\n", "stylua --fix: both passes ran")
+    write(staged_file, "-- STAGED:5\n")
+    local endless = run(staged, "stylua", "--fix", "--all", "--json")
+    eq(endless.code, 1, "stylua --fix: red when it never settles (" .. endless.err .. ")")
+    has(
+      check_of(endless.doc, "stylua").reason,
+      ("after %d passes"):format(lint.FIX_ROUNDS),
+      "stylua --fix: says that it did not settle"
+    )
+    eq(
+      read(staged_file),
+      ("-- STAGED:%d\n"):format(5 - lint.FIX_ROUNDS),
+      "stylua --fix: no more passes than that"
+    )
 
     -- luals: the whole workspace, only the findings in scope count; a path with blanks; a crash is never green
     local ls = project("luals-stub", {

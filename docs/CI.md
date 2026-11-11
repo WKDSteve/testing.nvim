@@ -1006,7 +1006,9 @@ The lint checks without the rest of the pipeline, for the files that changed, th
   without a single finding it could read (a crash, a configuration error) is red with its last output lines. The processes are those of
   `testing ci`: the same `needs` lookup, deadline and error format.
 - **`--fix`**: a check with a fix (`stylua`) checks first, runs the fix on the files that had findings (with `--all`:
-  `stylua <its args>`; with named files `stylua --respect-ignores <files>`), checks again and names the files
+  `stylua <its args>`; with named files `stylua --respect-ignores <files>`), repeats the fix until a pass changes
+  nothing (a formatter may need a second pass; at most three passes, then the reason says it did not settle), checks
+  again and names the files
   that changed (`fixed: lua/a.lua`); a check without one
   (`luacheck`, `luals`) runs as usual and says `<check>: no --fix`. The exit code is what is still wrong.
 - **A missing tool** skips that check with a reason that names the tool and where it was searched; the other checks

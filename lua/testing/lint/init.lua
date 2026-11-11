@@ -16,7 +16,8 @@
 --- with one of its extensions and below the paths of its args (a scope is never more than `--all`; the others are
 --- "not checked by <check>"). A check that takes files gets them in place of the paths of its args (its options
 --- stay); a check of the whole workspace (luals) runs as it is and keeps the findings of the files in scope. `--fix` checks first, runs the fix
---- of the check (stylua) on the files with findings and checks again: the exit code is what is still wrong.
+--- of the check (stylua) on the files with findings until a pass changes nothing (at most `M.FIX_ROUNDS`) and checks
+--- again: the exit code is what is still wrong.
 ---
 --- The processes are those of `testing ci` (`testing.ci` internals: the `needs` lookup, the deadline that kills the
 --- tree, the error format). A missing tool is a reported skip of that check and exit 3, never green (NEW-43); the
@@ -590,6 +591,36 @@ local function run_fix(check, targets, all, root)
   return changed, problem
 end
 
+--- How often `--fix` runs a fix at most: a formatter may need a second pass (stylua does on some files), so the fix
+--- repeats until a pass changes nothing.
+M.FIX_ROUNDS = 3
+
+---Run `once` until a pass changes nothing, at most `rounds` times.
+---@param once fun(): string[], string|nil One pass: the files it changed and a problem.
+---@param rounds? integer Default `M.FIX_ROUNDS`.
+---@return string[] changed Every file a pass changed, in the order first seen.
+---@return string|nil problem
+function M.fix_until_settled(once, rounds)
+  rounds = rounds or M.FIX_ROUNDS
+  local all, seen = {}, {}
+  for _ = 1, rounds do
+    local changed, problem = once()
+    for _, f in ipairs(changed) do
+      if not seen[f] then
+        seen[f] = true
+        all[#all + 1] = f
+      end
+    end
+    if problem then
+      return all, problem
+    end
+    if #changed == 0 then
+      return all, nil
+    end
+  end
+  return all, ("the fix still changed files after %d passes"):format(rounds)
+end
+
 ---@param results Testing.Lint.Result[]
 ---@return integer exit
 ---@return string|nil deciding
@@ -993,7 +1024,9 @@ function M.main(argv, sv)
           if #targets == 0 and mine then
             targets = mine
           end
-          local changed, fix_problem = run_fix(check, targets, mine == nil, root)
+          local changed, fix_problem = M.fix_until_settled(function()
+            return run_fix(check, targets, mine == nil, root)
+          end)
           local ms = r.ms
           -- what is still wrong decides
           r = run_check(check, mine, root, ctx) --[[@as Testing.Lint.Result]]
