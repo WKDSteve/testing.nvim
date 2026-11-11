@@ -867,6 +867,13 @@ local function execute(argv, sv)
   for _, r in ipairs(resolved) do
     deps.add_to_rtp(r.dir, false)
   end
+  -- Optional dependencies: on the runner's runtimepath when found, nothing when not (docmap.nvim for --changed)
+  for _, name in ipairs(plan.project.deps_optional or {}) do
+    local found = deps.resolve(name, root)
+    if found and found.dir then
+      deps.add_to_rtp(found.dir, false)
+    end
+  end
 
   -- Specs are cwd-dependent (lib.nvim's git specs look at "this repo"), and the old runner is
   -- documented as "run from the repo root". There is deliberately NO chdir here: on Windows

@@ -705,6 +705,11 @@ Otherwise a changed spec selects itself, and
 
 ### The graph: docmap.nvim contract, soft-required
 
+docmap.nvim has to be on the runner's runtimepath. A repository that wants it where it is installed, without making it
+a hard dependency (a missing one in `deps` is exit 3), names it in `deps_optional = { "docmap.nvim" }` of `.testing.lua`
+([CONFIG.md](CONFIG.md)); without it `--changed` says `module graph not used: docmap.nvim is not available` and uses
+the built-in heuristic.
+
 ```lua
 require("docmap.testing").affected_specs({ root = root, changed = { "lua/a/b.lua", ... }, spec_roots = { "TESTS" } })
   -> { version = 1, specs = { "TESTS/x_spec.lua", ... },                 -- relative paths

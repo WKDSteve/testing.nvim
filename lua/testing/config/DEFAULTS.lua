@@ -97,6 +97,9 @@ local DEFAULTS = {
     minit = "TESTS/minimal_init.lua",
     -- Dependencies (directory names) resolved by testing.deps: $<NAME>_DIR, .deps/, ../, stdpath('data')/lazy/.
     deps = {},
+    -- Optional dependencies: on the runner's runtimepath when found (same places as `deps`), nothing when not, never
+    -- exit 3; e.g. { "docmap.nvim" } so that `--changed` uses its module graph where it is installed.
+    deps_optional = {},
     -- Options the conformance suite calls the plugin's setup() with.
     setup = {},
     -- Test sheets (docs/SHEETS.md, "Apps"): how the programs start that a sheet names, and which browser it runs in.

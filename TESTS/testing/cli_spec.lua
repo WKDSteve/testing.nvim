@@ -399,6 +399,24 @@ return function(H)
   write(cfgroot .. "/.testing.lua", 'return { deps = { "ghost-dep.nvim" } }\n')
   code, out, errout = run({ cfgroot }, { GHOST_DEP_NVIM_DIR = dep })
   eq(code, 0, "the override resolves it: exit 0\n" .. out .. errout)
+  -- an optional dependency: on the runner's runtimepath when found, no error and no exit 3 when not
+  write(dep .. "/lua/ghostmark.lua", "return 1\n")
+  write(cfgroot .. "/.testing.lua", 'return { deps_optional = { "ghost-dep.nvim" } }\n')
+  local probe = cfgroot .. "/TESTS/opt_spec.lua"
+  write(
+    probe,
+    'return function(H)\n  H.eq(#vim.api.nvim_get_runtime_file("lua/ghostmark.lua", false), 1, "optional dep on the rtp")\nend\n'
+  )
+  code, out, errout = run({ cfgroot, "--file", "opt_spec" }, { GHOST_DEP_NVIM_DIR = dep })
+  eq(
+    code,
+    0,
+    "an optional dependency that is found is on the runtimepath: exit 0\n" .. out .. errout
+  )
+  os.remove(probe)
+  code, out, errout = run({ cfgroot })
+  eq(code, 0, "an optional dependency that is missing: no exit 3\n" .. out .. errout)
+  ok(not errout:find("ghost-dep.nvim", 1, true), "and no complaint about it\n" .. errout)
   vim.fn.delete(vim.fs.dirname(dep), "rf")
   vim.fn.delete(cfgroot, "rf")
 

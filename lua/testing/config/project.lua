@@ -482,6 +482,12 @@ local SCHEMA = {
     end, 0),
     expect = "a list of dependency directory names (letters, digits, . _ -)",
   },
+  deps_optional = {
+    check = list_of(function(v)
+      return require("testing.deps").is_valid_name(v)
+    end, 0),
+    expect = "a list of dependency directory names (letters, digits, . _ -)",
+  },
   setup = {
     check = function(v)
       return type(v) == "table"

@@ -479,7 +479,8 @@ local function ask_graph(opts, changed)
   if fn == nil then
     local ok, mod = pcall(require, "docmap.testing")
     if not ok or type(mod) ~= "table" or type(mod.affected_specs) ~= "function" then
-      return nil, "docmap.nvim is not available"
+      return nil,
+        'docmap.nvim is not available; deps_optional = { "docmap.nvim" } in .testing.lua uses it where installed'
     end
     fn = mod.affected_specs
   end
