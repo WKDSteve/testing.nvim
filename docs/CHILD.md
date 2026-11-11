@@ -49,6 +49,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `call_timeout_ms` | 10000 | timeout of one call; changeable later: `child.call_timeout_ms = 30000` |
 | `boot_timeout_ms` | 20000 | start plus the project's minit |
 | `kill_on_timeout` | `true` | a call that times out kills the child (see Timeouts) |
+| `watch_prompts` | `false` | a call held back by a prompt of the child (hit-enter, more, `confirm()`) fails at once with `testing.rpc: the child shows a <name> prompt (mode <m>): ...` instead of running into its timeout, and `screen()` reads a prompt from the UI; the child lives on (test sheets set it) |
 | `prompts` | `"cancel"` | `input()`, `confirm()`, ... answer "cancelled" (`"real"`: left alone) |
 | `notify_passthrough` | `true` | `vim.notify` is captured AND passed on |
 | `track_schedule` | `true` | count scheduled callbacks (for `settle`) |
@@ -95,6 +96,8 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `mouse(button, action, mods, row, col, grid?)` | `nvim_input_mouse`; 0-based screen cells |
 | `settle(timeout_ms, {raise=, rounds=, interval_ms=})` | wait until idle: `true`, or `false, why` |
 | `screen()` | `{ size, cursor, mode, lines, attrs, text, cells, cell_attrs, hl }`; compare it with a file through `testing.screen`, check a place with `screen.hl_check` |
+| `prompt()` | the mode of the prompt the child stands in (`r` hit-enter, `rm` more, `r?` `confirm()`; `require("testing.rpc").PROMPTS` names them), nil when none: `nvim_get_mode`, which the editor answers also in a prompt |
+| `ui_screen(mode?)` | the screen as the attached UI was last told it (redraw events, no call into the child), the shape of `screen()` with `from_ui = true`; nil before the UI drew |
 | `notifies({clear=})`, `prompts({clear=})` | what the child notified / what it answered with "cancelled" |
 | `messages()` | the lines of `:messages` |
 | `effects()` | the guard's ledger `{ spawned, network, fs_outside_tmp }` (empty without a guard) |
@@ -160,6 +163,11 @@ a letter of `attrs`. The UI is attached with `ext_linegrid` and `ext_hlstate`, a
 menu with `pumblend` are those before blending (the groups are right). `cursor` is the screen cursor (1-based).
 `cells[r]` and `cell_attrs[r]` are the same row by **screen column**: one entry per column, `""` (attribute
 `' '`) for the second cell of a wide character, so a column number means the same cell as on the screen.
+
+A prompt (hit-enter, more, `confirm()`) holds every call back until it is answered, `screen()` too. With
+`watch_prompts` it asks `nvim_get_mode` first and, in a prompt, answers from what the UI was told
+(`grid_line`, `grid_scroll`, ... up to the last `flush`; `ui_screen()`): the same rows, letters and cursor, `mode` is
+the prompt's, and `from_ui = true` says where it came from.
 
 ## Screen snapshots (`testing.screen`)
 

@@ -16,6 +16,24 @@ local M = {}
 M.USER_CALL_TIMEOUT_MS = 30000
 M.USER_BOOT_TIMEOUT_MS = 60000
 
+-- What answers a prompt, by its name (`testing.rpc.PROMPTS`).
+M.ANSWERS = {
+  ["hit-enter"] = '{ input = "<CR>" }',
+  more = '{ input = "q" } (or " " for the next page)',
+  confirm = '{ input = "<letter of a choice>" } (or "<Esc>")',
+}
+
+---The failure of a step that ran into a prompt of the child: which prompt, and how a sheet answers it.
+---@param prompt string `hit-enter`, `more` or `confirm`
+---@return string
+function M.prompt_failure(prompt)
+  return ("the child shows a %s prompt; answer it with %s (a step { prompt = %q } waits for it)"):format(
+    prompt,
+    M.ANSWERS[prompt] or '{ input = "<CR>" }',
+    prompt
+  )
+end
+
 ---@param v any
 ---@return string
 local function shown(v)
@@ -47,6 +65,29 @@ local function run_step(child, step, ctx)
     local idle, why = child.settle(step.settle)
     if not idle then
       return why or "not idle"
+    end
+  elseif step.prompt then
+    -- asked through `nvim_get_mode`, which the editor answers in a prompt too: no call waits behind it
+    local timeout = step.timeout or require("testing.sheet").DEFAULT_WAIT_MS
+    local deadline = vim.uv.hrtime() + timeout * 1e6
+    local rpc = require("testing.rpc")
+    while true do
+      local mode = child.prompt()
+      local shown_now = mode and rpc.PROMPTS[mode]
+      if shown_now == step.prompt then
+        break
+      end
+      if ctx.cancelled() then
+        return "aborted"
+      end
+      if vim.uv.hrtime() >= deadline then
+        return ("no %s prompt after %d ms%s"):format(
+          step.prompt,
+          timeout,
+          shown_now and (" (the child shows a " .. shown_now .. " prompt)") or ""
+        )
+      end
+      vim.wait(20)
     end
   elseif step.wait then
     -- a loop of its own: every poll is an RPC call that waits with `vim.wait` itself, and a
@@ -201,6 +242,8 @@ function M.new(s, opts, ctx)
       boot_timeout_ms = user and M.USER_BOOT_TIMEOUT_MS or nil,
       size = size,
       guard = false,
+      -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
+      watch_prompts = true,
       args = M.command_line(s.args, size),
     }, opts.spawn or {})
     -- a spawn that raises is a failure of this size, not an error out of `run` (expect hands the
@@ -252,7 +295,11 @@ function M.new(s, opts, ctx)
       cancelled = ctx.cancelled,
     })
     local out = {}
-    if not ok then
+    local prompt = not ok and require("testing.rpc").prompt_of(why)
+    if prompt then
+      -- no crash: the child waits for an answer, and the sheet should say which
+      out.reason = M.prompt_failure(prompt)
+    elseif not ok then
       out.raised = tostring(why)
     elseif why then
       out.reason = why

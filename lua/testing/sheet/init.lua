@@ -40,6 +40,11 @@
 ---                 `row`, `col` (`cols` wide), and what must hold: `group` (by name or the group a link
 ---                 ends in), `fg`, `bg`, `sp` (`#rrggbb`), `bold`, `italic`, `underline`, `undercurl`,
 ---                 `strikethrough`, `reverse`
+---   prompt = name wait until the child shows a prompt: "hit-enter", "more" or "confirm" (`timeout` ms, default
+---                 2000); asked through `nvim_get_mode`, which the editor answers in a prompt too. Answer it
+---                 with `input` (`<CR>`; `q` or a space for more; the letter of a choice for confirm). A `screen`
+---                 while it is up is read from what the UI was told. Any other step that runs into a prompt fails
+---                 with its name and how to answer it, instead of waiting for the RPC timeout
 ---   restart = true  quit the child as a person does (`:qall!`, `VimLeavePre` runs) and start it again in the
 ---                 same sandbox (its stdpath and temp directories stay), the UI attached again; `args = { ... }`
 ---                 on the step is the command line of this start, without it the sheet's `args`
@@ -77,6 +82,7 @@ M.ACTIONS = {
   "ask",
   "restart",
   "hl",
+  "prompt",
 }
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
@@ -91,6 +97,7 @@ M.ENGINE_ACTIONS = {
     ask = true,
     restart = true,
     hl = true,
+    prompt = true,
     -- the screen drawn as a page and photographed by the browser engine (`testing.sheet.shot`)
     shot = true,
   },
@@ -120,6 +127,8 @@ M.ENGINE_ACTIONS = {
 }
 M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
+---The prompts a `prompt` step waits for (`testing.rpc.PROMPTS`).
+M.PROMPT_NAMES = { ["hit-enter"] = true, more = true, confirm = true }
 M.MAX_BYTES = 256 * 1024
 M.MAX_LOAD_INSTRUCTIONS = 1000000
 ---The form of an `id`, a `feature` and an id of the feature catalog.
@@ -152,6 +161,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field note? string
 ---@field ignore_errmsg? boolean
 ---@field restart? boolean Quit the child and start it again in the same sandbox.
+---@field prompt? "hit-enter"|"more"|"confirm" Wait until the child shows this prompt.
 ---@field args? string[] The command line of a `restart` (else the sheet's `args`).
 
 ---@class Testing.Sheet
@@ -211,6 +221,7 @@ local STEP_KEYS = {
   note = "string",
   ignore_errmsg = "boolean",
   restart = "boolean",
+  prompt = "string",
   args = "table",
   hl = "table",
   groups = "boolean",
@@ -442,8 +453,11 @@ local function check_step(step, i, engine)
   if step.ignore_errmsg ~= nil and action ~= "keys" then
     return at .. ": ignore_errmsg belongs to a keys step"
   end
-  if step.timeout and action ~= "wait" then
-    return at .. ": timeout belongs to a wait step"
+  if step.timeout and action ~= "wait" and action ~= "prompt" then
+    return at .. ": timeout belongs to a wait or prompt step"
+  end
+  if action == "prompt" and not M.PROMPT_NAMES[step.prompt] then
+    return at .. '.prompt: "hit-enter", "more" or "confirm"'
   end
   if
     (step.masks or step.cursor ~= nil or step.mode ~= nil or step.groups ~= nil)

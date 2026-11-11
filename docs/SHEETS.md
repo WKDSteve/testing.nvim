@@ -42,6 +42,7 @@ return {
 | `expect = expr` | evaluates a Lua expression in the child now | it is not truthy |
 | `screen = name` (`masks`, `cursor`, `mode`, `groups`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24`; `groups = true` keeps the highlight group of every attribute letter in it | the snapshot differs (or is missing on CI) |
 | `hl = { ... }` | how a place is drawn: `text = "..."` (its first appearance on the screen, every cell of it) or `row`, `col` (`cols` wide), and what must hold: `group` (by its name, or the group a link ends in: `group = "FileopsConflict"` holds for a cell drawn with `DiffText` when it links there), `fg`, `bg`, `sp` (`#rrggbb` as drawn), `bold`, `italic`, `underline`, `undercurl`, `strikethrough`, `reverse` (`false` = must not be) | a cell is drawn otherwise (the line names it, what it has and what was expected), the text is not on the screen, or the group is not defined |
+| `prompt = name` (`timeout` ms, default 2000) | waits until the child shows a prompt: `"hit-enter"` (a message longer than the command line), `"more"` (a long one with `'more'` set; it is off in a child), `"confirm"` (`confirm()`). Asked through `nvim_get_mode`, which the editor answers while the prompt holds every other call back. Answer it with `input`: `"<CR>"`, `"q"` or `" "` for more, the letter of a choice for confirm | no such prompt in time (the line names one the child shows instead) |
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 | `shot = name` | a picture of the screen, `TESTS/sheets/out/<id>.<name>.<cols>x<rows>.png`: the screen (every cell with its colours and styles, the cursor as a block) is drawn as a page and photographed by the browser engine (node and playwright-core, as for a browser sheet); the font is the browser's, not a terminal's; a cell whose attribute the screen could not name (more than 52 attributes) is outlined dashed. The input of the AI judge and of README images. Without node, playwright-core or a browser the step is **skipped**: the other steps go on and the sheet ends as `skip` (never a green run without its picture) | the browser fails |
 
@@ -584,8 +585,11 @@ return {
 
 * A command that computes for a long time (`:Bindings check`) goes in as `input`: `keys` waits for an empty typeahead and
   runs into the RPC timeout.
-* Without a message plugin (noice) a message of several lines becomes a hit-enter prompt that blocks the child editor:
-  raise `cmdheight` in the sheet's setup.
+* Without a message plugin (noice) a message of several lines becomes a hit-enter prompt: the editor holds every call
+  back until it is answered. A step that runs into one fails at once with `the child shows a hit-enter prompt; answer
+  it with { input = "<CR>" } ...` (the child lives on); a `screen` while it is up is read from what the UI was told,
+  so the prompt itself can be a snapshot. Check it with `{ prompt = "hit-enter" }`, answer it with
+  `{ input = "<CR>" }`, or keep it away (`cmdheight` in the sheet's setup) when it is not what the sheet is about.
 * A text search in a chooser or list hits the first matching line, not the meant one: search for the field name at the
   start of the line.
 * Temporary paths change on every run: mask them in a screen snapshot.

@@ -47,6 +47,39 @@ M.REAP_MS = 10000
 ---How long `restart({ quit = true })` waits for the editor to quit by itself (ms).
 M.QUIT_MS = 10000
 
+---The prompts a child can stand in, by the mode `nvim_get_mode` answers. While one is up, the editor runs no call
+---(`nvim_exec_lua`, `nvim_command`, ...) until it is answered; `nvim_get_mode` and `nvim_input` it still answers.
+M.PROMPTS = { r = "hit-enter", rm = "more", ["r?"] = "confirm" }
+---With `watch_prompts`: how often a waiting call asks whether the child stands in a prompt (ms).
+M.PROMPT_PROBE_MS = 50
+---Calls the editor answers at once, also in a prompt: no prompt watch for them.
+local FAST = { nvim_get_mode = true, nvim_input = true, nvim_input_mouse = true }
+
+---The error of a call that waits behind a prompt: `testing.rpc: the child shows a <name> prompt (mode <m>): ...`.
+---@param mode string The mode of `nvim_get_mode` (a key of `M.PROMPTS`).
+---@param method string
+---@param args any[]
+---@return string
+function M.prompt_message(mode, method, args)
+  local what = method == "nvim_exec_lua"
+      and type(args) == "table"
+      and type(args[1]) == "string"
+      and vim.trim(args[1]):match("^[^\n]*"):sub(1, 80)
+    or method
+  return ("testing.rpc: the child shows a %s prompt (mode %s): %s waits behind it until it is answered"):format(
+    M.PROMPTS[mode] or "?",
+    mode,
+    what
+  )
+end
+
+---The name of the prompt an error of `M.prompt_message` names (`hit-enter`, `more`, `confirm`), nil for another error.
+---@param err any
+---@return string|nil
+function M.prompt_of(err)
+  return type(err) == "string" and err:match("^testing%.rpc: the child shows a (%S+) prompt") or nil
+end
+
 ---@class Testing.Rpc.Opts
 ---@field root? string Working directory and base of `<REPO>` (default: the current directory).
 ---@field args? string[] Arguments after the editor's own (`+cmd`, a file): the command line of the child, no shell.
@@ -67,6 +100,7 @@ M.QUIT_MS = 10000
 ---@field call_timeout_ms? integer Timeout of one call (default `M.CALL_TIMEOUT_MS`); adjustable later: `child.call_timeout_ms = n`.
 ---@field boot_timeout_ms? integer Default `M.BOOT_TIMEOUT_MS`.
 ---@field kill_on_timeout? boolean Kill the child when a call times out (default true).
+---@field watch_prompts? boolean A call that waits behind a prompt of the child (hit-enter, more, `confirm()`) fails at once with the prompt's name instead of running into its timeout, and `screen()` reads a prompt from the attached UI (default false).
 ---@field size? { rows: integer, cols: integer } Screen size for `screen()` (default 24x80).
 ---@field prompts? "cancel"|"real" `input()`/`confirm()` answer "cancelled" (default) or are left alone.
 ---@field notify_passthrough? boolean Also run the original `vim.notify` (default true).
@@ -304,10 +338,41 @@ local function call(S, method, args, timeout_ms)
   end
   local timeout = timeout_ms or S.opts.call_timeout_ms or M.CALL_TIMEOUT_MS
   local proc, wire = S.proc, S.wire
+  -- the prompt watch: a call the editor holds back while a prompt is up would only end at its timeout. Beside it
+  -- `nvim_get_mode` is asked, one at a time (the editor answers it in a prompt, else when it waits for input).
+  local watch = S.opts.watch_prompts and not FAST[method]
+  local probe, probed, prompt = nil, uv.hrtime(), nil
   vim.wait(timeout, function()
     local slot = wire.pending[id]
-    return slot == nil or slot.done or proc.exited or wire.broken ~= nil
+    if slot == nil or slot.done or proc.exited or wire.broken ~= nil then
+      return true
+    end
+    if not watch then
+      return false
+    end
+    local answer = probe and wire:take(probe)
+    if answer then
+      probe = nil
+      local mode = answer.ok and type(answer.result) == "table" and answer.result.mode or nil
+      if M.PROMPTS[mode] then
+        prompt = mode
+        return true
+      end
+    elseif not probe and uv.hrtime() - probed >= M.PROMPT_PROBE_MS * 1e6 then
+      probed = uv.hrtime()
+      probe = wire:request("nvim_get_mode", {})
+    end
+    return false
   end, 1)
+  if probe then
+    wire:forget(probe)
+  end
+  if prompt then
+    -- the call stays queued in the child and runs once the prompt is answered; its answer is dropped
+    wire:forget(id)
+    S.trace:finish(tc, "error", "prompt " .. prompt)
+    error(M.prompt_message(prompt, method, args), 0)
+  end
   local slot = wire.pending[id]
   if slot and slot.done then
     wire:take(id)
@@ -519,6 +584,7 @@ local function start(S, async_cb)
   S.kill_reason, S.trace_artifact, S.api_params, S.ui, S.boot = nil, nil, nil, false, nil
   -- what the attached UI was told about attributes: a new process numbers them anew
   S.hl, S.default_colors = {}, nil
+  S.grid, S.drawn = nil, nil
   S.stdin_closed, S.death_output = nil, nil
   S.async = {}
   S.notifies, S.prompts = {}, {}
@@ -828,6 +894,8 @@ end
 ---@field mouse fun(button: string, action: string, mods: string, row: integer, col: integer, grid?: integer)
 ---@field settle fun(timeout_ms?: integer, settle_opts?: { interval_ms?: integer, rounds?: integer, raise?: boolean }): boolean, string|nil
 ---@field screen fun(): table
+---@field ui_screen fun(mode?: string): table|nil The screen as the attached UI was last told it, no call into the child.
+---@field prompt fun(): string|nil The mode of the prompt the child stands in (`M.PROMPTS`), nil when none.
 ---@field notifies fun(nopts?: { clear?: boolean }): table[]
 ---@field prompts fun(nopts?: { clear?: boolean }): table[]
 ---@field messages fun(): string[]
@@ -1068,11 +1136,45 @@ local function build_child(S, opts)
       )
       S.ui = true
     end
-    local shot = call(S, "nvim_exec_lua", { "return " .. BOOT .. ".screen()", {} })
+    if opts.watch_prompts then
+      -- a prompt holds every call back: its screen comes from what the UI was told
+      local mode = child.prompt()
+      if mode then
+        return M._ui_screen(S, mode) or error(M.prompt_message(mode, "screen", {}), 0)
+      end
+    end
+    local ok, shot = pcall(call, S, "nvim_exec_lua", { "return " .. BOOT .. ".screen()", {} })
+    if not ok then
+      -- a prompt that came up while the screen was asked for
+      local mode = M.prompt_of(shot) and child.prompt()
+      local ui = mode and M._ui_screen(S, mode)
+      if ui then
+        return ui
+      end
+      error(shot, 0)
+    end
     if type(shot) == "table" then
       M._by_look(S, shot)
     end
     return shot
+  end
+
+  ---The screen as the attached UI was last told it (`screen()` reads it this way in a prompt), without a call into the
+  ---child; `mode` goes into the answer as it is. Nil before the UI drew anything.
+  ---@param mode? string
+  ---@return table|nil
+  function child.ui_screen(mode)
+    return M._ui_screen(S, mode or "?")
+  end
+
+  ---The prompt the child stands in, by its mode (`r` hit-enter, `rm` more, `r?` `confirm()`; `M.PROMPTS`), nil when
+  ---none. Asks `nvim_get_mode`, which the editor answers also in a prompt.
+  ---@return string|nil mode
+  function child.prompt()
+    sync()
+    local m = call(S, "nvim_get_mode", {})
+    local mode = type(m) == "table" and m.mode or nil
+    return M.PROMPTS[mode] and mode or nil
   end
 
   ---`vim.notify` calls the child made, oldest first: `{ msg, level, level_name }`. Kept by the parent:
@@ -1327,6 +1429,18 @@ local function rgb(v)
   return type(v) == "number" and ("#%06x"):format(v) or nil
 end
 
+-- The redraw events the screen of the attached UI is kept from (`M._take_grid`).
+local GRID_EVENTS = {
+  grid_resize = true,
+  grid_clear = true,
+  grid_line = true,
+  grid_scroll = true,
+  grid_cursor_goto = true,
+  flush = true,
+}
+-- The letters of a screen read from the UI, as `rpc_boot.screen` gives them (before `_by_look`).
+local UI_ATTR_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 -- The style keys of an attribute that a sheet may ask for.
 local STYLES = { "bold", "italic", "underline", "undercurl", "strikethrough", "reverse" }
 
@@ -1370,8 +1484,165 @@ function M._take_redraw(S, args)
       if type(last) == "table" then
         S.default_colors = { fg = rgb(last[1]), bg = rgb(last[2]) }
       end
+    elseif type(batch) == "table" and GRID_EVENTS[batch[1]] then
+      M._take_grid(S, batch)
     end
   end
+end
+
+---A blank row of `cols` cells.
+---@param cols integer
+---@return { text: string[], hl: integer[] }
+local function blank_row(cols)
+  local text, hl = {}, {}
+  for c = 1, cols do
+    text[c], hl[c] = " ", 0
+  end
+  return { text = text, hl = hl }
+end
+
+---The screen as the attached UI was told it (`ext_linegrid`, the one grid of a UI without `ext_multigrid`), kept from
+---the redraw events: what `screen()` reads while the child stands in a prompt and answers no call. `S.grid` is the
+---grid being drawn, `S.drawn` the rows and cursor as of the last `flush` (a redraw may span several batches).
+---Fast context: tables only.
+---@param S table
+---@param batch any[] `{ name, args... }`
+function M._take_grid(S, batch)
+  local name = batch[1]
+  local g = S.grid
+  if name == "grid_resize" then
+    for i = 2, #batch do
+      local a = batch[i]
+      if type(a) == "table" and a[1] == 1 and type(a[2]) == "number" and type(a[3]) == "number" then
+        g = { cols = a[2], rows = a[3], row = {}, cursor = { 0, 0 }, dirty = {} }
+        for r = 1, g.rows do
+          g.row[r], g.dirty[r] = blank_row(g.cols), true
+        end
+        S.grid, S.drawn = g, { rows = g.rows, cols = g.cols, row = {}, cursor = { 0, 0 } }
+      end
+    end
+    return
+  end
+  if not g then
+    return
+  end
+  if name == "grid_clear" then
+    for r = 1, g.rows do
+      g.row[r], g.dirty[r] = blank_row(g.cols), true
+    end
+  elseif name == "grid_line" then
+    for i = 2, #batch do
+      local a = batch[i]
+      local row = type(a) == "table" and a[1] == 1 and type(a[2]) == "number" and g.row[a[2] + 1]
+      if row and type(a[3]) == "number" and type(a[4]) == "table" then
+        local c, hl = a[3] + 1, 0
+        for _, cell in ipairs(a[4]) do
+          if type(cell) == "table" then
+            if type(cell[2]) == "number" then
+              hl = cell[2]
+            end
+            for _ = 1, (type(cell[3]) == "number" and cell[3] or 1) do
+              if c <= g.cols then
+                row.text[c], row.hl[c] = tostring(cell[1]), hl
+              end
+              c = c + 1
+            end
+          end
+        end
+        g.dirty[a[2] + 1] = true
+      end
+    end
+  elseif name == "grid_scroll" then
+    for i = 2, #batch do
+      local a = batch[i]
+      -- { grid, top, bot, left, right, rows, cols }: the region moves up by `rows` (down when negative)
+      if type(a) == "table" and a[1] == 1 and type(a[6]) == "number" and a[6] ~= 0 then
+        local top, bot, left, right, n = a[2], a[3], a[4], a[5], a[6]
+        local from, to, step = top, bot - n - 1, 1
+        if n < 0 then
+          from, to, step = bot - 1, top - n, -1
+        end
+        for r = from, to, step do
+          local dst, src = g.row[r + 1], g.row[r + n + 1]
+          if dst and src then
+            for c = left + 1, right do
+              dst.text[c], dst.hl[c] = src.text[c], src.hl[c]
+            end
+            g.dirty[r + 1] = true
+          end
+        end
+      end
+    end
+  elseif name == "grid_cursor_goto" then
+    local a = batch[#batch]
+    if type(a) == "table" and a[1] == 1 then
+      g.cursor = { tonumber(a[2]) or 0, tonumber(a[3]) or 0 }
+    end
+  elseif name == "flush" then
+    local d = S.drawn
+    for r in pairs(g.dirty) do
+      local row = g.row[r]
+      d.row[r] = { text = { unpack(row.text) }, hl = { unpack(row.hl) } }
+    end
+    g.dirty = {}
+    d.cursor = { g.cursor[1], g.cursor[2] }
+  end
+end
+
+---A screen as `rpc_boot.screen` answers it, from the last drawn state of the attached UI (`S.drawn`); `mode` is the
+---mode the child is in. Nil before the UI drew anything.
+---@param S table
+---@param mode string
+---@return table|nil
+function M._ui_screen(S, mode)
+  local d = S.drawn
+  if not d or not d.row[1] then
+    return nil
+  end
+  local lines, attrs, cells, cell_attrs, trimmed = {}, {}, {}, {}, {}
+  local letters, n, attr_ids = {}, 0, vim.empty_dict()
+  for r = 1, d.rows do
+    local row = d.row[r] or blank_row(d.cols)
+    local text, marks, rcells, rmarks = {}, {}, {}, {}
+    for c = 1, d.cols do
+      local s, id = row.text[c] or " ", row.hl[c] or 0
+      local mark = " "
+      if id ~= 0 then
+        if not letters[id] then
+          n = n + 1
+          local letter = UI_ATTR_LETTERS:sub(n, n)
+          letters[id] = letter ~= "" and letter or "?"
+          if letter ~= "" then
+            attr_ids[letter] = id
+          end
+        end
+        mark = letters[id]
+      end
+      -- the right half of a wide character is an empty cell, as `screenstring()` says
+      if s ~= "" then
+        text[#text + 1], marks[#marks + 1] = s, mark
+      end
+      rcells[c], rmarks[c] = s, s ~= "" and mark or " "
+    end
+    lines[r], attrs[r] = table.concat(text), table.concat(marks)
+    cells[r], cell_attrs[r] = rcells, table.concat(rmarks)
+    trimmed[r] = (lines[r]:gsub("%s+$", ""))
+  end
+  local shot = {
+    size = { rows = d.rows, cols = d.cols },
+    cursor = { row = d.cursor[1] + 1, col = d.cursor[2] + 1 },
+    mode = mode,
+    lines = lines,
+    attrs = attrs,
+    text = table.concat(trimmed, "\n"),
+    cells = cells,
+    cell_attrs = cell_attrs,
+    attr_ids = attr_ids,
+    -- not read through the child: it holds no call while a prompt is up
+    from_ui = true,
+  }
+  M._by_look(S, shot)
+  return shot
 end
 
 ---A table as one string, keys sorted: what an attribute looks like.
