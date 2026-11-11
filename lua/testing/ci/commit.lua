@@ -755,7 +755,7 @@ local function check(root, sha, args, say, snaps)
   end
   require("testing.metrics").record(args.metrics, {
     kind = res.quick and "ci-commit-quick" or "ci-commit",
-    repo = vim.fs.basename(root),
+    repo = require("testing.metrics").repo_name(root),
     sha = sha,
     duration_s = (vim.uv.hrtime() - started) / 1e9,
     wait_s = queued and queued.waited_s or nil,
@@ -1371,7 +1371,7 @@ function M.main_wsl(argv, args, sv)
     if not r.reused then
       require("testing.metrics").record((sv --[[@as table]]).metrics, {
         kind = r.quick and "ci-commit-quick" or "ci-commit",
-        repo = vim.fs.basename(root),
+        repo = require("testing.metrics").repo_name(root),
         sha = r.sha,
         os = "wsl",
         duration_s = (vim.uv.hrtime() - started) / 1e9 / math.max(1, #commits),

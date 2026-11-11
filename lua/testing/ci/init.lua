@@ -1657,7 +1657,7 @@ function M.main(argv, sv)
   end
   require("testing.metrics").record((sv --[[@as table]]).metrics, {
     kind = "ci",
-    repo = vim.fs.basename(root),
+    repo = require("testing.metrics").repo_name(root),
     sha = type(facts.commit) == "string" and facts.commit or nil,
     duration_s = os.time() - started,
     wait_s = queued and queued.waited_s or nil,

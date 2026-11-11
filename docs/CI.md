@@ -524,6 +524,9 @@ no environment value, no path. `testing stats` sums them up (docs/CLI.md); `--js
 - Where: `$TESTING_METRICS_FILE`, else `%LOCALAPPDATA%\testing\metrics.jsonl` on Windows, `$XDG_DATA_HOME/testing/` or
   `~/.local/share/testing/` elsewhere: read from the environment, not from `stdpath()`, which `scripts/test.sh` points
   at a throwaway folder. Above 8 MB the file moves aside to `metrics.1.jsonl` (both are read).
+- Which repository: the directory name of the checkout; a run in a linked worktree (`git worktree add ../repo-topic`)
+  counts for its main checkout (`metrics.repo_name` reads the worktree's `.git` file), not under the folder's name.
+  Lines written before 2026-11-11 carry the worktree's folder name.
 - Who writes: only the command-line entry (`scripts/testing.lua`); a spec or an editor that calls `cli.main` writes
   nothing. A run counts once: `ci commit` records each commit that ran (not a kept result), and its runs at the commit
   and the base (children carrying the queue's token) write no line of their own; `testing ci` records one `ci` line,

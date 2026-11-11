@@ -13,7 +13,8 @@
 --- and `wait_s` instead, `seconds_of` reads both.
 ---
 --- `kind`: `suite` (a whole suite), `suite-partial` (a selection), `ci` (`testing ci`), `ci-commit` / `ci-commit-quick`
---- (one commit of `testing ci commit`), `land`. Never a secret, an environment value or a path below the repository.
+--- (one commit of `testing ci commit`), `land`. `repo`: the directory name of the main checkout (`M.repo_name`: a linked
+--- worktree counts for it). Never a secret, an environment value or a path below the repository.
 ---
 --- Where: `$TESTING_METRICS_FILE`, else the user's data folder read from the environment, not from `stdpath()`
 --- (`scripts/test.sh` points `stdpath('state')` at a throwaway folder and sets its own `NVIM_APPNAME`):
@@ -119,6 +120,40 @@ function M.seconds_of(e, field)
   end
   local s = e[field .. "_s"]
   return type(s) == "number" and s or 0
+end
+
+---The name of a repository as a line carries it: the directory name of its main checkout. A linked worktree
+---(`git worktree add ../repo-topic`) has a `.git` FILE that points into `<main>/.git/worktrees/<name>`; its runs are
+---the repository's, not those of a repository named like the worktree's folder. Read from that file, no git is
+---started; anything else (a checkout, a submodule, no git) is the directory name.
+---@param root string
+---@return string
+function M.repo_name(root)
+  root = vim.fs.normalize(root)
+  local base = vim.fs.basename(root)
+  local st = vim.uv.fs_stat(root .. "/.git")
+  if not st or st.type ~= "file" then
+    return base
+  end
+  local f = io.open(root .. "/.git", "rb")
+  if not f then
+    return base
+  end
+  local text = f:read(4096) or ""
+  f:close()
+  local gitdir = text:match("^gitdir:%s*([^\r\n]-)%s*[\r\n]") or text:match("^gitdir:%s*(.-)%s*$")
+  if not gitdir or gitdir == "" then
+    return base
+  end
+  gitdir = vim.fs.normalize(gitdir)
+  if not (gitdir:match("^/") or gitdir:match("^%a:")) then
+    gitdir = vim.fs.normalize(root .. "/" .. gitdir)
+  end
+  local main = gitdir:match("^(.*)/%.git/worktrees/[^/]+$")
+  if not main or main == "" then
+    return base
+  end
+  return vim.fs.basename(main)
 end
 
 ---Append one run. Never raises and never fails the run: a line that cannot be written is lost.

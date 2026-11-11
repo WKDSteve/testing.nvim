@@ -409,7 +409,7 @@ function M.main(argv, sv)
   -- one line of `testing stats`: how long until landed (only when the entry armed the metrics)
   require("testing.metrics").record((sv --[[@as table]]).metrics, {
     kind = "land",
-    repo = vim.fs.basename(root),
+    repo = require("testing.metrics").repo_name(root),
     sha = c == 0 and vim.trim(out) or nil,
     duration_s = M.deps.now() - started,
     verdict = code == M.EXIT_OK and "landed"

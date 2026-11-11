@@ -954,7 +954,7 @@ function M.record_metrics(sv, plan, handle, seconds)
     kind = (v.kind == "green-partial" or require("testing.stamp.write").refuse(plan.args))
         and "suite-partial"
       or "suite",
-    repo = vim.fs.basename(plan.root),
+    repo = require("testing.metrics").repo_name(plan.root),
     sha = type(git) == "table" and type(git.sha) == "string" and git.sha or nil,
     duration_s = seconds,
     wait_s = handle and handle.waited_s or nil,
