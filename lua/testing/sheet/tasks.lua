@@ -26,35 +26,37 @@ M._names = {}
 
 ---The name a project has in a block, a report and a hand-over: `sheets.project` of its `.testing.lua` (the nvim config
 ---lives in a folder `nvim`, its tasks and checkout are `nvim-config`), else the repository's name
----(`testing.metrics.repo_name`: the folder, of the main checkout for a worktree). `.testing.lua` is read only behind
----the workspace trust (`testing.config.project.load`); an untrusted root or a file that does not load has the
----repository's name. Kept per root while the file is the same.
+---(`testing.metrics.repo_name`: the folder, of the main checkout for a worktree). The file is read as DATA (an empty
+---environment, as a sheet is read): naming a project runs none of its code, also in `testing sheets report`. A file
+---that does not read as data (it calls something), or a name that is no name, leaves the repository's name. Kept per
+---root while the file is the same.
 ---@param root string
 ---@return string
 function M.project_name(root)
   root = vim.fs.normalize(root):gsub("/+$", "")
-  local st = vim.uv.fs_stat(root .. "/.testing.lua")
+  local path = root .. "/.testing.lua"
+  local st = vim.uv.fs_stat(path)
   local stamp = st and ("%d.%d:%d"):format(st.mtime.sec, st.mtime.nsec, st.size) or ""
   local hit = M._names[root]
   if hit and hit.stamp == stamp then
     return hit.name
   end
   local name
-  local keep = true
-  if st then
-    local loaded = require("testing.config.project").load(root)
-    -- a root trusted later is asked again
-    keep = not loaded.untrusted
-    local sheets = not loaded.error and loaded.config.sheets or nil
+  if st and st.type == "file" then
+    local f = io.open(path, "rb")
+    local text = f and f:read("*a") or ""
+    if f then
+      f:close()
+    end
+    local cfg = require("testing.sheet").load_data(text, path, "project name")
+    local sheets = type(cfg) == "table" and cfg.sheets or nil
     local given = type(sheets) == "table" and sheets.project or nil
     if type(given) == "string" and #given <= 100 and given:match("^[%w_][%w_.%-]*$") then
       name = given
     end
   end
   name = name or require("testing.metrics").repo_name(root)
-  if keep then
-    M._names[root] = { stamp = stamp, name = name }
-  end
+  M._names[root] = { stamp = stamp, name = name }
   return name
 end
 

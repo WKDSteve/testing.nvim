@@ -50,6 +50,14 @@ return function(H)
   eq(tasks.project_name(nvim), "nvim", "no key: the folder")
   write(nvim .. "/.testing.lua", "error('broken')\n-- a file that does not load\n")
   eq(tasks.project_name(nvim), "nvim", "a file that does not load: the folder")
+  -- naming a project runs none of its code: the file is read as data
+  vim.g.project_name_ran = nil
+  write(
+    nvim .. "/.testing.lua",
+    'vim.g.project_name_ran = true\nreturn { sheets = { project = "nvim-config" } }\n'
+  )
+  eq(tasks.project_name(nvim), "nvim", "a file that calls something is not read")
+  eq(vim.g.project_name_ran, nil, "... and nothing of it ran")
 
   vim.fn.delete(base, "rf")
 end
