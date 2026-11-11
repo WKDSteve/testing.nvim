@@ -21,6 +21,43 @@
 
 local M = {}
 
+---@type table<string, { stamp: string, name: string }>
+M._names = {}
+
+---The name a project has in a block, a report and a hand-over: `sheets.project` of its `.testing.lua` (the nvim config
+---lives in a folder `nvim`, its tasks and checkout are `nvim-config`), else the repository's name
+---(`testing.metrics.repo_name`: the folder, of the main checkout for a worktree). `.testing.lua` is read only behind
+---the workspace trust (`testing.config.project.load`); an untrusted root or a file that does not load has the
+---repository's name. Kept per root while the file is the same.
+---@param root string
+---@return string
+function M.project_name(root)
+  root = vim.fs.normalize(root):gsub("/+$", "")
+  local st = vim.uv.fs_stat(root .. "/.testing.lua")
+  local stamp = st and ("%d.%d:%d"):format(st.mtime.sec, st.mtime.nsec, st.size) or ""
+  local hit = M._names[root]
+  if hit and hit.stamp == stamp then
+    return hit.name
+  end
+  local name
+  local keep = true
+  if st then
+    local loaded = require("testing.config.project").load(root)
+    -- a root trusted later is asked again
+    keep = not loaded.untrusted
+    local sheets = not loaded.error and loaded.config.sheets or nil
+    local given = type(sheets) == "table" and sheets.project or nil
+    if type(given) == "string" and #given <= 100 and given:match("^[%w_][%w_.%-]*$") then
+      name = given
+    end
+  end
+  name = name or require("testing.metrics").repo_name(root)
+  if keep then
+    M._names[root] = { stamp = stamp, name = name }
+  end
+  return name
+end
+
 M.BEGIN = "<!-- testing:sheets:begin -->"
 M.END = "<!-- testing:sheets:end -->"
 -- The last line inside the block: `<!-- testing:sheets:states <id>=<state> ... -->`, the contract tasks.nvim reads.
@@ -300,7 +337,7 @@ function M.render_block(entries, opts)
     out[#out + 1] = ("  "):rep(depth) .. (ticked[t] and "- [x] " or "- [ ] ") .. t
   end
   for _, e in ipairs(entries) do
-    local prefix = vim.fs.basename(e.root) .. "/"
+    local prefix = M.project_name(e.root) .. "/"
     local where = prefix .. e.rel
     local title = e.sheet and one_line(e.sheet.title) or where
     local id = e.sheet and (code(e.sheet.id) .. ", ") or ""

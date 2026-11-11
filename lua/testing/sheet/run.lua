@@ -314,7 +314,7 @@ function M.main(argv, sv, deps)
   if vault then
     local have = {}
     for _, r in ipairs(roots) do
-      have[vim.fs.basename(r)] = true
+      have[tasks.project_name(r)] = true
     end
     ---@cast call -?
     local doc = call("bodies", { ids = { o.id } })

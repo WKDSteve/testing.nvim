@@ -571,10 +571,11 @@ or bad usage, 3 the root cannot be analysed.
 checklist of live checks from the test sheets (TESTS/sheets/*.sheet.lua) and
 their last results (the editor's state, or the IR of a run with `--from`); runs
 nothing. `--tasks {vault}` writes the state of each sheet into its task through
-tasks.nvim (`--dry-run`: only say what would change). With a feature catalog
-(TESTS/sheets/features.lua) it ends with the section Features: the state of
-each functionality (the worst of its sheets), the ones without a sheet, the
-sheets without a `feature`, and unknown features. 0 written or printed, 2 bad
+tasks.nvim (`--dry-run`: only say what would change); a project is named
+there by `sheets.project` of its .testing.lua, else by its folder. With a
+feature catalog (TESTS/sheets/features.lua) it ends with the section
+Features: the state of each functionality (the worst of its sheets), the ones
+without a sheet, the sheets without a `feature`, and unknown features. 0 written or printed, 2 bad
 usage, 3 the file could not be written. See docs/SHEETS.md.
 
 `testing sheets new --from-task {area/slug} [--repo <dir>] [--vault <dir>]`:

@@ -321,12 +321,13 @@ function M.explain(argv, sv, deps)
     M.FORMAT,
   }
   for _, e in ipairs(red) do
-    local name = vim.fs.basename(e.root) .. "/" .. e.rel
+    local project = require("testing.sheet.tasks").project_name(e.root)
+    local name = project .. "/" .. e.rel
     ---@param s string
     ---@return string
     local function redact(s)
       for _, form in ipairs({ e.root, (e.root:gsub("/", "\\")) }) do
-        s = s:gsub(vim.pesc(form), (vim.fs.basename(e.root):gsub("%%", "%%%%")))
+        s = s:gsub(vim.pesc(form), (project:gsub("%%", "%%%%")))
       end
       -- Lua cuts a long chunk name to `...<tail>`: whatever stands before the sheet's own path is the machine's
       s = s:gsub("[^%s\"'`]*" .. vim.pesc(e.rel), (name:gsub("%%", "%%%%")))

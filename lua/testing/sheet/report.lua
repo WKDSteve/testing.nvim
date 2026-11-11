@@ -221,7 +221,8 @@ end
 ---@return string
 local function head(e, multi)
   local s = e.sheet
-  local where = multi and (vim.fs.basename(e.root) .. "/" .. e.rel) or e.rel
+  local where = multi and (require("testing.sheet.tasks").project_name(e.root) .. "/" .. e.rel)
+    or e.rel
   if not s then
     return ("- [ ] **%s**: does not load: %s"):format(one_line(where), one_line(e.error or "?"))
   end
@@ -471,7 +472,7 @@ function M.render(entries, opts)
     sub_items(out, e.sheet.judge, 2)
     if #e.snapshots > 0 then
       -- several projects: the snapshot paths name theirs, like the entry's own path does
-      local prefix = multi and (vim.fs.basename(e.root) .. "/") or ""
+      local prefix = multi and (require("testing.sheet.tasks").project_name(e.root) .. "/") or ""
       out[#out + 1] = "  - look at: "
         .. table.concat(
           vim.tbl_map(function(p)
