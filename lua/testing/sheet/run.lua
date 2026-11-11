@@ -20,9 +20,9 @@
 
 local M = {}
 
-M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]\n"
-  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]\n"
-  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict]"
+M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live]\n"
+  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live]\n"
+  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict] [--live]"
 
 ---@class Testing.SheetRun.Deps
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
@@ -194,14 +194,14 @@ function M.main(argv, sv, deps)
   deps = deps or {}
   local getenv = deps.getenv or vim.uv.os_getenv
   ---@type table<string, any>
-  local o = { dry_run = false, all = false, strict = false }
+  local o = { dry_run = false, all = false, strict = false, live = false }
   local roots = {}
   -- `--sheet <id>` (repeatable): these sheets of the roots, by id or file name, as `--all` runs them
   local wanted, wanted_list = {}, {}
   local i = 1
   while i <= #argv do
     local a = argv[i]
-    if a == "--dry-run" or a == "--all" or a == "--strict" then
+    if a == "--dry-run" or a == "--all" or a == "--strict" or a == "--live" then
       o[a:sub(3):gsub("-", "_")] = true
       i = i + 1
     else
@@ -399,8 +399,13 @@ function M.main(argv, sv, deps)
       red = true
       sv.out(("sheet %s: does not load: %s"):format(e.rel, (tostring(e.error):match("^[^\r\n]*"))))
     else
+      local live = e.sheet.live and require("testing.sheet.live")
+      if live and not live.gate(e.sheet, { live = o.live }, getenv) then
+        -- real keys and network: what it costs is said before it runs (a skip costs nothing)
+        sv.err("testing sheets: " .. live.notice(e.sheet))
+      end
       local started = vim.uv.hrtime()
-      local res = run(e.sheet, { root = e.root, ci = true })
+      local res = run(e.sheet, { root = e.root, ci = true, live = o.live, getenv = getenv })
       e.result = res
       -- a skip (a browser sheet without node, Playwright or chromium) is no green result: the report lists it
       -- under "not run" with its reason, and it does not make the run red
@@ -420,7 +425,7 @@ function M.main(argv, sv, deps)
         ("sheet %s: %s%s"):format(
           e.sheet.id,
           res.status,
-          status == "fail" and (": " .. e.case.message) or ""
+          (status == "fail" or status == "skip") and (": " .. tostring(e.case.message)) or ""
         )
       )
     end

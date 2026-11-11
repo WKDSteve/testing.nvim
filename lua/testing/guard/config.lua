@@ -121,6 +121,9 @@ M.DEFAULTS = {
       -- Executables (basename, `.exe` ignored) and hosts a case may use without a tag. Still logged.
       allow_exec = {},
       allow_hosts = {},
+      -- HTTP clients (`curl`) let through only when their arguments name URLs and every one of them a host of
+      -- `allow_hosts`: the live sheets of testing.sheet.live reach the hosts they name, no other.
+      allow_http_exec = {},
     },
     clock = { mode = "off", seed = nil },
   },
@@ -188,6 +191,7 @@ function M.normalize(cfg)
       "allow_patterns",
       "allow_exec",
       "allow_hosts",
+      "allow_http_exec",
       "ignore",
       "ignore_patterns",
       "ignore_groups",

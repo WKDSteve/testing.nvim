@@ -173,6 +173,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field engine "rpc"|"manual"|"browser"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
 ---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
+---@field live? Testing.Sheet.Live Real keys and network, only with `testing sheets run --live` (`testing.sheet.live`).
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
 ---@field steps Testing.Sheet.Step[]
@@ -242,6 +243,7 @@ local SHEET_KEYS = {
   args = "table",
   config = "string",
   feature = "string",
+  live = "table",
 }
 
 ---@param v any
@@ -715,6 +717,12 @@ function M.validate(s)
   end
   if s.engine == "desktop" and not s.app then
     return nil, "a desktop sheet names its app"
+  end
+  if s.live ~= nil then
+    local lerr = require("testing.sheet.live").check(s.live, s.engine, s.steps)
+    if lerr then
+      return nil, lerr
+    end
   end
   return s, nil
 end

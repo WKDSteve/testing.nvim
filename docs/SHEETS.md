@@ -334,7 +334,7 @@ the engine could not be reached or the file not written.
 ## One task, now (`testing sheets run`)
 
 ```
-testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]
+testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live]
 ```
 
 runs the sheets that name the task (a sheet that does not load too) and, with `--tasks`, writes their state into
@@ -353,6 +353,8 @@ the task's block: no suite, no second command. tasks.nvim's `:Tasks sheet-run` c
   through the engine of tasks.nvim (`nvim -l`, as `:Tasks` does there). A value that is neither `workstation` nor
   `default` is refused as a typo.
 * A red sheet carries its first failure line into the block (`red: 80x24 step 3, keys ...`).
+* `--live` lets the [live sheets](#live-sheets-live) among them run (with their variables set, never on CI); without it
+  they are skips.
 
 Exit codes: 0 green (or waiting for a person) and written, 1 a sheet is red or the task could not be written, 2 bad
 usage, refused (trust, workstation) or no sheet names the task, 3 the engine of tasks.nvim could not be reached.
@@ -595,6 +597,43 @@ return {
 * Temporary paths change on every run: mask them in a screen snapshot.
 * To run one sheet while you work on it: `testing sheets run --sheet <id>` (one line of result), or
   `testing sheets step <id> --run` to see each step.
+
+## Live sheets (`live`)
+
+Some live checks only make sense against a real service: the `stop_reason` of a real model, a translation with a real
+key. No sheet does that by default (its child gets no secret of the environment and no sheet runs on CI with one). A
+sheet that needs it says so, and what it needs:
+
+```lua
+return {
+  id = "ai.thinking-tokens",
+  title = "Completion: thinking tokens against max_tokens 512",
+  task = "ai.nvim/completion-thinking-tokens-gegen-max-tokens-512-live-messen",
+  live = {
+    env = { "ANTHROPIC_API_KEY" },          -- the variables the child gets, nothing else of the environment
+    hosts = { "api.anthropic.com" },        -- the only hosts it may reach
+    cost = "about 0.01 USD: three short requests",
+  },
+  steps = { ... },
+}
+```
+
+* It runs only with `testing sheets run --live` (with `--task`, `--sheet` or `--all`): never in the suite, never in
+  `testing sheets step`, never where `CI` is set (not even with `--live`). Otherwise, and when one of its variables is
+  not set, it is a **reported skip** with the reason, never a green run. Before it runs, the command says on stderr which
+  keys, which hosts and what it costs (`live sheet <id>: real keys (...) and network (...); cost: ...`).
+* Its child gets exactly the named variables, and a network guard (`testing.guard.process_net`, mode error, the other
+  guards off) that lets it reach the named hosts only: a Lua connection to another host is blocked, `curl` goes through
+  only when every URL of its arguments names one of them, any other program is blocked. A blocked attempt fails the
+  step: `the live sheet reached what it does not name (live.hosts): ...`. A safety net, not a sandbox: what a started
+  program does on its own (a `curl -K` file with another URL) is not seen.
+* The values never leave the run: every failure line, the screen of every step and the screen a `screen` or `hl` step
+  compares are masked (`<ANTHROPIC_API_KEY>` padded with `*` to the length of the value, so a screen keeps its columns;
+  a piece of a value cut by the end of a row too). So they reach no task block, no note, no snapshot file. A value
+  shorter than 6 bytes is not masked (it would mask ordinary text). A live sheet takes no `shot`: a picture cannot be
+  masked.
+* `live` belongs to an rpc sheet. `env` names (letters, digits, `_`, never `NVIM*`) and `hosts` are lists of 1 to 10,
+  `cost` a text of up to 300 bytes.
 
 ## Limits
 

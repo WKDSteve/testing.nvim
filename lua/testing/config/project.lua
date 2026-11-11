@@ -235,7 +235,7 @@ local GUARD_KEYS = {
   scheduled_error = { allow_patterns = "patterns", notify = "notify" },
   prompt = { getchar_wait_ms = "count", kit = "flag" },
   deprecation = {},
-  process_net = { allow_exec = "list", allow_hosts = "list" },
+  process_net = { allow_exec = "list", allow_hosts = "list", allow_http_exec = "list" },
 }
 
 ---Categories of the state guard (the guard layer's own list is the source of truth).

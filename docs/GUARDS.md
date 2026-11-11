@@ -119,7 +119,7 @@ configuration) is dropped with a note: the tree snapshot then sees more files, a
 | `fs` | `allow` (directories, added to `guard_allow.fs`), `allow_patterns`, `ignore`, `ignore_patterns` |
 | `state` | `categories` (`{ <category> = "error"|"warn"|"info"|"off" }`, capped at the guard's mode), `ignore_groups`, `ignore_vars`, `ignore_options`, `ignore_env`, `ignore_globals`, `ignore_highlights`, `ignore_usercmds`, `ignore_keymaps` (name or left-hand-side prefixes), `keep`, `max_per_category` |
 | `scheduled_error` | `allow_patterns`, `notify` |
-| `process_net` | `allow_exec`, `allow_hosts` (added to `guard_allow.spawn` / `.network`) |
+| `process_net` | `allow_exec`, `allow_hosts` (added to `guard_allow.spawn` / `.network`), `allow_http_exec` (HTTP clients such as `curl`, let through only to the hosts of `allow_hosts`) |
 | `prompt` | `getchar_wait_ms`, `kit` |
 
 `state.keep` is the short way to say "`setup()` leaves these on purpose": every name in it is ignored as an
@@ -275,6 +275,8 @@ blocked entries are marked `[blocked]`. A call is **let through** (still logged)
 * the case has the tag `@spawn` (processes) / `@network` (network), in `tags` or as a word in its name;
 * the executable (file name, `.exe` / `.cmd` / `.bat` ignored, case-insensitive) is in
   `guards.process_net.allow_exec`, or the host in `allow_hosts`;
+* the executable is in `allow_http_exec` (`curl`), its arguments name at least one `http://` / `https://` URL and
+  every one of them a host of `allow_hosts` (the live sheets of [SHEETS.md](SHEETS.md#live-sheets-live) use it);
 * the case called `h:allow("spawn", "git")` / `h:allow("network", "host")`.
 
 Otherwise (mode `error`) the call raises `testing.guard: ... (blocked: tag the case @spawn or list it

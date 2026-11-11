@@ -80,18 +80,56 @@ local function url_host(url)
   return (rest:match("^%[?([^/:%]?#]+)") or rest):lower()
 end
 
+---The hosts of the `http://` / `https://` URLs in a command (a list or a shell string), lower case; nil when it names
+---none.
+---@param cmd any
+---@return string[]|nil
+function M.url_hosts(cmd)
+  local words = type(cmd) == "table" and cmd or { tostring(cmd) }
+  local hosts = {}
+  for _, w in ipairs(words) do
+    for url in tostring(w):gmatch("[Hh][Tt][Tt][Pp][Ss]?://[^%s\"'<>]+") do
+      hosts[#hosts + 1] = url_host(url)
+    end
+  end
+  return #hosts > 0 and hosts or nil
+end
+
+---An HTTP client of `allow_http_exec` whose URLs all name hosts of `allow_hosts`: let through as the hosts it names.
+---@param cfg table
+---@param exe string
+---@param cmd any
+---@return boolean
+local function http_allowed(cfg, exe, cmd)
+  if not listed(cfg.allow_http_exec, exe) then
+    return false
+  end
+  local hosts = M.url_hosts(cmd)
+  if not hosts then
+    return false
+  end
+  for _, host in ipairs(hosts) do
+    if not listed(cfg.allow_hosts, host) then
+      return false
+    end
+  end
+  return true
+end
+
 ---Decide and record. Returns `true` when the call may proceed.
 ---@param self Testing.Guard.ProcessNet
 ---@param kind "spawn"|"network"
 ---@param text string display text (redacted by the ledger)
 ---@param key string executable name or host (lower case)
 ---@param api string
+---@param cmd? any The command of a spawn (for `allow_http_exec`).
 ---@return boolean proceed
-local function judge(self, kind, text, key, api)
+local function judge(self, kind, text, key, api, cmd)
   local h = self.h
   local ledger_kind = kind == "spawn" and "spawned" or "network"
   local tag_ok = h:has_tag(kind) or h.dyn_allow[kind][key] == true
   local cfg_ok = listed(kind == "spawn" and self.cfg.allow_exec or self.cfg.allow_hosts, key)
+    or (kind == "spawn" and http_allowed(self.cfg, key, cmd))
   local mode = self.cfg.mode
   if tag_ok or cfg_ok then
     h:log(ledger_kind, text, { allowed = tag_ok and "tag" or "config" })
@@ -176,8 +214,9 @@ function G:install()
         if not h:is_active() then
           return orig(...)
         end
-        local text, exe = describe_cmd((select(argn or 1, ...)))
-        judge(g, "spawn", text, exe, label)
+        local cmd = (select(argn or 1, ...))
+        local text, exe = describe_cmd(cmd)
+        judge(g, "spawn", text, exe, label, cmd)
         return inner(h, orig, ...)
       end
     end, label)
@@ -194,7 +233,7 @@ function G:install()
         return orig(cmd, ...)
       end
       local text, exe = describe_cmd(cmd)
-      judge(g, "spawn", text, exe, "os.execute")
+      judge(g, "spawn", text, exe, "os.execute", cmd)
       return inner(h, orig, cmd, ...)
     end
   end, "os.execute")
@@ -208,7 +247,7 @@ function G:install()
         argv[#argv + 1] = tostring(a)
       end
       argv[1] = shown_exe(argv[1])
-      judge(g, "spawn", ledger.format_argv(argv), exe_name(path), "uv.spawn")
+      judge(g, "spawn", ledger.format_argv(argv), exe_name(path), "uv.spawn", argv)
       return inner(h, orig, path, opts, ...)
     end
   end, "uv.spawn")

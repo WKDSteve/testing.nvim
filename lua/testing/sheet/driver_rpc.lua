@@ -45,7 +45,7 @@ end
 ---(`{ skip = why }`).
 ---@param child table testing.rpc handle
 ---@param step Testing.Sheet.Step
----@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean }
+---@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean, screen: fun(): table }
 ---@return string|nil
 ---@return { shot?: string, skip?: string }|nil
 local function run_step(child, step, ctx)
@@ -124,7 +124,7 @@ local function run_step(child, step, ctx)
     child.screen()
   elseif step.screen then
     local name = ("%s.%dx%d"):format(step.screen, ctx.size.cols, ctx.size.rows)
-    local res = require("testing.screen").compare(name, child.screen(), {
+    local res = require("testing.screen").compare(name, ctx.screen(), {
       root = ctx.root,
       file = ctx.sheet.path,
       masks = step.masks,
@@ -147,7 +147,7 @@ local function run_step(child, step, ctx)
         return ("there is no highlight group %s"):format(step.hl.group)
       end
     end
-    return require("testing.screen").hl_check(child.screen(), step.hl, resolved)
+    return require("testing.screen").hl_check(ctx.screen(), step.hl, resolved)
   elseif step.shot then
     -- the screen drawn as a page and photographed by the browser engine (`testing.sheet.shot`); without it a skip
     local path, failure, skip = require("testing.sheet.shot").take(child.screen(), {
@@ -218,12 +218,30 @@ function M.new(s, opts, ctx)
   end
   local D = {}
   local child, size
+  -- a live sheet: the values of its variables, masked wherever the run shows something (`testing.sheet.live`)
+  local live = s.live and require("testing.sheet.live") or nil
+  local mask = function(text)
+    return text
+  end
+  local blocked_seen = 0
 
   ---@param new_size { rows: integer, cols: integer }
   ---@return { failure?: string, skip?: string }|nil
   function D.open_size(new_size)
     size = new_size
     local tag = ("%dx%d"):format(size.cols, size.rows)
+    local live_env, live_guard
+    if live then
+      local getenv = opts.getenv or vim.uv.os_getenv
+      local why = live.gate(s, opts, getenv)
+      if why then
+        return { skip = why }
+      end
+      live_env = live.values(s, getenv)
+      mask = live.masker(live_env)
+      live_guard = live.guard_config(s)
+      blocked_seen = 0
+    end
     local user
     if s.config == "user" then
       -- the user's installed config, read only; where there is none (CI) the sheet is a skip, never green
@@ -241,7 +259,9 @@ function M.new(s, opts, ctx)
       call_timeout_ms = user and M.USER_CALL_TIMEOUT_MS or nil,
       boot_timeout_ms = user and M.USER_BOOT_TIMEOUT_MS or nil,
       size = size,
-      guard = false,
+      -- a live child: its network guard lets it reach the named hosts only
+      guard = live_guard or false,
+      extra_env = live_env,
       -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
       watch_prompts = true,
       args = M.command_line(s.args, size),
@@ -260,6 +280,10 @@ function M.new(s, opts, ctx)
     local ok, perr = pcall(function()
       -- attach the UI first: the editor lays out windows (floats too) for the size of its UI
       child.screen()
+      if live then
+        -- the guard watches while a case is open: the whole size is one
+        child.guard.begin_case({ id = s.id, name = s.title })
+      end
       for _, req in ipairs(s.requires or {}) do
         local met, rerr = pcall(child.lua_get, req.lua)
         if not met then
@@ -275,7 +299,7 @@ function M.new(s, opts, ctx)
       end
     end)
     if not ok then
-      answer = { failure = ("%s: %s"):format(tag, tostring(perr)) }
+      answer = { failure = mask(("%s: %s"):format(tag, tostring(perr))) }
     end
     if answer then
       D.close_size()
@@ -293,6 +317,11 @@ function M.new(s, opts, ctx)
       opts = opts,
       snapshots = ctx.snapshots,
       cancelled = ctx.cancelled,
+      -- what a screen, hl or snapshot step sees: masked in a live sheet
+      screen = function()
+        local shot = child.screen()
+        return live and live.mask_screen(shot, mask) or shot
+      end,
     })
     local out = {}
     local prompt = not ok and require("testing.rpc").prompt_of(why)
@@ -306,15 +335,39 @@ function M.new(s, opts, ctx)
     elseif made then
       out.shot, out.skip = made.shot, made.skip
     end
+    if live and not out.raised and not out.reason then
+      out.reason = D.blocked()
+    end
     -- E3: what the child shows after the step; a stepped run only, the suite never pays for it, and a screen
     -- that cannot be read says nothing about the step
     if opts.capture_screen and not out.raised then
       local got, screen = pcall(child.screen)
       if got and type(screen) == "table" then
-        out.screen = screen.lines
+        out.screen = vim.tbl_map(mask, screen.lines)
       end
     end
+    out.reason, out.raised = mask(out.reason), mask(out.raised)
     return out
+  end
+
+  ---What a live child started or reached that its sheet did not name, since the last step; nil when nothing.
+  ---@return string|nil
+  function D.blocked()
+    local got, res = pcall(child.guard.collect)
+    local findings = got and type(res) == "table" and res.findings or {}
+    local lines = {}
+    for i = blocked_seen + 1, #findings do
+      local f = findings[i]
+      if f.id == "network.blocked" or f.id == "process.spawn_blocked" then
+        lines[#lines + 1] = tostring(f.message)
+      end
+    end
+    blocked_seen = #findings
+    if #lines == 0 then
+      return nil
+    end
+    return "the live sheet reached what it does not name (live.hosts): "
+      .. table.concat(lines, "; ")
   end
 
   function D.close_size()

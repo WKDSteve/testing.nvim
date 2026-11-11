@@ -595,7 +595,9 @@ usage, refused or no sheet, 3 the engine of tasks.nvim could not be reached.
 `testing sheets run --all [--root <dir>] [--json <ir>] [--strict]` runs every
 sheet of the roots; `--json` writes the Result-IR, `--strict` makes a skip red.
 `testing sheets run --sheet {id}...` runs only the named sheets (id or file
-name), as `--all` would.
+name), as `--all` would. `--live` (any form) lets live sheets (`live = { env,
+hosts, cost }`) run with their real keys, only the named hosts and the cost
+said first; never on CI, a skip without it. See docs/SHEETS.md, "Live sheets".
 
 `testing sheets step {sheet} [--root <dir>] [--headed] [--delay <ms>]
 [--break <n>]... [--run]`: one sheet step by step. Events on stdout
