@@ -78,6 +78,19 @@ export interface StepAfter extends Base {
   image?: string;
   /** rpc engine: the child's screen after the step, one string per row. */
   screen?: string[];
+  /** A `measure` step: what it measured (also when the value broke its bound); `value` is the median of `values`. */
+  measure?: Measure;
+}
+
+export interface Measure {
+  name: string;
+  value: number;
+  values: number[];
+  unit?: string;
+  min?: number;
+  max?: number;
+  size?: string;
+  n?: number;
 }
 
 export interface Paused extends Base {

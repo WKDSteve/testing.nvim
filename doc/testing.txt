@@ -605,7 +605,10 @@ said first; never on CI, a skip without it. See docs/SHEETS.md, "Live sheets".
 `continue`, `until <n>`, `note <text>`, `abort`; closed stdin is `abort`). Writes
 nothing but the notes of the run (beside its pictures, for the report).
 `--run --format=text` writes one line per step instead (size, n/total,
-status, ms, action and value, `# note`, `: reason`) and the end.
+status, ms, action and value, `# note`, `: reason`, `=> ` a measured value)
+and the end. A `measure = expr` step (`name`, `min`, `max`, `unit`, `runs`)
+reads a number in the child, takes the median of its runs, fails outside the
+bounds and keeps the value as a note of the run (docs/SHEETS.md).
 0 green or a skip, 1 a step failed, 2 bad usage or refused, 3 aborted.
 See docs/SHEETS.md, "Step by step".
 

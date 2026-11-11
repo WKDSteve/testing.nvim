@@ -185,7 +185,11 @@ function M.text_line(ev, before)
       b.value ~= nil and (" " .. one_line(b.value)) or "",
       b.note and (" # " .. one_line(b.note)) or "",
       why and (": " .. one_line(why)) or "",
-      ev.shot and (" -> " .. tostring(ev.shot)) or ""
+      ev.shot and (" -> " .. tostring(ev.shot))
+        or (ev.measure and not why) and (" => " .. one_line(
+          require("testing.sheet").measure_text(ev.measure)
+        ))
+        or ""
     )
   elseif e == "note" then
     return ("note %s %s: %s"):format(tostring(ev.size), tostring(ev.n), tostring(ev.text))
@@ -766,7 +770,12 @@ function M.main(argv, sv, deps)
         shot = res.shot,
         image = res.image,
         screen = res.screen,
+        measure = res.measure,
       })
+      -- a measured value is a note of the run, as a person would take it: kept, and with --tasks in the task
+      if res.measure then
+        add_note(require("testing.sheet").measure_text(res.measure))
+      end
       -- a failure is where a person wants to look, before the next size or the end takes the target away
       if res.status == "fail" and reader then
         if not pause("failed", res.n, res.size, nil) then

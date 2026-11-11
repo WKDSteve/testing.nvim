@@ -43,6 +43,7 @@ return {
 | `screen = name` (`masks`, `cursor`, `mode`, `groups`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24`; `groups = true` keeps the highlight group of every attribute letter in it | the snapshot differs (or is missing on CI) |
 | `hl = { ... }` | how a place is drawn: `text = "..."` (its first appearance on the screen, every cell of it) or `row`, `col` (`cols` wide), and what must hold: `group` (by its name, or the group a link ends in: `group = "FileopsConflict"` holds for a cell drawn with `DiffText` when it links there), `fg`, `bg`, `sp` (`#rrggbb` as drawn), `bold`, `italic`, `underline`, `undercurl`, `strikethrough`, `reverse` (`false` = must not be) | a cell is drawn otherwise (the line names it, what it has and what was expected), the text is not on the screen, or the group is not defined |
 | `prompt = name` (`timeout` ms, default 2000) | waits until the child shows a prompt: `"hit-enter"` (a message longer than the command line), `"more"` (a long one with `'more'` set; it is off in a child), `"confirm"` (`confirm()`). Asked through `nvim_get_mode`, which the editor answers while the prompt holds every other call back. Answer it with `input`: `"<CR>"`, `"q"` or `" "` for more, the letter of a choice for confirm | no such prompt in time (the line names one the child shows instead) |
+| `measure = expr` (`name`, `min`, `max`, `unit`, `runs`) | reads a number in the child (a Lua expression), `runs` times (default 1, at most 20) and takes the median, so one reading under load does not decide; `name` says what it is (`"gopath (VeryLazy)"`), `unit` how it reads (`"ms"`). The value is kept in the result (`measures`), in the step's event (`measure`), as a note of a stepped run, and with `testing sheets run --tasks` as the notes of the run in the task's block: `- Schritt 2 (80x24): gopath (VeryLazy) = 3.2 ms (median of 3: 3.1, 3.2, 4; max 20)` | the median is above `max` or below `min` (the value is kept all the same), or the expression gives no finite number |
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 | `shot = name` | a picture of the screen, `TESTS/sheets/out/<id>.<name>.<cols>x<rows>.png`: the screen (every cell with its colours and styles, the cursor as a block) is drawn as a page and photographed by the browser engine (node and playwright-core, as for a browser sheet); the font is the browser's, not a terminal's; a cell whose attribute the screen could not name (more than 52 attributes) is outlined dashed. The input of the AI judge and of README images. Without node, playwright-core or a browser the step is **skipped**: the other steps go on and the sheet ends as `skip` (never a green run without its picture) | the browser fails |
 
@@ -214,7 +215,7 @@ end)
 ```
 
 `sheet.expect(H.ok, s, opts)` hands the verdict to a collecting harness instead of raising; `sheet.run(s, opts)`
-returns `{ ok, status, failures, snapshots }`. A project whose process guard is strict lists `nvim` in
+returns `{ ok, status, failures, snapshots, measures }` (`measures`: what the `measure` steps read). A project whose process guard is strict lists `nvim` in
 `guard_allow.spawn` (the sheet starts a child editor). A `manual` sheet runs nothing (status `manual`).
 
 ## The report
@@ -414,7 +415,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `size` | the target of a size is `open`, `failed` to start, or the sheet is a `skip` |
 | `step-before` | size, number, action, value, note: what is about to happen |
 | `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
-| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms`, on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser and desktop sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
+| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms`, `measure` what a `measure` step measured (`name`, `value`, `values`, `unit`, `min`, `max`; a `note` with its text follows), on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser and desktop sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
 | `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
 | `note` | a note was taken: `size`, `n` (the step the run stands before, else the one that ran last), `text`, `time` (UTC) |
 | `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
@@ -442,7 +443,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
   stdin (`--break` is refused with it): for watching, not for a client.
 * `--format=text` (only with `--run`) writes lines for a person or an agent instead of the JSON events: the sheet, each
   size, one line per step that ran, `<size> <n>/<total> <status> <ms> ms <action> <value>`, then `# <note>` and
-  `: <reason>` (the failure line, or why it was a skip) when there are any, notes, the task, and at the end
+  `: <reason>` (the failure line, or why it was a skip) when there are any, `=> <value>` of a measure, notes, the task, and at the end
   `end <status> <ms> ms` with the failure lines under it. A value longer than 80 bytes is cut; the screen of a step
   is not shown (the JSON events have it).
 

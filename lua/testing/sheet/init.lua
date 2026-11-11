@@ -83,6 +83,7 @@ M.ACTIONS = {
   "restart",
   "hl",
   "prompt",
+  "measure",
 }
 ---The steps of each engine: `wait` and `expect` exist in both, in the browser they are JavaScript in the page.
 M.ENGINE_ACTIONS = {
@@ -98,6 +99,7 @@ M.ENGINE_ACTIONS = {
     restart = true,
     hl = true,
     prompt = true,
+    measure = true,
     -- the screen drawn as a page and photographed by the browser engine (`testing.sheet.shot`)
     shot = true,
   },
@@ -127,6 +129,8 @@ M.ENGINE_ACTIONS = {
 }
 M.DEFAULT_MINIT = "TESTS/minimal_init.lua"
 M.DEFAULT_WAIT_MS = 2000
+---The most runs of a `measure` step.
+M.MAX_RUNS = 20
 ---The prompts a `prompt` step waits for (`testing.rpc.PROMPTS`).
 M.PROMPT_NAMES = { ["hit-enter"] = true, more = true, confirm = true }
 M.MAX_BYTES = 256 * 1024
@@ -162,6 +166,12 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field ignore_errmsg? boolean
 ---@field restart? boolean Quit the child and start it again in the same sandbox.
 ---@field prompt? "hit-enter"|"more"|"confirm" Wait until the child shows this prompt.
+---@field measure? string A Lua expression in the child that gives a number (`name`, `min`, `max`, `unit`, `runs`).
+---@field name? string
+---@field min? number
+---@field max? number
+---@field unit? string
+---@field runs? integer
 ---@field args? string[] The command line of a `restart` (else the sheet's `args`).
 
 ---@class Testing.Sheet
@@ -188,12 +198,23 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field lua string A Lua expression evaluated in the child before the first step; falsy = the sheet is skipped.
 ---@field reason string The `n/a` text.
 
+---@class Testing.Sheet.Measure
+---@field size? string
+---@field n? integer
+---@field name string
+---@field value number The median of `values`.
+---@field values number[]
+---@field unit? string
+---@field min? number
+---@field max? number
+
 ---@class Testing.Sheet.Result
 ---@field ok boolean
 ---@field status "pass"|"fail"|"manual"|"skip"|"aborted" `aborted` only from a session that was cancelled.
 ---@field skipped? string Why a sheet was skipped (a browser sheet without node, Playwright or chromium).
 ---@field failures string[] One line per failed step (size, step number, what).
 ---@field snapshots string[] The messages of the screen steps (written, matched, updated).
+---@field measures? Testing.Sheet.Measure[] What the `measure` steps measured, in order.
 
 local STEP_KEYS = {
   keys = "string",
@@ -223,6 +244,12 @@ local STEP_KEYS = {
   ignore_errmsg = "boolean",
   restart = "boolean",
   prompt = "string",
+  measure = "string",
+  name = "string",
+  min = "number",
+  max = "number",
+  unit = "string",
+  runs = "number",
   args = "table",
   hl = "table",
   groups = "boolean",
@@ -460,6 +487,10 @@ local function check_step(step, i, engine)
   end
   if action == "prompt" and not M.PROMPT_NAMES[step.prompt] then
     return at .. '.prompt: "hit-enter", "more" or "confirm"'
+  end
+  local merr = M.check_measure(step, action, at)
+  if merr then
+    return merr
   end
   if
     (step.masks or step.cursor ~= nil or step.mode ~= nil or step.groups ~= nil)
@@ -725,6 +756,90 @@ function M.validate(s)
     end
   end
   return s, nil
+end
+
+---Why the measure fields of a step are wrong, nil when they are right (or the step is no measure and has none).
+---@param step table
+---@param action string
+---@param at string
+---@return string|nil
+function M.check_measure(step, action, at)
+  local any = step.name ~= nil
+    or step.min ~= nil
+    or step.max ~= nil
+    or step.unit ~= nil
+    or step.runs ~= nil
+  if action ~= "measure" then
+    return any and (at .. ": name, min, max, unit and runs belong to a measure step") or nil
+  end
+  if vim.trim(step.measure) == "" then
+    return at .. ".measure must not be empty"
+  end
+  if not step.name or not step.name:match("^[%w][%w_ .()%-]*$") or #step.name > 60 then
+    return at .. ".name: what is measured, letters, digits, blanks and '_ . ( ) -', at most 60"
+  end
+  if step.unit ~= nil and (#step.unit > 16 or step.unit:find("%c")) then
+    return at .. ".unit: at most 16 bytes"
+  end
+  if step.runs ~= nil and not pos_int(step.runs, M.MAX_RUNS) then
+    return ("%s.runs: a whole number from 1 to %d"):format(at, M.MAX_RUNS)
+  end
+  for _, k in ipairs({ "min", "max" }) do
+    local v = step[k]
+    if v ~= nil and (v ~= v or v == math.huge or v == -math.huge) then
+      return ("%s.%s must be a finite number"):format(at, k)
+    end
+  end
+  if step.min and step.max and step.min > step.max then
+    return at .. ": min is above max"
+  end
+  return nil
+end
+
+---The median of numbers (the mean of the middle two of an even count).
+---@param values number[]
+---@return number
+function M.median(values)
+  local v = vim.deepcopy(values)
+  table.sort(v)
+  local n = #v
+  if n % 2 == 1 then
+    return v[(n + 1) / 2]
+  end
+  return (v[n / 2] + v[n / 2 + 1]) / 2
+end
+
+---A number of a measure as it is read: at most 4 significant digits.
+---@param v number
+---@return string
+local function num(v)
+  return (("%.4g"):format(v))
+end
+
+---What a measure says, on one line: `gopath (VeryLazy) = 12.3 ms (median of 3: 11.9, 12.3, 14; max 20)`.
+---@param m Testing.Sheet.Measure
+---@return string
+function M.measure_text(m)
+  local unit = m.unit and (" " .. m.unit) or ""
+  local parts = {}
+  if #m.values > 1 then
+    parts[#parts + 1] = ("median of %d: %s"):format(
+      #m.values,
+      table.concat(vim.tbl_map(num, m.values), ", ")
+    )
+  end
+  if m.min then
+    parts[#parts + 1] = "min " .. num(m.min)
+  end
+  if m.max then
+    parts[#parts + 1] = "max " .. num(m.max)
+  end
+  return ("%s = %s%s%s"):format(
+    m.name,
+    num(m.value),
+    unit,
+    #parts > 0 and (" (" .. table.concat(parts, "; ") .. ")") or ""
+  )
 end
 
 ---Read a sheet file as data (empty environment) and validate it.

@@ -47,7 +47,7 @@ end
 ---@param step Testing.Sheet.Step
 ---@param ctx { sheet: Testing.Sheet, size: table, root: string, opts: table, snapshots: string[], cancelled: fun(): boolean, screen: fun(): table }
 ---@return string|nil
----@return { shot?: string, skip?: string }|nil
+---@return { shot?: string, skip?: string, measure?: Testing.Sheet.Measure }|nil
 local function run_step(child, step, ctx)
   if step.keys then
     -- an error the keys caused (`E492: Not an editor command`) fails the step; feed itself never raises
@@ -108,6 +108,33 @@ local function run_step(child, step, ctx)
       end
       vim.wait(20)
     end
+  elseif step.measure then
+    -- `runs` times, the median counts: one reading under load would make the check flutter
+    local sheet = require("testing.sheet")
+    local values = {}
+    for i = 1, step.runs or 1 do
+      local v = child.lua_get(step.measure)
+      if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then
+        return ("%s: got %s, not a number"):format(step.name, shown(v))
+      end
+      values[i] = v
+    end
+    local m = {
+      name = step.name,
+      value = sheet.median(values),
+      values = values,
+      unit = step.unit,
+      min = step.min,
+      max = step.max,
+    }
+    local text = sheet.measure_text(m)
+    if step.max and m.value > step.max then
+      return ("%s: above the max"):format(text), { measure = m }
+    end
+    if step.min and m.value < step.min then
+      return ("%s: below the min"):format(text), { measure = m }
+    end
+    return nil, { measure = m }
   elseif step.expect then
     local v = child.lua_get(step.expect)
     if not v then
@@ -308,7 +335,7 @@ function M.new(s, opts, ctx)
   end
 
   ---@param step Testing.Sheet.Step
-  ---@return { reason?: string, raised?: string, screen?: string[], shot?: string, skip?: string }
+  ---@return { reason?: string, raised?: string, screen?: string[], shot?: string, skip?: string, measure?: Testing.Sheet.Measure }
   function D.run(step)
     local ok, why, made = pcall(run_step, child, step, {
       sheet = s,
@@ -334,6 +361,10 @@ function M.new(s, opts, ctx)
       out.reason = why
     elseif made then
       out.shot, out.skip = made.shot, made.skip
+    end
+    -- a measure that broke its bound is a failure, and its value is still a result
+    if ok and made and made.measure then
+      out.measure = made.measure
     end
     if live and not out.raised and not out.reason then
       out.reason = D.blocked()

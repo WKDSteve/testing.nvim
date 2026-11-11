@@ -41,6 +41,7 @@ end
 ---@field shot? string The file of a `shot` step.
 ---@field image? string A stepped run: the picture of the target after this step, in a folder of the run.
 ---@field screen? string[] The child's screen after the step (`capture_screen`).
+---@field measure? Testing.Sheet.Measure What a `measure` step measured (also when it broke its bound).
 
 ---@class Testing.Sheet.Session
 ---@field sheet Testing.Sheet
@@ -194,6 +195,12 @@ function Session:step(answer)
   next_step.ms = math.floor((vim.uv.hrtime() - started) / 1e6)
   next_step.status = "pass"
   next_step.screen, next_step.shot = out.screen, out.shot
+  if out.measure then
+    out.measure.size, out.measure.n = self.tag, next_step.n
+    next_step.measure = out.measure
+    self.measures = self.measures or {}
+    self.measures[#self.measures + 1] = out.measure
+  end
   -- only a stepped run asks for it, `sheet.run` pays nothing; a picture that cannot be had fails no step
   if self.opts.evidence_dir and self.driver.evidence and not out.raised then
     next_step.image = self.driver.evidence(next_step.n, self.tag, self.opts.evidence_dir)
@@ -244,8 +251,13 @@ end
 ---The verdict so far, in the shape of `testing.sheet.run`; `aborted` only when `cancel` was called.
 ---@return Testing.Sheet.Result
 function Session:result()
-  local result =
-    { ok = true, status = "pass", failures = self.failures, snapshots = self.snapshots }
+  local result = {
+    ok = true,
+    status = "pass",
+    failures = self.failures,
+    snapshots = self.snapshots,
+    measures = self.measures,
+  }
   if self.aborted then
     -- nothing is proved by half a run, whatever its steps did so far
     result.ok, result.status = false, "aborted"

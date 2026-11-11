@@ -407,6 +407,19 @@ function M.main(argv, sv, deps)
       local started = vim.uv.hrtime()
       local res = run(e.sheet, { root = e.root, ci = true, live = o.live, getenv = getenv })
       e.result = res
+      -- what the measure steps measured goes into the task as the notes of this run (`--tasks`)
+      if res.measures and #res.measures > 0 then
+        local notes = {}
+        for _, m in ipairs(res.measures) do
+          notes[#notes + 1] = {
+            size = m.size,
+            n = m.n,
+            text = sheet.measure_text(m),
+            time = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+          }
+        end
+        e.new_notes = { date = os.date("%Y-%m-%d"), notes = notes }
+      end
       -- a skip (a browser sheet without node, Playwright or chromium) is no green result: the report lists it
       -- under "not run" with its reason, and it does not make the run red
       local status = res.status == "fail" and "fail" or res.status == "skip" and "skip" or "pass"

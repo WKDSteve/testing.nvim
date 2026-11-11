@@ -103,7 +103,22 @@
         "failure": { "description": "The failure line as a normal run writes it.", "type": "string" },
         "shot": { "description": "The file of a `shot` step.", "type": "string" },
         "image": { "description": "browser and desktop engine: the picture of the target after this step, in a folder of the run.", "type": "string" },
-        "screen": { "description": "rpc engine: the child's screen after the step, one string per row.", "$ref": "#/$defs/strings" }
+        "screen": { "description": "rpc engine: the child's screen after the step, one string per row.", "$ref": "#/$defs/strings" },
+        "measure": {
+          "description": "A `measure` step: what it measured (also when the value broke its bound); `value` is the median of `values`.",
+          "type": "object",
+          "required": ["name", "value", "values"],
+          "properties": {
+            "name": { "type": "string" },
+            "value": { "type": "number" },
+            "values": { "type": "array", "items": { "type": "number" } },
+            "unit": { "type": "string" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "size": { "$ref": "#/$defs/tag" },
+            "n": { "$ref": "#/$defs/n" }
+          }
+        }
       }
     },
     "paused": {
