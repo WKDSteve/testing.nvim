@@ -88,6 +88,79 @@ return function(H)
     "script: a quote in an argument stays one argument"
   )
 
+  -- a linked worktree (`git worktree add`): its .git is a file naming a Windows path WSL cannot follow, so the mirror
+  -- fetches from the shared repository at the HEAD the Windows side read, and an unreachable one is one line
+  do
+    local wt_script = wsl.script({
+      repo = "x.nvim",
+      root = "E:/repos/x.nvim-wt",
+      deps = { ["lib.nvim"] = "E:/repos/lib.nvim" },
+      argv = {},
+      json = "C:/o",
+      worktrees = { ["x.nvim"] = { src = "E:/repos/x.nvim/.git", head = ("b"):rep(40) } },
+    })
+    has(
+      wt_script,
+      ("head_at 'x.nvim' '/mnt/e/repos/x.nvim/.git' '%s' ||"):format(("b"):rep(40)),
+      "worktree: the shared repository at the Windows HEAD"
+    )
+    ok(not wt_script:find("head_of 'x.nvim'", 1, true), "worktree: not through its .git file")
+    has(
+      wt_script,
+      "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' ||",
+      "worktree: an ordinary checkout as before"
+    )
+    has(
+      wt_script,
+      "x.nvim is a worktree of E:/repos/x.nvim/.git, which WSL cannot reach",
+      "worktree: an unreachable repository is said in one line"
+    )
+    local reach_at = wt_script:find("[ -d '/mnt/e/repos/x.nvim/.git' ]", 1, true)
+    local head_at = wt_script:find("head_at 'x.nvim'", 1, true)
+    ok(reach_at and head_at and reach_at < head_at, "worktree: reachability is checked first")
+
+    -- worktree_of on real git: a linked worktree names the shared repository and its HEAD, a checkout nothing
+    local base = vim.fs.normalize(vim.fn.tempname()) .. "-wt"
+    local main_dir, linked = base .. "/main", base .. "/linked"
+    vim.fn.mkdir(main_dir, "p")
+    local function git(dir, args)
+      return vim.system(vim.list_extend({ "git", "-C", dir }, args), { text = true }):wait()
+    end
+    git(main_dir, { "init", "-q" })
+    git(
+      main_dir,
+      { "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "a" }
+    )
+    git(main_dir, { "worktree", "add", "-q", "--detach", linked })
+    git(
+      linked,
+      { "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "b" }
+    )
+    local linked_head = vim.trim(git(linked, { "rev-parse", "HEAD" }).stdout or "")
+    eq(wsl.worktree_of(main_dir), nil, "worktree_of: an ordinary checkout is none")
+    local w = wsl.worktree_of(linked)
+    eq(w and w.head, linked_head, "worktree_of: the worktree's own HEAD (a commit on no branch)")
+    eq(
+      w and vim.uv.fs_realpath(w.src),
+      vim.uv.fs_realpath(main_dir .. "/.git"),
+      "worktree_of: the shared repository"
+    )
+
+    -- wsl.run hands the worktree to the script
+    local saved = wsl.run_bash
+    local got
+    wsl.run_bash = function(s)
+      got = s
+      return 3, "", "fake"
+    end
+    wsl.run(linked, {}, { ["lib.nvim"] = main_dir })
+    wsl.run_bash = saved
+    has(got, "head_at 'linked' ", "run: the worktree goes to the mirror through head_at")
+    has(got, ("'%s' ||"):format(linked_head), "run: ... at its HEAD")
+    has(got, "head_of 'lib.nvim'", "run: an ordinary dependency through head_of")
+    vim.fn.delete(base, "rf")
+  end
+
   -- the run: a fake WSL writes the document
   local saved_run = wsl.run_bash
   local seen

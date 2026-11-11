@@ -40,6 +40,42 @@ M.run_bash = function(script, timeout_ms)
   return res.code or 1, res.stdout or "", res.stderr or ""
 end
 
+---Replaced by a spec: git in a Windows checkout; its trimmed stdout, nil when it failed.
+---@param dir string
+---@param args string[]
+---@return string|nil
+M.git = function(dir, args)
+  local ok, res = pcall(function()
+    return vim.system(vim.list_extend({ "git", "-C", dir }, args), { text = true }):wait(30000)
+  end)
+  if not ok or not res or res.code ~= 0 then
+    return nil
+  end
+  return vim.trim(res.stdout or "")
+end
+
+---A linked worktree (`git worktree add`): its `.git` is a file naming the Windows path of the shared repository,
+---which git in WSL cannot follow. The mirror then fetches from the shared repository itself, at the worktree's HEAD
+---(read here, before the fetch). nil for an ordinary checkout or when git cannot tell.
+---@param path string Windows path of the checkout.
+---@return { src: string, head: string }|nil
+function M.worktree_of(path)
+  local out =
+    M.git(path, { "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "HEAD" })
+  local l = vim.split(out or "", "\n", { plain = true })
+  local gitdir, common, head = l[1], l[2], l[3]
+  if not (gitdir and common and head and head:match("^%x+$")) then
+    return nil
+  end
+  local function key(p)
+    return vim.fs.normalize((p:gsub("\\", "/"))):lower()
+  end
+  if key(gitdir) == key(common) then
+    return nil
+  end
+  return { src = vim.fs.normalize((common:gsub("\\", "/"))), head = head }
+end
+
 ---A Windows path as WSL sees it (`E:/repos/x` -> `/mnt/e/repos/x`).
 ---@param path string
 ---@return string
@@ -61,11 +97,13 @@ local function q(s)
 end
 
 ---The bash script that syncs the mirror and runs `ci commit` there.
----@param o { repo: string, root: string, deps: table<string, string>, argv: string[], json: string }
+---@param o { repo: string, root: string, deps: table<string, string>, argv: string[], json: string, worktrees?: table<string, { src: string, head: string }> }
 ---`repo` the directory name, `root` its Windows path, `deps` name -> Windows path, `argv` the arguments of the inner
----`ci commit`, `json` where the document goes (a Windows path).
+---`ci commit`, `json` where the document goes (a Windows path), `worktrees` name -> `M.worktree_of` of the checkouts
+---that are linked worktrees.
 ---@return string
 function M.script(o)
+  local worktrees = o.worktrees or {}
   local lines = {
     "set -u",
     -- tools installed for the user without sudo (stylua, luacheck): a shell started by wsl.exe reads no profile
@@ -86,24 +124,38 @@ function M.script(o)
     '  sync "$1" "$2" || return 1',
     '  git -C "$M/$1" -c core.autocrlf=false checkout -q --force --detach "$h" || return 1',
     "}",
+    -- a linked worktree: the shared repository as the source, the HEAD the Windows side read (a commit on no
+    -- branch is fetched by its id)
+    "head_at() {",
+    '  sync "$1" "$2" || return 1',
+    '  git -C "$M/$1" cat-file -e "$3^{commit}" 2>/dev/null '
+      .. '|| git -C "$M/$1" -c core.autocrlf=false fetch -q "$2" "$3" || return 1',
+    '  git -C "$M/$1" -c core.autocrlf=false checkout -q --force --detach "$3" || return 1',
+    "}",
   }
+  ---@param name string
+  ---@param path string Windows path of the checkout.
+  local function mirror(name, path)
+    local wt = worktrees[name]
+    local fail = ("{ echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(name)
+    if not wt then
+      lines[#lines + 1] = ("head_of %s %s || %s"):format(q(name), q(M.wsl_path(path)), fail)
+      return
+    end
+    local src = M.wsl_path(wt.src)
+    lines[#lines + 1] = ("[ -d %s ] || { echo %s >&2; exit 3; }"):format(
+      q(src),
+      q(("testing: wsl: %s is a worktree of %s, which WSL cannot reach"):format(name, wt.src))
+    )
+    lines[#lines + 1] = ("head_at %s %s %s || %s"):format(q(name), q(src), q(wt.head), fail)
+  end
   local names = vim.tbl_keys(o.deps)
   table.sort(names)
   for _, name in ipairs(names) do
-    local src = M.wsl_path(o.deps[name])
-    lines[#lines + 1] = ("head_of %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
-      q(name),
-      q(src),
-      name
-    )
+    mirror(name, o.deps[name])
   end
   -- the repository at the Windows HEAD as well: `--since` and the worktrees start from the mirror's HEAD
-  local src = M.wsl_path(o.root)
-  lines[#lines + 1] = ("head_of %s %s || { echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(
-    q(o.repo),
-    q(src),
-    o.repo
-  )
+  mirror(o.repo, o.root)
   local args = {}
   for _, a in ipairs(o.argv) do
     args[#args + 1] = q(a)
@@ -127,12 +179,18 @@ end
 ---@return string|nil problem
 function M.run(root, argv, deps)
   local json = vim.fs.normalize(vim.fn.tempname()) .. "-wsl-commit.json"
+  local repo = vim.fs.basename(root)
+  local worktrees = {}
+  for name, path in pairs(vim.tbl_extend("force", deps, { [repo] = root })) do
+    worktrees[name] = M.worktree_of(path)
+  end
   local script = M.script({
-    repo = vim.fs.basename(root),
+    repo = repo,
     root = root,
     deps = deps,
     argv = argv,
     json = json,
+    worktrees = worktrees,
   })
   local code, _, err = M.run_bash(script, 2 * 60 * 60 * 1000)
   local f = io.open(json, "rb")
