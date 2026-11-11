@@ -243,7 +243,8 @@ function M.run(args, say, state_dir)
     return M.EXIT_USAGE
   end
 
-  local repo = vim.fs.basename(root):gsub("[^%w._-]", "-")
+  -- the repository's name, also from a linked worktree of it (`testing.metrics.repo_name`), not the folder's
+  local repo = require("testing.metrics").repo_name(root):gsub("[^%w._-]", "-")
   local check = ("ci/%s-%s"):format(repo, sha:sub(1, 12))
   say(("land: %s -> %s, the hosted CI checks it"):format(short, check))
   code, _, err = git("push", "--quiet", args.remote, sha .. ":refs/heads/" .. check)

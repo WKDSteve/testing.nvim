@@ -70,7 +70,10 @@ return function(H)
     w.text = table.concat(w.said, "\n")
     return w
   end
-  local CHECK = "ci/" .. vim.fs.basename(vim.fs.normalize(vim.fn.getcwd())) .. "-" .. SHA:sub(1, 12)
+  local CHECK = "ci/"
+    .. require("testing.metrics").repo_name(vim.fn.getcwd())
+    .. "-"
+    .. SHA:sub(1, 12)
 
   -- green: the check branch, the run, main moves, the check branch goes
   local w = scenario({
@@ -90,6 +93,27 @@ return function(H)
   has(w.text, "landed on main", "green: says so")
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")
+
+  -- from a linked worktree the check branch carries the repository's name, not the folder's
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname())
+    vim.fn.mkdir(tmp .. "/myrepo/.git/worktrees/myrepo-topic", "p")
+    vim.fn.mkdir(tmp .. "/myrepo-topic", "p")
+    local f = assert(io.open(tmp .. "/myrepo-topic/.git", "wb"))
+    f:write("gitdir: " .. tmp .. "/myrepo/.git/worktrees/myrepo-topic\n")
+    f:close()
+    local wt = scenario(
+      { states = { { overall = "success", run = { url = "https://x/run/2" } } } },
+      { "--root=" .. tmp .. "/myrepo-topic" }
+    )
+    eq(wt.code, 0, "worktree: landed")
+    eq(
+      wt.pushes[1],
+      "push --quiet origin " .. SHA .. ":refs/heads/ci/myrepo-" .. SHA:sub(1, 12),
+      "worktree: the check branch is named after the repository"
+    )
+    vim.fn.delete(tmp, "rf")
+  end
 
   -- red: main stays, the systems are named
   w = scenario({
