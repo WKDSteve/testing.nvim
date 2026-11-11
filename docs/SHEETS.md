@@ -507,10 +507,14 @@ A repository without a Lua spec needs no suite for its sheets:
 
 ```
 testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]
+testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict]
 ```
 
 runs every sheet of the roots, with `--engine` only those of that engine (default the current directory; trust gate and workstation rule as above) and writes
-the Result-IR `testing sheets report --from` reads. `--strict` makes a skip red, for a CI job that exists to prove
+the Result-IR `testing sheets report --from` reads. `--sheet <id>` (repeatable) runs only the named sheets, by id or
+file name (`ci-editor-live` for `TESTS/sheets/ci-editor-live.sheet.lua`), as `--all` would run them; a name that is
+no sheet of the roots is refused before anything runs, and `--sheet` takes no `--task` (the block of a task is
+written whole, with every sheet of it). `--strict` makes a skip red, for a CI job that exists to prove
 something: without it a missing browser would leave the job green. Exit codes: 0 green, 1 a sheet is red (or a skip
 with `--strict`), 2 bad usage, refused or no sheet, 3 the IR could not be written.
 
@@ -567,8 +571,8 @@ return {
 * A text search in a chooser or list hits the first matching line, not the meant one: search for the field name at the
   start of the line.
 * Temporary paths change on every run: mask them in a screen snapshot.
-* To run one sheet while you work on it, `testing sheets step <id> --run` is the quickest way; `sheets run --all` has no
-  filter for one sheet.
+* To run one sheet while you work on it: `testing sheets run --sheet <id>` (one line of result), or
+  `testing sheets step <id> --run` to see each step.
 
 ## Limits
 

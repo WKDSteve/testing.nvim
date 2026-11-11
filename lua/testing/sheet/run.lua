@@ -21,7 +21,8 @@
 local M = {}
 
 M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]]\n"
-  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]"
+  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]\n"
+  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict]"
 
 ---@class Testing.SheetRun.Deps
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
@@ -63,6 +64,22 @@ function M.area_root(area, vault, getenv)
     end
   end
   return nil, table.concat(tried, ", ")
+end
+
+---Which name of `wanted` picks the entry: its id, else its file name without `.sheet.lua` (a sheet that does not load
+---has only that). Nil when none does.
+---@param e Testing.SheetReport.Entry
+---@param wanted table<string, true>
+---@return string|nil
+function M.picked(e, wanted)
+  if e.sheet and wanted[e.sheet.id] then
+    return e.sheet.id
+  end
+  local base = vim.fs.basename(tostring(e.rel)):gsub("%.sheet%.lua$", "")
+  if wanted[base] then
+    return base
+  end
+  return nil
 end
 
 ---Whether every entry is a sheet that starts nothing: loaded (as data) and `engine = "manual"`. False for none.
@@ -179,6 +196,8 @@ function M.main(argv, sv, deps)
   ---@type table<string, any>
   local o = { dry_run = false, all = false, strict = false }
   local roots = {}
+  -- `--sheet <id>` (repeatable): these sheets of the roots, by id or file name, as `--all` runs them
+  local wanted, wanted_list = {}, {}
   local i = 1
   while i <= #argv do
     local a = argv[i]
@@ -193,6 +212,7 @@ function M.main(argv, sv, deps)
         ["--tasks-cli"] = "cli",
         ["--json"] = "json",
         ["--engine"] = "engine",
+        ["--sheet"] = "sheet",
       })[a]
       if not key or not argv[i + 1] then
         sv.err(
@@ -207,11 +227,26 @@ function M.main(argv, sv, deps)
       end
       if key == "root" then
         roots[#roots + 1] = argv[i + 1]
+      elseif key == "sheet" then
+        if not wanted[argv[i + 1]] then
+          wanted[argv[i + 1]] = true
+          wanted_list[#wanted_list + 1] = argv[i + 1]
+        end
       else
         o[key] = argv[i + 1]
       end
       i = i + 2
     end
+  end
+  if #wanted_list > 0 then
+    if o.id or o.vault then
+      sv.err(
+        "testing sheets: --sheet picks sheets of the roots, without a task (the block is written whole)\n"
+          .. M.USAGE
+      )
+      return 2
+    end
+    o.all = true
   end
   if o.all and (o.id or o.vault) then
     sv.err("testing sheets: --all runs every sheet of the roots, without a task\n" .. M.USAGE)
@@ -314,13 +349,28 @@ function M.main(argv, sv, deps)
   end
 
   local report = require("testing.sheet.report")
-  local mine = {}
+  local mine, found = {}, {}
   for _, e in ipairs(report.collect(roots, { cases = {} })) do
     local id = e.sheet and e.sheet.task or (not e.sheet and tasks.task_of_unloadable(e))
     -- a sheet that does not load has no engine and stays in: it is red in every job
     local engine_fits = not o.engine or not e.sheet or e.sheet.engine == o.engine
-    if (o.all and engine_fits) or id == o.id then
+    local picked = M.picked(e, wanted)
+    if picked then
+      found[picked] = true
+    end
+    if (o.all and engine_fits and (#wanted_list == 0 or picked)) or id == o.id then
       mine[#mine + 1] = e
+    end
+  end
+  for _, name in ipairs(wanted_list) do
+    if not found[name] then
+      sv.err(
+        ("testing sheets: no sheet %s (id or file name) in %s"):format(
+          name,
+          table.concat(roots, ", ")
+        )
+      )
+      return 2
     end
   end
   if #mine == 0 then

@@ -366,6 +366,36 @@ f:close()
       "--strict and all green"
     )
 
+    -- `--sheet <id>`: only the named sheets, by id or file name, and a name that is not there is said
+    local ran = {}
+    local run_all = deps.run
+    deps.run = function(s)
+      ran[#ran + 1] = s.id
+      return run_all(s)
+    end
+    eq(run_cli.main({ "--sheet", "a.green", "--root", other }, sv, deps), 0, "--sheet runs")
+    eq(ran, { "a.green" }, "... only that sheet")
+    ran = {}
+    eq(
+      run_cli.main({ "--sheet", "red", "--sheet", "a.skip", "--root", other }, sv, deps),
+      0,
+      "--sheet twice"
+    )
+    table.sort(ran)
+    eq(ran, { "a.red", "a.skip" }, "... by file name and by id")
+    errs, ran = {}, {}
+    eq(run_cli.main({ "--sheet", "a.nope", "--root", other }, sv, deps), 2, "an unknown sheet")
+    has(table.concat(errs, "\n"), "no sheet a.nope", "... is named")
+    eq(ran, {}, "... and nothing ran")
+    errs = {}
+    eq(
+      run_cli.main({ "--sheet", "a.green", "--task", "x/y", "--root", other }, sv, deps),
+      2,
+      "--sheet and --task"
+    )
+    has(table.concat(errs, "\n"), "without a task", "... says why")
+    deps.run = run_all
+
     errs = {}
     eq(run_cli.main({ "--all", "--task", "a/b", "--root", other }, sv, deps), 2, "--all and --task")
     has(table.concat(errs, "\n"), "without a task", "... says why")
