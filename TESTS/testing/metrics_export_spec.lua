@@ -113,4 +113,27 @@ return function(H)
   eq(a, b, "order: the same part")
   eq(ra, rb, "order: the same rev line")
   eq(ra, "metrics:4:2026-11-02T08:00:00Z:-", "the rev line")
+
+  -- broken numbers of an untrusted line: counted as 0, never a document the encoder or a reader refuses
+  local broken = stats.export_part({
+    line("2026-11-03T10:00:00Z", "suite", {
+      duration_ms = math.huge,
+      wait_ms = -5,
+      files = { selected = 1.5, cached = 3, ran = 1e300 },
+    }),
+    line("2026-11-03T11:00:00Z", "suite", {
+      duration_ms = 0 / 0,
+      files = { selected = 4, cached = 9, ran = "2" },
+    }),
+    line("2026-11-03T12:00:00Z", "ci", { duration_ms = 8 * 86400 * 1000 }),
+  }, "r")
+  eq(broken.minutes, 0, "broken durations count 0")
+  eq(broken.kinds[1].wait_minutes, 0, "a negative wait counts 0")
+  eq(
+    broken.cache,
+    { selected = 4, cached = 4, ran = 2, hit_rate = 100 },
+    "file counts: whole and finite, never more cached than selected"
+  )
+  local okj, text = pcall(require("lib.nvim.json.canonical").encode, broken)
+  ok(okj, "the part of broken lines encodes: " .. tostring(text))
 end

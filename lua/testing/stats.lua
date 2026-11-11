@@ -230,6 +230,32 @@ M.EXPORT_KINDS = {
 ---Days of the part `metrics` (ending at the last run, not at the clock).
 M.EXPORT_DAYS = 90
 
+---The longest run a line may claim; a longer (or negative, or not finite) duration is a broken line and counts 0.
+M.EXPORT_MAX_SECONDS = 7 * 86400
+---The most spec files a line may claim; more (or a fraction, or not finite) counts 0.
+M.EXPORT_MAX_FILES = 100000
+
+---Seconds a document may hold: finite, 0 to `EXPORT_MAX_SECONDS`, else 0 (the canonical encoder refuses `inf`).
+---@param x any
+---@return number
+local function export_seconds(x)
+  if type(x) ~= "number" or x ~= x or x < 0 or x > M.EXPORT_MAX_SECONDS then
+    return 0
+  end
+  return x
+end
+
+---A count of spec files a document may hold: a whole number, 0 to `EXPORT_MAX_FILES`, else 0.
+---@param x any
+---@return integer
+local function export_files(x)
+  x = tonumber(x)
+  if not x or x ~= x or x < 0 or x > M.EXPORT_MAX_FILES or x ~= math.floor(x) then
+    return 0
+  end
+  return x --[[@as integer]]
+end
+
 ---A verdict as a document names it: a short word, else `other`.
 ---@param v any
 ---@return string
@@ -293,8 +319,8 @@ function M.export_part(entries, name, pushes)
   local total, backfilled = 0, 0
   for _, e in ipairs(mine) do
     local kind = M.EXPORT_KINDS[e.kind] and e.kind or "other"
-    local dur = math.max(0, metrics.seconds_of(e, "duration"))
-    local wait = math.max(0, metrics.seconds_of(e, "wait"))
+    local dur = export_seconds(metrics.seconds_of(e, "duration"))
+    local wait = export_seconds(metrics.seconds_of(e, "wait"))
     local k = kinds[kind]
     if not k then
       k = { runs = 0, seconds = 0, durations = {}, wait = 0, waited = 0, verdicts = {} }
@@ -316,9 +342,11 @@ function M.export_part(entries, name, pushes)
       days[day] = dd
     end
     if (kind == "suite" or kind == "suite-partial") and type(e.files) == "table" then
-      cache.selected = cache.selected + math.max(0, tonumber(e.files.selected) or 0)
-      cache.cached = cache.cached + math.max(0, tonumber(e.files.cached) or 0)
-      cache.ran = cache.ran + math.max(0, tonumber(e.files.ran) or 0)
+      -- never more from the cache than selected: the hit rate stays a percentage
+      local selected = export_files(e.files.selected)
+      cache.selected = cache.selected + selected
+      cache.cached = cache.cached + math.min(export_files(e.files.cached), selected)
+      cache.ran = cache.ran + export_files(e.files.ran)
     end
     if type(e.note) == "string" and e.note:find("^backfilled") then
       backfilled = backfilled + 1
