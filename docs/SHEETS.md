@@ -384,7 +384,7 @@ and nothing of them is handed to an AI.
 ## Step by step (`testing sheets step`)
 
 ```
-testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run] [--tasks <vault> [--tasks-cli <tasks.lua>]]
+testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run [--format=json|text]] [--tasks <vault> [--tasks-cli <tasks.lua>]]
 ```
 
 runs one sheet the way a debugger runs a program: it stops before a step, says what the step will do, runs it when
@@ -431,6 +431,18 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 * `--break <n>` stops before step `n` of every size. `--delay <ms>` waits before each step that does not stop, to give
   the eye a chance. `--run` starts as if `continue` had been said and reads no commands at all, not even a closed
   stdin (`--break` is refused with it): for watching, not for a client.
+* `--format=text` (only with `--run`) writes lines for a person or an agent instead of the JSON events: the sheet, each
+  size, one line per step that ran, `<size> <n>/<total> <status> <ms> ms <action> <value>`, then `# <note>` and
+  `: <reason>` (the failure line, or why it was a skip) when there are any, notes, the task, and at the end
+  `end <status> <ms> ms` with the failure lines under it. A value longer than 80 bytes is cut; the screen of a step
+  is not shown (the JSON events have it).
+
+  ```
+  sheet cli.red: Red in the middle (rpc, 3 steps, 80x24 40x10)
+  size 80x24 open
+  80x24 1/3 pass 41 ms lua vim.g.a = 1
+  80x24 2/3 fail 1003 ms expect false # never: 80x24 step 2, never (expect false) ...
+  ```
 * `--headed` opens a visible window for a browser sheet, with Playwright's Chromium, else an installed Chrome or Edge;
   an rpc sheet has none, its child editor shows up as the `screen` text of each step.
 * Notes stay beside the pictures of the run (`notes.json` in its folder under `stdpath("cache")`, emptied by the

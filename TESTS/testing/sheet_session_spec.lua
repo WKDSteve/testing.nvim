@@ -661,6 +661,70 @@ end
     ok(vim.tbl_filter(function(e)
       return e.event == "paused"
     end, ran)[1] == nil, "--run never pauses")
+
+    -- --format=text: one line per step that ran (n, status, ms, action, note, reason), then the end
+    local lines = {}
+    local c5 = step_cli.main(
+      { "cli.red", "--root", root, "--run", "--format=text" },
+      { out = function() end, err = function() end },
+      {
+        emit = function(line)
+          vim.list_extend(lines, vim.split(line, "\n", { plain = true }))
+          return true
+        end,
+        trust_check = function()
+          return nil
+        end,
+        getenv = function()
+          return nil
+        end,
+        session_opts = run_opts,
+      }
+    )
+    eq(c5, 1, "--format=text: the verdict of the run")
+    local text = table.concat(lines, "\n")
+    ok(not text:find('"schema"', 1, true), "no JSON: " .. text)
+    eq(lines[1], "sheet cli.red: Red in the middle (rpc, 3 steps, 80x24 40x10)", "the sheet first")
+    ok(vim.tbl_contains(lines, "size 80x24 open"), "a size that opens: " .. text)
+    local steps = vim.tbl_filter(function(l)
+      return l:match("^%d+x%d+ %d+/3 ")
+    end, lines)
+    eq(#steps, 4, "a line per step that ran (2 per size, the first failure ends a size): " .. text)
+    ok(steps[1]:match("^80x24 1/3 pass %d+ ms lua vim%.g%.a = 1$"), "a green step: " .. steps[1])
+    ok(
+      steps[2]:match(
+        "^80x24 2/3 fail %d+ ms expect false # never: 80x24 step 2, never %(expect false%)"
+      ),
+      "a red one, with its note and reason: " .. steps[2]
+    )
+    ok(lines[#lines - 2]:match("^end fail %d+ ms$"), "the end: " .. lines[#lines - 2])
+    has(lines[#lines - 1], "80x24 step 2", "... with the failure lines")
+    ok(not text:find("paused", 1, true), "nothing a client needs")
+
+    -- the line of a step, without a run
+    local before = {}
+    eq(
+      step_cli.text_line(
+        { event = "step-before", size = "s", n = 1, total = 2, action = "keys", value = "a\nb" },
+        before
+      ),
+      nil,
+      "step-before has no line of its own"
+    )
+    eq(
+      step_cli.text_line(
+        { event = "step-after", size = "s", n = 1, status = "skip", ms = 3, reason = "no browser" },
+        before
+      ),
+      "s 1/2 skip 3 ms keys a b: no browser",
+      "a skip says why, control characters become blanks"
+    )
+    local long_before = { event = "step-before", size = "s", n = 2, total = 2, action = "lua" }
+    long_before.value = ("x"):rep(500)
+    eq(step_cli.text_line(long_before, before), nil, "...")
+    local after_long = { event = "step-after", size = "s", n = 2, status = "pass", ms = 1 }
+    local cut = assert(step_cli.text_line(after_long, before))
+    ok(#cut < 120, "a long value is cut: " .. cut)
   end
 
   -- the gates ------------------------------------------------------------------------------------------------------
@@ -681,6 +745,16 @@ end
       { "cli.green", "--root", root, "--run", "--break", "1" },
       "--run reads no commands",
       "--run and --break"
+    )
+    refused(
+      { "cli.green", "--root", root, "--format=text" },
+      "belongs to --run",
+      "--format=text without --run"
+    )
+    refused(
+      { "cli.green", "--root", root, "--run", "--format", "yaml" },
+      "json or text",
+      "an unknown format"
     )
     refused(
       { "cli.green", "--root", root, "--break", "9" },

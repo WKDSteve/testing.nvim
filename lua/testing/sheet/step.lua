@@ -18,7 +18,7 @@ local M = {}
 
 M.SCHEMA = "testing-sheet-session/1"
 M.USAGE =
-  "usage: testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run] [--tasks <vault> [--tasks-cli <tasks.lua>]]"
+  "usage: testing sheets step <sheet> [--root <dir>] [--headed] [--delay <ms>] [--break <n>]... [--run [--format=json|text]] [--tasks <vault> [--tasks-cli <tasks.lua>]]"
 
 ---The longest note, in bytes: one line of a task, not a document.
 M.MAX_NOTE = 1000
@@ -126,6 +126,94 @@ local function stdin_reader()
   }
 end
 
+---The longest value of a step in a text line, in bytes: a line per step, not the step's source.
+M.MAX_TEXT_VALUE = 80
+
+---A value of a step on one line: a string as it is, anything else compact; control characters become blanks.
+---@param v any
+---@return string
+local function one_line(v)
+  local text = type(v) == "string" and v or vim.inspect(v, { newline = " ", indent = "" })
+  text = text:gsub("%c", " ")
+  if #text > M.MAX_TEXT_VALUE then
+    text = text:sub(1, M.MAX_TEXT_VALUE - 3) .. "..."
+  end
+  return text
+end
+
+---An event of the run as a line for a person or an agent (`--format=text`), nil for an event that has none.
+---
+---A step is one line when it ran: `<size> <n>/<total> <status> <ms> ms <action> <value>`, then `# <note>` and
+---`: <reason>` when there are any. `before` holds the `step-before` events by `<size>:<n>` (filled here), since
+---`step-after` names neither the action nor the note.
+---@param ev table An event of `testing-sheet-session/1`.
+---@param before table<string, table>
+---@return string|nil
+function M.text_line(ev, before)
+  local e = ev.event
+  if e == "start" then
+    local sizes = {}
+    for _, sz in ipairs(ev.sizes or {}) do
+      sizes[#sizes + 1] = ("%sx%s"):format(tostring(sz.cols), tostring(sz.rows))
+    end
+    return ("sheet %s: %s (%s, %d steps, %s)"):format(
+      tostring(ev.id),
+      one_line(ev.title or ""),
+      tostring(ev.engine or "rpc"),
+      #(ev.steps or {}),
+      table.concat(sizes, " ")
+    )
+  elseif e == "size" then
+    return ("size %s %s%s"):format(
+      tostring(ev.size),
+      tostring(ev.state),
+      ev.reason and (": " .. one_line(ev.reason)) or ""
+    )
+  elseif e == "step-before" then
+    before[("%s:%s"):format(tostring(ev.size), tostring(ev.n))] = ev
+    return nil
+  elseif e == "step-after" then
+    local b = before[("%s:%s"):format(tostring(ev.size), tostring(ev.n))] or {}
+    local why = ev.failure or ev.reason
+    return ("%s %s/%s %s %d ms %s%s%s%s%s"):format(
+      tostring(ev.size),
+      tostring(ev.n),
+      tostring(b.total or "?"),
+      tostring(ev.status),
+      tonumber(ev.ms) or 0,
+      tostring(b.action or "?"),
+      b.value ~= nil and (" " .. one_line(b.value)) or "",
+      b.note and (" # " .. one_line(b.note)) or "",
+      why and (": " .. one_line(why)) or "",
+      ev.shot and (" -> " .. tostring(ev.shot)) or ""
+    )
+  elseif e == "note" then
+    return ("note %s %s: %s"):format(tostring(ev.size), tostring(ev.n), tostring(ev.text))
+  elseif e == "task" then
+    return ("task %s %s%s"):format(
+      tostring(ev.id),
+      tostring(ev.outcome),
+      ev.message and (": " .. one_line(ev.message)) or ""
+    )
+  elseif e == "error" then
+    return "error: " .. one_line(ev.message or "")
+  elseif e == "end" then
+    local lines = {
+      ("end %s %d ms%s"):format(
+        tostring(ev.status),
+        tonumber(ev.ms) or 0,
+        ev.skipped and (": " .. one_line(ev.skipped)) or ""
+      ),
+    }
+    for _, f in ipairs(ev.failures or {}) do
+      lines[#lines + 1] = "  " .. (tostring(f):gsub("\r?\n", "\n  "))
+    end
+    return table.concat(lines, "\n")
+  end
+  -- `paused` and `ask` need a client; `--format=text` is `--run`, which has none
+  return nil
+end
+
 ---The folder of the last stepped run of a sheet (pictures of its steps, its notes), below `stdpath("cache")`.
 ---@param id string
 ---@return string
@@ -224,6 +312,17 @@ local function parse(argv)
     elseif a == "--run" then
       o.run = true
       i = i + 1
+    elseif a == "--format" or a:match("^%-%-format=") then
+      local v = a:match("^%-%-format=(.*)$")
+      if not v then
+        v = argv[i + 1]
+        i = i + 1
+      end
+      if v ~= "json" and v ~= "text" then
+        return nil, ("--format is json or text, got %s"):format(tostring(v))
+      end
+      o.format = v
+      i = i + 1
     elseif a == "--tasks" or a == "--tasks-cli" then
       if not argv[i + 1] then
         return nil, a .. " needs a value"
@@ -262,6 +361,9 @@ local function parse(argv)
   end
   if not o.target then
     return nil, "which sheet?"
+  end
+  if o.format == "text" and not o.run then
+    return nil, "--format=text belongs to --run: a client that sends commands reads the JSON events"
   end
   if o.run and #o.break_list > 0 then
     return nil, "--run reads no commands, nothing could go on after a --break"
@@ -437,11 +539,21 @@ function M.main(argv, sv, deps)
       io.stdout:flush()
       return ok and true or false
     end
+  local before = {}
   local function emit(event, fields)
     fields = fields or {}
     fields.schema, fields.event = M.SCHEMA, event
+    local line
+    if o.format == "text" then
+      line = M.text_line(fields, before)
+      if not line then
+        return
+      end
+    else
+      line = vim.json.encode(fields)
+    end
     -- nobody reads any more: nothing is left to do but clean up
-    if not write(vim.json.encode(fields)) and session then
+    if not write(line) and session then
       session:cancel()
     end
   end

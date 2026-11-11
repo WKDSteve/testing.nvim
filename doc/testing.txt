@@ -601,6 +601,8 @@ name), as `--all` would.
 (testing-sheet-session/1, one JSON line each), commands on stdin (`next`,
 `continue`, `until <n>`, `note <text>`, `abort`; closed stdin is `abort`). Writes
 nothing but the notes of the run (beside its pictures, for the report).
+`--run --format=text` writes one line per step instead (size, n/total,
+status, ms, action and value, `# note`, `: reason`) and the end.
 0 green or a skip, 1 a step failed, 2 bad usage or refused, 3 aborted.
 See docs/SHEETS.md, "Step by step".
 
