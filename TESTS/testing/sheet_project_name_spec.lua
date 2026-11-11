@@ -59,5 +59,44 @@ return function(H)
   eq(tasks.project_name(nvim), "nvim", "a file that calls something is not read")
   eq(vim.g.project_name_ran, nil, "... and nothing of it ran")
 
+  -- a block written before the project named itself names it by its folder: `sheets run --tasks` takes the root for
+  -- it instead of refusing (the block is then written under the new name)
+  write(nvim .. "/.testing.lua", 'return { sheets = { project = "nvim-config" } }\n')
+  local old_block = table.concat({
+    tasks.BEGIN,
+    "## Test sheets",
+    "",
+    "- **Context** (`cfg.context`, `nvim/TESTS/sheets/context-open.sheet.lua`): never run",
+    tasks.END,
+  }, "\n")
+  local errs, ran = {}, {}
+  local code = require("testing.sheet.run").main(
+    { "--task", "nvim-config/x", "--root", nvim, "--tasks", base },
+    {
+      out = function() end,
+      err = function(s)
+        errs[#errs + 1] = s
+      end,
+    },
+    {
+      getenv = function()
+        return nil
+      end,
+      trust_check = function()
+        return nil
+      end,
+      call = function()
+        return { items = { { id = "nvim-config/x", body = "# x\n\n" .. old_block .. "\n" } } }
+      end,
+      run = function(s)
+        ran[#ran + 1] = s.id
+        return { ok = true, status = "pass", failures = {}, snapshots = {} }
+      end,
+      no_write = true,
+    }
+  )
+  eq(errs, {}, "the old name in the block is this root: " .. table.concat(errs, "\n"))
+  eq({ code, ran }, { 0, { "cfg.context" } }, "... and its sheet runs")
+
   vim.fn.delete(base, "rf")
 end

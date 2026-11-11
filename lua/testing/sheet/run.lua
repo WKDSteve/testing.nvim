@@ -315,6 +315,10 @@ function M.main(argv, sv, deps)
     local have = {}
     for _, r in ipairs(roots) do
       have[tasks.project_name(r)] = true
+      -- a block written before the root named itself (`sheets.project`) names it by its folder: that is this root
+      -- too, and the block is written again under the new name
+      have[vim.fs.basename(r)] = true
+      have[require("testing.metrics").repo_name(r)] = true
     end
     ---@cast call -?
     local doc = call("bodies", { ids = { o.id } })
