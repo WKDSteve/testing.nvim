@@ -2,7 +2,7 @@
 ---@module 'testing.sheet.browser'
 ---@brief Engine "browser" of a test sheet: a page in a real browser (Playwright), steps as data.
 ---@description
---- The steps (`open`, `press`, `click`, `wait`, `expect`, `shot`) are written to a plan file and run by
+--- The steps (`open`, `press`, `click`, `drag`, `wait`, `expect`, `shot`) are written to a plan file and run by
 --- `browser_runner.mjs` with node and `playwright-core`; `wait` and `expect` are JavaScript expressions in the
 --- page (`document.activeElement.id === 'a'`). The runner prints one JSON line `{ failures, shots }`; exit 77
 --- is a prerequisite that is missing (node, `playwright-core`, chromium): the sheet is a reported skip

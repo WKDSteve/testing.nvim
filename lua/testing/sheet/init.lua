@@ -73,6 +73,7 @@ M.ACTIONS = {
   "press",
   "click",
   "hover",
+  "drag",
   "focus",
   "blur",
   "scheme",
@@ -108,6 +109,7 @@ M.ENGINE_ACTIONS = {
     press = true,
     click = true,
     hover = true,
+    drag = true,
     focus = true,
     blur = true,
     scheme = true,
@@ -151,6 +153,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field press? string
 ---@field click? string
 ---@field hover? string A CSS selector the pointer moves over (browser): a later `shot` shows the `:hover` state.
+---@field drag? { from: string, to: string } Drags the element `from` onto the element `to` (browser, CSS selectors).
 ---@field focus? string A CSS selector that gets the keyboard focus (browser).
 ---@field blur? boolean Takes the keyboard focus from whatever has it (browser); red when something but the page itself holds it afterwards.
 ---@field scheme? "light"|"dark" The page's `prefers-color-scheme` from now on (browser).
@@ -231,6 +234,7 @@ local STEP_KEYS = {
   press = "string",
   click = "string",
   hover = "string",
+  drag = "table",
   focus = "string",
   blur = "boolean",
   scheme = "string",
@@ -528,6 +532,19 @@ local function check_step(step, i, engine)
     ) and step[action] == ""
   then
     return ("%s.%s must not be empty"):format(at, action)
+  end
+  if action == "drag" then
+    for k, v in pairs(step.drag) do
+      if k ~= "from" and k ~= "to" then
+        return ("%s.drag: unknown field %s (from and to)"):format(at, tostring(k))
+      end
+      if type(v) ~= "string" or v == "" then
+        return ("%s.drag.%s: a CSS selector"):format(at, k)
+      end
+    end
+    if not (step.drag.from and step.drag.to) then
+      return at .. ".drag: from and to, each a CSS selector"
+    end
   end
   if action == "scheme" and step.scheme ~= "light" and step.scheme ~= "dark" then
     return at .. '.scheme: "light" or "dark"'
@@ -994,6 +1011,10 @@ end
 function M.value_text(v)
   if type(v) ~= "table" then
     return v
+  end
+  if v.from ~= nil and v.to ~= nil then
+    -- a `drag` step: where from, where to
+    return ("%s -> %s"):format(tostring(v.from), tostring(v.to))
   end
   if v.name == nil and (v.text ~= nil or v.row ~= nil) then
     -- an `hl` step: the place, then what must hold, in a fixed order

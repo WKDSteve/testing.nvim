@@ -698,6 +698,7 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `press = key` | a key by Playwright name (`Tab`, `Shift+Tab`, `Escape`, `Control+k`) | never |
 | `click = selector` | clicks the first element that matches the CSS selector | none matches in 5 s |
 | `hover = selector` | moves the pointer over the element and leaves it there: a later `expect` or `shot` sees its `:hover` state (JavaScript cannot trigger `:hover`) | none matches in 5 s |
+| `drag = { from = selector, to = selector }` | presses the pointer on `from`, moves it onto `to` and lets go there: HTML5 drag and drop (`draggable`, `drop` events) and pointer handlers both see it | either does not match in 5 s |
 | `focus = selector` | gives the element the keyboard focus (`:focus`, the focus ring) | none matches in 5 s |
 | `blur = true` | takes the keyboard focus from whatever has it (the next key goes to the page): the way back from a `focus`, without an `expect` that does it on the side | something but the page itself holds the focus afterwards (a handler gave it to another element) |
 | `scheme = "light"\|"dark"` | the page's `prefers-color-scheme` from now on, without a reload | never |

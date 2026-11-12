@@ -56,6 +56,11 @@ return function(H)
     { blur = "#k" },
     { scheme = "blue" },
     { scheme = "" },
+    { drag = {} },
+    { drag = { from = "#a" } },
+    { drag = { from = "#a", to = "" } },
+    { drag = { from = "#a", to = 3 } },
+    { drag = { from = "#a", to = "#b", via = "#c" } },
   }) do
     local _, why = sheet.validate({ id = "x", title = "x", engine = "browser", steps = { bad } })
     ok(why ~= nil, "a step with an unusable value is refused at load: " .. vim.inspect(bad))
@@ -253,7 +258,50 @@ return function(H)
       .. table.concat(passed_on.failures, "; ")
   )
 
-  -- 6. the size of a browser sheet is pixels: a tall page is fine, the size of a terminal grid stays small ------------
+  -- 6. drag: an item dragged onto a drop zone lands there (HTML5 drag and drop) ---------------------------------------
+  local dnd = assert(io.open(root .. "/drag.html", "wb"))
+  dnd:write(table.concat({
+    '<!doctype html><div id="item" draggable="true" style="width:80px;height:30px">item</div>',
+    '<div id="zone" style="width:200px;height:100px;margin-top:40px;border:1px solid">zone</div>',
+    "<script>",
+    "const zone = document.getElementById('zone');",
+    "document.getElementById('item').addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'item'));",
+    "zone.addEventListener('dragover', (e) => e.preventDefault());",
+    "zone.addEventListener('drop', (e) => { e.preventDefault(); window.dropped = e.dataTransfer.getData('text/plain'); });",
+    "</script>",
+  }, "\n"))
+  dnd:close()
+  local dragged = sheet.run(
+    assert(sheet.validate({
+      id = "page.drag",
+      title = "Drag",
+      engine = "browser",
+      steps = {
+        { open = "drag.html" },
+        { expect = "window.dropped === undefined", note = "nothing dropped yet" },
+        { drag = { from = "#item", to = "#zone" } },
+        { expect = "window.dropped === 'item'", note = "the item landed in the zone" },
+      },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(dragged.ok, "drag drops the item: " .. table.concat(dragged.failures, "; "))
+  local missed = sheet.run(
+    assert(sheet.validate({
+      id = "page.drag-missing",
+      title = "Drag to nowhere",
+      engine = "browser",
+      steps = { { open = "drag.html" }, { drag = { from = "#item", to = "#nowhere" } } },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  ok(
+    not missed.ok and (missed.failures[1] or ""):find("drag #item -> #nowhere", 1, true) ~= nil,
+    "a drag onto an element that is not there is red and names both: "
+      .. table.concat(missed.failures, "; ")
+  )
+
+  -- 7. the size of a browser sheet is pixels: a tall page is fine, the size of a terminal grid stays small ------------
   local tall = {
     id = "t",
     title = "t",

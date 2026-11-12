@@ -12,12 +12,14 @@ import { pathToFileURL } from 'node:url';
 
 const SKIP = 77;
 const DRIVER_SCHEMA = 'testing-sheet-driver/1';
-const ACTIONS = ['open', 'press', 'click', 'hover', 'focus', 'blur', 'scheme', 'wait', 'expect', 'shot'];
+const ACTIONS = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'scheme', 'wait', 'expect', 'shot'];
 
 function describe(step) {
   for (const a of ACTIONS) {
     if (step[a] !== undefined) {
-      const what = `${a} ${String(step[a]).replace(/\s+/g, ' ').slice(0, 60)}`;
+      // a `drag` is { from, to }: both are named (as testing.sheet.value_text does)
+      const value = a === 'drag' ? `${step.drag.from} -> ${step.drag.to}` : String(step[a]);
+      const what = `${a} ${value.replace(/\s+/g, ' ').slice(0, 60)}`;
       return step.note ? `${step.note} (${what})` : what;
     }
   }
@@ -57,6 +59,9 @@ async function runStep(page, step, where) {
   } else if (step.hover !== undefined) {
     // the pointer stays over the element: a later `shot` shows its :hover state (JS cannot trigger :hover)
     await page.hover(step.hover, { timeout: 5000 });
+  } else if (step.drag !== undefined) {
+    // pointer down on `from`, moved onto `to`, released there: HTML5 drag and drop and pointer handlers both see it
+    await page.dragAndDrop(step.drag.from, step.drag.to, { timeout: 5000 });
   } else if (step.focus !== undefined) {
     await page.focus(step.focus, { timeout: 5000 });
   } else if (step.blur !== undefined) {
