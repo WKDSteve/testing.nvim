@@ -42,6 +42,12 @@ return function(H)
   refused({ fakes = "open" }, "fakes must be a table", "not a list")
   refused({ fakes = { "../open" } }, "fakes[1]: a program name", "a path")
   refused({ fakes = { "open.cmd" } }, "fakes[1]: a program name", "an extension")
+  refused({ fakes = { ".exe" } }, "fakes[1]: a program name", "only an extension")
+  refused({ fakes = { "a/b.exe" } }, "fakes[1]: a program name", "a path with .exe")
+  ok(
+    sheet.validate(sheet_of({ fakes = { "powershell.exe", "explorer.exe" } })) ~= nil,
+    ".exe is allowed: what WSL calls through Windows interop"
+  )
   refused({ fakes = { "open", "open" } }, "fakes[2]: open twice", "twice")
   refused(
     { fakes = { "open" }, engine = "manual", manual = { "look" }, steps = {} },
@@ -76,6 +82,27 @@ return function(H)
     { "pass", {} },
     "the child found the stand-in and the step read the call"
   )
+
+  -- POSIX (WSL among them): a name with .exe is a stand-in like any other, so a feature that calls
+  -- `powershell.exe` through Windows interop reaches the stand-in and not Windows. On Windows the stand-in is a .cmd
+  -- file and a call of `x.exe` would not find it: there the bare name is the one to stand in for.
+  if vim.fn.has("win32") == 0 then
+    local exe = assert(sheet.validate(sheet_of({
+      fakes = { "powershell.exe" },
+      steps = {
+        {
+          lua = "_G.fake_code = vim.system({ 'powershell.exe', '-File', 'x.ps1' }, { text = true }):wait(10000).code",
+        },
+        {
+          expect = "_G.fake_code == 0 and vim.deep_equal(require('testing.fake_programs').read(vim.env.TESTING_FAKES, "
+            .. "'powershell.exe')[1].argv, { '-File', 'x.ps1' })",
+          note = "powershell.exe was the stand-in",
+        },
+      },
+    })))
+    local rexe = sheet.run(exe, { root = root, ci = true })
+    eq({ rexe.status, rexe.failures }, { "pass", {} }, "a .exe stand-in on POSIX")
+  end
 
   -- a sheet without the field finds no stand-in folder
   local plain =

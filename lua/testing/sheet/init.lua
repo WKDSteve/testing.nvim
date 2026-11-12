@@ -814,8 +814,10 @@ function M.check_fakes(fakes, engine)
   end
   local seen = {}
   for i, name in ipairs(fakes) do
-    if type(name) ~= "string" or not name:match("^[%a][%w_%-]*$") or #name > 40 then
-      return ("fakes[%d]: a program name (letters, digits, '_', '-'; no path, no extension)"):format(
+    -- `.exe` only for what WSL calls through Windows interop (`powershell.exe`): there it is a name like any other
+    local bare = type(name) == "string" and (name:match("^(.-)%.exe$") or name) or nil
+    if not bare or not bare:match("^[%a][%w_%-]*$") or #name > 40 then
+      return ("fakes[%d]: a program name (letters, digits, '_', '-'; no path, no extension but .exe)"):format(
         i
       )
     end

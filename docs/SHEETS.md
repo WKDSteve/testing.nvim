@@ -120,7 +120,7 @@ keeps one `manual` line for it ("once with the real network: the title comes").
 ### Stand-ins for programs (`fakes`)
 
 A feature that hands something to the system (`open`, `xdg-open`, `trash`, a browser) must not open a window or move a
-file in a sheet. `fakes = { "xdg-open", "open" }` (rpc only, at most 8 program names, no path, no extension) puts a
+file in a sheet. `fakes = { "xdg-open", "open" }` (rpc only, at most 8 program names, no path, no extension but `.exe`) puts a
 fresh folder of recording stand-ins (`testing.fake_programs`, `.cmd` on Windows, `sh` elsewhere) first on the child's
 `PATH` for each size, and names that folder in `TESTING_FAKES`. The feature calls the bare name as it always does; a
 step reads what was called:
@@ -136,6 +136,10 @@ steps = {
   },
 },
 ```
+
+A name with `.exe` (`powershell.exe`, `explorer.exe`) is for WSL, where a feature calls Windows programs through
+interop: there the stand-in catches the call before Windows runs it. On Windows itself the stand-in is a `.cmd` file
+and only the bare name (`powershell`) reaches it, so a sheet that runs on both lists both.
 
 `read(dir, program?)` gives `{ program, argv, cwd }` per call, in order. It proves what would be called, not what the
 system does with it: keep one `manual` line for the real effect. Known limit on Windows: an empty argument ends the
