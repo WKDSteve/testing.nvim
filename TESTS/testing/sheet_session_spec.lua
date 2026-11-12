@@ -662,6 +662,23 @@ end
       return e.event == "paused"
     end, ran)[1] == nil, "--run never pauses")
 
+    -- --delay waits before each step that does not stop, so the eye can follow (window phase): the gap between two
+    -- steps that take 50 ms holds the delay. A lower bound only, a loaded machine makes it longer, never shorter.
+    local after_at = {}
+    local c_delay = step_run({ "cli.green", "--root", root, "--run", "--delay", "300" }, {}, {
+      emit = function(line)
+        local doc = vim.json.decode(line)
+        if doc.event == "step-after" then
+          after_at[doc.n] = vim.uv.hrtime() / 1e6
+        end
+        return true
+      end,
+    })
+    eq(c_delay, 0, "--delay: a green run")
+    ok(after_at[1] and after_at[2], "--delay: both steps ran")
+    local gap = after_at[2] - after_at[1]
+    ok(gap >= 290, ("--delay 300 waits before a step, the gap was %d ms"):format(gap))
+
     -- --format=text: one line per step that ran (n, status, ms, action, note, reason), then the end
     local lines = {}
     local c5 = step_cli.main(
