@@ -180,8 +180,9 @@ The findings themselves are worked off with the rules of the LuaLS diagnostics (
 
 The in-process presets do not start `nvim -l` inside `nvim -l`: they run through `testing.cli` in the same process
 and with the same services. The suite step is green only when its Result-IR says so: exit `0` without a result is
-`infra` ("the suite wrote no result"), and a `--json` file left from an earlier run is not read. Options after `--` go to the `suite` step: `testing ci -- --jobs 4` (an error when no
-suite step is selected). An option that selects part of the suite (`--file`, `--filter`, `--tags`, `--shard`,
+`infra` ("the suite wrote no result"), and a `--json` file left from an earlier run is not read. Options after `--` go to the `suite` step: `testing ci -- --jobs 4`. Without a suite step
+in the run, an option that selects part of the suite is an error, one that only says how it runs (`--cached`,
+`--jobs`) is not used and said so (the base of `ci commit --quick -- --cached` runs only its red steps). An option that selects part of the suite (`--file`, `--filter`, `--tags`, `--shard`,
 `--changed`, ... the ones `testing stamp` refuses) makes the whole run **partial**: no sentinel, and the document
 says `partial_why = "suite options"`. A stamping suite step then runs as a plain run (a selection cannot earn a
 stamp), so `testing ci --step=suite -- --file TESTS/x_spec.lua` checks one file.

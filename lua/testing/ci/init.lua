@@ -1317,19 +1317,25 @@ function M.main(argv, sv)
     end
   end
   if #args.suite_args > 0 then
-    if not has_suite then
+    local run_args, bad =
+      require("testing.args").parse(vim.list_extend({ "run", root }, args.suite_args))
+    if not run_args then
+      return stop_early(M.EXIT_USAGE, { "the options after --: " .. tostring(bad) }, profile)
+    end
+    local selects = require("testing.stamp.write").refuse(run_args)
+    if not has_suite and selects then
       return stop_early(
         M.EXIT_USAGE,
         { "options after -- go to the suite step, and no suite step is selected" },
         profile
       )
     end
-    local run_args, bad =
-      require("testing.args").parse(vim.list_extend({ "run", root }, args.suite_args))
-    if not run_args then
-      return stop_early(M.EXIT_USAGE, { "the options after --: " .. tostring(bad) }, profile)
-    end
-    if require("testing.stamp.write").refuse(run_args) then
+    if not has_suite then
+      -- how the suite would run (`--cached`, `--jobs`): nothing to say without one. `ci commit` runs only the red steps
+      -- at the base, with the options the commit ran.
+      err("testing ci: no suite step is selected; the options after -- are not used")
+      args.suite_args = {}
+    elseif selects then
       suite_selects = true
       partial_why[#partial_why + 1] = "suite options"
     end

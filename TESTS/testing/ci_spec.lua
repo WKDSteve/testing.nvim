@@ -532,6 +532,16 @@ return function(H)
     has(res.out, "(partial: --step)", "partial: the verdict line says so")
     eq(doc_of(root).partial, true, "partial: the document says so")
     eq(doc_of(root).verdict, "green-partial", "partial: verdict green-partial")
+    -- options after -- without a suite step: how the suite would run is not used (the base of `ci commit --quick --
+    -- --cached` runs only its red steps); a selection of the suite stays a usage error
+    local opts = run(root, "--step=b", "--", "--cached")
+    eq(opts.code, 0, "suite options without a suite step: --cached is not an error")
+    has(opts.err, "the options after -- are not used", "suite options without a suite step: said")
+    eq(
+      run(root, "--step=b", "--", "--file", "x_spec.lua").code,
+      2,
+      "a suite selection without a suite step: exit 2"
+    )
     eq(run(root, "--step=zz").code, 2, "partial: an unknown step is exit 2")
     eq(run(root, "--profile=zz").code, 2, "partial: an unknown profile is exit 2")
   end
