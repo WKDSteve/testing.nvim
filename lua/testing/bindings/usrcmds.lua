@@ -1257,7 +1257,7 @@ function M.routes()
           optional_value = true,
           bare_value = "%",
           repeatable = true,
-          desc = "Only these files: bare the current buffer, --file=a,b the named ones (repeatable)",
+          desc = "Only these files: bare the current buffer, --file=a,b named ones (repeatable)",
         },
         {
           name = "changed",
