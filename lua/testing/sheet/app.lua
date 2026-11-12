@@ -259,7 +259,7 @@ end
 ---@param root string
 ---With `prepare_only` the app is built and its argv and env are filled in, but another program starts it (the webview
 ---engine: tauri-driver starts the app it drives); `stop` then only removes the folder of the run.
----@param opts? { cancelled?: fun(): boolean, prepare_only?: boolean }
+---@param opts? { prepare_only?: boolean, cancelled?: fun(): boolean }
 ---@return Testing.Sheet.App|nil app, string|nil err, string|nil skip Why the sheet is a skip, not a failure.
 function M.start(name, root, opts)
   opts = opts or {}

@@ -8,6 +8,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createServer } from 'node:net';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -49,6 +50,18 @@ export function keyActions(press) {
     ...keys.map((value) => ({ type: 'keyDown', value })),
     ...keys.reverse().map((value) => ({ type: 'keyUp', value })),
   ];
+}
+
+// A port of the loopback that nothing listens on now: the system picks it.
+function freePort() {
+  return new Promise((done, fail) => {
+    const probe = createServer();
+    probe.once('error', fail);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => done(port));
+    });
+  });
 }
 
 // The whole tree: tauri-driver starts msedgedriver, which starts the app; killing only the first leaves the others.
@@ -109,12 +122,31 @@ function driver() {
   // an expression of the sheet, as the body of a function: no eval, which the page's CSP may refuse
   const evaluate = (expression) => script(`return (\n${expression}\n);`);
 
+  // A tree that did not become a session (tauri-driver, msedgedriver, the app) is ended here, also when `open` is tried
+  // again for the next size: a second start must never leave the first one behind.
   const start = async (options) => {
-    const port = 4500 + Math.floor(Math.random() * 1000);
+    killTree(tauri);
+    tauri = undefined;
+    try {
+      await startTree(options);
+    } catch (e) {
+      killTree(tauri);
+      tauri = undefined;
+      base = undefined;
+      throw e;
+    }
+  };
+
+  const startTree = async (options) => {
+    // both ports free right now (not a guess in a range): two webview sheets at once, or a tauri-driver of somebody
+    // else, never meet; msedgedriver's port is named too, its default would be shared
+    const port = await freePort();
+    const nativePort = await freePort();
     server = `http://127.0.0.1:${port}`;
     // a list is a program with its first arguments (a spec's stand-in for tauri-driver)
     const [exe, ...first] = Array.isArray(options.tauri_driver) ? options.tauri_driver : [options.tauri_driver];
-    tauri = spawn(exe, [...first, '--port', String(port), '--native-driver', options.msedgedriver], {
+    const argv = [...first, '--port', String(port), '--native-port', String(nativePort)];
+    tauri = spawn(exe, [...argv, '--native-driver', options.msedgedriver], {
       cwd: options.cwd,
       env: { ...process.env, ...(options.env ?? {}) },
       stdio: 'ignore',
@@ -122,17 +154,23 @@ function driver() {
     });
     let failed;
     tauri.on('error', (e) => {
-      failed = e;
+      failed = e.message;
     });
-    for (let i = 0; i < 100 && !failed; i++) {
+    // a driver that ends at once (wrong msedgedriver, a port taken after all) is said now, not after the polling
+    tauri.on('exit', (code, signal) => {
+      failed = failed ?? `it ended (${signal ?? `exit ${code}`})`;
+    });
+    let up = false;
+    for (let i = 0; i < 100 && !failed && !up; i++) {
       try {
-        if ((await fetch(`${server}/status`, { signal: AbortSignal.timeout(1000) })).ok) break;
+        up = (await fetch(`${server}/status`, { signal: AbortSignal.timeout(1000) })).ok;
       } catch {
         // not up yet
       }
-      await new Promise((done) => setTimeout(done, 100));
+      if (!up) await new Promise((done) => setTimeout(done, 100));
     }
-    if (failed) throw new Error(`tauri-driver did not start: ${failed.message}`);
+    if (failed) throw new Error(`tauri-driver did not start: ${failed}`);
+    if (!up) throw new Error(`tauri-driver did not answer on ${server}`);
     const created = await call(
       'POST',
       `${server}/session`,

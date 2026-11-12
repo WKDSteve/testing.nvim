@@ -125,11 +125,39 @@ return function(H)
     "fake_tauri_driver.mjs",
     [[
 import { createServer } from 'node:http';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
 const native = process.argv[process.argv.indexOf('--native-driver') + 1];
 const log = (o) => appendFileSync(process.env.FAKE_WD_LOG, JSON.stringify(o) + '\n');
-log({ started: true, native, cwd: process.cwd().replace(/\\/g, '/'), probe: process.env.SHEET_PROBE ?? null });
+const nativePort = Number(process.argv[process.argv.indexOf('--native-port') + 1]);
+// the trees started before this one that still run now: an earlier try must be gone before the next one starts
+const alive = [];
+try {
+  for (const line of readFileSync(process.env.FAKE_WD_LOG, 'utf8').split('\n').filter(Boolean)) {
+    const doc = JSON.parse(line);
+    if (doc.started) {
+      try {
+        process.kill(doc.pid, 0);
+        alive.push(doc.pid);
+      } catch {
+        // gone
+      }
+    }
+  }
+} catch {
+  // no log yet
+}
+log({
+  started: true,
+  pid: process.pid,
+  port,
+  native,
+  nativePort,
+  alive,
+  cwd: process.cwd().replace(/\\/g, '/'),
+  probe: process.env.SHEET_PROBE ?? null,
+});
+if (process.env.FAKE_EXIT) process.exit(3);
 const E = 'element-6066-11e4-a52e-4f735466cecf';
 createServer((req, res) => {
   let body = '';
@@ -143,7 +171,11 @@ createServer((req, res) => {
       res.end(JSON.stringify({ value }));
     };
     if (path === '/status') return send(200, { ready: true });
-    if (path === '/session') return send(200, { sessionId: 's1', capabilities: {} });
+    if (path === '/session') {
+      // the session cannot be made (msedgedriver conflict, the app crashed): the process stays up, as tauri-driver does
+      if (process.env.FAKE_SESSION_FAIL) return send(500, { error: 'session not created', message: 'conflict' });
+      return send(200, { sessionId: 's1', capabilities: {} });
+    }
     if (path.endsWith('/element')) {
       if (json.value === '#missing') return send(404, { error: 'no such element', message: 'none' });
       return send(200, { [E]: 'e1' });
@@ -163,6 +195,10 @@ createServer((req, res) => {
     ".testing.lua",
     "return { sheets = { apps = { window = { run = { 'app.exe', '--demo', '${temp}' }, "
       .. "env = { SHEET_PROBE = 'probe-${temp}', FAKE_WD_LOG = '"
+      .. log
+      .. "' } }, failing = { run = { 'app.exe' }, env = { FAKE_SESSION_FAIL = '1', FAKE_WD_LOG = '"
+      .. log
+      .. "' } }, exits = { run = { 'app.exe' }, env = { FAKE_EXIT = '1', FAKE_WD_LOG = '"
       .. log
       .. "' } } } } }\n"
   )
@@ -306,4 +342,81 @@ createServer((req, res) => {
   )
   has(one({ expect = "THROWS" }), "javascript error: boom", "a throwing expression fails the step")
   has(one({ press = "Hyper" }), 'unknown key "Hyper"', "an unknown key is refused")
+
+  -- 4. what goes wrong while opening leaves nothing behind ----------------------------------------------------------------
+  local function starts()
+    local out = {}
+    for _, line in ipairs(vim.fn.filereadable(log) == 1 and vim.fn.readfile(log) or {}) do
+      local doc = vim.json.decode(line)
+      if doc.started then
+        out[#out + 1] = doc
+      end
+    end
+    return out
+  end
+  local function opts_for()
+    return {
+      root = root,
+      out_dir = root .. "/out",
+      tools = {
+        { name = "node", path = node },
+        { name = "tauri-driver", path = "unused" },
+        { name = "msedgedriver", path = "m" },
+      },
+      tauri_driver_argv = { node, fake },
+      driver_margin_ms = 20000,
+      driver_stop_ms = 4000,
+    }
+  end
+  -- the session cannot be made, for two sizes: each size starts a tree, and neither may outlive the run
+  vim.fn.delete(log)
+  local failing = sheet.run(
+    assert(sheet.validate({
+      id = "w.fail",
+      title = "T",
+      engine = "webview",
+      app = "failing",
+      sizes = { { cols = 800, rows = 600 }, { cols = 900, rows = 700 } },
+      steps = { { expect = "true" } },
+    })),
+    opts_for()
+  )
+  eq(failing.status, "fail", "a session that cannot be made fails the sheet")
+  has(failing.failures[1], "session not created", "... with the driver's reason")
+  local trees = starts()
+  eq(#trees, 2, "the second size tried again with a tree of its own")
+  eq(trees[2] and trees[2].alive, {}, "... once the tree of the first try was gone")
+  for i, t in ipairs(trees) do
+    ok(
+      vim.wait(5000, function()
+        return vim.uv.kill(t.pid, 0) ~= 0
+      end, 50),
+      ("the tree of try %d is gone (pid %d)"):format(i, t.pid)
+    )
+    ok(
+      type(t.nativePort) == "number" and t.nativePort > 0 and t.nativePort ~= t.port,
+      ("try %d names msedgedriver's port of its own (%s)"):format(i, tostring(t.nativePort))
+    )
+  end
+
+  -- a driver that ends at once is said at once, not after the polling
+  vim.fn.delete(log)
+  local t0 = vim.uv.hrtime()
+  local exits = sheet.run(
+    assert(sheet.validate({
+      id = "w.exit",
+      title = "T",
+      engine = "webview",
+      app = "exits",
+      steps = { { expect = "true" } },
+    })),
+    opts_for()
+  )
+  local ms = (vim.uv.hrtime() - t0) / 1e6
+  has(
+    exits.failures[1],
+    "tauri-driver did not start: it ended (exit 3)",
+    "a driver that ends says so"
+  )
+  ok(ms < 8000, ("... without waiting out the polling (%d ms)"):format(ms))
 end
