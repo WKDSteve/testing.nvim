@@ -19,6 +19,7 @@ return {
   minit = "TESTS/minimal_init.lua",      -- default; relative to the project root
   sizes = { { rows = 24, cols = 80 } },  -- one run per size (default 24x80)
   args = { "+Session load x" },          -- optional (rpc): the child's command line after its own, no shell
+  fakes = { "xdg-open" },                -- optional (rpc): recording stand-ins first on the child's PATH (below)
   steps = {
     { lua = 'require("ui").setup({ usrcmds = true })' },
     { keys = ":UI<CR>", note = "open the float" },
@@ -115,6 +116,30 @@ network), and nothing recorded with credentials goes into the repository. Why no
 and a connection for the whole suite of the repository (`guard_allow.spawn`, `network`), a program per repository and a
 port, and it is slower and flakier under load. The real transport is the business of the specs of the library; a sheet
 keeps one `manual` line for it ("once with the real network: the title comes").
+
+### Stand-ins for programs (`fakes`)
+
+A feature that hands something to the system (`open`, `xdg-open`, `trash`, a browser) must not open a window or move a
+file in a sheet. `fakes = { "xdg-open", "open" }` (rpc only, at most 8 program names, no path, no extension) puts a
+fresh folder of recording stand-ins (`testing.fake_programs`, `.cmd` on Windows, `sh` elsewhere) first on the child's
+`PATH` for each size, and names that folder in `TESTING_FAKES`. The feature calls the bare name as it always does; a
+step reads what was called:
+
+```lua
+fakes = { "xdg-open" },
+steps = {
+  { keys = "gx" },
+  { expect = "#require('testing.fake_programs').read(vim.env.TESTING_FAKES, 'xdg-open') == 1" },
+  {
+    expect = "require('testing.fake_programs').read(vim.env.TESTING_FAKES, 'xdg-open')[1].argv[1] == 'https://example.test/'",
+    note = "the link under the cursor is handed over",
+  },
+},
+```
+
+`read(dir, program?)` gives `{ program, argv, cwd }` per call, in order. It proves what would be called, not what the
+system does with it: keep one `manual` line for the real effect. Known limit on Windows: an empty argument ends the
+argument list of a `.cmd` stand-in.
 
 ### The user's installed config (`config = "user"`)
 

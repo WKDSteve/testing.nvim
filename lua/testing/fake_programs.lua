@@ -259,4 +259,13 @@ function Fake:close()
   vim.fn.delete(self.dir, "rf")
 end
 
+---The calls recorded in a folder of stand-ins that another process made (a sheet's `fakes`: the child editor reads
+---`vim.env.TESTING_FAKES`). Same shape as `Fake:calls`; a folder without a log gives no calls.
+---@param dir string
+---@param program? string Only the calls of this program.
+---@return Testing.FakePrograms.Call[]
+function M.read(dir, program)
+  return Fake.calls(setmetatable({ dir = dir, _log = dir .. "/calls.log" }, Fake), program)
+end
+
 return M

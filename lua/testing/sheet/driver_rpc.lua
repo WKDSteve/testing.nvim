@@ -251,6 +251,8 @@ function M.new(s, opts, ctx)
   end
   local D = {}
   local child, size
+  ---@type Testing.FakePrograms|nil
+  local fake
   -- a live sheet: the values of its variables, masked wherever the run shows something (`testing.sheet.live`)
   local live = s.live and require("testing.sheet.live") or nil
   local mask = function(text)
@@ -284,6 +286,19 @@ function M.new(s, opts, ctx)
         return { skip = why }
       end
     end
+    local env = live_env
+    if s.fakes then
+      -- stand-ins first on the child's PATH, a fresh log per size; a step reads it with
+      -- `require("testing.fake_programs").read(vim.env.TESTING_FAKES)`
+      if fake then
+        fake:close()
+      end
+      fake = require("testing.fake_programs").new(s.fakes)
+      env = vim.tbl_extend("force", env or {}, {
+        PATH = fake:path(vim.env.PATH or ""),
+        TESTING_FAKES = fake.dir,
+      })
+    end
     local spawn = vim.tbl_extend("force", {
       root = ctx.root,
       minit = not user and minit or nil,
@@ -294,7 +309,7 @@ function M.new(s, opts, ctx)
       size = size,
       -- a live child: its network guard lets it reach the named hosts only
       guard = live_guard or false,
-      extra_env = live_env,
+      extra_env = env,
       -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
       watch_prompts = true,
       args = M.command_line(s.args, size),
@@ -421,7 +436,13 @@ function M.new(s, opts, ctx)
     end
   end
 
-  D.close = D.close_size
+  function D.close()
+    D.close_size()
+    if fake then
+      fake:close()
+      fake = nil
+    end
+  end
 
   return D
 end

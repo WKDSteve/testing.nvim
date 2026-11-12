@@ -184,6 +184,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
 ---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
 ---@field live? Testing.Sheet.Live Real keys and network, only with `testing sheets run --live` (`testing.sheet.live`).
+---@field fakes? string[] Programs the child finds first on its `PATH` as recording stand-ins (`testing.fake_programs`): rpc only.
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
 ---@field steps Testing.Sheet.Step[]
@@ -271,6 +272,7 @@ local SHEET_KEYS = {
   config = "string",
   feature = "string",
   live = "table",
+  fakes = "table",
 }
 
 ---@param v any
@@ -727,6 +729,12 @@ function M.validate(s)
       return nil, aerr
     end
   end
+  if s.fakes ~= nil then
+    local ferr = M.check_fakes(s.fakes, s.engine)
+    if ferr then
+      return nil, ferr
+    end
+  end
   if s.config ~= nil then
     if s.config ~= "user" then
       return nil, 'config: "user" (the installed config of the user, read only)'
@@ -756,6 +764,35 @@ function M.validate(s)
     end
   end
   return s, nil
+end
+
+---At most this many stand-ins per sheet (`fakes`).
+M.MAX_FAKES = 8
+
+---Why `fakes` (programs the child finds as recording stand-ins, `testing.fake_programs`) is wrong, nil when it is right.
+---@param fakes any
+---@param engine string
+---@return string|nil
+function M.check_fakes(fakes, engine)
+  if engine ~= "rpc" then
+    return "fakes belongs to an rpc sheet"
+  end
+  if not is_list(fakes) or #fakes == 0 or #fakes > M.MAX_FAKES then
+    return ("fakes: a list of 1 to %d program names"):format(M.MAX_FAKES)
+  end
+  local seen = {}
+  for i, name in ipairs(fakes) do
+    if type(name) ~= "string" or not name:match("^[%a][%w_%-]*$") or #name > 40 then
+      return ("fakes[%d]: a program name (letters, digits, '_', '-'; no path, no extension)"):format(
+        i
+      )
+    end
+    if seen[name] then
+      return ("fakes[%d]: %s twice"):format(i, name)
+    end
+    seen[name] = true
+  end
+  return nil
 end
 
 ---Why the measure fields of a step are wrong, nil when they are right (or the step is no measure and has none).
