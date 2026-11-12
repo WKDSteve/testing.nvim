@@ -56,6 +56,8 @@ for _, name in ipairs({
   "TESTING_CACHE_HOME",
   -- the repositories root of `testing call` without one (a hub names it for its child: testing.export.call)
   "TESTING_REPOS_ROOT",
+  -- a run in GitHub Actions warns about its n/a cases even without --github (run.project reporter_plan)
+  "GITHUB_ACTIONS",
 }) do
   env[name] = os.getenv(name)
 end

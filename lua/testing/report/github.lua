@@ -26,6 +26,8 @@ local M = {}
 ---@field max_annotations? integer Annotations emitted at most (default 10).
 ---@field annotate_skips? boolean Also emit `::warning` for skipped cases (default false).
 ---@field annotate_na? boolean Emit one `::warning` naming the cases that did not apply here (default true).
+---@field only_na? boolean Render the n/a warning and nothing else (the implicit reporter of a run in GitHub Actions
+---without `--github`).
 ---@field summary? boolean Let the registry write the step summary (default true).
 ---@field summary_path? string Step summary file; default `$GITHUB_STEP_SUMMARY`.
 ---@field env? table<string, string|nil> Environment to read instead of the real one (tests).
@@ -50,10 +52,12 @@ function M.na_groups(result)
   for _, c in ipairs(result.cases or {}) do
     if type(c.na) == "string" and (c.status == "pass" or c.status == "skip") then
       count = count + 1
-      local g = by_reason[c.na]
+      -- the reason as a spec printed it (`print("n/a  <reason>")`) carries the marker; the warning says n/a already
+      local reason = c.na:gsub("^n/a%s+", "")
+      local g = by_reason[reason]
       if not g then
-        g = { reason = c.na, n = 0, first = c.id or c.file or "?" }
-        by_reason[c.na] = g
+        g = { reason = reason, n = 0, first = c.id or c.file or "?" }
+        by_reason[reason] = g
         groups[#groups + 1] = g
       end
       g.n = g.n + 1
@@ -172,6 +176,9 @@ end
 ---@return string[] lines
 function M.render(result, opts)
   local o = vim.tbl_extend("force", M.DEFAULTS, opts or {})
+  if o.only_na then
+    return { M.na_warning(result) }
+  end
   local entries = {}
   for _, c in ipairs(result.cases or {}) do
     local cls = util.class_of(c.status)

@@ -145,7 +145,7 @@ return function(H)
   local function with_na()
     local r = F.green()
     local a = F.add(r, { file = "TESTS/pty_spec.lua", name = "osc", status = "skip" })
-    a.na = "the pty checks need tmux"
+    a.na = "n/a  the pty checks need tmux"
     local b = F.add(r, { file = "TESTS/pty_spec.lua", name = "keys", status = "skip" })
     b.na = "the pty checks need tmux"
     local c = F.add(r, { file = "TESTS/trash_spec.lua", name = "gio" })

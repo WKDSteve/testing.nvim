@@ -310,7 +310,9 @@ Cases that did not apply here (n/a: a missing tmux, Podman image, browser or too
 runner they would go unnoticed. The reporter adds one warning for them, outside the cap of 10, that names each reason
 once with its count and a first case (`::warning title=testing: n/a here::3 case(s) did not apply here and did not
 run: ...`), and the step summary gets a section "Not applicable here" with the same list. `annotate_na = false` (an
-option of the reporter) leaves the warning out; the summary section stays.
+option of the reporter) leaves the warning out; the summary section stays. In GitHub Actions (`GITHUB_ACTIONS=true`) a
+run without `--github` prints that one warning too (and nothing else of this reporter, no step summary), so the fleet's
+workflows show a live check that stopped running without changing their run line.
 
 ## `junit`
 

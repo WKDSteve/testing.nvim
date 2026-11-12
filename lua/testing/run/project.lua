@@ -228,9 +228,11 @@ end
 ---The reporters to run on the real IR and on the sanitized one.
 ---@param args Testing.Args
 ---@param effective? string The reporter `resolve_reporter` chose (option, `TESTING_REPORTER`, agent environment).
+---@param env? table<string, string> The environment of the entry point (`sv.env`): in GitHub Actions a run without the
+---github reporter still gets its n/a warning (`only_na`), so a live check that stopped running shows on the run page.
 ---@return string stdout_reporter `term` (default), `github`, `junit`, `json` or `agent`
 ---@return Testing.Report.Spec[] sanitized_specs
-local function reporter_plan(args, effective)
+local function reporter_plan(args, effective, env)
   local primary = effective or args.reporter or "term"
   local sanitized = {}
   if primary == "github" then
@@ -241,6 +243,14 @@ local function reporter_plan(args, effective)
   end
   if args.github and primary ~= "github" then
     sanitized[#sanitized + 1] = { name = "github" }
+  end
+  if
+    primary ~= "github"
+    and not args.github
+    and type(env) == "table"
+    and env.GITHUB_ACTIONS == "true"
+  then
+    sanitized[#sanitized + 1] = { name = "github", opts = { only_na = true, summary = false } }
   end
   if args.junit then
     local path = vim.fs.normalize(vim.fn.fnamemodify(args.junit, ":p"))
@@ -1619,7 +1629,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     end
     require("testing.run.order").restore(res, discovery)
   end
-  local primary, sanitized_specs = reporter_plan(args, reporter_name)
+  local primary, sanitized_specs = reporter_plan(args, reporter_name, sv.env)
   local reports = require("testing.report")
   local code = report.exit_code
   -- the verdict is part of the IR (`run.verdict`): every reporter and the `--json` file say the same thing

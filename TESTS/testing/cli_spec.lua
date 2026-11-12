@@ -343,6 +343,25 @@ return function(H)
   eq(code, 1, "--github: exit 1")
   has(out, "::error", "annotations on stdout")
 
+  -- in GitHub Actions a run without --github still warns about its n/a cases (one line, no step summary)
+  write(root .. "/TESTS/na_spec.lua", 'return function(H)\n  print("n/a  needs tmux")\nend\n')
+  local summary_file = root .. "/out/summary.md"
+  code, out = run(
+    { root, "--file", "na_spec" },
+    { GITHUB_ACTIONS = "true", GITHUB_STEP_SUMMARY = summary_file }
+  )
+  eq(code, 0, "an n/a run stays green in Actions\n" .. out)
+  has(
+    out,
+    "::warning title=testing%3A n/a here::1 case(s) did not apply here and did not run: needs tmux",
+    "the n/a warning in Actions"
+  )
+  ok(not out:find("::error", 1, true), "and nothing else of the github reporter")
+  eq(vim.fn.filereadable(summary_file), 0, "no step summary without --github")
+  local _, na_out = run({ root, "--file", "na_spec" }, { GITHUB_ACTIONS = "false" })
+  ok(not na_out:find("::warning", 1, true), "outside Actions no workflow command: " .. na_out)
+  vim.fn.delete(root .. "/TESTS/na_spec.lua")
+
   -- exit 3: the IR cannot be written (the --json target is a directory)
   vim.fn.mkdir(root .. "/blocked.json", "p")
   code, out = run({ root, "--json", root .. "/blocked.json" })
