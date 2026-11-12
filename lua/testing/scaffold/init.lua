@@ -381,10 +381,46 @@ function M.build_vars(plugin, deps, owner, extra)
     -- Extra arguments of `testing run .` baked into scripts/test.sh (empty: nothing).
     RUN_ARGS = "",
   }
+  for k, v in pairs(M.sheets_only_vars(plugin, {})) do
+    vars[k] = v
+  end
   for k, v in pairs(extra or {}) do
     vars[k] = v
   end
   return vars
+end
+
+---The parts of `TESTS/minimal_init.lua` for dependencies only the test sheets load: found like the others (in
+---`DEPS`, so `ci commit` hands them over as `$<NAME>_DIR` and the cache keys on them), but neither required nor put
+---on the runtimepath; the path goes to `vim.g.<plugin>_sheets_<name>` (every character but a letter or a digit as
+---`_`), where the sheets' helpers take it into their child editor. Without such a dependency the three parts give
+---exactly the text of a file without the feature: a repository that has none is not out of date.
+---@param plugin string Sanitized plugin name.
+---@param names string[] Valid dependency names (`testing.deps.is_valid_name`), in `DEPS` order.
+---@return { SHEETS_ONLY_DECL: string, SHEETS_ONLY_ELSE: string, SHEETS_ONLY_RTP: string }
+function M.sheets_only_vars(plugin, names)
+  if #names == 0 then
+    return {
+      SHEETS_ONLY_DECL = "",
+      SHEETS_ONLY_ELSE = "else",
+      SHEETS_ONLY_RTP = "for _, name in ipairs(DEPS) do\n  vim.opt.rtp:append(found[name])\nend",
+    }
+  end
+  local entries, handover = {}, {}
+  for _, name in ipairs(names) do
+    entries[#entries + 1] = ("[%s] = true"):format(render.lua_quote(name))
+    handover[#handover + 1] = ("vim.g.%s_sheets_%s = found[%s]"):format(
+      (plugin:gsub("[^%w]", "_")),
+      (name:gsub("[^%w]", "_")),
+      render.lua_quote(name)
+    )
+  end
+  return {
+    SHEETS_ONLY_DECL = "\n\nlocal SHEETS_ONLY = { " .. table.concat(entries, ", ") .. " }",
+    SHEETS_ONLY_ELSE = "elseif not SHEETS_ONLY[name] then",
+    SHEETS_ONLY_RTP = "for _, name in ipairs(DEPS) do\n  if not SHEETS_ONLY[name] then\n    vim.opt.rtp:append(found[name])\n  end\nend\n"
+      .. table.concat(handover, "\n"),
+  }
 end
 
 ---Render one template file below `templates/` with `vars`.

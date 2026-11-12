@@ -117,6 +117,22 @@ A comment of the repository's own that explains a deliberate choice (a run of `#
 trace of, right above a code line the new render has exactly once and that has no comment of its own there) is put back
 above that line, listed under "kept". A template comment in an older wording is not: the new wording replaces it.
 
+**Dependencies only the test sheets load.** A dependency the specs must not see (it would answer what the specs
+fake) but the test sheets load in their own child editor stays in `DEPS` of `TESTS/minimal_init.lua` (so `ci commit`
+hands it over as `$<NAME>_DIR` and the cache keys on it) and is named in a line right below it:
+
+```lua
+local SHEETS_ONLY = { ["ui.nvim"] = true }
+```
+
+The gate then finds it like the others, but a missing one is not fatal, it is not put on the runtimepath, and its path
+goes to `vim.g.<plugin>_sheets_<name>` (every character but a letter or a digit as `_`: `vim.g.diff_sheets_ui_nvim`),
+where the sheets' helpers take it into their child. `--update` reads the names from that line, keeps them at the end
+of `DEPS` and renders the rest (the `elseif`, the loop, the handover lines); a comment of the repository's own above the
+line stays. A table it cannot read entry by entry (`= 1`, a computed name) is a risk and holds the file back. To start
+using it: add the name to `DEPS`, write the line, then `testing init --update --write`. A repository without the line
+gets exactly the file it had.
+
 Anything else of the repository's own is not kept: the code lines of the old file that the new one does not have
 are listed under "only in the old file" (only the exact lines an earlier template version wrote are counted
 instead), and its comment lines under "comments only in the old file" (a reason written down for a deliberate

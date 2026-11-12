@@ -300,18 +300,71 @@ end
 ---line by a formatter).
 local RTP_LOOP = "vim%.opt%.rtp:append%(found%[name%]%)%s*end[ \t]*\n"
 
+---The same loop with the `if not SHEETS_ONLY[name]` around the append (`scaffold.sheets_only_vars`).
+local RTP_LOOP_SHEETS = "vim%.opt%.rtp:append%(found%[name%]%)%s*end%s*end[ \t]*\n"
+
+---The dependencies an old minimal_init names as for the test sheets only: `local SHEETS_ONLY = { ["<name>"] = true }`
+---(`scaffold.sheets_only_vars`). A table this cannot read entry by entry is a risk: the file is held back rather than
+---putting a dependency on the runtimepath that was kept off it on purpose.
+---@param old string|nil The old `TESTS/minimal_init.lua`.
+---@return string[] names In the order of the table.
+---@return string[] risks
+function M.sheets_only_of(old)
+  local body = old and old:match("\nlocal SHEETS_ONLY%s*=%s*(%b{})")
+  if not body then
+    return {}, {}
+  end
+  local valid = require("testing.deps").is_valid_name
+  local names, risks = {}, {}
+  local rest = body:sub(2, -2):gsub('%[%s*"([^"\n]*)"%s*%]%s*=%s*true', function(name)
+    if valid(name) then
+      if not vim.tbl_contains(names, name) then
+        names[#names + 1] = name
+      end
+    else
+      risks[#risks + 1] = ("SHEETS_ONLY names a dependency this cannot read: %s"):format(
+        text.show(name, 80)
+      )
+    end
+    return ""
+  end)
+  if rest:gsub("[%s,;]", "") ~= "" then
+    risks[#risks + 1] =
+      'SHEETS_ONLY has entries other than ["<name>"] = true: the file is held back, write it in that form'
+  end
+  return names, risks
+end
+
 ---What a gate minimal_init sets up after the template's body: the text between the runtimepath loop and the last
----line (`legacy_init.GATE_TAIL`), or to the end when the file has no such line. Nil when there is nothing.
+---line (`legacy_init.GATE_TAIL`), or to the end when the file has no such line. Nil when there is nothing. The
+---handover lines of the sheets-only dependencies (`handover`) are the template's own and not part of it.
 ---@param before string
+---@param handover? string[] The `vim.g.<plugin>_sheets_<name> = found["<name>"]` lines the new file has.
 ---@return string|nil extra
-local function gate_extra(before)
-  local _, loop_end = before:find(RTP_LOOP)
+local function gate_extra(before, handover)
+  local _, loop_end = before:find(RTP_LOOP_SHEETS)
+  if not loop_end then
+    _, loop_end = before:find(RTP_LOOP)
+  end
   if not loop_end then
     return nil
   end
   local rest = before:sub(loop_end + 1)
   local tail = rest:find(legacy_init.GATE_TAIL, 1, true)
   local extra = tail and rest:sub(1, tail - 1) or rest
+  if handover and #handover > 0 then
+    local own = {}
+    for _, l in ipairs(handover) do
+      own[l] = true
+    end
+    local kept = {}
+    for _, l in ipairs(vim.split(extra, "\n", { plain = true })) do
+      if not own[vim.trim(l)] then
+        kept[#kept + 1] = l
+      end
+    end
+    extra = table.concat(kept, "\n")
+  end
   extra = extra:gsub("^%s+", ""):gsub("%s+$", "")
   return extra ~= "" and extra or nil
 end
@@ -635,6 +688,31 @@ function M.plan(root, opts)
     do
       local kept, risks, lost_comments = {}, {}, {}
       local vars, verr = scaffold.build_vars(plugin, deps, opts.owner or scaffold.DEFAULT_OWNER)
+      -- the dependencies only the test sheets load: in DEPS after the others, off the runtimepath, not required
+      local sheets, sheets_risks = M.sheets_only_of(old_minit)
+      vim.list_extend(risks, sheets_risks)
+      local handover = {}
+      if vars and #sheets > 0 then
+        local all = vim.deepcopy(vars.ALL_DEPS --[[@as string[] ]])
+        for _, name in ipairs(sheets) do
+          if not vim.tbl_contains(all, name) then
+            all[#all + 1] = name
+          end
+        end
+        vars.ALL_DEPS = all
+        local parts = scaffold.sheets_only_vars(plugin, sheets)
+        for k, v in pairs(parts) do
+          vars[k] = v
+        end
+        for line in parts.SHEETS_ONLY_RTP:gmatch("[^\n]+") do
+          if line:match("^vim%.g%.") then
+            handover[#handover + 1] = line
+          end
+        end
+        kept[#kept + 1] = ("the dependencies only the test sheets load (SHEETS_ONLY): %s"):format(
+          table.concat(sheets, ", ")
+        )
+      end
       local after, rerr
       if vars then
         after, rerr = scaffold.render_template("minimal_init.lua.tpl", vars)
@@ -645,7 +723,7 @@ function M.plan(root, opts)
       end
       if legacy_init.is_gate(old_minit) then
         ---@cast old_minit string
-        local extra = gate_extra(old_minit)
+        local extra = gate_extra(old_minit, handover)
         local at = after:find(legacy_init.GATE_TAIL, 1, true)
         if extra and at then
           local candidate = after:sub(1, at - 1) .. extra .. "\n\n" .. after:sub(at)

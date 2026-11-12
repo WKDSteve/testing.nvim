@@ -136,6 +136,70 @@ return function(H)
   has(f.after, "vim.o.swapfile = false", "extra: its own settings are kept")
   ok(loadstring(f.after) ~= nil, "extra: the result compiles")
 
+  -- ---------------------------------------------------------------- minimal_init: dependencies only the sheets load
+  -- written by hand as six repositories had it: in DEPS, off the runtimepath, handed over in vim.g
+  local sheets = project("sheets.nvim")
+  local sheets_path = sheets .. "/TESTS/minimal_init.lua"
+  local own_reason =
+    "-- Left off the runtimepath: the specs use doubles of ui.nvim, only the sheets press the real one."
+  local hand = slurp(sheets_path)
+    :gsub(
+      'local DEPS = { "testing.nvim", "lib.nvim" }',
+      'local DEPS = { "testing.nvim", "lib.nvim", "ui.nvim" }\n\n'
+        .. own_reason
+        .. '\n---@type table<string, true>\nlocal SHEETS_ONLY = { ["ui.nvim"] = true }',
+      1
+    )
+    :gsub(
+      "for _, name in ipairs%(DEPS%) do\n  vim%.opt%.rtp:append%(found%[name%]%)\nend\n",
+      "for _, name in ipairs(DEPS) do\n  if not SHEETS_ONLY[name] then\n    vim.opt.rtp:append(found[name])\n  end\nend\n"
+        .. 'vim.g.sheets_sheets_ui_nvim = found["ui.nvim"]\n\nvim.o.swapfile = false\n',
+      1
+    )
+  has(hand, "SHEETS_ONLY[name] then", "sheets: the hand-written file is built")
+  put(sheets_path, hand)
+  f = file(update.plan(sheets, NOFMT), "TESTS/minimal_init.lua")
+  eq(f.risks, {}, "sheets: nothing held back")
+  has(
+    f.after,
+    'local DEPS = { "testing.nvim", "lib.nvim", "ui.nvim" }',
+    "sheets: the dependency stays in DEPS"
+  )
+  has(f.after, 'local SHEETS_ONLY = { ["ui.nvim"] = true }', "sheets: ... and in SHEETS_ONLY")
+  has(f.after, own_reason, "sheets: the file's own reason stays above it")
+  has(f.after, "elseif not SHEETS_ONLY[name] then", "sheets: a missing one is not fatal")
+  has(
+    f.after,
+    "  if not SHEETS_ONLY[name] then\n    vim.opt.rtp:append",
+    "sheets: it is kept off the runtimepath"
+  )
+  local _, handovers = f.after:gsub('vim%.g%.sheets_sheets_ui_nvim = found%["ui%.nvim"%]', "")
+  eq(
+    handovers,
+    1,
+    "sheets: the vim.g handover once (the template's, not carried over a second time)"
+  )
+  has(f.after, "vim.o.swapfile = false", "sheets: its own settings after the runtimepath are kept")
+  ok(loadstring(f.after) ~= nil, "sheets: the result compiles")
+  eq(update.apply(update.plan(sheets, NOFMT)) ~= nil, true, "sheets: written")
+  eq(
+    file(update.plan(sheets, NOFMT), "TESTS/minimal_init.lua").changed,
+    false,
+    "sheets: once written, the file is up to date"
+  )
+  -- a table this cannot read entry by entry holds the file back
+  put(sheets_path, (hand:gsub('{ %["ui%.nvim"%] = true }', '{ ["ui.nvim"] = 1 }', 1)))
+  f = file(update.plan(sheets, NOFMT), "TESTS/minimal_init.lua")
+  has(
+    table.concat(f.risks, "\n"),
+    "SHEETS_ONLY has entries",
+    "sheets: an unreadable SHEETS_ONLY is a risk"
+  )
+  eq(update.sheets_only_of('x\nlocal SHEETS_ONLY = { ["a.nvim"] = true, ["b.nvim"] = true }\n'), {
+    "a.nvim",
+    "b.nvim",
+  }, "sheets_only_of: the names in order")
+
   -- a minimal_init that is not the gate is replaced by it, with what it set up carried over
   local legacy = project("legacy.nvim")
   put(

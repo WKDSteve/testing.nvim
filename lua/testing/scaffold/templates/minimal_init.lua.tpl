@@ -14,7 +14,7 @@
 local this = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p")
 local root = vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(this)))
 
-local DEPS = @@ALL_DEPS|lua@@
+local DEPS = @@ALL_DEPS|lua@@@@SHEETS_ONLY_DECL|raw@@
 
 ---@type table<string, string>
 local MARKERS = { ["lib.nvim"] = "lua/lib/nvim", ["testing.nvim"] = "lua/testing" }
@@ -60,7 +60,7 @@ for _, name in ipairs(DEPS) do
   end
   if hit then
     found[name] = hit
-  else
+  @@SHEETS_ONLY_ELSE|raw@@
     local lines = { ("error: dependency '%s' not found. Searched, in this order:"):format(name) }
     for i, p in ipairs(places) do
       lines[#lines + 1] = ("  %d. %s (%s)"):format(i, p[1], p[2] or "unset")
@@ -79,8 +79,6 @@ if #failures > 0 then
 end
 
 vim.opt.rtp:prepend(root)
-for _, name in ipairs(DEPS) do
-  vim.opt.rtp:append(found[name])
-end
+@@SHEETS_ONLY_RTP|raw@@
 
 return { root = root, deps = found }
