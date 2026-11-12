@@ -313,6 +313,19 @@ local function features_section(out, root, cat, entries)
     return
   end
   local known = require("testing.sheet.features").by_id(cat.catalog)
+  -- the entries of a functionality that the last baseline of the surface gate has as not exercised
+  local statuses = require("testing.surface.features").baseline_statuses(root)
+  local function unmeasured(f)
+    local list = statuses and require("testing.surface.features").unmeasured(f, statuses) or {}
+    if #list == 0 then
+      return ""
+    end
+    local parts = {}
+    for _, entry in ipairs(list) do
+      parts[#parts + 1] = code(entry)
+    end
+    return "; not exercised: " .. table.concat(parts, ", ")
+  end
   local of, without, unknown = {}, {}, {}
   for _, e in ipairs(entries) do
     local s = e.sheet
@@ -364,7 +377,12 @@ local function features_section(out, root, cat, entries)
       listed[#listed + 1] = {
         rank = RANK[worst],
         i = i,
-        line = ("- **%s** – %s: %s"):format(one_line(f.id), worst, table.concat(parts, ", ")),
+        line = ("- **%s** – %s: %s%s"):format(
+          one_line(f.id),
+          worst,
+          table.concat(parts, ", "),
+          unmeasured(f)
+        ),
       }
     end
   end
@@ -379,7 +397,11 @@ local function features_section(out, root, cat, entries)
   end
   for _, f in ipairs(cat.catalog) do
     if not of[f.id] then
-      out[#out + 1] = ("- %s – no sheet (%s)"):format(one_line(f.id), one_line(f.title))
+      out[#out + 1] = ("- %s – no sheet (%s)%s"):format(
+        one_line(f.id),
+        one_line(f.title),
+        unmeasured(f)
+      )
     end
   end
   if #without > 0 then

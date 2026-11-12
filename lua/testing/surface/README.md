@@ -13,5 +13,6 @@ contract: [docs/SURFACE.md](../../../docs/SURFACE.md). It reports first; a thres
 | [`testing.surface.track`](track.lua) | The tracking layer: `install` / `begin_case` / `end_case` / `collect` / `uninstall`, `hook_runner` for a minit |
 | [`testing.surface.coverage`](coverage.lua) | Pure: ratio, statuses, thresholds, baseline and diff, hits from a Result-IR or a sink |
 | [`testing.surface.tags`](tags.lua) | Cases that claim an entry: `binding:`/`command:` tags in the IR, `-- @covers` headers of a spec |
+| [`testing.surface.features`](features.lua) | The feature catalog against the surface: the functionality of a not covered entry, entries the catalog names wrongly, the entries the baseline has as not exercised |
 | [`testing.surface.render`](render.lua) | Text table, markdown, JSON, tab separated, the matrix entries x spec files |
 | [`testing.surface.view`](view.lua) | The matrix view of `:Testing surface --matrix` (lib.nvim ui.kit viewer): filters, jumps, export |

@@ -184,8 +184,12 @@ function M.text(report)
   if report.coverage and #report.coverage.missing > 0 then
     lines[#lines + 1] = ""
     lines[#lines + 1] = ("not covered (%d):"):format(#report.coverage.missing)
+    local by_entry = report.features and report.features.by_entry or {}
     for _, id in ipairs(report.coverage.missing) do
-      lines[#lines + 1] = ("  %s - no feature test"):format(clean(id))
+      lines[#lines + 1] = ("  %s - %s"):format(
+        clean(id),
+        clean(require("testing.surface.features").gap_text(by_entry[id]))
+      )
     end
   end
   for _, f in ipairs(report.failures or {}) do
@@ -252,8 +256,12 @@ function M.markdown(report)
     )
   end
   local extra = {}
+  local by_entry = report.features and report.features.by_entry or {}
   for _, id in ipairs(cov and cov.missing or {}) do
-    extra[#extra + 1] = ("* not covered: `%s` - no feature test"):format(cell(id))
+    extra[#extra + 1] = ("* not covered: `%s` - %s"):format(
+      cell(id),
+      cell(require("testing.surface.features").gap_text(by_entry[id]))
+    )
   end
   for _, f in ipairs(report.failures or {}) do
     extra[#extra + 1] = "* " .. failure_line(f)

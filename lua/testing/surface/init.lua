@@ -18,7 +18,8 @@
 --- Modules: `ids` (stable `kind:name` ids), `read` (the registries -> entries, in-process), `collect`
 --- (the same in a child editor), `track` (the installable layer that counts executions),
 --- `coverage` (pure: ratio, thresholds, baseline, IR), `tags` (the claims of passing cases: tags,
---- `-- @covers`), `render` (text / markdown / JSON / tab separated), `view` (the matrix view of
+--- `-- @covers`), `features` (the feature catalog against the entries), `render` (text / markdown / JSON / tab
+--- separated), `view` (the matrix view of
 --- `:Testing surface --matrix`). Full documentation, limits and the integration contract: docs/SURFACE.md.
 ---
 --- Exit codes of `main`: 0 done (below a threshold of 0 is a report), 1 a threshold or the baseline
@@ -244,6 +245,21 @@ function M.report(root, opts)
     notes = notes,
     exit_code = M.EXIT_OK,
   }
+
+  -- the feature catalog: which functionality rests on an entry, and an entry it names that is not there (a finding,
+  -- never a failure: the catalog is documentation)
+  local feats, ferr = require("testing.surface.features").load(root, surface.entries)
+  if ferr then
+    notes[#notes + 1] = "feature catalog: " .. ferr
+  elseif feats then
+    report.features = feats
+    for _, u in ipairs(feats.unknown) do
+      notes[#notes + 1] = ("feature catalog: %s names %s, which the surface does not have (a typo, a renamed entry?)"):format(
+        u.feature,
+        u.entry
+      )
+    end
+  end
 
   local hits, herr = M.hits(opts.hits or {})
   if herr then

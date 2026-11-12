@@ -233,7 +233,8 @@ Limits of the claims:
 ## The matrix and the report sections
 
 ```bash
-testing surface . --from out.json                    # the list; "not covered" names each entry: `binding:<leader>slt - no feature test`
+testing surface . --from out.json                    # the list; "not covered" names each entry: `binding:<leader>slt - no feature test`,
+                                                     # or the functionality of TESTS/sheets/features.lua that rests on it: `binding:Y - feature hover.copy has no sheet`
 testing surface . --from out.json --matrix           # entries x spec files, cases that exercised the entry per file
 testing surface . --from out.json --matrix --csv     # the same as a tab separated table (tabs and line breaks in a cell become `?`)
 testing surface . --from out.json --matrix --json    # `matrix = { files, rows = { { id, kind, status, cells, total } } }` and `table = { header, rows, files, src }`
@@ -319,6 +320,7 @@ Pilot: fileops.nvim (`surface.baseline.json`, the "Surface baseline gate" step o
 | `testing.surface.track` | the tracking layer: `install`, `hook_runner`, `unwrap` |
 | `testing.surface.coverage` | pure: `compute`, `by_file`, `thresholds`, `check`, `baseline`, `diff`, `matrix`, `from_ir`, `from_sink`, `annotate_ir` |
 | `testing.surface.tags` | `is_id`, `ids_of_tags`, `parse_covers`, `file_covers`, `apply`: the claims of passing cases (tags, `-- @covers`) |
+| `testing.surface.features` | `index`, `gap_text`, `with_sheet`, `load`, `baseline_statuses`, `unmeasured`: the feature catalog against the surface (the functionality of a not covered entry, an entry the catalog names wrongly, the entries the baseline has as not exercised) |
 | `testing.surface.render` | text, markdown, JSON, `matrix_rows`, `tsv` |
 | `testing.surface.view` | the matrix view of `:Testing surface --matrix`: `parse`, `filter`, `lines`, `cell_at`, `target`, `export_text`, `export_path` (pure), `open`, `show_verdict` |
 

@@ -273,6 +273,14 @@ functionality with a sheet, worst first, with its state and that of each of its 
 > manual > green; a red sheet names its message); then each functionality without a sheet, the sheets without a
 feature, and a `feature` the catalog does not know (with the sheet's file: a finding, not red). A catalog that does not
 load is said in its place. The section is in the Markdown only: the block in the tasks (`--tasks`) stays as it is.
+When the root has the baseline of the surface gate (`surface.baseline.json`, written by `testing surface
+--write-baseline`), a functionality also lists the entries of its `surface` that the baseline has as not exercised
+(`; not exercised: `command:Hover copy``): a function that rests on a key no test reaches.
+
+`testing surface` reads the catalog too: an entry under **not covered** names the functionality that rests on it and
+whether that one has a sheet (`binding:Y - feature hover.copy has no sheet`; no functionality: `no feature test`),
+and an entry the catalog names that the surface does not have is a note (`feature catalog: hover.copy names
+binding:YY, which the surface does not have`), never a failure: the catalog is documentation.
 
 Under a sheet whose last stepped run (`testing sheets step`) took notes, the list adds them: `notes of the stepped
 run on <date> (<status>):` and one item per note (`step <n> (<size>): <text>`), also for a run that was aborted.
