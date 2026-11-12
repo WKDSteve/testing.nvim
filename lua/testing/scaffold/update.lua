@@ -691,6 +691,19 @@ function M.plan(root, opts)
       -- the dependencies only the test sheets load: in DEPS after the others, off the runtimepath, not required
       local sheets, sheets_risks = M.sheets_only_of(old_minit)
       vim.list_extend(risks, sheets_risks)
+      -- two names that give one vim.g key would hand over only one path: the file is held back
+      local by_key = {}
+      for _, name in ipairs(sheets) do
+        local key = scaffold.sheets_only_key(plugin, name)
+        if by_key[key] then
+          risks[#risks + 1] = ("SHEETS_ONLY: %s and %s are both handed over as vim.g.%s: rename one"):format(
+            by_key[key],
+            name,
+            key
+          )
+        end
+        by_key[key] = name
+      end
       local handover = {}
       if vars and #sheets > 0 then
         local all = vim.deepcopy(vars.ALL_DEPS --[[@as string[] ]])
@@ -705,7 +718,7 @@ function M.plan(root, opts)
           vars[k] = v
         end
         for line in parts.SHEETS_ONLY_RTP:gmatch("[^\n]+") do
-          if line:match("^vim%.g%.") then
+          if line:match("^vim%.g[%.%[]") then
             handover[#handover + 1] = line
           end
         end

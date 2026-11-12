@@ -127,7 +127,8 @@ local SHEETS_ONLY = { ["ui.nvim"] = true }
 
 The gate then finds it like the others, but a missing one is not fatal, it is not put on the runtimepath, and its path
 goes to `vim.g.<plugin>_sheets_<name>` (every character but a letter or a digit as `_`: `vim.g.diff_sheets_ui_nvim`),
-where the sheets' helpers take it into their child. `--update` reads the names from that line, keeps them at the end
+where the sheets' helpers take it into their child. A key that is no Lua name (a plugin name that starts with a digit) is written
+as `vim.g["<key>"]`; two names that give one key (`a-b`, `a.b`) are a risk and hold the file back. `--update` reads the names from that line, keeps them at the end
 of `DEPS` and renders the rest (the `elseif`, the loop, the handover lines); a comment of the repository's own above the
 line stays. A table it cannot read entry by entry (`= 1`, a computed name) is a risk and holds the file back. To start
 using it: add the name to `DEPS`, write the line, then `testing init --update --write`. A repository without the line

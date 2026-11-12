@@ -200,6 +200,31 @@ return function(H)
     "b.nvim",
   }, "sheets_only_of: the names in order")
 
+  -- the vim.g key: a Lua name as `vim.g.<key>`, anything else (a plugin name that starts with a digit) as a string index
+  local digit = scaffold.sheets_only_vars("3d", { "ui.nvim" }).SHEETS_ONLY_RTP
+  has(
+    digit,
+    'vim.g["3d_sheets_ui_nvim"] = found["ui.nvim"]',
+    "sheets: a key that is no Lua name is an index"
+  )
+  ok(loadstring(digit) ~= nil, "sheets: ... and compiles: " .. digit)
+  has(
+    scaffold.sheets_only_vars("diff", { "ui.nvim" }).SHEETS_ONLY_RTP,
+    'vim.g.diff_sheets_ui_nvim = found["ui.nvim"]',
+    "sheets: a Lua name stays vim.g.<key> (the files written so far are up to date)"
+  )
+  -- two names on one key would hand over one path only
+  put(
+    sheets_path,
+    (hand:gsub('{ %["ui%.nvim"%] = true }', '{ ["a-b.nvim"] = true, ["a.b.nvim"] = true }', 1))
+  )
+  f = file(update.plan(sheets, NOFMT), "TESTS/minimal_init.lua")
+  has(
+    table.concat(f.risks, "\n"),
+    "are both handed over as vim.g.sheets_sheets_a_b_nvim",
+    "sheets: two names on one vim.g key are a risk"
+  )
+
   -- a minimal_init that is not the gate is replaced by it, with what it set up carried over
   local legacy = project("legacy.nvim")
   put(

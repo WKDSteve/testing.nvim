@@ -390,6 +390,15 @@ function M.build_vars(plugin, deps, owner, extra)
   return vars
 end
 
+---The `vim.g` key a sheets-only dependency is handed over in: `<plugin>_sheets_<name>`, every character but a letter
+---or a digit as `_`. Two names can give one key (`a-b`, `a.b`): `testing init --update` refuses that.
+---@param plugin string
+---@param name string
+---@return string
+function M.sheets_only_key(plugin, name)
+  return ("%s_sheets_%s"):format((plugin:gsub("[^%w]", "_")), (name:gsub("[^%w]", "_")))
+end
+
 ---The parts of `TESTS/minimal_init.lua` for dependencies only the test sheets load: found like the others (in
 ---`DEPS`, so `ci commit` hands them over as `$<NAME>_DIR` and the cache keys on them), but neither required nor put
 ---on the runtimepath; the path goes to `vim.g.<plugin>_sheets_<name>` (every character but a letter or a digit as
@@ -409,11 +418,11 @@ function M.sheets_only_vars(plugin, names)
   local entries, handover = {}, {}
   for _, name in ipairs(names) do
     entries[#entries + 1] = ("[%s] = true"):format(render.lua_quote(name))
-    handover[#handover + 1] = ("vim.g.%s_sheets_%s = found[%s]"):format(
-      (plugin:gsub("[^%w]", "_")),
-      (name:gsub("[^%w]", "_")),
-      render.lua_quote(name)
-    )
+    local key = M.sheets_only_key(plugin, name)
+    -- a key that is no Lua name (a plugin name that starts with a digit) is written as a string index
+    local target = key:match("^[%a_][%w_]*$") and ("vim.g." .. key)
+      or ("vim.g[" .. render.lua_quote(key) .. "]")
+    handover[#handover + 1] = ("%s = found[%s]"):format(target, render.lua_quote(name))
   end
   return {
     SHEETS_ONLY_DECL = "\n\nlocal SHEETS_ONLY = { " .. table.concat(entries, ", ") .. " }",
