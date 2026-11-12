@@ -3,9 +3,10 @@
 //                                         failed steps); exit 77 = a prerequisite is missing. The suite's way.
 //   node browser_runner.mjs --driver      one JSON line per command on stdin, one answer per line on stdout
 //                                         (testing-sheet-driver/1): open, step, close. stdin at its end closes too.
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
-import { resolve, isAbsolute } from 'node:path';
+import { resolve, isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
@@ -88,14 +89,47 @@ async function runStep(page, step, where) {
   return undefined;
 }
 
+// An unpacked extension needs a persistent context (a profile of its own, thrown away at the end): `launch` cannot
+// load one. It answers like a browser (`newPage({ viewport })`, `close()`), so the steps do not know the difference.
+// Headless works with the full Chromium (`channel: 'chromium'`, the new headless mode), not with the headless shell.
+async function launchWithExtension(chromium, headless, channel, extension) {
+  if (!existsSync(join(extension, 'manifest.json'))) {
+    throw new Error(`the extension ${extension} has no manifest.json`);
+  }
+  const profile = mkdtempSync(join(tmpdir(), 'testing-sheet-profile-'));
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(profile, {
+      headless,
+      channel: channel || 'chromium',
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    });
+  } catch (e) {
+    rmSync(profile, { recursive: true, force: true });
+    throw new Error(`chromium with the extension cannot be started (${String(e.message).split('\n')[0]})`);
+  }
+  return {
+    newPage: async (opts = {}) => {
+      const page = await context.newPage();
+      if (opts.viewport) await page.setViewportSize(opts.viewport);
+      return page;
+    },
+    close: async () => {
+      await context.close().catch(() => {});
+      rmSync(profile, { recursive: true, force: true });
+    },
+  };
+}
+
 // Answers with the browser, or throws an Error whose message is the reason for the skip.
-async function launch(playwrightDir, headless, channel) {
+async function launch(playwrightDir, headless, channel, extension) {
   let chromium;
   try {
     ({ chromium } = createRequire(resolve(playwrightDir, 'package.json'))('playwright-core'));
   } catch {
     throw new Error('playwright-core cannot be loaded');
   }
+  if (extension) return launchWithExtension(chromium, headless, channel, extension);
   // the project asked for this browser (sheets.browser of .testing.lua): nothing else proves what it wants proved
   if (channel) {
     try {
@@ -126,7 +160,7 @@ async function wholePlan(planPath) {
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
   let browser;
   try {
-    browser = await launch(plan.playwright_dir, true, plan.channel);
+    browser = await launch(plan.playwright_dir, true, plan.channel, plan.extension);
   } catch (e) {
     console.log(`SKIP: ${e.message}`);
     process.exit(SKIP);
@@ -190,7 +224,12 @@ function driver() {
       await closePage();
       if (!browser) {
         try {
-          browser = await launch(cmd.options.playwright_dir, !cmd.options.headed, cmd.options.channel);
+          browser = await launch(
+            cmd.options.playwright_dir,
+            !cmd.options.headed,
+            cmd.options.channel,
+            cmd.options.extension,
+          );
         } catch (e) {
           answer({ ok: false, skip: e.message });
           return;

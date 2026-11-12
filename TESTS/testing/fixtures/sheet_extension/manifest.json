@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "testing.nvim sheet fixture",
+  "version": "1.0",
+  "description": "A page of its own, at a fixed id (the key), for the browser engine's extension spec.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArH9/2Bi6iggjGj4EsHb4lEPdiTUX9QR8jc6pYoLBXSa2AEo5SldwStA9OwHJjawbm0tl2t6uOyEibggYMoB4fhL7zXidsMVxCaE3TjuV2+U74Kas7JWRAZpY7/K/vr+aLdlyiL7CFahECi7H2IorTvtCtTe3sE+3IvYu2xl0uam4g56kg1OuhkpQ5CuYhTfldzTM79sPpX/Ibt5kZ3ghfmDON2tBn/dDvA0b8kfICGKEOZ2TnMsely0VIWTW0wk0w+esU7oB11bxqQbK/3mqWI+ao+hzU6r+QkdFd5dX3bkDlAdUtSAQr/eM4tJrd4vojA3dYZRHSAuBiRQ3im9p7QIDAQAB"
+}

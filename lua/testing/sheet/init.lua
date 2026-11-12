@@ -184,6 +184,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field minit? string Relative to the root (default `TESTS/minimal_init.lua`).
 ---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
 ---@field live? Testing.Sheet.Live Real keys and network, only with `testing sheets run --live` (`testing.sheet.live`).
+---@field extension? string An unpacked browser extension (folder with `manifest.json`, relative to the root) Chromium loads: browser only.
 ---@field fakes? string[] Programs the child finds first on its `PATH` as recording stand-ins (`testing.fake_programs`): rpc only.
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
@@ -273,6 +274,7 @@ local SHEET_KEYS = {
   feature = "string",
   live = "table",
   fakes = "table",
+  extension = "string",
 }
 
 ---@param v any
@@ -727,6 +729,15 @@ function M.validate(s)
     local aerr = M.check_args(s.args, "args")
     if aerr then
       return nil, aerr
+    end
+  end
+  if s.extension ~= nil then
+    if s.engine ~= "browser" then
+      return nil, "extension belongs to a browser sheet"
+    end
+    local e = s.extension
+    if e == "" or e:find("^[/\\]") or e:find("^%a:") or e:find("%.%.") or e:find("%c") then
+      return nil, "extension: a folder relative to the project root (no '..', not absolute)"
     end
   end
   if s.fakes ~= nil then

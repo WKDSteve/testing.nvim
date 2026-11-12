@@ -698,3 +698,11 @@ size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-c
 is a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. There is no
 `prepare` step on purpose: a sheet is data and must not start programs; a page a sheet needs is a file the project
 produces (a fixture, a build output), or a program it names (`app`, see [Apps](#apps-sheetsapps)).
+
+**An extension** (`extension = "fixtures/ext"`, a folder with `manifest.json` relative to the project root; browser
+only): Chromium starts with that unpacked extension loaded, in a profile of its own that is thrown away at the end
+(Playwright's persistent context), so a sheet can check what the extension does to a page, or open one of the
+extension's own pages (`open = "chrome-extension://<id>/page.html"`; a `key` in the manifest fixes the id). It needs
+Playwright's full Chromium (the new headless mode, `channel` defaults to `chromium`): the headless shell cannot load
+extensions, and branded Chrome refuses `--load-extension` (`ERR_BLOCKED_BY_CLIENT`). Where that Chromium cannot start
+the sheet is a reported skip.

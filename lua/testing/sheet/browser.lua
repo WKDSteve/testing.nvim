@@ -63,6 +63,18 @@ local function prerequisites(root, opts)
   return node, pw
 end
 
+---The absolute folder of the sheet's unpacked extension (`extension`, relative to the project root), nil without one.
+---@param root string
+---@param s Testing.Sheet
+---@return string|nil
+function M.extension_dir(root, s)
+  if not s.extension then
+    return nil
+  end
+  local dir = vim.fs.normalize(root .. "/" .. s.extension)
+  return require("testing.platform").is_windows() and (dir:gsub("/", "\\")) or dir
+end
+
 ---@class Testing.Sheet.BrowserOpts
 ---@field root? string
 ---@field out_dir? string Where `shot` steps write (default `<root>/TESTS/sheets/out`).
@@ -149,6 +161,7 @@ function M.run(s, opts)
     out_dir = opts.out_dir or (root .. "/TESTS/sheets/out"),
     playwright_dir = pw,
     channel = opts.channel,
+    extension = M.extension_dir(root, s),
     sizes = s.sizes,
     steps = steps,
   }))
@@ -209,7 +222,12 @@ function M.driver(s, opts, ctx)
       return { node, runner_path(), "--driver" }, nil
     end,
     options = function()
-      return { headed = opts.headed == true, playwright_dir = pw, channel = opts.channel }
+      return {
+        headed = opts.headed == true,
+        playwright_dir = pw,
+        channel = opts.channel,
+        extension = M.extension_dir(ctx.root, s),
+      }
     end,
   })
 end
