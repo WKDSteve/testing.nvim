@@ -912,7 +912,8 @@ again every 30 seconds until no run of the head commits is going any more (a run
 `queued`, `running`, `waiting_runner`), then prints the table (or `--json`) and exits as without `--wait`. Every round
 is a conditional request with the stored ETags, so an unchanged run is a free `304` and the rate limit is spared. A head
 commit without a run (`no_run`) counts as going for the first 3 minutes (the run of a fresh push takes a moment to
-appear), then as answered. stderr gets a line `waiting (<elapsed>): <repo> (<state>), ...` whenever that set changes.
+appear), then as answered. A row GitHub did not answer this round (`unknown` without a run: a 502, a secondary
+rate limit) counts as going too and is asked again; a row git could not read does not (waiting does not change it). stderr gets a line `waiting (<elapsed>): <repo> (<state>), ...` whenever that set changes.
 The limit is 60 minutes, or the duration given (`--wait=90s`, `--wait=10m`, `--wait=2h`); past it the table comes all
 the same, stderr says `not finished after <limit>: <repo> (<state>), ...`, and the exit code is `1`. A self-hosted job
 whose runner is off (`waiting_runner`) is waited for until the limit: start the runner or rely on the limit. Not with

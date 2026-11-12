@@ -1194,6 +1194,62 @@ return function(H)
     has(stuck.err, "not finished after 1m15s: waity (queued)", "--wait: names what is not finished")
     has(stuck.out, "REPO", "--wait: ... after the table")
 
+    -- GitHub does not answer one round (a 502): no verdict yet, so the wait goes on instead of ending with exit 3
+    do
+      local bumpy = repo("bumpy", "https://github.com/WKDSteve/bumpy", sha("9"))
+      API[R .. "bumpy/actions/runs"] = {
+        etag = '"runs-bumpy"',
+        body = {
+          workflow_runs = { run_(99, "CI", "completed", "success", "2026-10-31T11:00:00Z") },
+        },
+      }
+      API[R .. "bumpy/actions/runs/99/jobs"] = {
+        etag = '"jobs-bumpy"',
+        body = { jobs = { job_(991, "test (ubuntu-latest)", "completed", "success") } },
+      }
+      local rounds = 0
+      local function bad_gateway_once(url, copts, done)
+        if url:find("/bumpy/actions/runs", 1, true) and not url:find("/jobs", 1, true) then
+          rounds = rounds + 1
+          if rounds == 1 then
+            return done(true, {
+              status = 502,
+              status_text = "Bad Gateway",
+              headers = {},
+              body = '{"message":"Server Error"}',
+            })
+          end
+        end
+        transport(url, copts, done)
+      end
+      clock, sleeps = NOW, {}
+      local res502 = run({ "--wait", "--state-dir", tmp .. "/wait-state502", bumpy }, {
+        transport = bad_gateway_once,
+        now = function()
+          return clock
+        end,
+        sleep = function(s)
+          sleeps[#sleeps + 1] = s
+          clock = clock + s
+        end,
+      })
+      eq(res502.code, remote.EXIT_OK, "--wait: a 502 in one round is asked again: " .. res502.err)
+      eq(#sleeps, 1, "--wait: ... one pause, then the answer")
+      has(res502.err, "bumpy (unknown)", "--wait: ... and says it waits for it")
+    end
+
+    -- a row git cannot read does not change by waiting: no pause for it
+    do
+      local gitless = repo("gitless", "https://github.com/WKDSteve/gitless", sha("8"))
+      GIT[gitless].fail = { code = 128, stdout = "", stderr = "fatal: not a git repository" }
+      local gl = run({ "--wait", "--state-dir", tmp .. "/wait-state-gl", gitless })
+      eq(
+        gl.code,
+        remote.EXIT_INFRA,
+        "--wait: a row git cannot read ends at once with exit 3 (no sleep)"
+      )
+    end
+
     -- a commit without a run: a fresh push's run may not be there yet, so it is waited for WAIT_NO_RUN_S, not longer
     clock, sleeps = NOW, {}
     local no_run_wait = run({ "--wait=1h", "--state-dir", tmp .. "/wait-state3", dirs.eps }, {

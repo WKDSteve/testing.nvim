@@ -1381,6 +1381,11 @@ function M.unfinished(records, elapsed)
   local out = {}
   for _, rec in ipairs(records) do
     local going = rec.run ~= nil and rec.run.status ~= "completed"
+    -- GitHub did not answer this round (a 502, a secondary rate limit, the deadline): no verdict yet, ask again. Not
+    -- a row git could not read (no `sha`): that does not change by waiting.
+    if rec.overall == "unknown" and rec.run == nil and rec.sha ~= nil then
+      going = true
+    end
     if rec.overall == "no_run" and elapsed < M.WAIT_NO_RUN_S then
       going = true
     end
