@@ -625,11 +625,15 @@ local function layout_parts(cfg, words)
       ("#   self-hosted runner has macOS. It runs the steps that depend on the platform: %s."):format(
         words.platform
       ),
+      "# - workflow_dispatch: started by hand with `gh workflow run ci.yml` (write access only), the hosted legs as for a",
+      "#   pull request. It replaces a run GitHub left hanging without jobs (cancel and rerun fail there); `testing ci",
+      "#   remote` counts push runs only, so the next push is still the verdict.",
       "",
     }, "\n"),
     FORK_TEXT = "#\n" .. M.wrap(fork, "# "),
-    TRIGGERS = push_pr,
-    CONCURRENCY = group,
+    TRIGGERS = push_pr .. "  workflow_dispatch:\n",
+    CONCURRENCY = "  # The event is part of the group: a run by hand must not cancel a push, and a push must not cancel it.\n"
+      .. "  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}\n",
     TIMEOUT_TEXT = "",
     MATRIX_TEXT = M.wrap(
       ("Only a push to main uses the self-hosted runner (the whole `full` profile); every other event, also one added later (workflow_dispatch, pull_request_target, ...), gets hosted runners: the whole profile on ubuntu, and on windows and macOS the steps that depend on the platform (%s do not)."):format(

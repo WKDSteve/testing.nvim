@@ -89,6 +89,14 @@ return function(H)
       text == read(golden .. "/tasks.yml"),
       "tasks: byte for byte the workflow tasks.nvim had by hand"
     )
+    -- a run by hand replaces one GitHub left hanging; it gets the hosted legs (not "push") and its own
+    -- concurrency group, so it never cancels a push run
+    has(text, "\n  pull_request:\n  workflow_dispatch:\n", "public: a run by hand is possible")
+    has(
+      text,
+      "group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}",
+      "public: a run by hand does not cancel a push"
+    )
     -- the security rule: whatever the push legs are, a pull request only gets hosted runners
     local push, other = text:match("github.event_name == 'push' && '(.-)' || '(.-)'")
     has(push, '"runs-on":["self-hosted","windows"]', "a push runs on the self-hosted runner")

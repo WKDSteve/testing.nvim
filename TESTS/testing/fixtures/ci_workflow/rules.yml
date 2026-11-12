@@ -11,6 +11,9 @@
 #   0.12.2, stylua 2.5.2, luacheck 1.2.0); a difference between the two is a finding.
 # - macOS: a GitHub-hosted leg on every event, also on a push: the repository is public, so it costs nothing, and no
 #   self-hosted runner has macOS. It runs the steps that depend on the platform: the suite, conformance and contracts.
+# - workflow_dispatch: started by hand with `gh workflow run ci.yml` (write access only), the hosted legs as for a
+#   pull request. It replaces a run GitHub left hanging without jobs (cancel and rerun fail there); `testing ci
+#   remote` counts push runs only, so the next push is still the verdict.
 # - publish-ci-verified: after a green push only, on a GitHub-hosted runner: the one job with write access never runs
 #   on the maintainer's machine. It waits for macOS too: `ci-verified` means green on all three systems.
 #
@@ -23,12 +26,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # The event is part of the group: a run by hand must not cancel a push, and a push must not cancel it.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

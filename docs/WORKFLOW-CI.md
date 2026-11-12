@@ -95,7 +95,7 @@ GitHub-hosted VM, never on the local machine. Every workflow `testing init` writ
 | Event | `public` | `private` | `hosted` |
 | --- | --- | --- | --- |
 | push to `main` | local runner, whole profile; **hosted macOS**, platform steps | local runner, whole profile | hosted ubuntu (whole profile), hosted windows and macOS (platform steps) |
-| `workflow_dispatch` | no such trigger | **hosted macOS**, platform steps | no such trigger |
+| `workflow_dispatch` | as a pull request (by hand, see below) | **hosted macOS**, platform steps | no such trigger |
 | `pull_request` | hosted ubuntu (whole profile), hosted windows and macOS (platform steps) | no such trigger | as a push |
 
 ```bash
@@ -217,6 +217,10 @@ generated workflow is therefore `testing init --workflow=public`, and only its c
 - Red only on macOS is red, also for the exit code.
 - On a private repository the `MACOS` cell therefore stays `-`, also after a run by hand: that run can neither hide a
   red push run nor turn it green. Its result: `gh run list -R <owner>/<repo> --workflow=ci.yml --event workflow_dispatch`.
+- On a public repository a run by hand (`gh workflow run ci.yml -R <owner>/<repo>`) restarts a run GitHub left
+  hanging without jobs (status `queued`; cancel, force-cancel and rerun fail there). It gets the hosted legs of a pull
+  request and its own concurrency group, so it never cancels a push run. `testing ci remote` still counts push runs
+  only: the hanging run stays the shown one until the next push, the run by hand is the proof in between.
 
 ### The log of a red macOS run
 
