@@ -51,6 +51,32 @@ return function(H)
     "1",
     "--update-snapshots reaches the child (testing.screen reads it there)"
   )
+  -- the overrides the live-check engines read reach the child, where those engines run: every name such a module
+  -- reads with os_getenv is kept (a new override that is not on the list fails here)
+  local src_root =
+    vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
+  local engines = {
+    "lua/testing/tier3.lua",
+    "lua/testing/pty.lua",
+    "lua/testing/container.lua",
+    "lua/testing/sheet/browser.lua",
+    "lua/testing/sheet/desktop.lua",
+  }
+  local read = {}
+  for _, rel in ipairs(engines) do
+    local text = table.concat(vim.fn.readfile(src_root .. "/" .. rel), " ")
+    for name in text:gmatch('getenv%("([%w_]+)"%)') do
+      read[name] = true
+    end
+  end
+  ok(read.TESTING_PLAYWRIGHT_DIR and read.TESTING_CONTAINER_IMAGE, "the scan finds the overrides")
+  for name in pairs(read) do
+    eq(
+      env.sanitize({ [name] = "x" }).env[name],
+      "x",
+      name .. " reaches the child (a live-check engine reads it)"
+    )
+  end
   ok(vim.tbl_contains(r.dropped, "GITHUB_TOKEN"), "the dropped names are reported")
   ok(not vim.tbl_contains(r.dropped, "PATH"), "kept names are not reported as dropped")
 

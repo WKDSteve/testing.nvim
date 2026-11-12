@@ -90,6 +90,19 @@ M.ALLOW = {
   "TESTING_UPDATE_SNAPSHOTS",
   -- the project's `snapshots.dir`, the default folder of testing.screen in the child
   "TESTING_SNAPSHOTS_DIR",
+  -- where the live-check engines find their tools and images (tier 2.5/3: testing.tier3, testing.pty,
+  -- testing.container, the browser and desktop sheets); they run in the spec's child editor, so an override that
+  -- stopped at the parent would never apply. Paths and names, no secrets
+  "TESTING_PLAYWRIGHT_DIR",
+  "PLAYWRIGHT_BROWSERS_PATH",
+  "TESTING_NODE",
+  "TESTING_TAURI_DRIVER",
+  "TESTING_MSEDGEDRIVER",
+  "TESTING_DESKTOP_DRIVER",
+  "TESTING_WSL",
+  "TESTING_WSL_DISTRO",
+  "TESTING_CONTAINER_ENGINE",
+  "TESTING_CONTAINER_IMAGE",
   -- display (a spec that opens a GUI helper)
   "DISPLAY",
   "WAYLAND_DISPLAY",
