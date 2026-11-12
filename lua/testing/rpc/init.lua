@@ -52,6 +52,19 @@ M.QUIT_MS = 10000
 M.PROMPTS = { r = "hit-enter", rm = "more", ["r?"] = "confirm" }
 ---With `watch_prompts`: how often a waiting call asks whether the child stands in a prompt (ms).
 M.PROMPT_PROBE_MS = 50
+---The mode of an answer of `nvim_get_mode` when it is a prompt that waits for an answer (a key of `M.PROMPTS`), else
+---nil. For hit-enter the mode alone is not enough: while the editor still works through keys (`nvim_feedkeys` with
+---`x`, `:normal`) it passes a hit-enter state that the remaining keys end, and then `blocking` is false; only a
+---hit-enter that waits for input holds the calls back. `confirm()` reads its answer without `blocking`, more with it.
+---@param answer any
+---@return string|nil
+function M.prompt_mode(answer)
+  local mode = type(answer) == "table" and answer.mode or nil
+  if not M.PROMPTS[mode] or (mode == "r" and answer.blocking ~= true) then
+    return nil
+  end
+  return mode
+end
 ---Calls the editor answers at once, also in a prompt: no prompt watch for them.
 local FAST = { nvim_get_mode = true, nvim_input = true, nvim_input_mouse = true }
 
@@ -353,8 +366,8 @@ local function call(S, method, args, timeout_ms)
     local answer = probe and wire:take(probe)
     if answer then
       probe = nil
-      local mode = answer.ok and type(answer.result) == "table" and answer.result.mode or nil
-      if M.PROMPTS[mode] then
+      local mode = answer.ok and M.prompt_mode(answer.result) or nil
+      if mode then
         prompt = mode
         return true
       end
@@ -1172,9 +1185,7 @@ local function build_child(S, opts)
   ---@return string|nil mode
   function child.prompt()
     sync()
-    local m = call(S, "nvim_get_mode", {})
-    local mode = type(m) == "table" and m.mode or nil
-    return M.PROMPTS[mode] and mode or nil
+    return M.prompt_mode(call(S, "nvim_get_mode", {}))
   end
 
   ---`vim.notify` calls the child made, oldest first: `{ msg, level, level_name }`. Kept by the parent:

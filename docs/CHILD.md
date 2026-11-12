@@ -96,7 +96,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `mouse(button, action, mods, row, col, grid?)` | `nvim_input_mouse`; 0-based screen cells |
 | `settle(timeout_ms, {raise=, rounds=, interval_ms=})` | wait until idle: `true`, or `false, why` |
 | `screen()` | `{ size, cursor, mode, lines, attrs, text, cells, cell_attrs, hl }`; compare it with a file through `testing.screen`, check a place with `screen.hl_check` |
-| `prompt()` | the mode of the prompt the child stands in (`r` hit-enter, `rm` more, `r?` `confirm()`; `require("testing.rpc").PROMPTS` names them), nil when none: `nvim_get_mode`, which the editor answers also in a prompt |
+| `prompt()` | the mode of the prompt the child stands in (`r` hit-enter, `rm` more, `r?` `confirm()`; `require("testing.rpc").PROMPTS` names them), nil when none: `nvim_get_mode`, which the editor answers also in a prompt; a hit-enter counts only while the editor waits for input (`blocking`), not one it passes while it still works through keys (`require("testing.rpc").prompt_mode`) |
 | `ui_screen(mode?)` | the screen as the attached UI was last told it (redraw events, no call into the child), the shape of `screen()` with `from_ui = true`; nil before the UI drew |
 | `notifies({clear=})`, `prompts({clear=})` | what the child notified / what it answered with "cancelled" |
 | `messages()` | the lines of `:messages` |

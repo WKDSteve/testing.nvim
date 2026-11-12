@@ -144,6 +144,25 @@ return function(H)
     has(wrong[2].reason, "(the child shows a hit-enter prompt)", "another prompt is named")
   end
 
+  -- 6. a hit-enter state the editor only passes is no prompt ----------------------------------------------------------
+  -- While the editor still works through keys (`keys` feeds with `x`) it can stand in mode `r` for a moment without
+  -- waiting for input (`blocking` false): the keys end it by themselves, so a call that waits then must not fail.
+  -- Seen live: tasks.nvim's sheet `tasks.dashboard-follows-vault-switch` (`:TasksVault switch` with a Snacks picker)
+  -- failed its keys step on it. `confirm()` reads its answer without `blocking`, so only hit-enter needs it.
+  do
+    local rpc = require("testing.rpc")
+    eq(rpc.prompt_mode({ mode = "r", blocking = false }), nil, "mode r without blocking: no prompt")
+    eq(
+      rpc.prompt_mode({ mode = "r", blocking = true }),
+      "r",
+      "mode r that waits for input: hit-enter"
+    )
+    eq(rpc.prompt_mode({ mode = "rm", blocking = true }), "rm", "the more prompt")
+    eq(rpc.prompt_mode({ mode = "r?", blocking = false }), "r?", "confirm() without blocking")
+    eq(rpc.prompt_mode({ mode = "n", blocking = true }), nil, "normal mode: no prompt")
+    eq(rpc.prompt_mode(nil), nil, "no answer: no prompt")
+  end
+
   -- 5. the screen from the UI is the screen of the child ----------------------------------------------------------------
   do
     local child = assert(require("testing.rpc").spawn({
