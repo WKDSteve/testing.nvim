@@ -171,7 +171,7 @@ end
 ---@return string|nil path, boolean applies
 function M.tmux(opts, is_windows)
   if is_windows == nil then
-    is_windows = vim.fn.has("win32") == 1
+    is_windows = require("testing.platform").is_windows()
   end
   if is_windows then
     return nil, false
