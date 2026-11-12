@@ -48,7 +48,7 @@ return {
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 | `shot = name` | a picture of the screen, `TESTS/sheets/out/<id>.<name>.<cols>x<rows>.png`: the screen (every cell with its colours and styles, the cursor as a block) is drawn as a page and photographed by the browser engine (node and playwright-core, as for a browser sheet); the font is the browser's, not a terminal's; a cell whose attribute the screen could not name (more than 52 attributes) is outlined dashed. The input of the AI judge and of README images. Without node, playwright-core or a browser the step is **skipped**: the other steps go on and the sheet ends as `skip` (never a green run without its picture) | the browser fails |
 
-Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns (4000 pixels for a browser or desktop sheet): an endless wait
+Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns (4000 pixels for a browser, desktop or webview sheet): an endless wait
 is a mistake, not a check. Every step may carry a `note`; a failure names the size, the step number and the
 note, and all failures of a sheet are one line. The first failed
 step ends that size (the steps after it depend on it). The UI is attached before the first step, so windows
@@ -387,7 +387,7 @@ the task's block: no suite, no second command. tasks.nvim's `:Tasks sheet-run` c
 * A missing snapshot is a failure, as on CI: a run from a task never writes a reference image (run the spec once).
 * On the workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) only **manual sheets** run
   (`engine = "manual"`: questions and steps for a person, nothing is started for them). The decision waits until every
-  sheet of the run is loaded as data: one rpc, browser or desktop sheet among them, or one that does not load, refuses
+  sheet of the run is loaded as data: one rpc, browser, desktop or webview sheet among them, or one that does not load, refuses
   the whole run (exit 2, nothing ran), unless `TESTING_ALLOW_WORKSTATION=1`. With `--tasks` the result is written
   through the engine of tasks.nvim (`nvim -l`, as `:Tasks` does there). A value that is neither `workstation` nor
   `default` is refused as a typo.
@@ -453,7 +453,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `size` | the target of a size is `open`, `failed` to start, or the sheet is a `skip` |
 | `step-before` | size, number, action, value, note: what is about to happen |
 | `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
-| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms`, `measure` what a `measure` step measured (`name`, `value`, `values`, `unit`, `min`, `max`; a `note` with its text follows), on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser and desktop sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
+| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms`, `measure` what a `measure` step measured (`name`, `value`, `values`, `unit`, `min`, `max`; a `note` with its text follows), on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser, desktop and webview sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
 | `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
 | `note` | a note was taken: `size`, `n` (the step the run stands before, else the one that ran last), `text`, `time` (UTC) |
 | `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
@@ -650,6 +650,44 @@ return {
 * A window on the runner is a question of its own: `testing sheets run --all --engine browser` leaves desktop sheets out of a
   CI job (a sheet that does not load stays in, it is red in every job).
 
+## Webview sheets (`engine = "webview"`)
+
+A sheet with `engine = "webview"` works in the page inside the WebView2 of an app (Tauri on Windows and Linux), with
+the steps of a browser sheet: what the desktop engine cannot reach by accessible name (an edge of an SVG graph, a
+`<details>`, a canvas) is a CSS selector or JavaScript here. It goes through W3C WebDriver: `webview_runner.mjs`
+(node, no client library) starts `tauri-driver` with `msedgedriver` as its native driver, and tauri-driver starts the
+app. The app is named as in a desktop sheet ([Apps](#apps-sheetsapps)): its `build` runs here, its `run` and `env`
+(with `${temp}` filled in) go to the driver, which starts it; `ready` and `window` do not apply.
+
+```lua
+return {
+  id = "docmap.engine-panel",
+  title = "docmap-desktop: the engine panel",
+  engine = "webview",
+  app = "window",
+  sizes = { { cols = 1400, rows = 900 } },   -- the window, in pixels
+  steps = {
+    { wait = "document.querySelector('#engine-panel') !== null", timeout = 15000 },
+    { click = "#engine-panel summary" },
+    { expect = "document.querySelector('#engine-panel').open" },
+    { shot = "engine-panel" },
+  },
+}
+```
+
+* The steps are `press`, `click`, `hover`, `focus`, `blur`, `wait`, `expect`, `shot` and `ask`, as in a browser sheet.
+  There is no `open` (the app shows its own page), no `scheme` and no `drag`: WebDriver has neither the media
+  emulation nor HTML5 drag and drop.
+* `wait` and `expect` are JavaScript expressions, run as the body of a function (no `eval`, which the app's
+  Content-Security-Policy may refuse); a promise is awaited. A selector that matches nothing is waited for 5 s.
+* `press` takes Playwright's key names (`Enter`, `Tab`, `Escape`, `ArrowDown`, `Control+k`, one character).
+* The driver programs are `$TESTING_NODE`, `$TESTING_TAURI_DRIVER` and `$TESTING_MSEDGEDRIVER`, else on the PATH
+  (`testing doctor` lists them); msedgedriver's version must match the installed WebView2. Without one of them, and on
+  macOS (Tauri has no WebDriver there), the sheet is a reported skip.
+* The app runs with the user's real folders unless its `env` moves them: give it a folder of the run (`${temp}`) for
+  everything it writes, and `WEBVIEW2_USER_DATA_FOLDER` for the page's storage.
+* The window appears on the screen and takes the focus: like a desktop sheet, not for a CI job without a desktop.
+
 ## Pitfalls when writing a sheet
 
 * A command that computes for a long time (`:Bindings check`) goes in as `input`: `keys` waits for an empty typeahead and
@@ -704,7 +742,7 @@ return {
 
 ## Limits
 
-* The engines are RPC, browser and desktop; terminal byte streams are a later engine.
+* The engines are RPC, browser, desktop and webview; terminal byte streams are a later engine.
 * `judge` is for a person; an AI reviewer that pre-sorts the inbox does not exist yet.
 * A step's Lua is code: review a sheet like a spec.
 

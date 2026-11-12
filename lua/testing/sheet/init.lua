@@ -60,7 +60,9 @@
 local M = {}
 
 M.VERSION = 1
-M.ENGINES = { rpc = true, manual = true, browser = true, desktop = true }
+---The engines whose size is a window or a viewport in pixels, not cells.
+M.PIXEL_ENGINES = { browser = true, desktop = true, webview = true }
+M.ENGINES = { rpc = true, manual = true, browser = true, desktop = true, webview = true }
 M.ACTIONS = {
   "keys",
   "input",
@@ -113,6 +115,19 @@ M.ENGINE_ACTIONS = {
     focus = true,
     blur = true,
     scheme = true,
+    wait = true,
+    expect = true,
+    shot = true,
+    ask = true,
+  },
+  -- the page in the WebView2 of an app, through WebDriver (tauri-driver): as browser, without `open` (the app shows its
+  -- page), `scheme` and `drag` (WebDriver has neither the media emulation nor HTML5 drag and drop)
+  webview = {
+    press = true,
+    click = true,
+    hover = true,
+    focus = true,
+    blur = true,
     wait = true,
     expect = true,
     shot = true,
@@ -307,7 +322,7 @@ end
 ---Upper bounds: an endless wait (`timeout = 1/0`) or a screen of a billion rows is a mistake, not a check.
 M.MAX_MS = 10 * 60 * 1000
 M.MAX_CELLS = 1000
----A browser or desktop sheet's size is pixels, not cells: a page taller than a screen is a normal thing to shoot.
+---A browser, desktop or webview sheet's size is pixels, not cells: a page taller than a screen is a normal thing to shoot.
 M.MAX_PIXELS = 4000
 
 ---@param v any
@@ -669,7 +684,7 @@ function M.validate(s)
   end
   s.engine = s.engine or "rpc"
   if not M.ENGINES[s.engine] then
-    return nil, "engine must be rpc, browser, desktop or manual"
+    return nil, "engine must be rpc, browser, desktop, webview or manual"
   end
   s.steps = s.steps or {}
   if not is_list(s.steps) then
@@ -681,7 +696,7 @@ function M.validate(s)
       return nil, err
     end
   end
-  if (s.engine == "rpc" or s.engine == "browser" or s.engine == "desktop") and #s.steps == 0 then
+  if s.engine ~= "manual" and #s.steps == 0 then
     return nil,
       ("%s sheet needs steps"):format(s.engine == "rpc" and "an rpc" or ("a " .. s.engine))
   end
@@ -703,13 +718,12 @@ function M.validate(s)
   -- a browser sheet's size is the viewport in pixels (cols = width, rows = height)
   s.sizes = s.sizes
     or {
-      (s.engine == "browser" or s.engine == "desktop") and { rows = 700, cols = 1000 }
-        or { rows = 24, cols = 80 },
+      M.PIXEL_ENGINES[s.engine] and { rows = 700, cols = 1000 } or { rows = 24, cols = 80 },
     }
   if not is_list(s.sizes) or #s.sizes == 0 then
     return nil, "sizes must be a non-empty list"
   end
-  local max_size = (s.engine == "browser" or s.engine == "desktop") and M.MAX_PIXELS or M.MAX_CELLS
+  local max_size = M.PIXEL_ENGINES[s.engine] and M.MAX_PIXELS or M.MAX_CELLS
   for i, size in ipairs(s.sizes) do
     if
       type(size) ~= "table"
@@ -782,15 +796,15 @@ function M.validate(s)
     end
   end
   if s.app then
-    if s.engine ~= "browser" and s.engine ~= "desktop" then
-      return nil, "app belongs to a browser or desktop sheet"
+    if not M.PIXEL_ENGINES[s.engine] then
+      return nil, "app belongs to a browser, desktop or webview sheet"
     end
     if not s.app:match("^[%w][%w_.%-]*$") then
       return nil, "app: letters, digits, '_', '-', '.'"
     end
   end
-  if s.engine == "desktop" and not s.app then
-    return nil, "a desktop sheet names its app"
+  if (s.engine == "desktop" or s.engine == "webview") and not s.app then
+    return nil, ("a %s sheet names its app"):format(s.engine)
   end
   if s.live ~= nil then
     local lerr = require("testing.sheet.live").check(s.live, s.engine, s.steps)

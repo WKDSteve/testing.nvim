@@ -11,6 +11,7 @@ local M = {}
 ---@field label string What the messages call it: `browser driver`.
 ---@field prepare fun(): string[]|nil, string|nil The argv of the driver, or nil and the reason of a skip.
 ---@field options fun(app: Testing.Sheet.App|nil): table The `options` of an `open` command.
+---@field driver_starts_app? boolean The driver starts the app itself (webview): it is built and filled in, not started.
 
 ---@param s Testing.Sheet
 ---@param opts table `driver_argv`, `driver_margin_ms`, `driver_stop_ms`, `out_dir`.
@@ -129,8 +130,11 @@ function M.new(s, opts, ctx, how)
     end
     -- one app for all sizes, as one browser
     if s.app and not app then
-      local started, aerr, skip =
-        require("testing.sheet.app").start(s.app, ctx.root, { cancelled = ctx.cancelled })
+      local started, aerr, skip = require("testing.sheet.app").start(
+        s.app,
+        ctx.root,
+        { cancelled = ctx.cancelled, prepare_only = how.driver_starts_app }
+      )
       if skip then
         return { skip = skip }
       end

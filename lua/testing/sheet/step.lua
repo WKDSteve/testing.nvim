@@ -627,7 +627,7 @@ function M.main(argv, sv, deps)
     root = root,
     sizes = s.sizes,
     steps = steps,
-    headed = o.headed == true and s.engine == "browser",
+    headed = o.headed == true and (s.engine == "browser" or s.engine == "webview"),
     delay_ms = o.delay or 0,
     breaks = o.break_list,
     judge = s.judge,

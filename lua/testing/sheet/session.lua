@@ -105,6 +105,8 @@ function M.open(s, opts)
     self.driver = require("testing.sheet.browser").driver(s, opts, ctx)
   elseif s.engine == "desktop" then
     self.driver = require("testing.sheet.desktop").driver(s, opts, ctx)
+  elseif s.engine == "webview" then
+    self.driver = require("testing.sheet.webview").driver(s, opts, ctx)
   elseif #s.steps > 0 then
     -- a manual sheet with questions: nothing to start, a person answers
     self.driver =

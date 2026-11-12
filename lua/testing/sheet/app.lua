@@ -248,14 +248,18 @@ end
 
 ---@class Testing.Sheet.App
 ---@field vars table<string, string> What a sheet may fill in: `temp`, and the name of `ready.as`.
----@field pid integer
+---@field pid? integer Not with `prepare_only`.
 ---@field window? string A part of the title of its window.
 ---@field stop fun() The whole process tree and the folder go away. Safe to call twice.
+---@field argv? string[] With `prepare_only`: the program and its arguments, filled in, the program resolved.
+---@field env? table<string, string> With `prepare_only`: its environment, filled in.
 
 ---Build and start an app, wait until it is ready.
 ---@param name string
 ---@param root string
----@param opts? { cancelled?: fun(): boolean }
+---With `prepare_only` the app is built and its argv and env are filled in, but another program starts it (the webview
+---engine: tauri-driver starts the app it drives); `stop` then only removes the folder of the run.
+---@param opts? { cancelled?: fun(): boolean, prepare_only?: boolean }
 ---@return Testing.Sheet.App|nil app, string|nil err, string|nil skip Why the sheet is a skip, not a failure.
 function M.start(name, root, opts)
   opts = opts or {}
@@ -333,6 +337,9 @@ function M.start(name, root, opts)
       return nil, ("env %s: %s"):format(k, eerr)
     end
     env[k] = e
+  end
+  if opts.prepare_only then
+    return { vars = vars, stop = stop, argv = argv, env = env, window = spec.window }, nil
   end
 
   local lines, partial, stderr = {}, "", {}
