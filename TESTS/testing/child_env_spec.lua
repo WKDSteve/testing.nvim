@@ -68,8 +68,15 @@ return function(H)
     for name in text:gmatch('getenv%("([%w_]+)"%)') do
       read[name] = true
     end
+    -- testing.tier3 names its overrides in a table (`env = "TESTING_NODE"`) and reads them through a variable
+    for name in text:gmatch('env = "([%w_]+)"') do
+      read[name] = true
+    end
   end
-  ok(read.TESTING_PLAYWRIGHT_DIR and read.TESTING_CONTAINER_IMAGE, "the scan finds the overrides")
+  ok(
+    read.TESTING_PLAYWRIGHT_DIR and read.TESTING_CONTAINER_IMAGE and read.TESTING_MSEDGEDRIVER,
+    "the scan finds the overrides"
+  )
   for name in pairs(read) do
     eq(
       env.sanitize({ [name] = "x" }).env[name],
