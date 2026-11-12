@@ -845,6 +845,7 @@ released without a review. Details, the way back and the limits: [RUNNER-GUARD.m
 
 ```
 testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]
+                  [--wait[=<duration>]] [--history[=N]]
 ```
 
 The latest GitHub Actions run of the CI workflow per repository, one cell per system. It runs nothing locally and
@@ -905,6 +906,17 @@ never the token) or `token_error`, `workflow` (the `--workflow`), and `repos`, s
 `dir`, `branch`, `workflow`, `sha`, `overall`, `run` (`id`, `url`, `status`, `conclusion`, `created_at`, `updated_at`,
 `event`, `attempt`), `os` (per cell `state`, `url` and `job`: the job that decided it), `non_gating`, `note`, `error`
 and `config_error`. Keys are sorted and the same answers give the same bytes.
+
+**Waiting: `--wait[=<duration>]`.** After a push the runs are still queued or running; `testing ci remote --wait` asks
+again every 30 seconds until no run of the head commits is going any more (a run whose status is not `completed`:
+`queued`, `running`, `waiting_runner`), then prints the table (or `--json`) and exits as without `--wait`. Every round
+is a conditional request with the stored ETags, so an unchanged run is a free `304` and the rate limit is spared. A head
+commit without a run (`no_run`) counts as going for the first 3 minutes (the run of a fresh push takes a moment to
+appear), then as answered. stderr gets a line `waiting (<elapsed>): <repo> (<state>), ...` whenever that set changes.
+The limit is 60 minutes, or the duration given (`--wait=90s`, `--wait=10m`, `--wait=2h`); past it the table comes all
+the same, stderr says `not finished after <limit>: <repo> (<state>), ...`, and the exit code is `1`. A self-hosted job
+whose runner is off (`waiting_runner`) is waited for until the limit: start the runner or rely on the limit. Not with
+`--history` (exit 2).
 
 **History: `--history[=N]`.** `testing ci remote --history[=N]` (default 30, at most 100) looks at the last N completed
 push runs of the workflow on the branch instead of the head commit only, and counts the jobs per system as

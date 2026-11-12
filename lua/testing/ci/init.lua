@@ -43,6 +43,7 @@ M.USAGE = table.concat({
   "       testing ci --repos=<a,b> | --repos-root=<dir> | --repos-file=<list> [--force] [--jobs=<n>] ...",
   "       testing ci list [--json] [--root=<dir>]",
   "       testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]",
+  "                         [--wait[=<duration>]]",
   "       testing ci overview [<root>...] [--repos-root=<dir>] [--out=<file.html>] [--json] [--no-remote] ...",
   "       testing ci hook install|remove|status [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
   "       testing ci runner-guard check|install|remove|status [--runners=<dir>]",

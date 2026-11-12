@@ -460,8 +460,11 @@ return function(H)
     remote.deps = {
       git = git,
       transport = opts.transport or transport,
-      now = function()
+      now = opts.now or function()
         return NOW
+      end,
+      sleep = opts.sleep or function()
+        error("a sleep without --wait")
       end,
       token = opts.token or function()
         return TOKEN, "env:" .. remote.TOKEN_ENV
@@ -1109,6 +1112,123 @@ return function(H)
   eq(fb.code, remote.EXIT_INFRA, "--repos-root: a repository git cannot read is exit 3")
   has(fb.out, "broken", "--repos-root: ... and has its row")
   has(fb.out, "fully green: 0 / 2", "--repos-root: ... and counts")
+
+  -- ------------------------------------------------------------------ --wait
+
+  do
+    local waity = repo("waity", "https://github.com/WKDSteve/waity", sha("7"))
+    local runs_path, jobs_path = R .. "waity/actions/runs", R .. "waity/actions/runs/77/jobs"
+    -- the run of the head commit, round by round: queued without jobs, running, running (unchanged: a 304), done
+    local phases = {
+      { status = "queued", jobs = {} },
+      { status = "in_progress", jobs = { job_(771, "test (ubuntu-latest)", "in_progress", nil) } },
+      { status = "in_progress", jobs = { job_(771, "test (ubuntu-latest)", "in_progress", nil) } },
+      {
+        status = "completed",
+        conclusion = "success",
+        jobs = { job_(771, "test (ubuntu-latest)", "completed", "success") },
+      },
+    }
+    local function show(i)
+      local ph = phases[i]
+      -- an unchanged answer keeps its ETag: the fake GitHub then says 304
+      local tag = (i == 3) and 2 or i
+      API[runs_path] = {
+        etag = '"runs-waity-' .. tag .. '"',
+        body = {
+          workflow_runs = {
+            run_(77, "CI", ph.status, ph.conclusion, "2026-10-31T11:59:00Z", {
+              updated_at = "2026-10-31T12:0" .. tag .. ":00Z",
+            }),
+          },
+        },
+      }
+      API[jobs_path] = { etag = '"jobs-waity-' .. tag .. '"', body = { jobs = ph.jobs } }
+    end
+    local clock, phase, sleeps = NOW, 1, {}
+    show(1)
+    local res = run({ "--wait", "--state-dir", tmp .. "/wait-state", waity }, {
+      now = function()
+        return clock
+      end,
+      sleep = function(s)
+        sleeps[#sleeps + 1] = s
+        clock = clock + s
+        phase = phase + 1
+        show(phase)
+      end,
+    })
+    eq(res.code, remote.EXIT_OK, "--wait: exit 0 once the run is green: " .. res.err)
+    eq(sleeps, { 30, 30, 30 }, "--wait: three pauses of WAIT_POLL_S, then done")
+    has(res.out, "fully green: 1 / 1", "--wait: the table of the finished run")
+    has(res.err, "waity (queued)", "--wait: says what it waits for")
+    has(res.err, "waity (running)", "--wait: ... and when that changes")
+    local _, n_running = res.err:gsub("waity %(running%)", "")
+    eq(n_running, 1, "--wait: an unchanged state is said once")
+    local conditional, not_modified = 0, 0
+    for _, r in ipairs(requests) do
+      if r.path == runs_path and r.etag then
+        conditional = conditional + 1
+        if r.etag == '"runs-waity-2"' then
+          not_modified = not_modified + 1
+        end
+      end
+    end
+    eq(conditional, 3, "--wait: every later round asks with the stored ETag")
+    ok(not_modified >= 1, "--wait: ... and an unchanged run is a 304")
+
+    -- past the limit: the table, `not finished`, exit 1
+    clock, phase, sleeps = NOW, 1, {}
+    show(1)
+    local stuck = run({ "--wait=75s", "--state-dir", tmp .. "/wait-state2", waity }, {
+      now = function()
+        return clock
+      end,
+      sleep = function(s)
+        sleeps[#sleeps + 1] = s
+        clock = clock + s
+      end,
+    })
+    eq(stuck.code, remote.EXIT_RED, "--wait=75s: still queued past the limit is exit 1")
+    eq(sleeps, { 30, 30, 15 }, "--wait=75s: the last pause ends at the limit")
+    has(stuck.err, "not finished after 1m15s: waity (queued)", "--wait: names what is not finished")
+    has(stuck.out, "REPO", "--wait: ... after the table")
+
+    -- a commit without a run: a fresh push's run may not be there yet, so it is waited for WAIT_NO_RUN_S, not longer
+    clock, sleeps = NOW, {}
+    local no_run_wait = run({ "--wait=1h", "--state-dir", tmp .. "/wait-state3", dirs.eps }, {
+      now = function()
+        return clock
+      end,
+      sleep = function(s)
+        sleeps[#sleeps + 1] = s
+        clock = clock + s
+      end,
+    })
+    eq(
+      #sleeps,
+      remote.WAIT_NO_RUN_S / remote.WAIT_POLL_S,
+      "--wait: no run is waited for WAIT_NO_RUN_S"
+    )
+    eq(no_run_wait.code, run({ dirs.eps }).code, "--wait: ... then the exit code of no_run")
+
+    -- nothing going: no pause at all
+    local fin = repo("fin", "https://github.com/WKDSteve/fin", sha("8"))
+    API[R .. "fin/actions/runs"] = {
+      etag = '"runs-fin"',
+      body = { workflow_runs = { run_(88, "CI", "completed", "success", "2026-10-31T11:00:00Z") } },
+    }
+    API[R .. "fin/actions/runs/88/jobs"] = {
+      etag = '"jobs-fin"',
+      body = { jobs = { job_(881, "test (ubuntu-latest)", "completed", "success") } },
+    }
+    local done_now = run({ "--wait", "--state-dir", tmp .. "/wait-state4", fin })
+    eq(done_now.code, remote.EXIT_OK, "--wait: a finished run needs no wait (and no sleep)")
+
+    eq(run({ "--wait=soon" }).code, remote.EXIT_USAGE, "--wait=soon: not a duration, exit 2")
+    eq(run({ "--wait", "--history" }).code, remote.EXIT_USAGE, "--wait with --history: exit 2")
+    eq(remote.human(4500), "1h15m", "human: hours and minutes")
+  end
 
   -- ------------------------------------------------------------------ usage
 

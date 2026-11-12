@@ -276,7 +276,9 @@ whether the tree is still the stamped one (see "Stamp and verify" below).
 .testing.lua locally; `ci remote` runs nothing and reports the latest GitHub
 Actions run of the CI workflow per repository and system (docs/CI.md, "The
 GitHub Actions status"; `--history[=N]` reads the last N runs and tells when
-one system was red alone); `ci overview` runs nothing either and writes one
+one system was red alone; `--wait[=<duration>]` asks again every 30 seconds
+until no run of the head commits is going, at most 60 minutes or the duration,
+past that exit 1 "not finished"); `ci overview` runs nothing either and writes one
 static HTML page of the fleet from `ci verify`, `ci.json` and that adapter
 (docs/CI.md, "Fleet overview").
 `ci commit {rev}` checks a commit in a git worktree of its own (another

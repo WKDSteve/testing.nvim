@@ -3,7 +3,7 @@
 ---@brief `testing ci remote`: the latest GitHub Actions run of the CI workflow per repository, per system.
 ---@description
 --- ```
---- testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]
+--- testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>] [--wait[=<dauer>]]
 --- ```
 ---
 --- Per repository: `owner/repo` from `git remote get-url origin` (https and ssh; any other host is `no_github`), the
@@ -30,6 +30,11 @@
 --- Requests are conditional: per checkout the ETag and the last answer live in
 --- `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json`; a `304` reuses the stored answer (it does not count
 --- against the rate limit), and the jobs of a completed run whose `updated_at` did not change are not asked for again.
+---
+--- `--wait[=<duration>]` (default `WAIT_DEFAULT_S`): asks again every `WAIT_POLL_S` seconds (conditional requests, a
+--- `304` is free) until no run of the head commits is still going (status other than `completed`; a commit without a run
+--- counts as going for `WAIT_NO_RUN_S` after the start, the run of a fresh push may not be there yet), then prints the
+--- table and exits as without `--wait`. Past the limit: the table, `not finished after ...` on stderr, exit 1.
 ---
 --- Exit codes: 0 every repository was fetched and none is red, 1 a repository is failure, rejected, cancelled or no_runner, 2 a
 --- usage error, 3 a repository could not be fetched (unknown) and none is red: no token, no network; also when
@@ -80,8 +85,18 @@ end
 ---What makes the exit code 1.
 local RED = { failure = true, rejected = true, cancelled = true, no_runner = true }
 
+---`--wait` without a value: how long to wait at most (seconds).
+M.WAIT_DEFAULT_S = 3600
+
+---`--wait`: the pause between two rounds of requests (seconds).
+M.WAIT_POLL_S = 30
+
+---`--wait`: how long a head commit without a run counts as "its run is not there yet" (seconds after the start).
+M.WAIT_NO_RUN_S = 180
+
 M.USAGE = table.concat({
   "usage: testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>] [--history[=N]]",
+  "                         [--wait[=<duration>]]",
   "  <root>              a repository (default: the current directory)",
   "  --repos-root=<dir>  every directory directly below <dir> with a GitHub origin and .github/workflows",
   '                      (names containing "vault" are left out; repeatable)',
@@ -90,6 +105,8 @@ M.USAGE = table.concat({
   "  --state-dir=<dir>   where the ETag cache lives (default: stdpath('state'))",
   "  --history[=N]       the last N push runs (default 30, at most 100) per repository and system instead of the head",
   "                      commit only, and how often macOS (or another system) was red ALONE (docs/CI.md)",
+  "  --wait[=<duration>] ask again every 30s until no run of the head commits is still going, then the table",
+  "                      (default 60m; 90s, 10m, 1h); past the limit: exit 1, not finished",
   "  token: $" .. M.TOKEN_ENV .. " (read-only), else `gh auth token`; never GITHUB_TOKEN",
   "  exit: 0 nothing red, 1 failure/rejected/cancelled/no_runner, 2 usage, 3 a repository could not be fetched",
 }, "\n")
@@ -139,6 +156,13 @@ M.deps = {
   now = function()
     return os.time()
   end,
+  ---`--wait`: pause between two rounds; the event loop keeps running.
+  ---@param seconds number
+  sleep = function(seconds)
+    vim.wait(math.floor(seconds * 1000), function()
+      return false
+    end, 200)
+  end,
 }
 
 ---@class Testing.Ci.Remote.Args
@@ -146,6 +170,7 @@ M.deps = {
 ---@field repos_roots string[]
 ---@field json boolean
 ---@field history? integer
+---@field wait? number seconds
 ---@field workflow? string
 ---@field state_dir? string
 ---@field help boolean
@@ -167,6 +192,15 @@ function M.parse(argv)
       args.help = true
     elseif key == "json" and value == nil then
       args.json = true
+    elseif key == "wait" then
+      local seconds, why = M.WAIT_DEFAULT_S, nil
+      if value ~= nil then
+        seconds, why = require("testing.run.fast").parse_duration(value)
+      end
+      if not seconds then
+        return nil, ("--wait takes a duration like 90s, 10m or 1h (%s)"):format(tostring(why))
+      end
+      args.wait = seconds
     elseif key == "history" then
       local n = value == nil and require("testing.ci.remote_history").DEFAULT or tonumber(value)
       local max = require("testing.ci.remote_history").MAX
@@ -1338,6 +1372,73 @@ function M.render(records)
   return lines
 end
 
+---The rows whose head commit still has a run going: its status is not `completed` (queued, in progress, waiting for
+---a runner), or, while `elapsed` is below `WAIT_NO_RUN_S`, there is no run yet (a fresh push).
+---@param records table[]
+---@param elapsed number seconds since the wait began
+---@return string[] labels "repo (state)"
+function M.unfinished(records, elapsed)
+  local out = {}
+  for _, rec in ipairs(records) do
+    local going = rec.run ~= nil and rec.run.status ~= "completed"
+    if rec.overall == "no_run" and elapsed < M.WAIT_NO_RUN_S then
+      going = true
+    end
+    if going then
+      out[#out + 1] = ("%s (%s)"):format(label(rec), tostring(rec.overall))
+    end
+  end
+  return out
+end
+
+---A number of seconds as `45s`, `12m` or `1h30m`.
+---@param seconds number
+---@return string
+function M.human(seconds)
+  seconds = math.floor(seconds + 0.5)
+  if seconds < 60 then
+    return seconds .. "s"
+  elseif seconds < 3600 then
+    local m, s = math.floor(seconds / 60), seconds % 60
+    return s == 0 and (m .. "m") or ("%dm%ds"):format(m, s)
+  end
+  local h, m = math.floor(seconds / 3600), math.floor(seconds % 3600 / 60)
+  return m == 0 and (h .. "h") or ("%dh%dm"):format(h, m)
+end
+
+---`--wait`: collect, and again every `WAIT_POLL_S` seconds while a run of a head commit is going, at most `limit`
+---seconds. Every round asks with the stored ETags (`collect`), so an unchanged answer is a free `304`. A line on stderr
+---whenever the set of runs still going changes.
+---@param repos table[]
+---@param opts table `collect`'s options
+---@param limit number seconds
+---@param sv { err: fun(s: string) }
+---@return table[] records
+---@return table info
+---@return string[] unfinished empty when every run finished in time
+function M.wait(repos, opts, limit, sv)
+  local start = M.deps.now()
+  local last
+  while true do
+    local records, info = M.collect(vim.deepcopy(repos), opts)
+    local elapsed = M.deps.now() - start
+    local going = M.unfinished(records, elapsed)
+    -- no token or no repository: waiting changes nothing
+    if #going == 0 or info.token_error or #records == 0 then
+      return records, info, {}
+    end
+    if elapsed >= limit then
+      return records, info, going
+    end
+    local now_text = table.concat(going, ", ")
+    if now_text ~= last then
+      sv.err(("testing ci remote: waiting (%s): %s"):format(M.human(elapsed), now_text))
+      last = now_text
+    end
+    M.deps.sleep(math.min(M.WAIT_POLL_S, limit - elapsed))
+  end
+end
+
 ---`testing ci remote --history[=N]` for the resolved `repos`.
 ---@param args Testing.Ci.Remote.Args
 ---@param repos table[]
@@ -1396,9 +1497,19 @@ function M.main(argv, sv)
   end
   local state_dir = args.state_dir or sv.state_dir or vim.fn.stdpath("state")
   if args.history then
+    if args.wait then
+      sv.err("testing ci remote: --wait and --history do not go together")
+      return M.EXIT_USAGE
+    end
     return M.history_main(args, repos, state_dir, sv)
   end
-  local records, info = M.collect(repos, { workflow = args.workflow, state_dir = state_dir })
+  local records, info, unfinished
+  if args.wait then
+    records, info, unfinished =
+      M.wait(repos, { workflow = args.workflow, state_dir = state_dir }, args.wait, sv)
+  else
+    records, info = M.collect(repos, { workflow = args.workflow, state_dir = state_dir })
+  end
   if #records == 0 then
     sv.err("testing ci remote: no repository with a GitHub origin and .github/workflows found")
     return M.EXIT_USAGE
@@ -1421,6 +1532,15 @@ function M.main(argv, sv)
         M.TOKEN_ENV
       )
     )
+  end
+  if unfinished and #unfinished > 0 then
+    sv.err(
+      ("testing ci remote: not finished after %s: %s"):format(
+        M.human(args.wait),
+        table.concat(unfinished, ", ")
+      )
+    )
+    return M.EXIT_RED
   end
   return M.exit_code(records)
 end
