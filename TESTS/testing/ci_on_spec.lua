@@ -278,9 +278,22 @@ return function(H)
     local file = cf:read("*a")
     cf:close()
     ok(
-      file:find("ARG BASH_SHA256\n", 1, true) ~= nil,
-      "the sum of the bash sources is a build argument"
+      file:find("ARG BASH_SHA256=" .. string.rep("%x", 64) .. "\n") ~= nil,
+      "the sum of the bash sources is fixed"
     )
+    for from in file:gmatch("\nFROM (%S+)") do
+      ok(from:find("@sha256:%x+$") ~= nil, "a base image is pinned by digest: " .. from)
+    end
+    -- a linked worktree as the root: refused before a container starts (git could not follow its .git file in there)
+    local wt = vim.fs.normalize(vim.fn.tempname()) .. "-linked"
+    vim.fn.mkdir(wt, "p")
+    local gf = assert(io.open(wt .. "/.git", "wb"))
+    gf:write("gitdir: C:/somewhere/.git/worktrees/x\n")
+    gf:close()
+    local wcode, _, wproblems = on.run_target("darwin-like", {}, wt, {}, { container = {} })
+    eq(wcode, 3, "a linked worktree: infrastructure")
+    has(wproblems[1], "is a linked worktree", "and why")
+    vim.fn.delete(wt, "rf")
     ok(file:find("sha256sum -c -", 1, true) ~= nil, "the download is checked against it")
     ok(
       not file:find("| tar", 1, true),
@@ -291,7 +304,7 @@ return function(H)
     eq(res.code, 3, "darwin-like without its image: infrastructure")
     has(
       res.err,
-      "podman build --build-arg BASH_SHA256=<sha256 of the bash sources> --tag localhost/testing-darwin-like:1 containers/darwin-like",
+      "podman build --tag localhost/testing-darwin-like:1 containers/darwin-like",
       "the build line of its own Containerfile"
     )
     ok(not res.err:find("ci.container.image", 1, true), "ci.container.image is the linux target's")

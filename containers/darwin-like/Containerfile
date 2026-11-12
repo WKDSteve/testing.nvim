@@ -15,23 +15,21 @@
 # working tree is what the mount of a Windows checkout already gives (Podman on WSL, drvfs); on a Linux host it would
 # need a casefold file system, which this image does not set up (docs/CI.md).
 #
-# Built once, with the network, naming the sha256 of the bash sources (checked against ftp.gnu.org's signature
-# before it is written here; the build refuses without it, and a tarball with another sum fails the build):
+# Built once, with the network:
 #
-#   podman build --build-arg BASH_SHA256=<sha256 of bash-3.2.57.tar.gz> \
-#     --tag localhost/testing-darwin-like:1 containers/darwin-like
+#   podman build --tag localhost/testing-darwin-like:1 containers/darwin-like
 #
-# The base images are named by tag here; pin them by digest (`image@sha256:...`) with the first build.
+# What comes from the network is fixed here: the base images by digest, the bash sources by their sha256 (checked on
+# 2026-11-12 against the GPG signature of ftp.gnu.org, key of Chet Ramey 7C0135FB088AAF6C66C650B9BB5869F064EA74AB);
+# a tarball with another sum fails the build. Moving a pin is a new tag (`:2`, and `testing.ci.on.DARWIN_IMAGE`): a
+# proof names the image id it ran in.
 #
-# A change here is a new tag (`:2`, and `testing.ci.on.DARWIN_IMAGE`): a proof names the image id it ran in.
-#
-# Status: written but not built yet (the build downloads the Chimera image and the bash sources); the first build may
-# still need fixes here, and until then `--on=darwin-like` ends with exit 3 and the build line.
+# First built 2026-11-12 (Chimera 2026-11, neovim 0.12.6, git 2.56.1).
 
-FROM docker.io/library/debian:bookworm-slim AS bash32
+FROM docker.io/library/debian:bookworm-slim@sha256:c67e92c8099ba22853ab4cfda7cfb494d253d6012ca82dee98ba8976772af018 AS bash32
 ARG BASH_VERSION=3.2.57
-# no default: code from the network is only built when its sum is the one named
-ARG BASH_SHA256
+# code from the network is only built when its sum is this one
+ARG BASH_SHA256=3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4
 RUN set -eux; \
     test -n "${BASH_SHA256}" || { echo "BASH_SHA256 is required (--build-arg BASH_SHA256=...)"; exit 1; }; \
     apt-get update; \
@@ -46,8 +44,10 @@ RUN set -eux; \
     make install; \
     /opt/bash32/bin/bash -c 'echo "$BASH_VERSION"' | grep -q '^3\.2\.'
 
-FROM docker.io/chimeralinux/chimera:latest
+FROM docker.io/chimeralinux/chimera:latest@sha256:ef2b5165b3a43474a212caf7d3d9d1505bf9f7bc835d776d5ad687e3d12e3902
 RUN set -eux; \
+    apk add --no-interactive chimera-repo-user; \
+    apk update; \
     apk add --no-interactive neovim git; \
     nvim --version | head -1; git --version
 COPY --from=bash32 /opt/bash32/bin/bash /usr/local/bin/bash32

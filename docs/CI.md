@@ -481,10 +481,12 @@ A case-insensitive working tree is what a Windows checkout mounted through Podma
 host the image does not set up a casefold file system, and that class is covered by the hosted Windows run. Not
 reproduced at all: the ARM64 memory model, FSEvents, the GUI, the timing of the hosted runners.
 
-The image is built once, with the network, naming the sha256 of the bash sources (the build refuses without it and
-fails on another sum): `podman build --build-arg BASH_SHA256=<sum> --tag localhost/testing-darwin-like:1
-containers/darwin-like`
-(the Containerfile is not built yet, see its header).
+The image is built once, with the network: `podman build --tag localhost/testing-darwin-like:1 containers/darwin-like`.
+What it takes from the network is fixed in the Containerfile: the base images by digest and the bash sources by their
+sha256 (checked against the GPG signature of ftp.gnu.org); another sum fails the build. Run it from the main checkout,
+not from a linked worktree: the `.git` file of a worktree names a host path the container does not have, and every git
+call of the suite fails there. The hosted macOS run has `suite` and `conformance` only, and so does this image (no
+stylua, luacheck or node): `testing ci --on=darwin-like --step=suite,conformance`.
 `ci.container.image` does not apply to this target (it is the `linux` target's).
 
 ## Land through the hosted CI: `testing ci land`

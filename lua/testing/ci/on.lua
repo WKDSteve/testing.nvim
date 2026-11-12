@@ -42,12 +42,7 @@ M.DARWIN_IMAGE = "localhost/testing-darwin-like:1"
 ---The images that testing.nvim's own Containerfiles build: the target, its image and the folder to build it from.
 M.BUILT_IMAGES = {
   linux = { image = M.DEFAULT_IMAGE, dir = "containers/ci" },
-  -- the bash sources are checked against a sum the builder names: the build refuses without it
-  ["darwin-like"] = {
-    image = M.DARWIN_IMAGE,
-    dir = "containers/darwin-like",
-    args = "--build-arg BASH_SHA256=<sha256 of the bash sources> ",
-  },
+  ["darwin-like"] = { image = M.DARWIN_IMAGE, dir = "containers/darwin-like" },
 }
 
 ---How long the run in a container may take, all steps together (each step keeps its own deadline in there).
@@ -335,6 +330,19 @@ end
 ---@return table|nil doc
 ---@return string[] problems
 function M.run_target(target, argv, root, pipeline, sv)
+  -- a linked worktree: its `.git` file names a path of this machine that the container does not have, so every git
+  -- call of the suite would fail in there and read as a red spec
+  local dotgit = vim.uv.fs_stat(root .. "/.git")
+  if dotgit and dotgit.type == "file" then
+    return 3,
+      nil,
+      {
+        ("%s: %s is a linked worktree: git cannot follow its .git file in the container; run it from the main checkout"):format(
+          target,
+          root
+        ),
+      }
+  end
   local ci = require("testing.ci")
   local container = require("testing.container")
   local copts = vim.deepcopy(sv.container or {})
@@ -350,8 +358,7 @@ function M.run_target(target, argv, root, pipeline, sv)
       {
         ("%s: %s"):format(target, reason),
         M.BUILT_IMAGES[target]
-            and ("build the image: podman build %s--tag %s %s (in the testing.nvim checkout)%s"):format(
-              M.BUILT_IMAGES[target].args or "",
+            and ("build the image: podman build --tag %s %s (in the testing.nvim checkout)%s"):format(
               M.BUILT_IMAGES[target].image,
               M.BUILT_IMAGES[target].dir,
               target == "linux" and ", or set ci.container.image" or ""
