@@ -736,11 +736,11 @@ return function(H)
 
   -- ---------------------------------------------------------------- lint --file[=a,b]
 
-  eq(
-    usrcmds.lint_files({ "%" }, "C:\\r\\a.lua"),
-    { "C:/r/a.lua" },
-    "lint --file: bare is the buffer"
-  )
+  eq(usrcmds.lint_files({ "%" }, "/r/a.lua"), { "/r/a.lua" }, "lint --file: bare is the buffer")
+  if vim.fn.has("win32") == 1 then
+    -- a Windows buffer name is normalized (on Linux a backslash is part of a file name)
+    eq(usrcmds.lint_files({ "%" }, "C:\\r\\a.lua"), { "C:/r/a.lua" }, "lint --file: slashes")
+  end
   eq(
     usrcmds.lint_files(true, "/r/a.lua"),
     { "/r/a.lua" },
