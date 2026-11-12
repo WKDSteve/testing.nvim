@@ -1,4 +1,6 @@
 -- @cache-env TESTING_CI_TARGET
+-- @cache-allow outside
+-- (the absolute paths here are places in the container: `/repo`, `/out`, its HOME; this machine never reads them)
 ---@module 'testing.ci.on'
 ---@brief `testing ci --on=host,linux,darwin-like,devcontainer`: the pipeline on this machine and in containers, one after the other.
 ---@description
@@ -7,14 +9,14 @@
 --- ```
 ---
 --- `host` is the run as without `--on` (`testing.ci`). A container target starts the same run inside a container of the
---- engine of `testing.container` (Podman): `testing ci --on=host` again, there, on the repository mounted READ-ONLY at
---- `/repo` (the runner's checkout and every dependency checkout too, `$<NAME>_DIR` pointing at them), with one output
---- folder that is writable (`/out`: the document and the state of the inner run). No network unless
+--- engine of `testing.container` (Podman): `testing ci --on=host` again, there, on a copy of the repository in the
+--- container's own file system (`M.on_copy`; the checkouts are mounted READ-ONLY below `/src`, the runner's and every
+--- dependency's too, `$<NAME>_DIR` pointing at their copies), with one output folder that is writable (`/out`: the document and the state of the inner run). No network unless
 --- `ci.container.network = true`; the container is called `testing-ci-<repo>-<target>` and removed when it ends.
 ---
 ---   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:2`: nvim, stylua, luacheck and git at
 ---                 the versions of the hosted CI), or `ci.container.image`
----   darwin-like   the image of `containers/darwin-like/Containerfile` (`localhost/testing-darwin-like:1`): bash 3.2 as
+---   darwin-like   the image of `containers/darwin-like/Containerfile` (`localhost/testing-darwin-like:2`): bash 3.2 as
 ---                 `bash` and `/bin/sh`, BSD userland (Chimera Linux), `TMPDIR` behind a `/var` symlink; the macOS
 ---                 error classes without macOS (a green run there proves nothing about macOS)
 ---   devcontainer  the image of the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`,
@@ -37,7 +39,7 @@ M.ORDER = { "host", "linux", "darwin-like", "devcontainer" }
 M.DEFAULT_IMAGE = "localhost/testing-ci:2"
 
 ---The image of the `darwin-like` target (`containers/darwin-like/Containerfile`).
-M.DARWIN_IMAGE = "localhost/testing-darwin-like:1"
+M.DARWIN_IMAGE = "localhost/testing-darwin-like:2"
 
 ---The images that testing.nvim's own Containerfiles build: the target, its image and the folder to build it from.
 M.BUILT_IMAGES = {
@@ -274,6 +276,55 @@ local function checkouts(root, pipeline)
   return { mounts = mounts, env = env, runner = runner }
 end
 
+---Where the checkouts are copied to in the container before the run (a folder every image lets each user write).
+M.WORK = "/tmp/ci"
+
+---The script that copies each mounted checkout into the container's own file system and then starts the run there:
+---`sh -c <script> sh <root> <from> <to> [<from> <to> ...] -- <command...>`. Fixed text, the places come as arguments
+---(paths of the container, never text of the repository). POSIX sh and cp only (bash 3.2 and FreeBSD's cp in the
+---darwin-like image, which has no tar); a copy that fails ends the container with exit 3 and says which.
+M.COPY_SCRIPT = table.concat({
+  'root="$1"',
+  "shift",
+  'while [ "$1" != "--" ]; do',
+  '  mkdir -p "$2" && cp -R -p "$1/." "$2" || { echo "testing ci --on: cannot copy $1 to $2" >&2; exit 3; }',
+  "  shift 2",
+  "done",
+  "shift",
+  'cd "$root"',
+  'exec "$@"',
+}, "\n")
+
+---The run works on a copy of the checkouts, not on the mounts: every `require` and every git call of a suite reads
+---files, and through the mount of a Windows drive (Podman on WSL, 9p) each lookup costs milliseconds (a `:checkhealth`
+---took 10 s instead of 1, the suite twice as long, and its deadlines broke). The mounts stay read-only, below `/src`;
+---the copy is the container's own and goes with it. `co` is what `checkouts` returned (places below `/`), the answer
+---the same with the places of the copy and the pairs to copy.
+---@param co { mounts: table<string, string>, env: table<string, string>, runner: string }
+---@return { mounts: table<string, string>, env: table<string, string>, runner: string, root: string, copy: string[] }
+function M.on_copy(co)
+  local mounts, copy = {}, {}
+  local hosts = vim.tbl_keys(co.mounts)
+  table.sort(hosts)
+  for _, host in ipairs(hosts) do
+    local at = co.mounts[host]
+    mounts[host] = "/src" .. at
+    copy[#copy + 1] = "/src" .. at
+    copy[#copy + 1] = M.WORK .. at
+  end
+  local env = {}
+  for k, v in pairs(co.env) do
+    env[k] = M.WORK .. v
+  end
+  return {
+    mounts = mounts,
+    env = env,
+    runner = M.WORK .. co.runner,
+    root = M.WORK .. "/repo",
+    copy = copy,
+  }
+end
+
 ---The options of the inner run: what `testing ci` got, without `--on`, `--json`, `--state-dir`, `--root`, `--events`
 ---and `--junit` (they name places of this machine).
 ---@param argv string[]
@@ -391,6 +442,7 @@ function M.run_target(target, argv, root, pipeline, sv)
   -- a container of this name that an earlier run left when it had ended; a running one (another run of this
   -- repository) is never stopped here
   container.remove(name, copts)
+  co = M.on_copy(co)
   local env = vim.tbl_extend("force", co.env, {
     [M.TARGET_ENV] = target,
     -- the outer run was trusted (scripts/testing.lua asked before anything ran)
@@ -412,16 +464,20 @@ function M.run_target(target, argv, root, pipeline, sv)
     "-l",
     co.runner .. "/scripts/testing.lua",
     "ci",
-    "--root=/repo",
+    "--root=" .. co.root,
     "--state-dir=/out/state",
     "--json=/out/ci.json",
     "--no-agent",
   }
   vim.list_extend(command, inner_options(argv))
+  local wrapped = { "sh", "-c", M.COPY_SCRIPT, "sh", co.root }
+  vim.list_extend(wrapped, co.copy)
+  wrapped[#wrapped + 1] = "--"
+  vim.list_extend(wrapped, command)
   local before = ci.internal.git_facts(root)
   local started = os.date("!%Y-%m-%dT%H:%M:%SZ")
   local res = container.run(
-    command,
+    wrapped,
     vim.tbl_extend("force", copts, {
       mounts = co.mounts,
       writable = { [out_dir] = "/out" },
@@ -435,7 +491,7 @@ function M.run_target(target, argv, root, pipeline, sv)
       -- PID 1 reaps orphans as on a host: without it a killed process tree leaves zombies, and the suite's checks
       -- that nothing is left (child_run, child_rpc_process, health) read as red
       init = true,
-      workdir = "/repo",
+      workdir = "/tmp",
       timeout_ms = M.TIMEOUT_MS,
       -- the engine ends the container itself after this long: a client that was killed leaves none behind
       stop_after_s = math.floor(M.TIMEOUT_MS / 1000),

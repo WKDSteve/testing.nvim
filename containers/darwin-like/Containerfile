@@ -11,20 +11,20 @@
 #     path that went through realpath no longer starts with the TMPDIR a test compared it to.
 #   * no Docker, no git extras (git itself only).
 #
-# Not reproduced: the ARM64 memory model, FSEvents, the GUI, the timing of the hosted runners. A case-insensitive
-# working tree is what the mount of a Windows checkout already gives (Podman on WSL, drvfs); on a Linux host it would
-# need a casefold file system, which this image does not set up (docs/CI.md).
+# Not reproduced: the ARM64 memory model, FSEvents, the GUI, the timing of the hosted runners, a case-insensitive
+# working tree (the run works on a copy in the container's file system; `--on=host` on Windows and the hosted Windows
+# run cover that class, docs/CI.md).
 #
 # Built once, with the network:
 #
-#   podman build --tag localhost/testing-darwin-like:1 containers/darwin-like
+#   podman build --tag localhost/testing-darwin-like:2 containers/darwin-like
 #
 # What comes from the network is fixed here: the base images by digest, the bash sources by their sha256 (checked on
 # 2026-11-12 against the GPG signature of ftp.gnu.org, key of Chet Ramey 7C0135FB088AAF6C66C650B9BB5869F064EA74AB);
-# a tarball with another sum fails the build. Moving a pin is a new tag (`:2`, and `testing.ci.on.DARWIN_IMAGE`): a
-# proof names the image id it ran in.
+# a tarball with another sum fails the build. Moving a pin or adding a package is a new tag (`:3`, and
+# `testing.ci.on.DARWIN_IMAGE`): a proof names the image id it ran in.
 #
-# First built 2026-11-12 (Chimera 2026-11, neovim 0.12.6, git 2.56.1).
+# First built 2026-11-12 (Chimera 2026-11, neovim 0.12.6, git 2.56.1); `:2` adds `ps` (procps).
 
 FROM docker.io/library/debian:bookworm-slim@sha256:c67e92c8099ba22853ab4cfda7cfb494d253d6012ca82dee98ba8976772af018 AS bash32
 ARG BASH_VERSION=3.2.57
@@ -50,6 +50,10 @@ RUN set -eux; \
     apk update; \
     apk add --no-interactive neovim git; \
     nvim --version | head -1; git --version
+# macOS has `ps`; the base image has none, and testing.child reads the process table with it to kill a tree
+RUN set -eux; \
+    apk add --no-interactive procps; \
+    ps -A -o pid= -o ppid= >/dev/null
 COPY --from=bash32 /opt/bash32/bin/bash /usr/local/bin/bash32
 # /bin/sh and /bin/bash are bash 3.2 from here on (the last step: apk's own scripts ran with the system shell)
 RUN ["/usr/local/bin/bash32", "-c", "set -e; ln -sf /usr/local/bin/bash32 /bin/bash; ln -sf /usr/local/bin/bash32 /bin/sh; ln -sf /usr/local/bin/bash32 /usr/bin/bash; ln -sf /usr/local/bin/bash32 /usr/bin/sh"]

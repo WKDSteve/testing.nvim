@@ -185,18 +185,24 @@ return function(H)
     local argv = table.concat(run_argv(), " ")
     has(argv, "--network none", "no network by default")
     has(argv, "--name " .. on.container_name(repo, "linux"), "the container's name")
-    has(argv, root .. ":/repo:ro", "the repository read-only")
-    has(argv, ":/deps/lib.nvim:ro", "lib.nvim read-only")
+    has(argv, root .. ":/src/repo:ro", "the repository read-only")
+    has(argv, ":/src/deps/lib.nvim:ro", "lib.nvim read-only")
     has(argv, ":/out:rw", "one writable output folder")
     has(argv, "TESTING_CI_TARGET=linux", "the inner run knows its target")
-    has(argv, "LIB_NVIM_DIR=/deps/lib.nvim", "and where lib.nvim is")
+    has(argv, "LIB_NVIM_DIR=/tmp/ci/deps/lib.nvim", "and where lib.nvim is: its copy")
+    -- the run works on a copy in the container (a lookup through the mount of a Windows drive costs milliseconds)
+    has(argv, "/src/repo /tmp/ci/repo", "the repository is copied before the run")
+    -- with what every image has: the darwin-like one (Chimera) has no tar, and a copy that fails ends the container
+    ok(not on.COPY_SCRIPT:find("tar", 1, true), "the copy needs no tar")
+    has(on.COPY_SCRIPT, "exit 3", "a failed copy is infrastructure")
+    has(argv, "/src/deps/lib.nvim /tmp/ci/deps/lib.nvim", "and lib.nvim")
     has(argv, "localhost/testing-ci:2", "the image of containers/ci")
     -- not root, as on a hosted runner: the user of this machine is the user in there (the output folder is its own)
     has(argv, "--userns keep-id", "the run is not root")
     ok(not argv:find("--user ", 1, true), "no --user that would make it root: " .. argv)
     has(
       argv,
-      "ci --root=/repo --state-dir=/out/state --json=/out/ci.json",
+      "ci --root=/tmp/ci/repo --state-dir=/out/state --json=/out/ci.json",
       "the same pipeline again in there"
     )
     local dir = require("testing.state").dir(root, { state_dir = state_dir })
@@ -307,7 +313,7 @@ return function(H)
     eq(res.code, 3, "darwin-like without its image: infrastructure")
     has(
       res.err,
-      "podman build --tag localhost/testing-darwin-like:1 containers/darwin-like",
+      "podman build --tag localhost/testing-darwin-like:2 containers/darwin-like",
       "the build line of its own Containerfile"
     )
     ok(not res.err:find("ci.container.image", 1, true), "ci.container.image is the linux target's")
@@ -315,7 +321,7 @@ return function(H)
     eq(res2.code, 0, "the darwin-like target (" .. res2.err .. ")")
     has(
       table.concat(run_argv(), " "),
-      "localhost/testing-darwin-like:1",
+      "localhost/testing-darwin-like:2",
       "runs in the darwin-like image"
     )
     ok(
@@ -489,9 +495,9 @@ return function(H)
     vim.env.LIB_NVIM_DIR = saved
     eq(res.code, 0, "the run of lib.nvim itself (" .. res.err .. ")")
     local argv = table.concat(run_argv(), " ")
-    has(argv, lib .. ":/repo:ro", "the repository is mounted")
-    has(argv, "LIB_NVIM_DIR=/repo", "and lib.nvim is the repository")
-    ok(not argv:find(":/deps/lib.nvim:ro", 1, true), "no second mount of it")
+    has(argv, lib .. ":/src/repo:ro", "the repository is mounted")
+    has(argv, "LIB_NVIM_DIR=/tmp/ci/repo", "and lib.nvim is the repository")
+    ok(not argv:find(":/src/deps/lib.nvim:ro", 1, true), "no second mount of it")
   end
 
   -- the network is part of the pipeline's hash where it is set (a proof without it is not one with it)

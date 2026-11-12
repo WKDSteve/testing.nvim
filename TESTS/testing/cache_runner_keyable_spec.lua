@@ -125,6 +125,39 @@ return function(H)
   end
   eq(failed, {}, "a spec that requires a runner module has a cache key")
 
+  -- ... also in the container of `testing ci --on`: the runner names its places (`/src`, `/tmp/ci`, `/out`, its HOME
+  -- `/tmp/home`) as absolute literals, and in there they exist. Every runner spec lost its key in that container;
+  -- here the scanner sees a machine on which they exist.
+  do
+    local real_realpath = vim.uv.fs_realpath
+    local PLACES = { "/repo", "/out", "/deps", "/src", "/tmp/ci", "/tmp/home" }
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.uv.fs_realpath = function(path, ...)
+      local real = real_realpath(path, ...)
+      if real == nil and type(path) == "string" then
+        for _, place in ipairs(PLACES) do
+          if path == place or path:sub(1, #place + 1) == place .. "/" then
+            return path
+          end
+        end
+      end
+      return real
+    end
+    local in_container = new_ctx("container")
+    local lost = {}
+    local okk, err = pcall(function()
+      for _, mod in ipairs(MODULES) do
+        local key, why = cache.key({ file = specs[mod] }, in_container)
+        if key == nil then
+          lost[#lost + 1] = mod .. ": " .. tostring(why)
+        end
+      end
+    end)
+    vim.uv.fs_realpath = real_realpath
+    ok(okk, "the keys were asked: " .. tostring(err))
+    eq(lost, {}, "in the container of testing ci --on a runner module keeps its key")
+  end
+
   -- ---------------------------------------------------------------- a device without content is no input
   -- `/dev/null` (git and shell calls) exists on POSIX only: it must not take the key of a spec that loads such a
   -- module, on any platform. A real file outside the project still does.
