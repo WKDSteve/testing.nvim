@@ -208,9 +208,10 @@ return function(H)
     },
   }
 
+  -- 1250 ms is an exact half: rounded up on every system (`%.1f` left it to the C library: 1.2 here, 1.3 there)
   eq(report.term(RED, "SENTINEL"), {
     "  stylua         green       0.4 s",
-    "  luacheck       red         1.2 s  2 finding(s)",
+    "  luacheck       red         1.3 s  2 finding(s)",
     "  suite          skipped     0.0 s  an earlier step failed",
     "ci: RED luacheck (exit 1)",
   }, "term: red")

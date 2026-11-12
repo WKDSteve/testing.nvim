@@ -278,7 +278,10 @@ end
 ---@param ms integer
 ---@return string
 local function seconds(ms)
-  return ("%.1f s"):format(ms / 1000)
+  -- rounded here, half up, not by `%.1f`: the Lua build and its C library decide an exact half (1250 ms), and they do
+  -- not agree on it (1.2 on Windows and glibc, 1.3 in the darwin-like image), so one document printed differently
+  local tenths = math.floor((tonumber(ms) or 0) / 100 + 0.5)
+  return ("%d.%d s"):format(math.floor(tenths / 10), tenths % 10)
 end
 
 ---@param doc table testing-ci/1
