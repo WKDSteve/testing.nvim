@@ -650,8 +650,30 @@ local function tree_of(ctx, hasher, dir, variant, opts, data)
   local hit = t[k]
   if not hit then
     local o = opts
+    -- what the test sheets write while the suite runs (a page they open, screenshots) is output, never an input:
+    -- in a fresh tree (`ci commit`, a snapshot) it appears during the run and would change the key of every spec
+    -- whose key takes in that folder (`not written: an input changed while the run was going`)
+    -- both absolute: a run can name its root relatively (`.`), the directories below it are then relative as well
+    local function abs(p)
+      return (vim.fs.normalize(vim.fn.fnamemodify(p, ":p")):gsub("/+$", ""))
+    end
+    local root = ctx.root and abs(ctx.root)
+    local norm = abs(dir)
+    local base = root
+      and (norm == root and "" or (norm:sub(1, #root + 1) == root .. "/" and norm:sub(#root + 2)))
+    if base then
+      local inner = opts and opts.skip
+      o = vim.tbl_extend("force", opts or {}, {
+        skip = function(r)
+          if M.is_output(base == "" and r or (base .. "/" .. r)) then
+            return true
+          end
+          return inner ~= nil and inner(r)
+        end,
+      })
+    end
     if ctx.raw_eol then
-      o = vim.tbl_extend("force", opts or {}, { raw = true })
+      o = vim.tbl_extend("force", o or {}, { raw = true })
     end
     local dig, why, crlf = hasher:tree(dir, o)
     hit = { dig, why, crlf }
@@ -659,6 +681,22 @@ local function tree_of(ctx, hasher, dir, variant, opts, data)
   end
   note_crlf(hit[3], data)
   return hit[1], hit[2]
+end
+
+---Project-relative folders that hold what a run writes, never what it reads: no digest of a directory enters them.
+---`TESTS/sheets/out` is where the test sheets put the page they open and their screenshots (`testing.sheet`).
+M.OUTPUT_DIRS = { "TESTS/sheets/out" }
+
+---Is `rel` (project-relative, `/`) a folder of `M.OUTPUT_DIRS` or below one?
+---@param rel string
+---@return boolean
+function M.is_output(rel)
+  for _, out in ipairs(M.OUTPUT_DIRS) do
+    if rel == out or rel:sub(1, #out + 1) == out .. "/" then
+      return true
+    end
+  end
+  return false
 end
 
 ---Directory names a digest of the whole project does not enter.

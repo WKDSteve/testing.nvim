@@ -173,6 +173,11 @@ and nothing else: it is tested in its own repository):
   `nvim_get_runtime_file`), or a spec that changes `package.path`/`rtp` and then `require`s a module that nothing
   resolves, takes the **whole project** (everything below the root except `.git`, `.deps`, `.cache`,
   `node_modules`) into the key,
+- no directory digest (the whole project, the spec root, a declared or literal directory) enters `TESTS/sheets/out`:
+  the test sheets write the page they open and their screenshots there while the suite runs. In a fresh tree
+  (`ci commit`, `ci --snapshot`, the WSL mirror) that folder appears during the run, and as an input it changed the
+  key of every spec that reads files of `TESTS/`, so nothing was stored (`not written: an input changed while the run
+  was going`),
 - a string literal that names a place outside the project (`../x`, `C:/x`, `~/x`, `/etc/x`, read from the root and
   from the directory of the file that names it) in a spec or module that reads files means **no key** when it names a
   file or directory that EXISTS there: the key cannot see it. A literal that names nothing (the string of a test of a
