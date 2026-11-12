@@ -253,6 +253,47 @@ return function(H)
     has(second, "Question: What does this step do?", "the new preview replaced the old one")
   end
 
+  -- a second question while the first answer streams: its preview is not overwritten by late chunks of the first,
+  -- also before it is sent (the answer before ends with the new preview)
+  do
+    local p = new_panel()
+    local ai = fake_ai()
+    panel.explain(p, 2, { require = ai.require, select = chooser({ "what", "Send" }) })
+    local h = ai.calls[1].handlers
+    h.on_chunk("first answer")
+    local held
+    ok(
+      panel.explain(p, 1, {
+        require = ai.require,
+        select = function(items, _, on_choice)
+          if items[1] == "Send" then
+            held = on_choice -- the question whether to send stays open
+            return
+          end
+          return on_choice(items[1])
+        end,
+      }),
+      "asked again"
+    )
+    eq(ai.killed, 1, "the first answer ends with the new preview")
+    h.on_chunk(" LATE")
+    vim.wait(200, function()
+      return false
+    end, 10)
+    local shown = table.concat(answer_lines(p), "\n")
+    ok(
+      not shown:find("LATE", 1, true),
+      "a late chunk of the first answer stays out of the preview: " .. shown
+    )
+    has(
+      answer_lines(p),
+      "Question: What does this step do?",
+      "the preview of the second question is whole"
+    )
+    held("Send")
+    eq(#ai.calls, 2, "sent after all")
+  end
+
   -- the buffer of the answer wiped while the answer streams: the rest is dropped, no new buffer
   do
     local p = new_panel()

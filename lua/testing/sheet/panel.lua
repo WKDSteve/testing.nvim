@@ -468,22 +468,26 @@ function M.explain(p, n, deps)
       say.warn("testing sheet: " .. tostring(err))
       return
     end
+    -- one question at a time: the new preview replaces the buffer, so the answer before ends here (its late chunks
+    -- would write into the preview at the lines of the old answer), whether this one is sent or not
+    if p.explain_proc then
+      pcall(p.explain_proc.kill, p.explain_proc)
+      p.explain_proc = nil
+    end
+    p.explain_gen = (p.explain_gen or 0) + 1
+    local gen = p.explain_gen
     local target = explain.target(ai)
     local preview = { ("# Step %d: %s"):format(n, kind.label), "", "Goes to " .. target .. ":", "" }
     vim.list_extend(preview, vim.split(req.prompt, "\n", { plain = true }))
     explain_write(p, preview)
     select({ "Send", "Cancel" }, { prompt = ("Send this to %s?"):format(target) }, function(answer)
+      if gen ~= p.explain_gen then
+        return -- a newer question took the buffer while this one waited for its answer
+      end
       if answer ~= "Send" then
         explain_write(p, { "", "(not sent)" }, true)
         return
       end
-      -- one question at a time: a new one ends the one before, whose late chunks are then dropped
-      if p.explain_proc then
-        pcall(p.explain_proc.kill, p.explain_proc)
-        p.explain_proc = nil
-      end
-      p.explain_gen = (p.explain_gen or 0) + 1
-      local gen = p.explain_gen
       explain_write(p, { "", "## Answer", "" }, true)
       local first = vim.api.nvim_buf_line_count(explain_buf(p)) -- the answer replaces this line and what follows
       local text = ""
