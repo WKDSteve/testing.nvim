@@ -126,6 +126,30 @@ return function(H)
       end
     end
 
+    -- the account's name is redacted in a process without $USER/$USERNAME too (a container, a service)
+    do
+      local okpw, pw = pcall(vim.uv.os_get_passwd)
+      local account = okpw and type(pw) == "table" and pw.username or nil
+      if type(account) == "string" and #account >= 3 then
+        local saved_user, saved_username = vim.env.USER, vim.env.USERNAME
+        vim.env.USER, vim.env.USERNAME = nil, nil
+        local t = trace_mod.new()
+        t:event("notify", "run by " .. account)
+        local path = dir .. "/sub/noenv.trace.json"
+        local okw, artifact = pcall(trace_mod.write, t:snapshot({ reason = "crash" }), {
+          path = path,
+          root = dir,
+        })
+        vim.env.USER, vim.env.USERNAME = saved_user, saved_username
+        ok(okw and artifact, "the trace is written without $USER")
+        local text = slurp(path) or ""
+        ok(
+          not text:lower():find("run by " .. account:lower(), 1, true),
+          "the account's name is redacted without $USER"
+        )
+      end
+    end
+
     -- a path below the run directory is `<RUN>/...`
     do
       local rel = trace_mod.artifact_path(dir .. "/run1/a.trace.json", dir .. "/run1")

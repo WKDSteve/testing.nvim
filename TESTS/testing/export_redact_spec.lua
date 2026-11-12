@@ -119,6 +119,13 @@ return function(H)
     if USER and #USER >= 3 then
       local s2 = export.clean("run by " .. USER, fx.beta, fx.state)
       eq(#export.leaks({ s2 }), 0, "the user name is redacted: " .. tostring(s2))
+      -- also in a process without $USER/$USERNAME (a container, a service): the account still has its name
+      local saved_user, saved_username = vim.env.USER, vim.env.USERNAME
+      vim.env.USER, vim.env.USERNAME = nil, nil
+      local okc, s3 = pcall(export.clean, "run by " .. USER, fx.beta, fx.state)
+      vim.env.USER, vim.env.USERNAME = saved_user, saved_username
+      ok(okc, "clean without $USER: " .. tostring(s3))
+      eq(#export.leaks({ s3 }), 0, "the user name is redacted without $USER: " .. tostring(s3))
     end
     -- the shapes the POSIX rule cannot see: a file URI, a UNC path with forward slashes, a path after a `>`
     for _, shape in ipairs({

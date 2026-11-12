@@ -180,7 +180,11 @@ return function(H)
 
   local SECRET = HOME .. "/secret/project/file.lua"
   local SECRET_WIN = SECRET:gsub("/", "\\")
-  local USER = vim.env.USERNAME or vim.env.USER or "nobody-at-all"
+  -- the account's name (a process may run without $USER: a container, a service), as the redaction reads it
+  local okpw, pw = pcall(vim.uv.os_get_passwd)
+  local ACCOUNT = okpw and type(pw) == "table" and type(pw.username) == "string" and pw.username
+    or nil
+  local USER = ACCOUNT or vim.env.USERNAME or vim.env.USER or "nobody-at-all"
   vim.env.TESTING_OVERVIEW_SECRET = "s3cr3t-value"
   local remote_calls = 0
   ---The CI adapter's records, by directory name.
@@ -564,7 +568,7 @@ return function(H)
     local inproc = require("testing.run.inproc")
     local text = inproc.redact_text("at " .. root .. "/a.lua and " .. HOME .. "/b.lua", root)
     eq(text, "at <REPO>/a.lua and <HOME>/b.lua", "redact_text: the roots of the IR")
-    local user = vim.env.USERNAME or vim.env.USER
+    local user = ACCOUNT or vim.env.USERNAME or vim.env.USER
     if type(user) == "string" and #user >= 3 then
       lacks(inproc.redact_text("owner " .. user, root), user, "redact_text: the user's name")
     end

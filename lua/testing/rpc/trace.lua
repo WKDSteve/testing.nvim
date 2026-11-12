@@ -169,11 +169,21 @@ function Trace:snapshot(extra)
   }
 end
 
+---The name of the account this editor runs as (nil when the system does not say).
+---@return string|nil
+local function account_name()
+  local ok, pw = pcall(vim.uv.os_get_passwd)
+  return ok and type(pw) == "table" and type(pw.username) == "string" and pw.username or nil
+end
+
 ---Redaction words of the IR kernel: user and host name.
 ---@return Testing.Result.Redact
 local function redaction()
   local words = {}
   for _, w in ipairs({
+    -- the account's name, as the validator (`testing.export.leaks`) reads it: a process may run without $USER (a
+    -- container, a service), and the name is still in its paths and messages
+    { account_name(), "<USER>" },
     { vim.env.USERNAME or vim.env.USER, "<USER>" },
     { vim.uv.os_gethostname(), "<HOST>" },
     { vim.env.COMPUTERNAME or vim.env.HOSTNAME, "<HOST>" },
