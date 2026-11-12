@@ -884,7 +884,8 @@ return function(H)
     has(public, "persist-credentials: false", "two-runner: a checkout keeps no credentials")
     has(public, "fail-fast: false", "two-runner: a red macOS leg does not cancel the local one")
     has(public, "pull_request:", "two-runner: pull requests run")
-    lacks(public, "\n  workflow_dispatch:", "two-runner: public needs no run by hand")
+    -- a run by hand replaces a run GitHub left hanging (hosted legs, its own concurrency group)
+    has(public, "\n  workflow_dispatch:", "two-runner: a hanging run can be replaced by hand")
     -- every action reaches the maintainer's machine: pinned by commit, as in the repositories it comes from
     for line in public:gmatch("uses: ([^\n]+)") do
       ok(line:match("@%x%x%x%x%x%x%x+ # v%d") ~= nil, "two-runner: pinned by commit: " .. line)
