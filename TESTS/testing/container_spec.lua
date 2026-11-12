@@ -55,6 +55,22 @@ return function(H)
     "docker: no --userns"
   )
 
+  local named = container.argv(
+    { "true" },
+    { engine = "podman", image = "img:1", passwd_entry = "r:*:1:1::/h:/bin/sh" }
+  )
+  eq({ named[6], named[7] }, { "--passwd-entry", "r:*:1:1::/h:/bin/sh" }, "podman: --passwd-entry")
+  ok(
+    not vim.tbl_contains(
+      container.argv(
+        { "true" },
+        { engine = "docker", image = "img:1", passwd_entry = "r:*:1:1::/h:/bin/sh" }
+      ),
+      "--passwd-entry"
+    ),
+    "docker: no --passwd-entry"
+  )
+
   local calls = {}
   local function fake(code, stderr)
     return function(argv)

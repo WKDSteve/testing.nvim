@@ -2,7 +2,7 @@
 # versions of the hosted CI (testing.ci.workflow.TOOLS: nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0). git is the one of
 # the Debian release (trixie: 2.47; not bookworm: the luacheck binary needs glibc 2.38). Built once, with the network:
 #
-#   podman build --tag localhost/testing-ci:2 containers/ci
+#   podman build --tag localhost/testing-ci:3 containers/ci
 #
 # What comes from the network is fixed here: the base image by digest, each
 # release file by its sha256; a file with another sum fails the build, and nothing is unpacked before its sum is
@@ -15,7 +15,9 @@
 #
 # x86_64 only: luacheck ships no binary for another architecture (the hosted CI is x86_64 too).
 #
-# A change here is a new tag (`:3`, and `testing.ci.on.DEFAULT_IMAGE`): a proof names the image id it ran in.
+# A change here is a new tag (`:4`, and `testing.ci.on.DEFAULT_IMAGE`): a proof names the image id it ran in.
+# `:2` (2026-11-12): the sums, trixie, the luacheck binary; `:3`: `ps` (procps), which testing.child reads the
+# process table with to kill a tree.
 FROM docker.io/library/debian:trixie-slim@sha256:7378260c0a098d27ac206225db5e7d92b8c7c84ea7afccc86eeb513756bbd392
 ARG NVIM=0.12.2
 ARG NVIM_SHA256=31cf85945cb600d96cdf69f88bc68bec814acbff50863c5546adef3a1bcef260
@@ -26,7 +28,7 @@ ARG LUACHECK_SHA256=d68da17fca0697d9e2fb04201f3884abd259fa558b3a449bccaed47f1390
 RUN set -eux; \
     test "$(uname -m)" = x86_64 || { echo "x86_64 only (luacheck has no other binary)"; exit 1; }; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git unzip; \
+    apt-get install -y --no-install-recommends ca-certificates curl git unzip procps; \
     dl=/tmp/dl; mkdir "$dl"; \
     curl -fsSLo "$dl/nvim.tar.gz" "https://github.com/neovim/neovim/releases/download/v${NVIM}/nvim-linux-x86_64.tar.gz"; \
     curl -fsSLo "$dl/stylua.zip" "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA}/stylua-linux-x86_64.zip"; \
@@ -44,7 +46,7 @@ RUN set -eux; \
     apt-get purge -y curl unzip; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*; \
-    nvim --version | head -1; stylua --version; git --version
+    nvim --version | head -1; stylua --version; git --version; ps -A -o pid= -o ppid= >/dev/null
 # As root in a rootless container luacheck's thread library (Lanes) asks for a priority it may not have and aborts: the
 # runs use a user that is not root (testing.ci.on), and so does this check.
 RUN setpriv --reuid=65534 --regid=65534 --clear-groups luacheck --version

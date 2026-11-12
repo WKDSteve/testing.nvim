@@ -28,6 +28,8 @@ local M = {}
 ---@field user? string `--user` (default: the image's).
 ---@field userns? string Podman's `--userns` (`keep-id`: the user of this machine is the user in the container, not root;
 ---an output folder of this machine stays writable). Ignored for docker, which has no such mode.
+---@field passwd_entry? string Podman's `--passwd-entry`: the line of /etc/passwd for that user (its name and HOME;
+---`$UID` and `$GID` are filled in by Podman). Ignored for docker.
 ---@field init? boolean `--init`: a small init is PID 1 and reaps the orphans, as launchd or systemd do on a host (a
 ---suite that kills a process tree and checks that nothing is left needs it).
 ---@field workdir? string `--workdir` (default: the image's).
@@ -107,6 +109,9 @@ function M.argv(command, opts)
   end
   if opts.userns and not engine(opts):match("docker[^/]*$") then
     vim.list_extend(argv, { "--userns", opts.userns })
+  end
+  if opts.passwd_entry and not engine(opts):match("docker[^/]*$") then
+    vim.list_extend(argv, { "--passwd-entry", opts.passwd_entry })
   end
   if opts.init then
     argv[#argv + 1] = "--init"

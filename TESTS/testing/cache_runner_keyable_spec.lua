@@ -130,10 +130,14 @@ return function(H)
   -- here the scanner sees a machine on which they exist.
   do
     local real_realpath = vim.uv.fs_realpath
-    local PLACES = { "/repo", "/out", "/deps", "/src", "/tmp/ci", "/tmp/home" }
+    -- folders whose tree exists, and the HOME itself (`~/x` names a file below the HOME of THIS machine)
+    local PLACES = { "/repo", "/out", "/deps", "/src", "/tmp/ci" }
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.uv.fs_realpath = function(path, ...)
       local real = real_realpath(path, ...)
+      if real == nil and path == "/tmp/home" then
+        return path
+      end
       if real == nil and type(path) == "string" then
         for _, place in ipairs(PLACES) do
           if path == place or path:sub(1, #place + 1) == place .. "/" then

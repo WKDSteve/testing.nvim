@@ -196,10 +196,12 @@ return function(H)
     ok(not on.COPY_SCRIPT:find("tar", 1, true), "the copy needs no tar")
     has(on.COPY_SCRIPT, "exit 3", "a failed copy is infrastructure")
     has(argv, "/src/deps/lib.nvim /tmp/ci/deps/lib.nvim", "and lib.nvim")
-    has(argv, "localhost/testing-ci:2", "the image of containers/ci")
+    has(argv, "localhost/testing-ci:3", "the image of containers/ci")
     -- not root, as on a hosted runner: the user of this machine is the user in there (the output folder is its own)
     has(argv, "--userns keep-id", "the run is not root")
     ok(not argv:find("--user ", 1, true), "no --user that would make it root: " .. argv)
+    -- named `runner` as on a hosted runner, not after the engine's machine (`user`: the placeholder <USER> held it)
+    has(argv, "--passwd-entry runner:*:$UID:$GID::/tmp/home:/bin/sh", "the account is runner")
     has(
       argv,
       "ci --root=/tmp/ci/repo --state-dir=/out/state --json=/out/ci.json",
@@ -357,7 +359,7 @@ return function(H)
     ok(file:find("sha256sum -c -", 1, true) ~= nil, "the downloads are checked")
     ok(
       file:find("sha256sum -c -", 1, true) < file:find("tar -x", 1, true)
-        and file:find("sha256sum -c -", 1, true) < file:find("unzip ", 1, true),
+        and file:find("sha256sum -c -", 1, true) < file:find("unzip -o", 1, true),
       "before anything is unpacked"
     )
     ok(not file:find("| tar", 1, true), "nothing is unpacked straight from the pipe")
@@ -513,7 +515,7 @@ return function(H)
   local available = require("testing.container").available({ image = on.DEFAULT_IMAGE })
   if not available then
     print(
-      "ci_on_spec: podman or the image localhost/testing-ci:2 is not there: the real container run is not tried"
+      "ci_on_spec: podman or the image localhost/testing-ci:3 is not there: the real container run is not tried"
     )
   else
     local linux = project("only-linux", {

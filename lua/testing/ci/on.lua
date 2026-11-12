@@ -14,7 +14,7 @@
 --- dependency's too, `$<NAME>_DIR` pointing at their copies), with one output folder that is writable (`/out`: the document and the state of the inner run). No network unless
 --- `ci.container.network = true`; the container is called `testing-ci-<repo>-<target>` and removed when it ends.
 ---
----   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:2`: nvim, stylua, luacheck and git at
+---   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:3`: nvim, stylua, luacheck and git at
 ---                 the versions of the hosted CI), or `ci.container.image`
 ---   darwin-like   the image of `containers/darwin-like/Containerfile` (`localhost/testing-darwin-like:2`): bash 3.2 as
 ---                 `bash` and `/bin/sh`, BSD userland (Chimera Linux), `TMPDIR` behind a `/var` symlink; the macOS
@@ -36,7 +36,10 @@ M.TARGETS = { host = true, linux = true, ["darwin-like"] = true, devcontainer = 
 M.ORDER = { "host", "linux", "darwin-like", "devcontainer" }
 
 ---The image of the `linux` target (`containers/ci/Containerfile`).
-M.DEFAULT_IMAGE = "localhost/testing-ci:2"
+M.DEFAULT_IMAGE = "localhost/testing-ci:3"
+
+---The account in a container: `runner` (as on the hosted runners), the HOME the run gets; `$UID`/`$GID` are Podman's.
+M.PASSWD_ENTRY = "runner:*:$UID:$GID::/tmp/home:/bin/sh"
 
 ---The image of the `darwin-like` target (`containers/darwin-like/Containerfile`).
 M.DARWIN_IMAGE = "localhost/testing-darwin-like:2"
@@ -488,6 +491,9 @@ function M.run_target(target, argv, root, pipeline, sv)
       -- root's privileges and aborts without them). Podman's keep-id makes the user of this machine the user in there,
       -- so the output folder stays writable (docker has no such mode: there the image's user, root, as before)
       userns = "keep-id",
+      -- ... named `runner`, as on a hosted runner. keep-id takes the name of the engine's machine (`user` for Podman
+      -- on WSL): a common word, and then the placeholder `<USER>` holds the name the validator refuses to find
+      passwd_entry = M.PASSWD_ENTRY,
       -- PID 1 reaps orphans as on a host: without it a killed process tree leaves zombies, and the suite's checks
       -- that nothing is left (child_run, child_rpc_process, health) read as red
       init = true,
