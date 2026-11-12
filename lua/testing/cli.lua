@@ -644,6 +644,14 @@ local function execute(argv, sv)
   if argv[1] == "sheets" then
     return require("testing.sheet.report").main(vim.list_slice(argv, 2), sv)
   end
+  -- `testing callers`: a public function or module that went away, and who in the fleet still calls it (docs/CLI.md)
+  if argv[1] == "callers" then
+    return require("testing.callers").main(vim.list_slice(argv, 2), {
+      out = sv.out,
+      err = sv.err,
+      getenv = (sv --[[@as Testing.Cli.Services]]).getenv,
+    })
+  end
   -- `testing status`: is the repository (or the fleet) proven, one line each (docs/CLI.md)
   if argv[1] == "status" then
     return require("testing.status").main(vim.list_slice(argv, 2), sv)

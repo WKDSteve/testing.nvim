@@ -32,6 +32,7 @@ return function(H)
   local allowed = {
     { "export", "--out", "x" },
     { "call", "fleet" },
+    { "callers", "--base=HEAD~1" },
     { "ci", "remote" },
     { "ci", "overview", "--no-remote" },
     { "ci", "verify", "--json" },

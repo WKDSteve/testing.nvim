@@ -9,7 +9,7 @@
 --- refuses it. `TESTING_ALLOW_WORKSTATION=1` lifts the refusal where it is allowed on purpose (the same switch as
 --- `testing sheets run`).
 ---
---- The allowed commands (`docs/CLI.md`, section Workstation): `export`, `call`, `stats`, `ci remote`, `ci overview`,
+--- The allowed commands (`docs/CLI.md`, section Workstation): `export`, `call`, `stats`, `callers`, `ci remote`, `ci overview`,
 --- `ci verify --json`, `lint` without `--fix`, and the help. `sheets run` and `sheets step` pass here and refuse
 --- themselves unless every sheet of the run is a manual one (`testing.sheet.run.refused`).
 
@@ -79,7 +79,7 @@ function M.allowed(argv)
     end
     return false
   end
-  if first == "export" or first == "call" or first == "stats" then
+  if first == "export" or first == "call" or first == "stats" or first == "callers" then
     return true, first
   end
   if first == "lint" then
@@ -125,7 +125,7 @@ function M.refusal(argv, getenv)
   end
   return (
     "testing: `%s` is refused on the workstation (NVIM_MACHINE_ROLE=workstation): it builds or starts "
-    .. "programs there, and nothing unsigned may run on that machine; allowed: export, call, stats, ci remote, "
+    .. "programs there, and nothing unsigned may run on that machine; allowed: export, call, stats, callers, ci remote, "
     .. "ci overview, ci verify --json, lint (set %s=1 where that is allowed)"
   ):format(what, M.ALLOW_ENV)
 end
