@@ -841,7 +841,7 @@ function M.repos_table(rows, finished, total)
       r.name,
       r.state,
       type(r.verify) == "string" and r.verify or "-",
-      type(r.ms) == "number" and ("%.1f s"):format(r.ms / 1000) or "-"
+      type(r.ms) == "number" and require("testing.ci.report").seconds(r.ms) or "-"
     )
   end
   if total > #rows then

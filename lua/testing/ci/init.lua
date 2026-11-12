@@ -1058,7 +1058,7 @@ end
 ---@param ms integer
 ---@return string
 local function seconds(ms)
-  return ("%.1f s"):format(ms / 1000)
+  return require("testing.ci.report").seconds(ms)
 end
 
 ---Write the document of a run that happened elsewhere (the snapshot of `testing ci --snapshot`) the way a run writes

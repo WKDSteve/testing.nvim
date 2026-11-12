@@ -275,9 +275,11 @@ function M.finding_line(f)
   return (text and text ~= "") and (loc .. ": " .. clean(text)) or loc
 end
 
+---A duration as `<s>.<tenth> s`, the one way every `testing ci` output writes seconds (the report, the live line,
+---the editor, the repositories table).
 ---@param ms integer
 ---@return string
-local function seconds(ms)
+function M.seconds(ms)
   -- rounded here, half up, not by `%.1f`: the Lua build and its C library decide an exact half (1250 ms), and they do
   -- not agree on it (1.2 on Windows and glibc, 1.3 in the darwin-like image), so one document printed differently
   local tenths = math.floor((tonumber(ms) or 0) / 100 + 0.5)
@@ -322,7 +324,7 @@ function M.term(doc, sentinel)
     lines[#lines + 1] = ("  %-14s %-8s %8s%s%s"):format(
       s.name,
       s.state,
-      seconds(s.ms),
+      M.seconds(s.ms),
       reason and ("  " .. clean(reason)) or "",
       found
     )

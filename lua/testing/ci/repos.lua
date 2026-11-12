@@ -666,11 +666,11 @@ function M.main(argv, sv)
     green = green + (r.code == 0 and 1 or 0)
     proven = proven + (r.state == "skipped" and 1 or 0)
     sv.out(
-      ("%-" .. width .. "s  %-11s %-8s %.1f s"):format(
+      ("%-" .. width .. "s  %-11s %-8s %s"):format(
         r.name,
         r.verify or "-",
         r.state or "?",
-        r.ms / 1000
+        require("testing.ci.report").seconds(r.ms)
       )
     )
   end
