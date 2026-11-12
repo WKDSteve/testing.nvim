@@ -339,11 +339,33 @@ return function(H)
     local cf = assert(io.open(here .. "/containers/ci/Containerfile", "rb"))
     local file = cf:read("*a")
     cf:close()
-    local downloads = 0
-    for _ in file:gmatch("curl %-fsSLo ") do
-      downloads = downloads + 1
+    -- every download counts, not only the checked form: a new `curl ... | sh` or `wget` must turn this red. A line of
+    -- apt-get names curl as a package, not as a command.
+    local downloads, unchecked, piped = 0, {}, {}
+    for line in (file .. "\n"):gmatch("([^\n]*)\n") do
+      local code = line:gsub("^%s*#.*$", "")
+      if not code:find("apt%-get") then
+        for at in code:gmatch("()%f[%w]curl%f[%W]") do
+          if code:sub(at, at + #"curl -fsSLo " - 1) == "curl -fsSLo " then
+            downloads = downloads + 1
+          else
+            unchecked[#unchecked + 1] = vim.trim(code)
+          end
+        end
+        if code:find("%f[%w]wget%f[%W]") then
+          unchecked[#unchecked + 1] = vim.trim(code)
+        end
+      end
+      -- a pipe (not `||`) into a shell or an unpacker runs or unpacks what was never checked
+      for _, prog in ipairs({ "sh", "bash", "tar", "unzip" }) do
+        if code:find("[^|]|%s*" .. prog .. "%f[%W]") or code:find("^|%s*" .. prog .. "%f[%W]") then
+          piped[#piped + 1] = vim.trim(code)
+        end
+      end
     end
     eq(downloads, 3, "nvim, stylua and luacheck are downloaded to files")
+    eq(unchecked, {}, "no other download (a curl not to a file, wget)")
+    eq(piped, {}, "nothing is piped into a shell or an unpacker")
     for _, tool in ipairs({ "NVIM", "STYLUA", "LUACHECK" }) do
       ok(
         file:find("ARG " .. tool .. "_SHA256=" .. string.rep("%x", 64) .. "\n") ~= nil,
