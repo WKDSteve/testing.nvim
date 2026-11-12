@@ -481,7 +481,9 @@ A case-insensitive working tree is what a Windows checkout mounted through Podma
 host the image does not set up a casefold file system, and that class is covered by the hosted Windows run. Not
 reproduced at all: the ARM64 memory model, FSEvents, the GUI, the timing of the hosted runners.
 
-The image is built once, with the network: `podman build --tag localhost/testing-darwin-like:1 containers/darwin-like`
+The image is built once, with the network, naming the sha256 of the bash sources (the build refuses without it and
+fails on another sum): `podman build --build-arg BASH_SHA256=<sum> --tag localhost/testing-darwin-like:1
+containers/darwin-like`
 (the Containerfile is not built yet, see its header).
 `ci.container.image` does not apply to this target (it is the `linux` target's).
 

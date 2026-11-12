@@ -15,9 +15,13 @@
 # working tree is what the mount of a Windows checkout already gives (Podman on WSL, drvfs); on a Linux host it would
 # need a casefold file system, which this image does not set up (docs/CI.md).
 #
-# Built once, with the network:
+# Built once, with the network, naming the sha256 of the bash sources (checked against ftp.gnu.org's signature
+# before it is written here; the build refuses without it, and a tarball with another sum fails the build):
 #
-#   podman build --tag localhost/testing-darwin-like:1 containers/darwin-like
+#   podman build --build-arg BASH_SHA256=<sha256 of bash-3.2.57.tar.gz> \
+#     --tag localhost/testing-darwin-like:1 containers/darwin-like
+#
+# The base images are named by tag here; pin them by digest (`image@sha256:...`) with the first build.
 #
 # A change here is a new tag (`:2`, and `testing.ci.on.DARWIN_IMAGE`): a proof names the image id it ran in.
 #
@@ -26,10 +30,15 @@
 
 FROM docker.io/library/debian:bookworm-slim AS bash32
 ARG BASH_VERSION=3.2.57
+# no default: code from the network is only built when its sum is the one named
+ARG BASH_SHA256
 RUN set -eux; \
+    test -n "${BASH_SHA256}" || { echo "BASH_SHA256 is required (--build-arg BASH_SHA256=...)"; exit 1; }; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make bison; \
-    curl -fsSL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VERSION}.tar.gz" | tar -xz -C /tmp; \
+    curl -fsSLo /tmp/bash.tar.gz "https://ftp.gnu.org/gnu/bash/bash-${BASH_VERSION}.tar.gz"; \
+    echo "${BASH_SHA256}  /tmp/bash.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/bash.tar.gz -C /tmp; \
     cd "/tmp/bash-${BASH_VERSION}"; \
     CFLAGS="-O2 -std=gnu89 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion" \
       ./configure --prefix=/opt/bash32 --enable-static-link --without-bash-malloc; \

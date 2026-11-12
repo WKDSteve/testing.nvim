@@ -272,12 +272,26 @@ return function(H)
 
   -- darwin-like: the image of containers/darwin-like, and how to build it when it is missing
   do
+    -- what the image builds from the network is checked against a sum the builder names (fail closed)
+    local here = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
+    local cf = assert(io.open(here .. "/containers/darwin-like/Containerfile", "rb"))
+    local file = cf:read("*a")
+    cf:close()
+    ok(
+      file:find("ARG BASH_SHA256\n", 1, true) ~= nil,
+      "the sum of the bash sources is a build argument"
+    )
+    ok(file:find("sha256sum -c -", 1, true) ~= nil, "the download is checked against it")
+    ok(
+      not file:find("| tar", 1, true),
+      "nothing from the network is unpacked straight from the pipe"
+    )
     eq({ on.parse("darwin-like,linux") }, { { "darwin-like", "linux" } }, "darwin-like is a target")
     local res = run(engine({ image_exists = 1 }), "--on=darwin-like")
     eq(res.code, 3, "darwin-like without its image: infrastructure")
     has(
       res.err,
-      "podman build --tag localhost/testing-darwin-like:1 containers/darwin-like",
+      "podman build --build-arg BASH_SHA256=<sha256 of the bash sources> --tag localhost/testing-darwin-like:1 containers/darwin-like",
       "the build line of its own Containerfile"
     )
     ok(not res.err:find("ci.container.image", 1, true), "ci.container.image is the linux target's")
