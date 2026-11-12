@@ -15,7 +15,7 @@
 ---                 directory listings), `env` (the names read; `env_computed` when a name is computed,
 ---                 `env_whole` when the whole environment is read, `env_dynamic` for either),
 ---   * `directives` what the author of the file states in its first lines (`-- @cache off`, `-- @cache-inputs`,
----                 `-- @cache-allow`, `-- @cache-env`, `-- @require-wrapper`).
+---                 `-- @cache-allow`, `-- @cache-env`, `-- @require-wrapper`, `-- @scans-data`).
 ---
 --- Comments are ignored, string contents are not (a `require` inside `vim.cmd("lua require('x')")` is a
 --- dependency; a marker inside a string is not a marker). Pure Lua apart from `index`, which walks the
@@ -28,7 +28,7 @@ local M = {}
 ---Version of the analysis. Bump it whenever `analyze` can answer differently for the same text: the index
 ---of the cache (`testing.cache.hash`) keeps analyses with the hashes and drops the ones of another version.
 ---@type integer
-M.VERSION = 13
+M.VERSION = 14
 
 ---Largest file read by `index`/`read_text` (a bigger file is reported as unreadable, never cut).
 ---@type integer
@@ -78,7 +78,7 @@ M.BUILTIN = {
 ---@field where table<string, integer> First line (1-based) of the hit of a hidden input that makes a spec uncacheable: keys `time`, `random`, `spawn`, `net` (`testing explain` names it). Absent key: the hit has no single line.
 ---@field outside_paths string[] The string literals (or words of a command string) that name a place outside the project: `../x`, `C:/x`, `~/x`, `/etc/x`.
 ---@field wrapped table<string, Testing.Scan.Wrapped> Modules the file uses ONLY as `X.member("literal", ...)` (an alias of `require("X")` or `require("X").member("literal")`): per module the members called and the literal names passed. A module with any other use (passed on, indexed, a computed first argument, `pcall(require, "X")`) is not listed. Read by the affected heuristic for modules that declare `-- @require-wrapper`; the cache key does not use it.
----@field directives { off: boolean, inputs: string[], allow: string[], wrapper: string[], env: string[] } `-- @cache off`, `-- @cache-inputs a b`, `-- @cache-allow time random` (the author vouches that the clock, random numbers, processes or the network a file uses do not decide what a spec sees), `-- @cache-env NAME *_DIR PREFIX_* *` (the variables a computed read can reach, `*` for the whole environment: their hashed values join the key), `-- @require-wrapper require module fn` (the module computes `require(<argument>)`, and only for the first argument of the listed functions: see `testing.affected.heuristic`).
+---@field directives { off: boolean, inputs: string[], allow: string[], wrapper: string[], env: string[], data: boolean } `-- @cache off`, `-- @cache-inputs a b`, `-- @cache-allow time random` (the author vouches that the clock, random numbers, processes or the network a file uses do not decide what a spec sees), `-- @cache-env NAME *_DIR PREFIX_* *` (the variables a computed read can reach, `*` for the whole environment: their hashed values join the key), `-- @require-wrapper require module fn` (the module computes `require(<argument>)`, and only for the first argument of the listed functions: see `testing.affected.heuristic`), `-- @scans-data` (`data`: the directories the file lists and the paths it names are data it is pointed at, a vault or a temporary folder, never the project's own files).
 
 ---@class Testing.Scan.Wrapped
 ---@field members string[] Sorted, unique.
@@ -936,15 +936,19 @@ end
 ---a line such as `-- @cache x` + 40 000 spaces + `y` (the lazy group is extended one byte at a time and `%s*$` runs
 ---over the rest of the blanks each time). Every reader of a body ignores blanks at its end.
 ---@param text string
----@return { off: boolean, inputs: string[], allow: string[] }
+---@return { off: boolean, inputs: string[], allow: string[], wrapper: string[], env: string[], data: boolean }
 local function scan_directives(text)
-  local d = { off = false, inputs = {}, allow = {}, wrapper = {}, env = {} }
+  local d = { off = false, inputs = {}, allow = {}, wrapper = {}, env = {}, data = false }
   local allowed = {}
   for _, raw in ipairs(head_lines(text, M.HEADER_LINES)) do
     local line = clip_header_line(raw)
     local members = require("testing.affected.wrapped").directive(line)
     if members then
       vim.list_extend(d.wrapper, members)
+    end
+    -- `-- @scans-data`: what the file lists or loads by path is data, not the project (testing.affected.heuristic)
+    if line:match("^%s*%-%-%s*@scans%-data%f[^%w_%-]") then
+      d.data = true
     end
     local body = line:match("^%s*%-%-%s*@cache%s+(.*)")
     if body and body:match("^off%f[%W]") then
@@ -1130,6 +1134,7 @@ function M.valid_info(raw)
       allow = vim.list_slice(d.allow, 1),
       wrapper = vim.list_slice(wrapper, 1),
       env = vim.list_slice(d.env == nil and {} or d.env, 1),
+      data = d.data == true,
     },
     wrapped = wrapped,
   }

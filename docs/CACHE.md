@@ -735,7 +735,8 @@ so every commit after it makes it stale by git history, and a stale graph select
 passes `verify = true`: docmap.nvim then scans the tree, and when its nodes and `require` edges equal the map's the
 graph counts as fresh. The scan runs only when the map is stale, a fresh map costs nothing. Measured on tasks.nvim
 (2026-11-12, 2 MB map, 76 modules): about 0.5 s without the scan, about 7 s with it. A graph that still says
-`complete = false` after it (tasks.nvim: `dynamic_require_in_graph`) runs everything as before.
+`complete = false` after it (`dynamic_require_in_graph`: a module that requires by a computed name;
+tasks.nvim had three until it named them as literals) runs everything as before.
 
 When the module is absent, throws, answers `nil, err` or answers a shape that does not match, the built-in heuristic
 is used and `r.warnings` says why. The heuristic builds the `require` graph of the project itself (`lua/**.lua`):
@@ -753,6 +754,15 @@ other way (passes it on, a computed or concatenated name, a member that is not d
 the alias bound twice, a name that matches the wrapper by a prefix) is a dependency on everything, as before: when
 in doubt everything is selected. The cache key does not use this reading (a computed `require` stays "every module"
 there). The measurement on lib.nvim is in [PERFORMANCE.md](PERFORMANCE.md#incremental-run-the-d7-budget-under-1-s-median-measured-2026-10-07).
+
+**Data scanners.** A module that lists directories (`vim.fs.dir`, `glob`, ...) and looks at its own surroundings
+(`getcwd`, `stdpath`) or names a path the project has as well (`README.md`, `assets/`) counts as changed with any
+change: it might read the project. A tool whose folders are its data (tasks.nvim lists a vault, a spec lists its own
+temporary folder) states so with `-- @scans-data` in its first 30 lines: the author vouches that what the file lists
+or loads by path is data it is pointed at, never the project's own files. The file is then no seed of every change,
+and a spec with the line is not selected merely because it lists directories; its `require`s are edges as before.
+Measured on tasks.nvim (2026-11-12, a commit in `lua/tasks_nvim/api.lua`, a fresh module graph): 110 of 110 spec
+files without the line, 72 of 110 with it on its six vault scanners (docmap.nvim alone names 53).
 
 ### `testing doctor`: freshness
 

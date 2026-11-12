@@ -114,6 +114,43 @@ return function(H)
     S.remove(root)
   end
 
+  -- `-- @scans-data`: a module that lists the folder it is pointed at (a vault) and names a file that the project
+  -- happens to have as well (`README.md`) is no seed of every change; its require edges still count
+  do
+    local vault =
+      'local M = {}\nfunction M.list(dir) return vim.fn.glob(dir .. "/README.md", false, true) end\nfunction M.root() return vim.fn.getcwd() end\nreturn M\n'
+    local root = S.project({
+      ["README.md"] = "# p\n",
+      ["lua/vault.lua"] = vault,
+      ["lua/marked.lua"] = "-- @scans-data\n" .. vault,
+      ["lua/other.lua"] = "return { v = 1 }\n",
+      ["lua/uses_other.lua"] = '-- @scans-data\nlocal o = require("other")\nreturn { v = o.v, l = vim.fn.glob("x") }\n',
+      ["TESTS/v_spec.lua"] = 'local v = require("vault")\nreturn function(H) H.ok(v, "v") end\n',
+      ["TESTS/m_spec.lua"] = 'local v = require("marked")\nreturn function(H) H.ok(v, "m") end\n',
+      ["TESTS/u_spec.lua"] = 'local u = require("uses_other")\nreturn function(H) H.ok(u, "u") end\n',
+      ["TESTS/tmp_spec.lua"] = "-- @scans-data\nreturn function(H)\n  for name in vim.fs.dir(vim.fn.tempname()) do H.ok(name) end\nend\n",
+      ["TESTS/tmp_plain_spec.lua"] = "return function(H)\n  for name in vim.fs.dir(vim.fn.tempname()) do H.ok(name) end\nend\n",
+    })
+    local specs = {
+      "TESTS/v_spec.lua",
+      "TESTS/m_spec.lua",
+      "TESTS/u_spec.lua",
+      "TESTS/tmp_spec.lua",
+      "TESTS/tmp_plain_spec.lua",
+    }
+    local r = select_in(root, specs, { "lua/other.lua" })
+    ok(r.all == false, "a placeable change")
+    ok(
+      has(r, "TESTS/v_spec.lua"),
+      "without the directive the vault lister is a seed of every change"
+    )
+    ok(not has(r, "TESTS/m_spec.lua"), "with `-- @scans-data` it is not")
+    ok(has(r, "TESTS/u_spec.lua"), "a marked module still reaches what it requires")
+    ok(has(r, "TESTS/tmp_plain_spec.lua"), "a spec that lists directories sees any change")
+    ok(not has(r, "TESTS/tmp_spec.lua"), "unless it says it lists only its own data")
+    S.remove(root)
+  end
+
   -- a directory literal covers the files below it
   do
     local root = S.project({

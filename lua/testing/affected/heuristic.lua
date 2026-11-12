@@ -260,6 +260,15 @@ local function names_project_path(info, root)
   return false
 end
 
+---`-- @scans-data`: the author vouches that what the file lists or loads by path is data it is pointed at (a vault,
+---a temporary folder), never the project's own files. A directory listing then makes it no seed of every change; its
+---`require`s still count as edges.
+---@param info Testing.Scan.Info
+---@return boolean
+local function scans_data(info)
+  return info.directives ~= nil and info.directives.data == true
+end
+
 ---Select specs from the `require` graph of the project.
 ---@param cls Testing.Affected.Classified
 ---@param specs string[]
@@ -286,6 +295,7 @@ function M.reach(cls, specs, opts)
         info
         and (info.markers.dirscan or info.markers.dynload)
         and (info.markers.selfscan or names_project_path(info, opts.root))
+        and not scans_data(info)
         and not cls.modules[mod]
       then
         seeds[mod] =
@@ -450,7 +460,11 @@ function M.reach(cls, specs, opts)
       if not info then
         -- an unreadable spec cannot be excluded
         reason[s] = "spec cannot be read (not excluded)"
-      elseif anything_changed and (info.markers.dirscan or info.markers.dynload) then
+      elseif
+        anything_changed
+        and (info.markers.dirscan or info.markers.dynload)
+        and not scans_data(info)
+      then
         reason[s] = "lists directories or loads files by path: any change can reach it"
       elseif any_seed then
         local deps, all = deps_of(info)
