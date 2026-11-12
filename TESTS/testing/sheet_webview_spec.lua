@@ -88,7 +88,7 @@ return function(H)
       return out
     end
     local none, why = webview.prerequisites(rows({ node = "n", ["tauri-driver"] = "t" }))
-    if vim.fn.has("mac") == 1 then
+    if require("testing.platform").is_macos() then
       has(why, "macOS", "macOS has no WebDriver of Tauri")
     else
       ok(none == nil, "without msedgedriver nothing runs")
@@ -115,7 +115,7 @@ return function(H)
       node = row.path
     end
   end
-  if not node or vim.fn.has("mac") == 1 then
+  if not node or require("testing.platform").is_macos() then
     print("n/a  node is not installed (or macOS): the runner is not run")
     return
   end

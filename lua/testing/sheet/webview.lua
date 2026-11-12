@@ -24,7 +24,7 @@ function M.prerequisites(tools)
   for _, row in ipairs(tools or require("testing.tier3").tools()) do
     found[row.name] = row.path
   end
-  if vim.fn.has("mac") == 1 then
+  if require("testing.platform").is_macos() then
     return nil, "Tauri has no WebDriver on macOS"
   end
   for _, name in ipairs({ "node", "tauri-driver", "msedgedriver" }) do
