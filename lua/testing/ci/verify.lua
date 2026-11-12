@@ -37,7 +37,7 @@ M.DEFAULT_MAX_AGE = "7d"
 
 M.USAGE = table.concat({
   "usage: testing ci verify [--profile=<name>] [--json] [--allow-dirty] [--max-age=<7d>]",
-  "                         [--on=<host|linux|devcontainer>] [--state-dir=<dir>] [--root=<dir>]",
+  "                         [--on=<host|linux|darwin-like|devcontainer>] [--state-dir=<dir>] [--root=<dir>]",
   "  --profile=<name>  the profile whose last complete run is the proof (default: ci.default)",
   "  --json            print the document testing-ci-verify/1 instead of lines (no sentinel in it)",
   "  --allow-dirty     accept a working tree with uncommitted changes",

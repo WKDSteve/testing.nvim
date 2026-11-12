@@ -1,9 +1,9 @@
 -- @cache-env TESTING_CI_TARGET
 ---@module 'testing.ci.on'
----@brief `testing ci --on=host,linux,devcontainer`: the pipeline on this machine and in containers, one after the other.
+---@brief `testing ci --on=host,linux,darwin-like,devcontainer`: the pipeline on this machine and in containers, one after the other.
 ---@description
 --- ```
---- testing ci --on=<host|linux|devcontainer>[,...] [the options of testing ci]
+--- testing ci --on=<host|linux|darwin-like|devcontainer>[,...] [the options of testing ci]
 --- ```
 ---
 --- `host` is the run as without `--on` (`testing.ci`). A container target starts the same run inside a container of the
@@ -14,6 +14,9 @@
 ---
 ---   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:1`: nvim, stylua, luacheck and git at
 ---                 the versions of the hosted CI), or `ci.container.image`
+---   darwin-like   the image of `containers/darwin-like/Containerfile` (`localhost/testing-darwin-like:1`): bash 3.2 as
+---                 `bash` and `/bin/sh`, BSD userland (Chimera Linux), `TMPDIR` behind a `/var` symlink; the macOS
+---                 error classes without macOS (a green run there proves nothing about macOS)
 ---   devcontainer  the image of the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`,
 ---                 built once and tagged by the digest of the Dockerfile and the build section); it must have nvim
 ---                 and the tools of the steps
@@ -27,11 +30,20 @@
 
 local M = {}
 
-M.TARGETS = { host = true, linux = true, devcontainer = true }
-M.ORDER = { "host", "linux", "devcontainer" }
+M.TARGETS = { host = true, linux = true, ["darwin-like"] = true, devcontainer = true }
+M.ORDER = { "host", "linux", "darwin-like", "devcontainer" }
 
 ---The image of the `linux` target (`containers/ci/Containerfile`).
 M.DEFAULT_IMAGE = "localhost/testing-ci:1"
+
+---The image of the `darwin-like` target (`containers/darwin-like/Containerfile`).
+M.DARWIN_IMAGE = "localhost/testing-darwin-like:1"
+
+---The images that testing.nvim's own Containerfiles build: the target, its image and the folder to build it from.
+M.BUILT_IMAGES = {
+  linux = { image = M.DEFAULT_IMAGE, dir = "containers/ci" },
+  ["darwin-like"] = { image = M.DARWIN_IMAGE, dir = "containers/darwin-like" },
+}
 
 ---How long the run in a container may take, all steps together (each step keeps its own deadline in there).
 M.TIMEOUT_MS = 2 * 60 * 60 * 1000
@@ -152,6 +164,9 @@ function M.image_of(target, root, pipeline, copts, opts)
   local cfg = pipeline.container or {}
   if target == "linux" then
     return cfg.image or M.DEFAULT_IMAGE
+  end
+  if target == "darwin-like" then
+    return M.DARWIN_IMAGE
   end
   local dir = root .. "/.devcontainer"
   local path = dir .. "/devcontainer.json"
@@ -329,9 +344,11 @@ function M.run_target(target, argv, root, pipeline, sv)
       nil,
       {
         ("%s: %s"):format(target, reason),
-        target == "linux"
-            and ("build the image: podman build --tag %s containers/ci (in the testing.nvim checkout), or set ci.container.image"):format(
-              M.DEFAULT_IMAGE
+        M.BUILT_IMAGES[target]
+            and ("build the image: podman build --tag %s %s (in the testing.nvim checkout)%s"):format(
+              M.BUILT_IMAGES[target].image,
+              M.BUILT_IMAGES[target].dir,
+              target == "linux" and ", or set ci.container.image" or ""
             )
           or "start the engine's machine (podman machine start) or build the devcontainer image",
       }

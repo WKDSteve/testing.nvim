@@ -37,7 +37,7 @@ M.SENTINEL = "TESTING_CI_OK"
 
 M.USAGE = table.concat({
   "usage: testing ci [--profile=<name>] [--step=<a,b>] [--keep-going] [--reuse] [--agent|--no-agent] [--json=<file>]",
-  "                  [--on=<host,linux,devcontainer>]",
+  "                  [--on=<host,linux,darwin-like,devcontainer>]",
   "       testing ci verify [--profile=<name>] [--json] [--allow-dirty] [--max-age=<7d>] [--root=<dir>]",
   "       testing ci commit <rev>... | --range=<a>..<b> [--base=<rev>] [--force] [--keep] [--json=<file>] ...",
   "       testing ci --repos=<a,b> | --repos-root=<dir> | --repos-file=<list> [--force] [--jobs=<n>] ...",

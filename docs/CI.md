@@ -412,13 +412,16 @@ root whatever the file says. Refused on the workstation like every run.
 
 ```
 testing ci --on=host,linux [the options of testing ci]
+testing ci --on=darwin-like
 testing ci --on=devcontainer
 testing ci verify --on=linux
 ```
 
 The pipeline runs on each target in turn: `host` is this machine (the run without `--on`), `linux` a container of the
 image of [`containers/ci/Containerfile`](../containers/ci/Containerfile) (`localhost/testing-ci:1`: Debian bookworm,
-nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release), `devcontainer` the image of
+nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release), `darwin-like` the image of
+[`containers/darwin-like/Containerfile`](../containers/darwin-like/Containerfile) (`localhost/testing-darwin-like:1`,
+see [below](#the-darwin-like-target-macos-error-classes-without-macos)), `devcontainer` the image of
 the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`, built once and tagged by the
 digest of the Dockerfile and the `build` section, not of the files of the build context; it needs nvim and the tools
 of the steps). The engine is Podman (`testing.container`,
@@ -461,6 +464,26 @@ reads that proof, never the host's: the tree, the pipeline, the age and the imag
 without it the answer is `rejected`; a devcontainer image that is not built is not built by `verify`). The system,
 Neovim and the tool versions are the image's and are not compared with this machine. `ci.container` (the network, the
 image) is part of the pipeline's hash where it is set. The host's `ci.json` carries the container documents of the run under `targets`.
+
+### The `darwin-like` target: macOS error classes without macOS
+
+The image is **not macOS**, and a green run in it proves nothing about macOS. It fails where macOS would fail for one
+of these reasons, before the hosted macOS run does:
+
+| Class | In the image | Example it catches |
+| --- | --- | --- |
+| bash 3.2 | `/bin/bash` and `/bin/sh` are bash 3.2.57 (static, from the GNU sources) | `declare -A`, `${x,,}`, `mapfile`, `"${a[@]}"` of an empty array under `set -u` |
+| BSD userland | Chimera Linux (FreeBSD's `sed`, `stat`, `grep`, `du`, `date`); the build checks `sed -i ''`, `stat -f` and that `grep -P` is refused | `sed -i 's/..'` without a suffix, `stat -c`, `grep -P` |
+| `TMPDIR` behind a link | `TMPDIR=/var/folders/zz/.../T/`, `/var/folders` a link into `/private/var` | a realpath that no longer starts with the `TMPDIR` it is compared to |
+| no extras | no Docker, git without extras | a script that assumes either |
+
+A case-insensitive working tree is what a Windows checkout mounted through Podman on WSL already is (drvfs); on a Linux
+host the image does not set up a casefold file system, and that class is covered by the hosted Windows run. Not
+reproduced at all: the ARM64 memory model, FSEvents, the GUI, the timing of the hosted runners.
+
+The image is built once, with the network: `podman build --tag localhost/testing-darwin-like:1 containers/darwin-like`
+(the Containerfile is not built yet, see its header).
+`ci.container.image` does not apply to this target (it is the `linux` target's).
 
 ## Land through the hosted CI: `testing ci land`
 

@@ -270,6 +270,27 @@ return function(H)
     has(res2.err, "is not installed", "the reason")
   end
 
+  -- darwin-like: the image of containers/darwin-like, and how to build it when it is missing
+  do
+    eq({ on.parse("darwin-like,linux") }, { { "darwin-like", "linux" } }, "darwin-like is a target")
+    local res = run(engine({ image_exists = 1 }), "--on=darwin-like")
+    eq(res.code, 3, "darwin-like without its image: infrastructure")
+    has(
+      res.err,
+      "podman build --tag localhost/testing-darwin-like:1 containers/darwin-like",
+      "the build line of its own Containerfile"
+    )
+    ok(not res.err:find("ci.container.image", 1, true), "ci.container.image is the linux target's")
+    local res2 = run(engine({ verdict = "green", exit = 0 }), "--on=darwin-like")
+    eq(res2.code, 0, "the darwin-like target (" .. res2.err .. ")")
+    has(
+      table.concat(run_argv(), " "),
+      "localhost/testing-darwin-like:1",
+      "runs in the darwin-like image"
+    )
+    has(res2.out, "darwin-like", "the report names the target")
+  end
+
   -- a devcontainer: its image, from a devcontainer.json with comments
   do
     local res = run(engine({ verdict = "green", exit = 0 }), "--on=devcontainer")
