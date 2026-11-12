@@ -44,16 +44,17 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: v@@STYLUA_VERSION@@
           args: --version
-      # PUC Lua, not "luajit-2.1" (that tarball 404s); `std = "luajit"` in .luacheckrc decides what is checked against.
-      - uses: leafo/gh-actions-lua@@@LUA_ACTION|raw@@
-        if: matrix.hosted && matrix.steps == ''
-        with:
-          luaVersion: "@@LUA_VERSION@@"
-      - uses: leafo/gh-actions-luarocks@@@LUAROCKS_ACTION|raw@@
-        if: matrix.hosted && matrix.steps == ''
+      # luacheck as the release binary of lunarmodules, its sha256 pinned (checked against the maintainer's signature;
+      # the file scripts/wsl-tools.sh of testing.nvim installs): no Lua from www.lua.org, whose download timed out.
+      # `std = "luajit"` in .luacheckrc decides what is checked against.
       - if: matrix.hosted && matrix.steps == ''
-        run: luarocks install luacheck @@LUACHECK_VERSION@@
-@@PACKAGE_STEPS|raw@@@@NODE_STEP|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/luacheck" "https://github.com/lunarmodules/luacheck/releases/download/v@@LUACHECK_VERSION@@/luacheck"
+          echo "@@LUACHECK_SUM@@  $RUNNER_TEMP/luacheck" | sha256sum -c -
+          install -D -m 755 "$RUNNER_TEMP/luacheck" "$HOME/.local/bin/luacheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+@@PACKAGE_STEPS|raw@@@@PLAYWRIGHT_STEP|raw@@@@NODE_STEP|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
         env:
 @@ENV|raw@@          CI_STEPS: ${{ matrix.steps }}
           CI_REPORT: ${{ runner.temp }}/ci-report.json

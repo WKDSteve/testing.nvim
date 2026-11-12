@@ -661,5 +661,59 @@ return function(H)
     ok(not plain:find("matrix.nvim", 1, true), "min_nvim: ... and no matrix.nvim")
   end
 
+  -- luacheck is the release binary, checked against its pinned sum; no Lua from www.lua.org (it timed out)
+  do
+    local root = project("lc", "{ 'suite' }", [[{ name = "lc.nvim", platform = { "suite" } }]])
+    local text = workflow.render(root)
+    has(
+      text,
+      ('echo "%s  $RUNNER_TEMP/luacheck" | sha256sum -c -'):format(workflow.SHA256.luacheck),
+      "luacheck: the download is checked against the pinned sum"
+    )
+    ok(not text:find("leafo/gh-actions-lua", 1, true), "luacheck: no Lua from www.lua.org")
+    ok(not text:find("luarocks", 1, true), "luacheck: no luarocks")
+    ok(not text:find("@@", 1, true), "luacheck: every placeholder is filled")
+  end
+
+  -- playwright: Chromium for the browser sheets on the full leg, outside the checkout; only when asked for
+  do
+    local root = project(
+      "pw",
+      "{ 'suite' }",
+      [[{ name = "pw.nvim", platform = { "suite" },
+          playwright = { version = "1.64.1", used_by = "the browser sheets" } }]]
+    )
+    local text, problems = workflow.render(root)
+    eq(problems, {}, "playwright: no problem")
+    has(text, "playwright-core@1.64.1", "playwright: that release of playwright-core")
+    has(text, "install --with-deps chromium", "playwright: its Chromium")
+    has(
+      text,
+      'echo "TESTING_PLAYWRIGHT_DIR=$RUNNER_TEMP/pw" >> "$GITHUB_ENV"',
+      "playwright: the sheets find it"
+    )
+    has(
+      text,
+      "# the browser sheets: playwright-core 1.64.1",
+      "playwright: the comment says who needs it"
+    )
+    local plain = workflow.render(
+      project("nopw", "{ 'suite' }", [[{ name = "nopw.nvim", platform = { "suite" } }]])
+    )
+    ok(not plain:find("playwright", 1, true), "playwright: without the key nothing of it")
+    local _, bad = workflow.render(
+      project(
+        "badpw",
+        "{ 'suite' }",
+        [[{ name = "badpw.nvim", platform = { "suite" }, playwright = { version = "latest", used_by = "x" } }]]
+      )
+    )
+    has(
+      table.concat(bad or {}, "; "),
+      ".playwright: expected",
+      "playwright: an inexact version is refused"
+    )
+  end
+
   vim.fn.delete(tmp, "rf")
 end

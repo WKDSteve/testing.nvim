@@ -144,6 +144,7 @@ ci = {
     layout = "public",                             -- optional: "public" (default), "private" or "hosted"
     platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
+    playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
     checkouts = {                                  -- optional: more checkouts below .deps/, not on the specs' rtp
       { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
       { repo = "WKDSteve/hover.nvim", ref = "ci-verified", why = "<only the test sheets load it>" },
@@ -169,6 +170,14 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   a hosted ubuntu runner: the only job with write access stays off the maintainer's machine, whose global pre-push hook
   would refuse the move from a shallow checkout anyway. The jobs are named `testing ci (<system>)`, so
   `testing ci remote` puts each leg in its column and the publish job in none.
+- **Tools.** The hosted legs install the versions of the self-hosted runner: nvim through `rhysd/action-setup-vim`, stylua
+  through its action, and luacheck as the release binary of `lunarmodules/luacheck` whose sha256 is pinned in
+  `testing.ci.workflow.SHA256` (checked against the maintainer's signature, the same file `scripts/wsl-tools.sh`
+  installs): no Lua and no luarocks from www.lua.org, whose download timed out. A new luacheck is a new pin there.
+- **Playwright.** `playwright = { version, used_by }` installs that release of `playwright-core` and its Chromium on the
+  full leg, outside the checkout, and names them in `TESTING_PLAYWRIGHT_DIR` and `PLAYWRIGHT_BROWSERS_PATH`: the
+  browser sheets (and an unpacked extension, which needs the full Chromium) run there instead of being a reported
+  skip. Without the key nothing of it is in the workflow.
 - **Packages.** `packages` names programs the specs or test sheets need and a runner image lacks (`ripgrep`, for a sheet
   that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
   macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the

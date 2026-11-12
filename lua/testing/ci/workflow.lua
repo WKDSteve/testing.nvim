@@ -11,6 +11,7 @@
 ---       name = "tasks.nvim",                        -- the repository (never the directory: a worktree is named otherwise)
 ---       platform = { "suite", "conformance" },     -- the steps that depend on the platform (hosted windows, macOS)
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
+---       playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
 ---       checkouts = {                               -- optional: more checkouts below .deps/ (third-party: pinned)
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
 ---       },
@@ -46,15 +47,17 @@ M.PATH = ".github/workflows/ci.yml"
 M.WIDTH = 120
 
 ---The versions the self-hosted runner has on its PATH; the hosted legs install exactly these.
-M.TOOLS = { nvim = "0.12.2", stylua = "2.5.2", luacheck = "1.2.0", lua = "5.4" }
+M.TOOLS = { nvim = "0.12.2", stylua = "2.5.2", luacheck = "1.2.0" }
+
+---The sha256 of the release files the hosted legs download (the same as scripts/wsl-tools.sh). luacheck: the Linux binary
+---of lunarmodules/luacheck v1.2.0, checked on 2026-11-12 against its signature (Caleb Maclennan, 63CC496475267693).
+M.SHA256 = { luacheck = "d68da17fca0697d9e2fb04201f3884abd259fa558b3a449bccaed47f1390defc" }
 
 ---The actions, pinned by commit (third-party code runs on the self-hosted runner too). Bump on purpose.
 M.ACTIONS = {
   checkout = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5",
   setup_vim = "febef33995d6649302e9d88dda81e071b68f16a7 # v1",
   stylua = "76fd70c03e6340ceaf673366712db9b20560b402 # v5",
-  lua = "6919171ccf181b826f44b9bca76307b577217377 # v13",
-  luarocks = "35d062def313a7699a0d513e996bcf4352f05389 # v6",
   node = "249970729cb0ef3589644e2896645e5dc5ba9c38 # v6",
   upload = "cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7",
   cache = "0057852bfaa89a56745cba8c7296529d2fc39830 # v4",
@@ -88,6 +91,7 @@ local KEYS = {
   layout = true,
   platform = true,
   node = true,
+  playwright = true,
   checkouts = true,
   packages = true,
   env = true,
@@ -104,6 +108,7 @@ local KEYS = {
 ---@class Testing.Ci.Workflow.Config
 ---@field platform string[]
 ---@field node? { version: string, used_by: string }
+---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field packages { name: string, why: string, apt?: string, brew?: string, choco?: string }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ), never on a self-hosted one.
 ---@field env table<string, string>
@@ -203,6 +208,26 @@ function M.validate(raw)
         end
       end
       cfg.node = { version = n.version, used_by = n.used_by }
+    end
+  end
+  if raw.playwright ~= nil then
+    local p = raw.playwright
+    if
+      type(p) ~= "table"
+      or type(p.version) ~= "string"
+      or not p.version:match("^%d+%.%d+%.%d+$")
+      or not is_text(p.used_by)
+    then
+      bad(
+        '.playwright: expected { version = "1.64.1", used_by = "<what needs it, for a comment>" }'
+      )
+    else
+      for k in pairs(p) do
+        if k ~= "version" and k ~= "used_by" then
+          bad(".playwright: unknown key %s", tostring(k))
+        end
+      end
+      cfg.playwright = { version = p.version, used_by = p.used_by }
     end
   end
   if raw.checkouts ~= nil then
@@ -799,7 +824,7 @@ function M.render_cfg(cfg, deps, opts)
     NVIM_VERSION = M.TOOLS.nvim,
     STYLUA_VERSION = M.TOOLS.stylua,
     LUACHECK_VERSION = M.TOOLS.luacheck,
-    LUA_VERSION = M.TOOLS.lua,
+    LUACHECK_SUM = M.SHA256.luacheck,
     TIMEOUT = tostring(cfg.timeout),
     KINDS = parts.KINDS,
     INTRO = M.wrap(
@@ -844,8 +869,6 @@ function M.render_cfg(cfg, deps, opts)
     CHECKOUT_ACTION = M.ACTIONS.checkout,
     SETUP_VIM_ACTION = M.ACTIONS.setup_vim,
     STYLUA_ACTION = M.ACTIONS.stylua,
-    LUA_ACTION = M.ACTIONS.lua,
-    LUAROCKS_ACTION = M.ACTIONS.luarocks,
     UPLOAD_ACTION = M.ACTIONS.upload,
     CHECKOUTS = (table.concat(checkouts):gsub("\n$", "")),
     PACKAGE_STEPS = package_steps(cfg.packages),
@@ -854,6 +877,27 @@ function M.render_cfg(cfg, deps, opts)
           M.ACTIONS.node,
           render.yaml_quote(cfg.node.version)
         )
+      or "",
+    -- an exact version (checked above): npm installs that release of playwright-core, which names its own Chromium
+    PLAYWRIGHT_STEP = cfg.playwright
+        and table.concat({
+          ("      # %s: playwright-core %s and its Chromium, outside the checkout; without them a browser"):format(
+            cfg.playwright.used_by,
+            cfg.playwright.version
+          ),
+          "      # sheet is a reported skip.",
+          "      - if: matrix.hosted && matrix.steps == ''",
+          "        shell: bash",
+          "        run: |",
+          ('          npm install --prefix "$RUNNER_TEMP/pw" --no-save --no-package-lock playwright-core@%s'):format(
+            cfg.playwright.version
+          ),
+          '          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers"',
+          '          "$RUNNER_TEMP/pw/node_modules/.bin/playwright-core" install --with-deps chromium',
+          '          echo "TESTING_PLAYWRIGHT_DIR=$RUNNER_TEMP/pw" >> "$GITHUB_ENV"',
+          '          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"',
+          "",
+        }, "\n")
       or "",
     ENV = table.concat(env),
     PUBLISH_JOB = publish_job,

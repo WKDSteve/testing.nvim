@@ -110,6 +110,9 @@ return {
       -- the steps that depend on the platform: the hosted windows and macOS legs run only these
       platform = { "suite", "conformance" },
       node = { version = "22", used_by = "the Node contract check" },
+      -- Chromium for the browser sheets (an unpacked extension needs the full Chromium, which this Windows machine
+      -- cannot start): the real browser cases run on the hosted full leg instead of being a reported skip
+      playwright = { version = "1.64.1", used_by = "the browser sheets" },
       checkouts = {
         {
           repo = "WKDSteve/lib.nvim",
