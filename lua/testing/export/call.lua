@@ -52,7 +52,7 @@ M.REMOTE_MAX_AGE_MAX = 86400
 M.PARAMS = {
   state_dir = { type = "string", methods = { fleet = true, repo = true, finding = true } },
   areas = { type = "string", methods = { fleet = true, repo = true, finding = true } },
-  metrics = { type = "string", methods = { repo = true } },
+  metrics = { type = "string", methods = { fleet = true, repo = true } },
   export = { type = "boolean", methods = { fleet = true, repo = true } },
   remote = { type = "boolean", methods = { fleet = true, repo = true } },
   github_token = { type = "string", methods = { fleet = true, repo = true } },
@@ -86,7 +86,7 @@ M.USAGE = table.concat({
   "  --params=-|<json>   the request as one JSON object (on stdin with -), alone, in place of the options:",
   "                      state_dir, areas (the areas.json of the data classes), export, remote, include, exclude",
   "                      (fleet), repo (a key of fleet below $TESTING_REPOS_ROOT; repo, finding), fp (finding),",
-  "                      metrics (the metrics.jsonl of the heavy runs; repo);",
+  "                      metrics (the metrics.jsonl of the heavy runs; fleet, repo);",
   "                      with remote also github_token (on stdin only) and remote_max_age (whole seconds)",
   "  $TESTING_REPOS_ROOT the repositories root of fleet when it is given none",
   "  stdout: one line of canonical JSON; runs nothing (--remote: the adapter's ETag cache)",
@@ -496,7 +496,7 @@ function M.main(argv, sv)
     remote = args.remote,
     github_token = args.github_token,
     remote_max_age = args.remote_max_age,
-    -- the metrics of the caller (`params.metrics`, repo); nil: the file the environment names
+    -- the metrics of the caller (`params.metrics`, fleet and repo); nil: the file the environment names
     metrics_file = args.metrics,
     -- the data classes of the caller's `areas.json` (`params.areas`); nil: this device's own file
     classes = args.areas and { path = args.areas } or nil,

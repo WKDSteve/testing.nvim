@@ -334,6 +334,10 @@
           },
           "additionalProperties": false
         },
+        "metrics": {
+          "description": "What the heavy runs of the repositories of this document cost on this machine together: the part metrics of a repository, from the lines of all of them (a repository left out is not counted), the pushes summed over their checkouts. Capability fleet_metrics; an engine without it leaves the field out. null: no line of any of them, or the local results were not read (the workstation).",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/metrics" }]
+        },
         "local_read": { "$ref": "#/$defs/local_read" },
         "remote": { "$ref": "#/$defs/remote_info" }
       },

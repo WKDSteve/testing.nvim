@@ -2,11 +2,12 @@
   "capabilities": [
     "data_classes",
     "fleet",
+    "fleet_metrics",
     "manifest",
     "metrics",
     "repo"
   ],
-  "digest": "sha256:3f9b90ff671bc731",
+  "digest": "sha256:cda507c37874d817",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",

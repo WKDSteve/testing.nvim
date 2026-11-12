@@ -282,7 +282,7 @@ end
 ---at the last run, not at the clock, and the pushes are counted from the day of the first run on: an export without a
 ---new run or push stays the same bytes.
 ---@param entries table[] The lines of `testing.metrics.read`.
----@param name string The directory name of the repository.
+---@param name string|table<string, true> The directory name of the repository, or a set of them (the fleet).
 ---@param pushes? fun(): integer[]|nil The epoch seconds of its pushes (`M.pushes`), asked only when there is a line;
 ---nil or a nil answer: not known.
 ---@return table|nil part nil: no line of this repository.
@@ -292,7 +292,7 @@ function M.export_part(entries, name, pushes)
   local mine = {}
   for _, e in ipairs(entries) do
     if
-      e.repo == name
+      (type(name) == "table" and name[e.repo] == true or e.repo == name)
       and type(e.ts) == "string"
       and e.ts:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$")
     then

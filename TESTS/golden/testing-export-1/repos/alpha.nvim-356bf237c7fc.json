@@ -2,6 +2,7 @@
   "capabilities": [
     "data_classes",
     "fleet",
+    "fleet_metrics",
     "manifest",
     "metrics",
     "repo"
@@ -9,7 +10,7 @@
   "cases": [],
   "cases_omitted": 0,
   "cases_red": 0,
-  "digest": "sha256:f539f453741ad6ab",
+  "digest": "sha256:abf117542a6221fd",
   "engine": {
     "git": "fixture",
     "nvim": "0.0.0",

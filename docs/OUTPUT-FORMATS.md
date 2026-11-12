@@ -360,7 +360,7 @@ Every document starts with the same fields:
 | `engine` | `{ version, git, nvim }` of testing.nvim. |
 | `rev` | What the sources looked like (`last.json`, `last_green.json`, `ci.json` with the paths of this machine replaced by their placeholders, the CI run). |
 | `digest` | `sha256:<16 hex>` of the content **without** `generated_at` and `engine`: two documents of an unchanged state have the same digest, whenever and wherever they were made. The manifest's `rev` and `digest` follow the path and digest of each of its files, not their bytes (which hold `generated_at`). |
-| `capabilities` | What this engine writes (`data_classes`, `fleet`, `manifest`, `metrics`, `repo`); a client shows only what is listed. `data_classes`: the fleet carries `excluded_by` and `classes`, fleet and repo carry `local_read`. `metrics`: a repo document carries `metrics`. |
+| `capabilities` | What this engine writes (`data_classes`, `fleet`, `fleet_metrics`, `manifest`, `metrics`, `repo`); a client shows only what is listed. `data_classes`: the fleet carries `excluded_by` and `classes`, fleet and repo carry `local_read`. `metrics`: a repo document carries `metrics`. `fleet_metrics`: the fleet carries `metrics` too. |
 | `root` | Only in the local form: the repos root (fleet, when exactly one `--repos-root` was named) or the repository (repo). |
 
 The bytes are canonical (`lib.nvim.json.canonical`): keys sorted by byte value, no whitespace (stdout, the form that is
@@ -434,6 +434,11 @@ same bytes. `null`: no run recorded for it, or `local_read` is false. Which file
 user's data folder; `TESTING_METRICS=off` exports none (a suite's children have it, so a spec never reads the user's
 file).
 
+The fleet carries the same part `metrics` for all its repositories together (capability `fleet_metrics`): the lines of
+every repository of the document (one that was left out, by selection or by its data class, is not counted, nor is a
+line of a repository that is not in it), `pushes` summed over their checkouts (`null` when one of them cannot be read),
+`days` the sum per day: the trend of the whole fleet. `null`: no line of any of them, or `local_read` is false.
+
 ### `manifest`
 
 The table of contents of an export folder, `testing-export.json`:
@@ -462,7 +467,7 @@ stdin (`--params=<json>` takes it inline), alone, in place of the options:
 | --- | --- | --- | --- |
 | `state_dir` | whole path | fleet, repo, finding | the state folder (as `--state-dir`) |
 | `areas` | whole path | fleet, repo (with `export`), finding | the `areas.json` of the data classes; without it the child asks its own (none: nothing is released) |
-| `metrics` | whole path | repo | the `metrics.jsonl` of the heavy runs, for the part `metrics`; without it the file the child's environment names (a hub's child has none: `metrics` is `null`) |
+| `metrics` | whole path | fleet, repo | the `metrics.jsonl` of the heavy runs, for the part `metrics`; without it the file the child's environment names (a hub's child has none: `metrics` is `null`) |
 | `export` | boolean | fleet, repo | the export form (as `--export`) |
 | `remote` | boolean | fleet, repo | ask the CI adapter (as `--remote`) |
 | `github_token` | a GitHub token | fleet, repo, with `remote` | the token the adapter takes before `$TESTING_GITHUB_TOKEN` and `gh auth token`, for a child without an environment. Only on stdin (`--params=-`): inline it is refused, there is no switch. In no document, no message, no cache; redacted as `<TOKEN>` like every token of the adapter. `hello` names it as the capability `remote_token`. |

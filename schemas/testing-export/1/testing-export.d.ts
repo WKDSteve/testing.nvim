@@ -157,6 +157,10 @@ export interface Fleet {
     checked: boolean;
     problem: TextOrNull;
   };
+  /**
+   * What the heavy runs of the repositories of this document cost on this machine together: the part metrics of a repository, from the lines of all of them (a repository left out is not counted), the pushes summed over their checkouts. Capability fleet_metrics; an engine without it leaves the field out. null: no line of any of them, or the local results were not read (the workstation).
+   */
+  metrics?: null | Metrics;
   local_read?: LocalRead;
   remote: RemoteInfo;
 }
@@ -185,6 +189,69 @@ export interface Summary {
   xpass: Count;
   timeout: Count;
   crash: Count;
+}
+/**
+ * What the heavy runs of this repository cost on this machine (`testing stats`, docs/CI.md "Metrics"), from the lines of metrics.jsonl whose repo is the directory name. The days end at the last run, not at the clock, and the pushes are counted from the day of the first run on, so an export without a new run or push stays the same. Capability metrics.
+ */
+export interface Metrics {
+  runs: Count;
+  /**
+   * Machine minutes of all runs.
+   */
+  minutes: number;
+  first: Time;
+  last: Time;
+  /**
+   * Lines entered afterwards (a measurement from before the metrics were written), part of runs.
+   */
+  backfilled: number;
+  /**
+   * Per kind of run, sorted by kind. other: a kind this version does not know.
+   */
+  kinds: MetricsKind[];
+  /**
+   * The days with a run of the 90 days that end at the last run, oldest first.
+   */
+  days: {
+    day: string;
+    runs: Count;
+    minutes: number;
+  }[];
+  /**
+   * The spec files of the suite runs (suite, suite-partial): selected, taken from the cache, run. hit_rate in percent, null without a selected file.
+   */
+  cache: {
+    selected: Count;
+    cached: Count;
+    ran: Count;
+    hit_rate: null | number;
+  };
+  /**
+   * Pushes of main since the day of the first run (the reflog of origin/main of this checkout); null: not known.
+   */
+  pushes: null | Count;
+  runs_per_push: null | number;
+}
+export interface MetricsKind {
+  kind: "suite" | "suite-partial" | "ci" | "ci-commit" | "ci-commit-quick" | "land" | "other";
+  runs: Count;
+  minutes: number;
+  median_s: number;
+  /**
+   * Minutes waited in the queue of heavy runs.
+   */
+  wait_minutes: number;
+  /**
+   * Runs that waited.
+   */
+  waited: number;
+  /**
+   * How often each verdict, sorted. other: a verdict that is no short word.
+   */
+  verdicts: {
+    verdict: string;
+    n: Count;
+  }[];
 }
 export interface RemoteInfo {
   asked: boolean;
@@ -314,69 +381,6 @@ export interface HistoryStats {
     n: Count;
   }[];
   red_since: TimeOrNull;
-}
-/**
- * What the heavy runs of this repository cost on this machine (`testing stats`, docs/CI.md "Metrics"), from the lines of metrics.jsonl whose repo is the directory name. The days end at the last run, not at the clock, and the pushes are counted from the day of the first run on, so an export without a new run or push stays the same. Capability metrics.
- */
-export interface Metrics {
-  runs: Count;
-  /**
-   * Machine minutes of all runs.
-   */
-  minutes: number;
-  first: Time;
-  last: Time;
-  /**
-   * Lines entered afterwards (a measurement from before the metrics were written), part of runs.
-   */
-  backfilled: number;
-  /**
-   * Per kind of run, sorted by kind. other: a kind this version does not know.
-   */
-  kinds: MetricsKind[];
-  /**
-   * The days with a run of the 90 days that end at the last run, oldest first.
-   */
-  days: {
-    day: string;
-    runs: Count;
-    minutes: number;
-  }[];
-  /**
-   * The spec files of the suite runs (suite, suite-partial): selected, taken from the cache, run. hit_rate in percent, null without a selected file.
-   */
-  cache: {
-    selected: Count;
-    cached: Count;
-    ran: Count;
-    hit_rate: null | number;
-  };
-  /**
-   * Pushes of main since the day of the first run (the reflog of origin/main of this checkout); null: not known.
-   */
-  pushes: null | Count;
-  runs_per_push: null | number;
-}
-export interface MetricsKind {
-  kind: "suite" | "suite-partial" | "ci" | "ci-commit" | "ci-commit-quick" | "land" | "other";
-  runs: Count;
-  minutes: number;
-  median_s: number;
-  /**
-   * Minutes waited in the queue of heavy runs.
-   */
-  wait_minutes: number;
-  /**
-   * Runs that waited.
-   */
-  waited: number;
-  /**
-   * How often each verdict, sorted. other: a verdict that is no short word.
-   */
-  verdicts: {
-    verdict: string;
-    n: Count;
-  }[];
 }
 export interface Manifest {
   schema: Schema;

@@ -51,7 +51,7 @@ M.ENGINE_VERSION = "0.1.0-dev"
 
 ---What this engine writes; sorted.
 ---@type string[]
-M.CAPABILITIES = { "data_classes", "fleet", "manifest", "metrics", "repo" }
+M.CAPABILITIES = { "data_classes", "fleet", "fleet_metrics", "manifest", "metrics", "repo" }
 
 ---What `testing call hello` says this engine answers: the capabilities of its documents, the findings
 ---(`testing-finding/1`), `hello` itself and the request on stdin (`--params=-`); sorted.
@@ -60,6 +60,7 @@ M.HELLO_CAPABILITIES = {
   "data_classes",
   "finding",
   "fleet",
+  "fleet_metrics",
   "hello",
   "manifest",
   "metrics",
@@ -1219,6 +1220,88 @@ local function prefetch_real(dirs)
   end
 end
 
+---The lines of the metrics file of one build, read once (reset by `protect`).
+---@type { path: string|false, entries: table[] }|nil
+local metrics_cache
+
+---The lines of the metrics file an export reads (`opts.metrics_file`), once per build.
+---@param opts Testing.Export.Opts
+---@return table[]
+local function metrics_entries(opts)
+  local path = opts.metrics_file
+  if path == nil then
+    local metrics = require("testing.metrics")
+    -- the reading side: a CI service or a heavy run around the export does not stop the reading, `off` does
+    local m = metrics.from_env(function(name)
+      if name == "CI" or name == require("testing.queue").TOKEN_ENV then
+        return nil
+      end
+      return os.getenv(name)
+    end)
+    path = m and m.path or false
+  end
+  if metrics_cache and metrics_cache.path == path then
+    return metrics_cache.entries
+  end
+  local entries = {}
+  if path then
+    local ok, read = pcall(require("testing.metrics").read, path)
+    entries = ok and read or {}
+  end
+  metrics_cache = { path = path, entries = entries }
+  return entries
+end
+
+---The part `metrics` of a repository (`testing.stats.export_part`).
+---@param dir string
+---@param opts Testing.Export.Opts
+---@return table|vim.NIL metrics NIL: no line of this repository, or the local results were not read (the workstation).
+---@return string line What the `rev` of the document follows.
+local function metrics_of(dir, opts)
+  if opts.no_local == true then
+    return NIL, "metrics:off"
+  end
+  local part, line = require("testing.stats").export_part(
+    metrics_entries(opts),
+    -- the name the lines carry: a worktree counts for its main checkout (`metrics.repo_name`)
+    require("testing.metrics").repo_name(dir),
+    function()
+      local ok, list = pcall(M.deps.pushes, dir)
+      return ok and type(list) == "table" and list or nil
+    end
+  )
+  return part or NIL, line
+end
+
+---The part `metrics` of the fleet: the same part as a repository's, from the lines of every repository of the
+---document (one left out is not counted), the pushes summed over their checkouts. `fleet_metrics`.
+---@param dirs string[]
+---@param opts Testing.Export.Opts
+---@return table|vim.NIL metrics NIL: no line of any of them, or the local results were not read (the workstation).
+---@return string line What the `rev` of the document follows.
+local function fleet_metrics_of(dirs, opts)
+  if opts.no_local == true then
+    return NIL, "metrics:off"
+  end
+  local names = {}
+  for _, dir in ipairs(dirs) do
+    names[require("testing.metrics").repo_name(dir)] = true
+  end
+  local part, line = require("testing.stats").export_part(metrics_entries(opts), names, function()
+    -- one checkout whose pushes cannot be read makes the sum unknown, not smaller
+    local all = {}
+    for _, dir in ipairs(dirs) do
+      local ok, list = pcall(M.deps.pushes, dir)
+      if not ok or type(list) ~= "table" then
+        return nil
+      end
+      vim.list_extend(all, list)
+    end
+    return all
+  end)
+  return part or NIL, line
+end
+
 ---@param dirs string[]
 ---@param info { excluded: string[] }
 ---@param opts Testing.Export.Opts
@@ -1256,6 +1339,9 @@ local function build_fleet(dirs, info, opts, remote, remote_info, classed)
     lines[#lines + 1] = src.rev
   end
   doc.repos = rows
+  local metrics, metrics_line = fleet_metrics_of(dirs, opts)
+  doc.metrics = metrics
+  lines[#lines + 1] = metrics_line
   local selection = #(info.excluded or {})
   doc.excluded = selection + (classed and classed.n_private + classed.n_unclassified or 0)
   -- by reason, never by name; null: the data classes were not asked (a document that stays on this machine)
@@ -1373,59 +1459,6 @@ local function history_of(dir, opts)
     },
   },
     ("history:%d:%s"):format(#entries, last and last.run or "-")
-end
-
----The lines of the metrics file of one build, read once (reset by `protect`).
----@type { path: string|false, entries: table[] }|nil
-local metrics_cache
-
----The lines of the metrics file an export reads (`opts.metrics_file`), once per build.
----@param opts Testing.Export.Opts
----@return table[]
-local function metrics_entries(opts)
-  local path = opts.metrics_file
-  if path == nil then
-    local metrics = require("testing.metrics")
-    -- the reading side: a CI service or a heavy run around the export does not stop the reading, `off` does
-    local m = metrics.from_env(function(name)
-      if name == "CI" or name == require("testing.queue").TOKEN_ENV then
-        return nil
-      end
-      return os.getenv(name)
-    end)
-    path = m and m.path or false
-  end
-  if metrics_cache and metrics_cache.path == path then
-    return metrics_cache.entries
-  end
-  local entries = {}
-  if path then
-    local ok, read = pcall(require("testing.metrics").read, path)
-    entries = ok and read or {}
-  end
-  metrics_cache = { path = path, entries = entries }
-  return entries
-end
-
----The part `metrics` of a repository (`testing.stats.export_part`).
----@param dir string
----@param opts Testing.Export.Opts
----@return table|vim.NIL metrics NIL: no line of this repository, or the local results were not read (the workstation).
----@return string line What the `rev` of the document follows.
-local function metrics_of(dir, opts)
-  if opts.no_local == true then
-    return NIL, "metrics:off"
-  end
-  local part, line = require("testing.stats").export_part(
-    metrics_entries(opts),
-    -- the name the lines carry: a worktree counts for its main checkout (`metrics.repo_name`)
-    require("testing.metrics").repo_name(dir),
-    function()
-      local ok, list = pcall(M.deps.pushes, dir)
-      return ok and type(list) == "table" and list or nil
-    end
-  )
-  return part or NIL, line
 end
 
 ---@param dir string

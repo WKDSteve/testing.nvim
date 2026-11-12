@@ -3,6 +3,7 @@
     "data_classes",
     "finding",
     "fleet",
+    "fleet_metrics",
     "hello",
     "manifest",
     "metrics",

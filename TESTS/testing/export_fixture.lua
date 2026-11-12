@@ -291,7 +291,8 @@ function M.build(base)
     areas,
     M.areas({ ["alpha.nvim"] = "public", ["beta.nvim"] = "internal", ["gamma.nvim"] = "internal" })
   )
-  -- the metrics of the heavy runs (testing.metrics), never the user's file: beta has runs, alpha and gamma none
+  -- the metrics of the heavy runs (testing.metrics), never the user's file: beta has runs, gamma one, alpha none,
+  -- and elsewhere.nvim (no repository of the export) one that the fleet must not count
   local metrics = base .. "/metrics/metrics.jsonl"
   M.write(metrics, table.concat({
     json.encode({
@@ -327,6 +328,27 @@ function M.build(base)
       duration_ms = 30000,
       verdict = "green-partial",
       files = { selected = 10, cached = 10, ran = 0 },
+    }),
+    json.encode({
+      v = 1,
+      ts = "2026-10-30T08:00:00Z",
+      kind = "suite",
+      repo = "gamma.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 120000,
+      verdict = "green",
+      files = { selected = 20, cached = 5, ran = 15 },
+    }),
+    json.encode({
+      v = 1,
+      ts = "2026-10-30T09:00:00Z",
+      kind = "suite",
+      repo = "elsewhere.nvim",
+      host = "fixture-host",
+      os = "linux",
+      duration_ms = 999000,
+      verdict = "green",
     }),
     json.encode({
       v = 1,

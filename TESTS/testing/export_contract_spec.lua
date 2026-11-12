@@ -90,6 +90,47 @@ return function(H)
     )
   end
 
+  -- ── the fleet's metrics: the lines of the repositories of the document, summed; another repository's not ──
+  do
+    local docs = first.docs
+    local fleet = docs["fleet.json"]
+    local function repo_metrics(name)
+      for path, doc in pairs(docs) do
+        if path:match("^repos/" .. name) then
+          return doc.metrics
+        end
+      end
+    end
+    local beta, gamma = repo_metrics("beta"), repo_metrics("gamma")
+    ok(type(fleet.metrics) == "table", "the fleet has a part metrics")
+    ok(type(beta) == "table" and type(gamma) == "table", "beta and gamma have lines of their own")
+    if type(fleet.metrics) == "table" and type(beta) == "table" and type(gamma) == "table" then
+      eq(fleet.metrics.runs, beta.runs + gamma.runs, "runs: beta and gamma, not elsewhere.nvim")
+      ok(
+        math.abs(fleet.metrics.minutes - (beta.minutes + gamma.minutes)) < 0.11,
+        ("minutes: the same sum, elsewhere's 16.6 left out (%s vs %s + %s)"):format(
+          fleet.metrics.minutes,
+          beta.minutes,
+          gamma.minutes
+        )
+      )
+      eq(
+        fleet.metrics.first,
+        gamma.first < beta.first and gamma.first or beta.first,
+        "first: the earliest of them"
+      )
+      eq(
+        fleet.metrics.cache.selected,
+        beta.cache.selected + gamma.cache.selected,
+        "the cache of both suites"
+      )
+    end
+    ok(
+      vim.tbl_contains(fleet.capabilities, "fleet_metrics"),
+      "announced as the capability fleet_metrics"
+    )
+  end
+
   -- ── the same state built elsewhere, at another time: same bytes but generated_at, same digest ──
   do
     local fx2 = build("contract-b")

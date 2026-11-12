@@ -80,7 +80,8 @@ return function(H)
     eq(r.doc.form, "export", "the export form")
     eq(r.out[1]:find('"root"', 1, true), nil, "no root")
     local restore = fixture.install()
-    local doc = export.fleet(fixture.opts(fx))
+    -- the child reads no metrics file (TESTING_METRICS=off), so neither does the document it is compared with
+    local doc = export.fleet(fixture.opts(fx, { metrics_file = false }))
     restore()
     eq(r.out[1], export.encode(doc), "the bytes of testing.export.fleet")
     eq(r.doc.repos[1].ci_remote.state, "success", "alpha: the adapter's record")
@@ -462,7 +463,20 @@ return function(H)
       2,
       "metrics must be a whole path"
     )
-    eq(hub("fleet", vim.json.encode({ metrics = fx.metrics })).code, 2, "fleet takes no metrics")
+    -- the fleet takes the metrics file too: the sum of its repositories (fleet_metrics)
+    local fm =
+      hub("fleet", vim.json.encode({ export = true, areas = fx.areas, metrics = fx.metrics }))
+    eq(fm.code, 0, "fleet with metrics: exit 0: " .. fm.err)
+    eq(
+      type(fm.doc and fm.doc.metrics) == "table" and fm.doc.metrics.runs,
+      part.runs + 1,
+      "fleet with metrics: beta's lines and gamma's one"
+    )
+    eq(
+      hub("finding", vim.json.encode({ repo = alpha, metrics = fx.metrics })).code,
+      2,
+      "finding takes no metrics"
+    )
     local fd =
       hub("finding", vim.json.encode({ repo = alpha, state_dir = fx.state, areas = fx.areas }))
     eq(fd.code, 0, "finding by key: exit 0: " .. fd.err)
