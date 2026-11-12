@@ -42,6 +42,15 @@ return {
           end
           return false
         end
+        ---Whether the child of `:Testing <sub>` has ENDED since the last `_G.mark()`: its verdict (`testing <sub> done`,
+        ---`testing <sub>: the report has findings ...`, `testing <sub> failed ...`). Not `testing <sub>: <root>`: that is
+        ---said when the child starts, and a step that waited for it let the next command run beside it (surface,
+        ---conformance and budget at once; `:checkhealth` and the conformance checks then missed their deadlines on the
+        ---hosted runners).
+        function _G.ended(sub)
+          local head = "testing " .. sub
+          return _G.said(head .. " done") or _G.said(head .. ": the report has findings") or _G.said(head .. " failed")
+        end
         ---Whether a loaded buffer (the viewer of a report) contains `s` (plain).
         function _G.shown(s)
           for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -85,24 +94,24 @@ return {
     },
     { lua = [[_G.mark(); vim.cmd("Testing doctor")]], note = ":Testing doctor" },
     {
-      wait = [[_G.said("testing doctor") and _G.shown("lib.nvim")]],
+      wait = [[_G.ended("doctor") and _G.shown("lib.nvim")]],
       timeout = 60000,
       note = "the dependency report names lib.nvim",
     },
     { lua = [[_G.mark(); vim.cmd("Testing surface")]], note = ":Testing surface" },
     {
-      wait = [[_G.said("testing surface")]],
+      wait = [[_G.ended("surface")]],
       timeout = 120000,
       note = "the surface report answers (done, or findings that fail its gate)",
     },
     { lua = [[_G.mark(); vim.cmd("Testing conformance")]], note = ":Testing conformance" },
     {
-      wait = [[_G.said("testing conformance") and _G.shown("K1")]],
+      wait = [[_G.ended("conformance") and _G.shown("K1")]],
       timeout = 120000,
       note = "the conformance checks report by number",
     },
     { lua = [[_G.mark(); vim.cmd("Testing budget")]], note = ":Testing budget" },
-    { wait = [[_G.said("testing budget")]], timeout = 120000, note = "the budget run answers" },
+    { wait = [[_G.ended("budget")]], timeout = 120000, note = "the budget run ends" },
     { lua = [[_G.mark(); vim.cmd("Testing health")]], note = ":Testing health" },
     {
       wait = [[vim.bo.filetype == "checkhealth"]],
