@@ -25,14 +25,67 @@ local M = {}
 ---@class Testing.Report.GithubOpts
 ---@field max_annotations? integer Annotations emitted at most (default 10).
 ---@field annotate_skips? boolean Also emit `::warning` for skipped cases (default false).
+---@field annotate_na? boolean Emit one `::warning` naming the cases that did not apply here (default true).
 ---@field summary? boolean Let the registry write the step summary (default true).
 ---@field summary_path? string Step summary file; default `$GITHUB_STEP_SUMMARY`.
 ---@field env? table<string, string|nil> Environment to read instead of the real one (tests).
 ---@field summary_max_bytes? integer Cap of what is appended (default 900000; GitHub allows 1 MiB).
 
 ---@type Testing.Report.GithubOpts
-M.DEFAULTS =
-  { max_annotations = 10, annotate_skips = false, summary = true, summary_max_bytes = 900000 }
+M.DEFAULTS = {
+  max_annotations = 10,
+  annotate_skips = false,
+  annotate_na = true,
+  summary = true,
+  summary_max_bytes = 900000,
+}
+
+---The cases that did not apply here (`case.na` on a pass or a skip, see `testing.core.result.skip_counts`),
+---grouped by their reason in the order of first appearance.
+---@param result Testing.Result
+---@return integer count
+---@return { reason: string, n: integer, first: string }[] groups
+function M.na_groups(result)
+  local count, groups, by_reason = 0, {}, {}
+  for _, c in ipairs(result.cases or {}) do
+    if type(c.na) == "string" and (c.status == "pass" or c.status == "skip") then
+      count = count + 1
+      local g = by_reason[c.na]
+      if not g then
+        g = { reason = c.na, n = 0, first = c.id or c.file or "?" }
+        by_reason[c.na] = g
+        groups[#groups + 1] = g
+      end
+      g.n = g.n + 1
+    end
+  end
+  return count, groups
+end
+
+---One warning that names the n/a cases of the run, or nil when there are none. It stands outside the cap
+---of the per-case annotations (like the verdict line), so a checker that silently stopped running on a runner
+---(a missing tmux, Podman image or browser) shows on the run page instead of reading as plain green.
+---@param result Testing.Result
+---@return string|nil
+function M.na_warning(result)
+  local count, groups = M.na_groups(result)
+  if count == 0 then
+    return nil
+  end
+  local parts = {}
+  for i, g in ipairs(groups) do
+    if i > 5 then
+      parts[#parts + 1] = ("... %d more reason(s)"):format(#groups - 5)
+      break
+    end
+    parts[#parts + 1] = ("%s (%d case(s), e.g. %s)"):format(util.cap(g.reason, 160), g.n, g.first)
+  end
+  return M.command(
+    "warning",
+    { title = "testing: n/a here" },
+    ("%d case(s) did not apply here and did not run: %s"):format(count, table.concat(parts, "; "))
+  )
+end
 
 ---Escape the data part of a workflow command (the message).
 ---@param s any
@@ -191,6 +244,12 @@ function M.render(result, opts)
     end
     lines[#lines + 1] = M.command(e.level, e.props, e.message)
   end
+  if o.annotate_na then
+    local na_line = M.na_warning(result)
+    if na_line then
+      lines[#lines + 1] = na_line
+    end
+  end
   local verdict = result.run and result.run.verdict
   if type(verdict) == "table" and verdict.kind == "red" and not M.has_bad_case(result) then
     -- an exit code 1 without a red case (a cache audit that found a stale pass): the log must not stay green
@@ -314,6 +373,23 @@ function M.summary_markdown(result)
         M.md_escape(c.id or "?"),
         c.status,
         M.md_escape(util.cap(tostring(detail or "no detail recorded"), 300))
+      )
+    end
+  end
+  local na_count, na_groups = M.na_groups(result)
+  if na_count > 0 then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = ("### Not applicable here (%d case(s), not run)"):format(na_count)
+    lines[#lines + 1] = ""
+    for i, g in ipairs(na_groups) do
+      if i > 25 then
+        lines[#lines + 1] = ("- ... %d more reason(s)"):format(#na_groups - 25)
+        break
+      end
+      lines[#lines + 1] = ("- %s: %d case(s), e.g. %s"):format(
+        M.md_escape(util.cap(g.reason, 300)),
+        g.n,
+        M.md_escape(g.first)
       )
     end
   end

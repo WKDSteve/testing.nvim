@@ -306,6 +306,12 @@ second command. At most 10 annotations are emitted (the GitHub limit per type an
 warning says how many were left out. The step summary table is **appended** to
 `$GITHUB_STEP_SUMMARY` (other steps share the file) and capped in size.
 
+Cases that did not apply here (n/a: a missing tmux, Podman image, browser or tool) keep a run green, so on a CI
+runner they would go unnoticed. The reporter adds one warning for them, outside the cap of 10, that names each reason
+once with its count and a first case (`::warning title=testing: n/a here::3 case(s) did not apply here and did not
+run: ...`), and the step summary gets a section "Not applicable here" with the same list. `annotate_na = false` (an
+option of the reporter) leaves the warning out; the summary section stays.
+
 ## `junit`
 
 * `fail` and `xpass` become `<failure>`; `error`, `timeout` and `crash` become `<error>`; `skip` and

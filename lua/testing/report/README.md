@@ -89,7 +89,9 @@ line) becomes `#\x23[`. The IR that `--reporter json` prints on stdout gets the 
 valid JSON and decodes to the original text); the file of `--json <file>` is no log and is left as it is. At
 most `max_annotations` (default 10, the
 GitHub limit per type and step) are emitted, then one warning says how many were left out. Skips are
-annotated with `annotate_skips = true`.
+annotated with `annotate_skips = true`. The n/a cases (`case.na` on a pass or a skip) get one warning of their own,
+outside the cap, that groups them by reason (`na_warning`, off with `annotate_na = false`), and a section of the step
+summary.
 
 The step summary table escapes every cell for Markdown and HTML and is **appended** (other steps
 share the file), capped at `summary_max_bytes` (default 900000).

@@ -140,6 +140,44 @@ return function(H)
   ok(capped_text:find("summary truncated", 1, true), "the cap is announced")
   vim.fn.delete(small)
 
+  -- n/a: one warning outside the cap, and a summary section ---------------------------------------------------------
+  local result_mod = require("testing.core.result")
+  local function with_na()
+    local r = F.green()
+    local a = F.add(r, { file = "TESTS/pty_spec.lua", name = "osc", status = "skip" })
+    a.na = "the pty checks need tmux"
+    local b = F.add(r, { file = "TESTS/pty_spec.lua", name = "keys", status = "skip" })
+    b.na = "the pty checks need tmux"
+    local c = F.add(r, { file = "TESTS/trash_spec.lua", name = "gio" })
+    c.na = "the image localhost/testing-linux:1 is not built"
+    return result_mod.finalize(r)
+  end
+  local na_lines = gh.render(with_na())
+  eq(#na_lines, 1, "a run whose only remarks are n/a cases emits one line")
+  eq(
+    na_lines[1],
+    "::warning title=testing%3A n/a here::3 case(s) did not apply here and did not run: "
+      .. "the pty checks need tmux (2 case(s), e.g. TESTS/pty_spec.lua::osc); "
+      .. "the image localhost/testing-linux:1 is not built (1 case(s), e.g. TESTS/trash_spec.lua::gio)",
+    "the n/a warning names each reason once, with its count and a first case"
+  )
+  eq(#gh.render(with_na(), { annotate_na = false }), 0, "annotate_na = false turns it off")
+  local capped_na = gh.render(with_na(), { max_annotations = 0 })
+  eq(#capped_na, 1, "the n/a warning does not count against the annotation cap")
+  local na_md = table.concat(gh.summary_markdown(with_na()), "\n")
+  ok(
+    na_md:find("### Not applicable here (3 case(s), not run)", 1, true),
+    "summary section: " .. na_md
+  )
+  ok(
+    na_md:find("- the pty checks need tmux: 2 case(s), e.g. TESTS/pty\\_spec.lua::osc", 1, true),
+    "summary line per reason"
+  )
+  ok(
+    not table.concat(gh.summary_markdown(F.green()), "\n"):find("Not applicable", 1, true),
+    "no section without n/a cases"
+  )
+
   -- determinism ---------------------------------------------------------------------------------------------------
   eq(gh.render(F.hostile()), gh.render(F.hostile()), "annotations are deterministic")
   eq(gh.summary_markdown(F.mixed()), gh.summary_markdown(F.mixed()), "summary is deterministic")
