@@ -169,11 +169,19 @@ function Trace:snapshot(extra)
   }
 end
 
+---The account of this process, asked once (`false`: asked, the system did not say). It cannot change while the process
+---runs; the environment and the host name can (a spec sets `vim.env`), so those are read on every call.
+---@type string|false|nil
+local account
+
 ---The name of the account this editor runs as (nil when the system does not say).
 ---@return string|nil
 local function account_name()
-  local ok, pw = pcall(vim.uv.os_get_passwd)
-  return ok and type(pw) == "table" and type(pw.username) == "string" and pw.username or nil
+  if account == nil then
+    local ok, pw = pcall(vim.uv.os_get_passwd)
+    account = ok and type(pw) == "table" and type(pw.username) == "string" and pw.username or false
+  end
+  return account or nil
 end
 
 ---Redaction words of the IR kernel: user and host name.
