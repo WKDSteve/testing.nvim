@@ -488,7 +488,9 @@ function M.explain(p, n, deps)
       local first = vim.api.nvim_buf_line_count(explain_buf(p)) -- the answer replaces this line and what follows
       local text = ""
       local function current()
-        return gen == p.explain_gen and vim.api.nvim_buf_is_valid(explain_buf(p))
+        -- a buffer wiped meanwhile is not made again for the rest of an answer that has nowhere to go
+        local buf = p.explain_buf
+        return gen == p.explain_gen and buf ~= nil and vim.api.nvim_buf_is_valid(buf)
       end
       local function show()
         local buf = explain_buf(p)

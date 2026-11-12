@@ -253,6 +253,23 @@ return function(H)
     has(second, "Question: What does this step do?", "the new preview replaced the old one")
   end
 
+  -- the buffer of the answer wiped while the answer streams: the rest is dropped, no new buffer
+  do
+    local p = new_panel()
+    local ai = fake_ai()
+    panel.explain(p, 2, { require = ai.require, select = chooser({ "what", "Send" }) })
+    local wiped = p.explain_buf
+    vim.api.nvim_buf_delete(wiped, { force = true })
+    local h = ai.calls[1].handlers
+    h.on_chunk("after the wipe")
+    h.on_done({ text = "after the wipe" })
+    vim.wait(200, function()
+      return false
+    end, 10)
+    eq(p.explain_buf, wiped, "no new buffer for the rest of the answer")
+    ok(not vim.api.nvim_buf_is_valid(wiped), "the wiped one stays gone")
+  end
+
   -- a step that has not run: the result is not offered
   do
     local p = new_panel()
