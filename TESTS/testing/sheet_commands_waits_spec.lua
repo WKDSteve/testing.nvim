@@ -3,7 +3,8 @@
 -- starts; a wait that this message already satisfies lets the next command run beside the child (surface,
 -- conformance and budget at once), and the steps after it missed their deadlines on the hosted runners (macOS step 19,
 -- ubuntu step 23 `:checkhealth`). Every wait after such a command is evaluated here with only the start message said
--- and every report shown: it must still be false.
+-- and every report shown: it must still be false. And it must end on the child's real verdict (`interpret`), for
+-- every exit code a report command can have.
 return function(H)
   local ok = H.ok
 
@@ -66,6 +67,11 @@ return function(H)
     return nil
   end
 
+  -- the child's verdict of a green run reads the IR it wrote: one passed spec, as in the fixture project
+  local child = require("testing.bindings.child")
+  local ir_path = vim.fn.tempname() .. ".json"
+  vim.fn.writefile({ '{"summary":{"pass":1,"skip":0,"xfail":0}}' }, ir_path)
+
   local pending, checked = nil, 0
   for i, step in ipairs(sheet.steps) do
     if i > 1 and step.lua then
@@ -90,6 +96,31 @@ return function(H)
           step.wait
         )
       )
+      -- the wait must END on the child's real verdict (testing.bindings.child.interpret), else a broken
+      -- `_G.ended` or a changed message would only time out on the runners
+      -- a wait on `_G.ended` ends on every verdict (done, findings, failed); one on a green message only on exit 0
+      local codes = step.wait:find("_G.ended(", 1, true) and { 0, 1, 2 } or { 0 }
+      for _, code in ipairs(codes) do
+        fake_g.mark()
+        fake_vim.notify(("testing %s: %s"):format(pending, "/tmp/x"))
+        local verdict = child.interpret(
+          pending,
+          { code = code, stdout = "", stderr = "boom" },
+          { json = ir_path }
+        )
+        fake_vim.notify(verdict.message)
+        local oke, ended = pcall(wait)
+        ok(
+          oke and ended == true,
+          ("step %d: the end of `:Testing %s` (exit %d, %q) ends the wait: %s"):format(
+            i,
+            pending,
+            code,
+            verdict.message,
+            tostring(ended)
+          )
+        )
+      end
       checked = checked + 1
       pending = nil
     end
@@ -98,4 +129,5 @@ return function(H)
     checked >= 7,
     ("every child command of the sheet is followed by a wait that was checked (%d)"):format(checked)
   )
+  vim.fn.delete(ir_path)
 end
