@@ -638,10 +638,11 @@ return {
 
 * A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
 * `window` in a `wait` or `expect` (`{ name = "report.txt", window = "Downloads" }`) looks into the window of another
-  program instead: the one visible window of any process whose title contains that part, opened by what the app did
+  program instead: the one visible window of another process (never the app's own) whose title contains that part,
+  opened by what the app did
   (Explorer, a browser, a mail program). The driver only reads there: it neither sizes nor focuses that window, and
-  `toggle`, `click`, `set` and `shot` stay in the app's own window. No such window yet keeps a `wait` waiting; two of
-  them fail the step, as two elements do. The failure line says `in "Downloads"`.
+  `toggle`, `click`, `set` and `shot` stay in the app's own window. No such window yet, or two of them for a moment,
+  keeps a `wait` waiting; at its deadline (and in an `expect`) two of them fail the step, as two elements do. The failure line says `in "Downloads"`.
 * The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH (`cargo install --path crates/sheet-driver` in appkit). Without one, the sheet is a reported skip.
 * `ended_early` in the app's entry is the text of a skip for a program that ends at once with success, like a second
   instance that hands over to a running one. Without it that is a failure.
