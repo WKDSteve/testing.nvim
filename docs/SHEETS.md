@@ -494,6 +494,25 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 From the editor: `:Testing sheet step [<sheet>]` ([BINDINGS.md](BINDINGS.md)) is a client of this command, with the steps
 in a buffer and, under them, what the step under the cursor did and its notes (`N` takes one). Debugging the Lua code of a spec stays `--debug`.
 
+**Watching a run.** The child editor of an rpc sheet runs unseen; what it shows is the `screen` of each `step-after`, the
+tile of the step in the panel (and in testing-desktop's "Step by step" page). There is no window of its own and no
+colour, only the text (decision E3 of the live-watch plan). To follow a run by eye, step with `n`, set breakpoints, or
+let it run with `--delay=<ms>` (`:Testing sheet step --delay=500`), which waits before each step that does not stop.
+
+**Explain a step with AI (`E`).** In the panel, `E` on a step asks ai.nvim to explain it. Nothing is sent on its own:
+
+1. pick the question: what the step does, what to watch out for, or (once it ran) what its result means;
+2. the whole request appears in a buffer beside the panel with where it goes (`ai.nvim, provider <id>`): the sheet, its
+   steps (the one in question marked), the step's status, time, reason, failure line, a measured value, the child's
+   screen as text (at most 60 rows) and the notes of the step. Pictures are not sent;
+3. only `Send` sends it, through `require("ai").stream` (ai.nvim's providers, keys and policy, ai-desktop included as
+   its provider `ai_desktop`); the answer streams in under the request.
+
+The run is not touched: it stays paused or goes on. A new question ends the one before. Without ai.nvim, or when the
+provider has no key, the panel says so and works as before. A live sheet never runs step by step, so none of its
+secrets can reach a request. For a red run as a whole there is `testing sheets prompt explain` (see
+"Hand over to an AI").
+
 Underneath is `require("testing.sheet.session")`: `open(s, opts)`, `peek()` (the next step, starting the target of a
 size when needed), `step()`, `close()` (always), `result()` (the shape of `sheet.run`), `cancel()`. `sheet.run` of an
 rpc sheet is the loop over it. A browser sheet runs one step at a time through `browser_runner.mjs --driver`, which

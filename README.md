@@ -395,7 +395,8 @@ that lints a written file). Every subcommand, flag and
 completion: [docs/BINDINGS.md](docs/BINDINGS.md).
 
 `:Testing sheet step <sheet>` goes through a test sheet beside the code, one key per step, with the screen of the
-child editor in the tile:
+child editor in the tile (`--delay=<ms>` slows a run down to watch it; `E` explains a step through ai.nvim, only on
+purpose and after showing what is sent):
 
 ![The sheet panel beside the code, paused before step 2, with the child's screen in the tile](assets/screenshots/sheet-panel.png)
 

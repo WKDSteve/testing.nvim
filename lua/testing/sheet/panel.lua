@@ -8,6 +8,7 @@
 ---
 ---   n next   c continue   u until the cursor   b breakpoint   a abort   q close   y / n answer a question
 ---   N note on the step where the run stands (any time, also while it runs)
+---   E explain the step under the cursor with AI (ai.nvim): asks which question, shows the request, sends on a yes
 ---
 --- Breakpoints live here: `c` goes to the next one with `until`. They count for the size that runs. Closing the buffer
 --- aborts the run: its child sees its stdin close and cleans up.
@@ -49,6 +50,9 @@ local counter = 0
 ---@field finished? table The `end` event.
 ---@field problem? string Why there is no `end` event.
 ---@field stderr string[]
+---@field explain_buf? integer The buffer of the AI explanations.
+---@field explain_proc? table The running ai.nvim stream, killable.
+---@field explain_gen? integer Counts the questions; an answer to an earlier one is dropped.
 
 ---One line, whatever a value contains.
 ---@param v any
@@ -382,6 +386,157 @@ function M.abort(p)
   end
 end
 
+---The buffer of the explanations, beside the panel; made on first use, one per panel.
+---@param p Testing.Sheet.Panel
+---@return integer buf
+local function explain_buf(p)
+  if p.explain_buf and vim.api.nvim_buf_is_valid(p.explain_buf) then
+    return p.explain_buf
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(buf, ("testing://sheet-explain/%d"):format(p.buf))
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = "markdown"
+  p.explain_buf = buf
+  return buf
+end
+
+---@param p Testing.Sheet.Panel
+---@param lines string[]
+---@param append? boolean
+local function explain_write(p, lines, append)
+  local buf = explain_buf(p)
+  vim.bo[buf].modifiable = true
+  if append then
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
+  else
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  end
+  vim.bo[buf].modifiable = false
+  -- shown under the panel, without taking the cursor from it
+  if #vim.api.nvim_list_uis() > 0 and vim.fn.bufwinid(buf) == -1 then
+    local panel_win = vim.fn.bufwinid(p.buf)
+    if panel_win ~= -1 then
+      vim.api.nvim_win_call(panel_win, function()
+        vim.cmd("belowright split")
+        vim.api.nvim_win_set_buf(0, buf)
+      end)
+    end
+  end
+end
+
+---Explain a step with ai.nvim, only on purpose (rule PRIN-60): pick the question, see the whole request and where it
+---goes, then send it or not. The answer streams into a buffer beside the panel; the run is not touched and goes on.
+---Without ai.nvim nothing is sent and the panel stays as it is.
+---@param p Testing.Sheet.Panel
+---@param n? integer The step (default: under the cursor, else where the run stands).
+---@param deps? table For specs: `require` (finds `ai`), `select` (as `vim.ui.select`).
+---@return boolean asked false when there is nothing to explain or no ai.nvim
+function M.explain(p, n, deps)
+  deps = deps or {}
+  local explain = require("testing.sheet.explain")
+  local say = require("testing.notify").get()
+  local select = deps.select or vim.ui.select
+  n = n or cursor_step(p) or p.at
+  if not (p.doc and n and p.doc.steps and p.doc.steps[n]) then
+    say.warn("testing sheet: put the cursor on a step to explain")
+    return false
+  end
+  local ai, why = explain.ai(deps.require)
+  if not ai then
+    say.warn("testing sheet: no explanation, " .. tostring(why))
+    return false
+  end
+  local size = p.size
+  local mark = size and p.marks[size] and p.marks[size][n] or nil
+  local notes = size and p.notes and p.notes[size] and p.notes[size][n] or nil
+  local kinds = explain.kinds(mark)
+  select(kinds, {
+    prompt = ("Explain step %d with AI:"):format(n),
+    format_item = function(k)
+      return k.label
+    end,
+  }, function(kind)
+    if not kind then
+      return
+    end
+    local req, err =
+      explain.request({ doc = p.doc, size = size, n = n, mark = mark, notes = notes }, kind.id)
+    if not req then
+      say.warn("testing sheet: " .. tostring(err))
+      return
+    end
+    local target = explain.target(ai)
+    local preview = { ("# Step %d: %s"):format(n, kind.label), "", "Goes to " .. target .. ":", "" }
+    vim.list_extend(preview, vim.split(req.prompt, "\n", { plain = true }))
+    explain_write(p, preview)
+    select({ "Send", "Cancel" }, { prompt = ("Send this to %s?"):format(target) }, function(answer)
+      if answer ~= "Send" then
+        explain_write(p, { "", "(not sent)" }, true)
+        return
+      end
+      -- one question at a time: a new one ends the one before, whose late chunks are then dropped
+      if p.explain_proc then
+        pcall(p.explain_proc.kill, p.explain_proc)
+        p.explain_proc = nil
+      end
+      p.explain_gen = (p.explain_gen or 0) + 1
+      local gen = p.explain_gen
+      explain_write(p, { "", "## Answer", "" }, true)
+      local first = vim.api.nvim_buf_line_count(explain_buf(p)) -- the answer replaces this line and what follows
+      local text = ""
+      local function current()
+        return gen == p.explain_gen and vim.api.nvim_buf_is_valid(explain_buf(p))
+      end
+      local function show()
+        local buf = explain_buf(p)
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(
+          buf,
+          first - 1,
+          -1,
+          false,
+          vim.split(text, "\n", { plain = true })
+        )
+        vim.bo[buf].modifiable = false
+      end
+      local ok, proc = pcall(ai.stream, req, {
+        on_chunk = vim.schedule_wrap(function(delta)
+          if current() then
+            text = text .. tostring(delta)
+            show()
+          end
+        end),
+        on_done = vim.schedule_wrap(function(res)
+          if current() then
+            p.explain_proc = nil
+            if text == "" and type(res) == "table" and type(res.text) == "string" then
+              text = res.text
+            end
+            show()
+            explain_write(p, { "", "(done)" }, true)
+          end
+        end),
+        on_error = vim.schedule_wrap(function(e)
+          if current() then
+            p.explain_proc = nil
+            local msg = type(e) == "table" and (e.message or e.kind) or e
+            explain_write(p, { "", "(no answer: " .. tostring(msg) .. ")" }, true)
+          end
+        end),
+      })
+      if not ok then
+        explain_write(p, { "", "(no answer: " .. tostring(proc) .. ")" }, true)
+        return
+      end
+      p.explain_proc = proc
+    end)
+  end)
+  return true
+end
+
 ---@param p Testing.Sheet.Panel
 local function map_keys(p)
   local function map(lhs, fn, desc)
@@ -413,6 +568,9 @@ local function map_keys(p)
   map("a", function()
     M.abort(p)
   end, "abort the run")
+  map("E", function()
+    M.explain(p)
+  end, "explain the step under the cursor with AI (ai.nvim, asks before sending)")
   map("q", function()
     vim.api.nvim_buf_delete(p.buf, { force = true })
   end, "abort the run and close")
@@ -532,6 +690,9 @@ function M.open(root, target, opts)
     buffer = buf,
     callback = function()
       M.abort(p)
+      if p.explain_proc then
+        pcall(p.explain_proc.kill, p.explain_proc)
+      end
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
   })

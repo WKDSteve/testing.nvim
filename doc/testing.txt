@@ -615,7 +615,9 @@ See docs/SHEETS.md, "Step by step".
 
 `:Testing sheet step [{sheet}]` is the same in a buffer: n next, c continue,
 u until the cursor, b breakpoint, N note on the step, a abort, q close, y or n to
-a question.
+a question. E explains the step under the cursor with AI through ai.nvim (what
+it does, what to watch out for, what its result means): the request is shown
+before it is sent, and only sent on a yes; without ai.nvim nothing happens.
 
 `testing sheets prompt draft --from-task {id}` / `prompt explain --task {id}`:
 a Markdown hand-over for an AI (draft a sheet from the task; explain a red
