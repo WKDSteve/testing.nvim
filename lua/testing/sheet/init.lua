@@ -424,13 +424,13 @@ function M.check_args(list, at)
   return nil
 end
 
----What a desktop `wait` or `expect` asks of an element.
+---What a desktop `wait` or `expect` asks of an element; `window` looks into another program's window (read only).
 ---@param v table
 ---@param at string
 ---@return string|nil err
 local function check_want(v, at)
   for k in pairs(v) do
-    if k ~= "name" and k ~= "state" and k ~= "value" then
+    if k ~= "name" and k ~= "state" and k ~= "value" and k ~= "window" then
       return ("%s: unknown field %s"):format(at, tostring(k))
     end
   end
@@ -442,6 +442,9 @@ local function check_want(v, at)
   end
   if v.value ~= nil and type(v.value) ~= "number" then
     return at .. ".value must be a number"
+  end
+  if v.window ~= nil and (type(v.window) ~= "string" or v.window == "") then
+    return at .. ".window must be a part of a title, a non-empty string"
   end
   return nil
 end
@@ -1044,6 +1047,9 @@ function M.value_text(v)
   end
   if v.value ~= nil then
     parts[#parts + 1] = "value=" .. tostring(v.value)
+  end
+  if v.window ~= nil then
+    parts[#parts + 1] = ("in %q"):format(v.window)
   end
   return table.concat(parts, " ")
 end

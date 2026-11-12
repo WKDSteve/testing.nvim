@@ -110,6 +110,7 @@ end
       { wait = { name = "mute", state = "on", value = 1 }, timeout = 100 },
       { wait = "mute" },
       { expect = { name = "gain" } },
+      { wait = { name = "report.txt", window = "Downloads" }, timeout = 100 },
       { toggle = "mute" },
       { click = "Matrix" },
       { set = "gain", value = -12 },
@@ -124,6 +125,8 @@ end
       { { wait = { name = "a", state = "red" } }, 'must be "on" or "off"' },
       { { wait = { name = "a", value = "x" } }, "value must be a number" },
       { { wait = { name = "a", role = "x" } }, "unknown field role" },
+      { { wait = { name = "a", window = "" } }, "window must be a part of a title" },
+      { { expect = { name = "a", window = 1 } }, "window must be a part of a title" },
       { { toggle = "" }, "must not be empty" },
       { { set = "", value = 1 }, "must not be empty" },
       { { set = "gain" }, "takes a value" },
@@ -156,6 +159,11 @@ end
       sheet._describe({ wait = { name = "mute", state = "on" }, note = nil }),
       "wait mute state=on",
       "a failure line names what was asked"
+    )
+    eq(
+      sheet._describe({ expect = { name = "report.txt", window = "Downloads" } }),
+      'expect report.txt in "Downloads"',
+      "... and the window of another program it looked in"
     )
   end
 
