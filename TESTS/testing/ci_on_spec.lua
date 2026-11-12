@@ -315,6 +315,10 @@ return function(H)
       "localhost/testing-darwin-like:1",
       "runs in the darwin-like image"
     )
+    ok(
+      vim.tbl_contains(run_argv(), "--init"),
+      "with an init as PID 1 that reaps orphans: " .. table.concat(run_argv(), " ")
+    )
     has(res2.out, "darwin-like", "the report names the target")
   end
 

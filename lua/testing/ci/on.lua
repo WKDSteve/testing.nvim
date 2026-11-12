@@ -430,6 +430,9 @@ function M.run_target(target, argv, root, pipeline, sv)
       name = name,
       -- the output folder belongs to the user of this machine: root in a rootless container maps to that user
       user = "0",
+      -- PID 1 reaps orphans as on a host: without it a killed process tree leaves zombies, and the suite's checks
+      -- that nothing is left (child_run, child_rpc_process, health) read as red
+      init = true,
       workdir = "/repo",
       timeout_ms = M.TIMEOUT_MS,
       -- the engine ends the container itself after this long: a client that was killed leaves none behind

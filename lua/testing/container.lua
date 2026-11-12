@@ -26,6 +26,8 @@ local M = {}
 ---@field network? boolean true: the container has the network (default: `--network none`).
 ---@field name? string `--name` of the container (it is removed when it ends: `--rm`).
 ---@field user? string `--user` (default: the image's).
+---@field init? boolean `--init`: a small init is PID 1 and reaps the orphans, as launchd or systemd do on a host (a
+---suite that kills a process tree and checks that nothing is left needs it).
 ---@field workdir? string `--workdir` (default: the image's).
 ---@field stop_after_s? integer Podman's `--timeout`: the engine ends the container after this long, also when the client
 ---that started it is gone.
@@ -100,6 +102,9 @@ function M.argv(command, opts)
   end
   if opts.user then
     vim.list_extend(argv, { "--user", opts.user })
+  end
+  if opts.init then
+    argv[#argv + 1] = "--init"
   end
   if opts.workdir then
     vim.list_extend(argv, { "--workdir", opts.workdir })
