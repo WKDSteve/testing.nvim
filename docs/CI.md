@@ -217,6 +217,12 @@ a dead pid, or older than 6 hours (`SUITE_LOCK_MAX_AGE` seconds), is taken over 
 The `scripts/test.sh` that `testing init` writes does the same: it loads `scripts/suite-lock.sh` from the testing.nvim checkout it
 resolved and skips the check when that checkout is older and has no such file (it never releases the lock: a dead pid is taken over); `testing init --update` brings the template into a repository.
 
+A worktree is a checkout of its own: the lock is keyed by the checkout's path, so a run in a worktree (yours, or the
+one `ci commit` and `ci --snapshot` make) neither waits for nor warns about a run in the main checkout. What still
+orders heavy runs is the machine-wide queue ([below](#one-heavy-run-at-a-time-the-queue)), on purpose: the timeouts
+come from the load of the machine, not from the checkout (`TESTING_QUEUE_SLOTS=<n>` lets n go at once where the
+machine takes it).
+
 ## A run
 
 - The profile is `--profile`, else `ci.default`. `--step=a,b` runs only those steps: a **partial** run, which never
@@ -588,6 +594,30 @@ the run printed: its state is gone with the snapshot, and the verdict line alone
 
 `testing ci hook install --snapshot` makes the pre-push hook run its profile that way instead of on the working tree,
 on each commit the push names: see below.
+
+### Native apps (Rust, Svelte): the same way
+
+A repository that is not a Lua project gets the same independence from the working tree through a `ci` section of
+process steps: `testing ci commit <sha>`, `ci --snapshot [--with=...]` and `ci land` then run its `cargo test`,
+`vitest` and browser tests in a worktree of their own, never in the checkout other sessions work in.
+
+```lua
+-- .testing.lua of a Rust app (tried on pult, 2026-11-12: `ci GREEN rust 2/2` in a fresh worktree, 112 s)
+ci = {
+  profiles = { rust = { "fmt", "test" } },
+  default = "rust",
+  steps = {
+    fmt = { run = { "cargo", "fmt", "--all", "--check" } },
+    test = { run = { "cargo", "test", "--workspace", "--locked" }, timeout = "30m" },
+    -- a page: { run = { "pnpm", "--dir", "ui", "install", "--frozen-lockfile", "--prefer-offline" } }, then
+    -- { run = { "pnpm", "--dir", "ui", "exec", "vitest", "run" } } (pnpm's store makes the install a matter of links)
+  },
+},
+```
+
+A worktree has no `target/` and no `node_modules`: set `CARGO_TARGET_DIR` to the checkout's `target` in the
+environment that starts the run (cargo locks it, so two builds wait for each other rather than collide) and the
+first build is an incremental one; pnpm links from its store. The machine-wide queue still applies.
 
 ## The pre-push hook
 

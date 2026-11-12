@@ -76,6 +76,14 @@ plan has a risk (a block that could not be carried over, a dependency it cannot 
 changes (they would be gone for good); `--force` writes it anyway. `.testing.lua`, the CI job and the lint
 configuration are never touched.
 
+**Other sessions at work are no reason to wait.** Uncommitted changes elsewhere in the repository hold nothing back:
+`--write` looks only at the two files it writes. When one of THOSE has another session's changes, do not `--force`
+(they would be gone) and do not wait: update a worktree of your own (`git worktree add <dir> origin/main`, then
+`testing init <dir> --update --write`, commit there, `testing ci commit HEAD --root=<dir>`, `git push origin HEAD:main`
+from it). The command does not do this itself: it writes files and never commits, checks or pushes, which are the
+caller's steps. Whoever holds the other change meets the update on the next `git pull --rebase --autostash` in the
+same file, as with any concurrent edit.
+
 Example of such a fix (2026-11-10): `scripts/test.sh` starts nvim in the background and waits for it, so a TERM, INT or
 HUP to the script reaches nvim at once (on Windows nvim's children go with it). A script from before stops only after
 nvim ended: stopping it left the suite running. `testing init --update --write` brings it.
