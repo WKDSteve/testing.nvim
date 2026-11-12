@@ -41,6 +41,20 @@ return function(H)
     "no network, mounts read-only and sorted, environment sorted, then image and command"
   )
 
+  -- the user of this machine is the user in the container (podman); docker has no keep-id and keeps the image's user
+  local keep = container.argv(
+    { "true" },
+    { engine = "podman", image = "img:1", userns = "keep-id" }
+  )
+  eq({ keep[6], keep[7] }, { "--userns", "keep-id" }, "podman: --userns keep-id")
+  ok(
+    not vim.tbl_contains(
+      container.argv({ "true" }, { engine = "docker", image = "img:1", userns = "keep-id" }),
+      "--userns"
+    ),
+    "docker: no --userns"
+  )
+
   local calls = {}
   local function fake(code, stderr)
     return function(argv)

@@ -190,7 +190,10 @@ return function(H)
     has(argv, ":/out:rw", "one writable output folder")
     has(argv, "TESTING_CI_TARGET=linux", "the inner run knows its target")
     has(argv, "LIB_NVIM_DIR=/deps/lib.nvim", "and where lib.nvim is")
-    has(argv, "localhost/testing-ci:1", "the image of containers/ci")
+    has(argv, "localhost/testing-ci:2", "the image of containers/ci")
+    -- not root, as on a hosted runner: the user of this machine is the user in there (the output folder is its own)
+    has(argv, "--userns keep-id", "the run is not root")
+    ok(not argv:find("--user ", 1, true), "no --user that would make it root: " .. argv)
     has(
       argv,
       "ci --root=/repo --state-dir=/out/state --json=/out/ci.json",
@@ -320,6 +323,45 @@ return function(H)
       "with an init as PID 1 that reaps orphans: " .. table.concat(run_argv(), " ")
     )
     has(res2.out, "darwin-like", "the report names the target")
+  end
+
+  -- linux: what containers/ci builds from the network is checked against a sum fixed in the file (fail closed)
+  do
+    local here = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
+    local cf = assert(io.open(here .. "/containers/ci/Containerfile", "rb"))
+    local file = cf:read("*a")
+    cf:close()
+    local downloads = 0
+    for _ in file:gmatch("curl %-fsSLo ") do
+      downloads = downloads + 1
+    end
+    eq(downloads, 3, "nvim, stylua and luacheck are downloaded to files")
+    for _, tool in ipairs({ "NVIM", "STYLUA", "LUACHECK" }) do
+      ok(
+        file:find("ARG " .. tool .. "_SHA256=" .. string.rep("%x", 64) .. "\n") ~= nil,
+        "the sum of " .. tool .. " is fixed"
+      )
+      ok(file:find('"${' .. tool .. '_SHA256}"', 1, true) ~= nil, "and checked: " .. tool)
+    end
+    eq(
+      file:match("ARG LUACHECK_SHA256=(%x+)"),
+      require("testing.ci.workflow").SHA256.luacheck,
+      "luacheck: the sum the hosted legs check"
+    )
+    ok(file:find("sha256sum -c -", 1, true) ~= nil, "the downloads are checked")
+    ok(
+      file:find("sha256sum -c -", 1, true) < file:find("tar -x", 1, true)
+        and file:find("sha256sum -c -", 1, true) < file:find("unzip ", 1, true),
+      "before anything is unpacked"
+    )
+    ok(not file:find("| tar", 1, true), "nothing is unpacked straight from the pipe")
+    ok(not file:find("luarocks", 1, true), "no unpinned rocks")
+    local froms = 0
+    for from in file:gmatch("\nFROM (%S+)") do
+      froms = froms + 1
+      ok(from:find("@sha256:%x+$") ~= nil, "the base image is pinned by digest: " .. from)
+    end
+    eq(froms, 1, "one base image")
   end
 
   -- a devcontainer: its image, from a devcontainer.json with comments
@@ -465,7 +507,7 @@ return function(H)
   local available = require("testing.container").available({ image = on.DEFAULT_IMAGE })
   if not available then
     print(
-      "ci_on_spec: podman or the image localhost/testing-ci:1 is not there: the real container run is not tried"
+      "ci_on_spec: podman or the image localhost/testing-ci:2 is not there: the real container run is not tried"
     )
   else
     local linux = project("only-linux", {

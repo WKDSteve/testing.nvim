@@ -1,28 +1,51 @@
 # The image of `testing ci --on=linux` (testing.ci.on): the pipeline of a repository on Linux, with the tools at the
 # versions of the hosted CI (testing.ci.workflow.TOOLS: nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0). git is the one of
-# the Debian release (bookworm: 2.39). Built once, with the network:
+# the Debian release (trixie: 2.47; not bookworm: the luacheck binary needs glibc 2.38). Built once, with the network:
 #
-#   podman build --tag localhost/testing-ci:1 containers/ci
+#   podman build --tag localhost/testing-ci:2 containers/ci
 #
-# A change here is a new tag (`:2`, and `testing.ci.on.DEFAULT_IMAGE`): a proof names the image id it ran in.
-FROM docker.io/library/debian:bookworm-slim
+# What comes from the network is fixed here: the base image by digest, each
+# release file by its sha256; a file with another sum fails the build, and nothing is unpacked before its sum is
+# checked. The sums, checked on 2026-11-12 against a second source:
+#
+#   nvim    nvim-linux-x86_64.tar.gz of neovim v0.12.2: the digest GitHub keeps for the release asset
+#   stylua  stylua-linux-x86_64.zip of JohnnyMorganz/StyLua v2.5.2: the asset digest, and scripts/wsl-tools.sh
+#   luacheck  the Linux binary of lunarmodules/luacheck v1.2.0: its GPG signature (Caleb Maclennan, 63CC496475267693),
+#           the sum of testing.ci.workflow.SHA256.luacheck and scripts/wsl-tools.sh
+#
+# x86_64 only: luacheck ships no binary for another architecture (the hosted CI is x86_64 too).
+#
+# A change here is a new tag (`:3`, and `testing.ci.on.DEFAULT_IMAGE`): a proof names the image id it ran in.
+FROM docker.io/library/debian:trixie-slim@sha256:7378260c0a098d27ac206225db5e7d92b8c7c84ea7afccc86eeb513756bbd392
 ARG NVIM=0.12.2
+ARG NVIM_SHA256=31cf85945cb600d96cdf69f88bc68bec814acbff50863c5546adef3a1bcef260
 ARG STYLUA=2.5.2
+ARG STYLUA_SHA256=bcb0d855e91f102f28a370e850f8566b3b44b79e6274d806ea5246837c0fd5ab
 ARG LUACHECK=1.2.0
+ARG LUACHECK_SHA256=d68da17fca0697d9e2fb04201f3884abd259fa558b3a449bccaed47f1390defc
 RUN set -eux; \
+    test "$(uname -m)" = x86_64 || { echo "x86_64 only (luacheck has no other binary)"; exit 1; }; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git unzip lua5.1 liblua5.1-0-dev luarocks gcc libc6-dev; \
-    arch="$(uname -m)"; \
-    case "$arch" in x86_64) nv=x86_64; sl=x86_64 ;; aarch64) nv=arm64; sl=aarch64 ;; *) echo "unsupported $arch"; exit 1 ;; esac; \
-    curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM}/nvim-linux-${nv}.tar.gz" | tar -xz -C /opt; \
-    ln -s "/opt/nvim-linux-${nv}/bin/nvim" /usr/local/bin/nvim; \
-    curl -fsSLo /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA}/stylua-linux-${sl}.zip"; \
-    unzip -o /tmp/stylua.zip -d /usr/local/bin; \
+    apt-get install -y --no-install-recommends ca-certificates curl git unzip; \
+    dl=/tmp/dl; mkdir "$dl"; \
+    curl -fsSLo "$dl/nvim.tar.gz" "https://github.com/neovim/neovim/releases/download/v${NVIM}/nvim-linux-x86_64.tar.gz"; \
+    curl -fsSLo "$dl/stylua.zip" "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA}/stylua-linux-x86_64.zip"; \
+    curl -fsSLo "$dl/luacheck" "https://github.com/lunarmodules/luacheck/releases/download/v${LUACHECK}/luacheck"; \
+    printf '%s  %s\n' \
+      "${NVIM_SHA256}" "$dl/nvim.tar.gz" \
+      "${STYLUA_SHA256}" "$dl/stylua.zip" \
+      "${LUACHECK_SHA256}" "$dl/luacheck" | sha256sum -c -; \
+    tar -xzf "$dl/nvim.tar.gz" -C /opt; \
+    ln -s /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim; \
+    unzip -o "$dl/stylua.zip" stylua -d /usr/local/bin; \
+    install -m 755 "$dl/luacheck" /usr/local/bin/luacheck; \
     chmod +x /usr/local/bin/stylua; \
-    rm /tmp/stylua.zip; \
-    luarocks install luacheck "${LUACHECK}"; \
-    apt-get purge -y gcc; \
+    rm -rf "$dl"; \
+    apt-get purge -y curl unzip; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*; \
-    nvim --version | head -1; stylua --version; luacheck --version; git --version
+    nvim --version | head -1; stylua --version; git --version
+# As root in a rootless container luacheck's thread library (Lanes) asks for a priority it may not have and aborts: the
+# runs use a user that is not root (testing.ci.on), and so does this check.
+RUN setpriv --reuid=65534 --regid=65534 --clear-groups luacheck --version
 WORKDIR /repo

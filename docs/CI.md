@@ -418,8 +418,9 @@ testing ci verify --on=linux
 ```
 
 The pipeline runs on each target in turn: `host` is this machine (the run without `--on`), `linux` a container of the
-image of [`containers/ci/Containerfile`](../containers/ci/Containerfile) (`localhost/testing-ci:1`: Debian bookworm,
-nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release), `darwin-like` the image of
+image of [`containers/ci/Containerfile`](../containers/ci/Containerfile) (`localhost/testing-ci:2`: Debian trixie,
+nvim 0.12.2, stylua 2.5.2, luacheck 1.2.0 as the hosted CI, git of the Debian release; every download checked
+against a sha256 fixed in the file, the base image pinned by digest), `darwin-like` the image of
 [`containers/darwin-like/Containerfile`](../containers/darwin-like/Containerfile) (`localhost/testing-darwin-like:1`,
 see [below](#the-darwin-like-target-macos-error-classes-without-macos)), `devcontainer` the image of
 the repository's `.devcontainer/devcontainer.json` (`image`, or `build.dockerfile`, built once and tagged by the
@@ -428,19 +429,20 @@ of the steps). The engine is Podman (`testing.container`,
 `$TESTING_CONTAINER_ENGINE`); the image is built once, with the network:
 
 ```
-podman build --tag localhost/testing-ci:1 containers/ci
+podman build --tag localhost/testing-ci:2 containers/ci
 ```
 
 In the container `testing ci` runs again on the repository, which is mounted **read-only** at `/repo` (the runner's
 checkout and every dependency checkout too, `$<NAME>_DIR` pointing at them); one output folder is writable (the
-document and the state of the inner run). The container has **no network** unless the pipeline says so, its name is
-`testing-ci-<repo>-<target>` and it is removed when it ends:
+document and the state of the inner run). The run is **not root**, as on a hosted runner: with Podman the user of
+this machine is the user in there (`--userns=keep-id`; docker keeps the image's user). The container has **no
+network** unless the pipeline says so, its name is `testing-ci-<repo>-<target>` and it is removed when it ends:
 
 ```lua
 ci = {
   profiles = { ... },
   container = {
-    image = "localhost/my-ci:3",  -- the image of the `linux` target (default localhost/testing-ci:1)
+    image = "localhost/my-ci:3",  -- the image of the `linux` target (default localhost/testing-ci:2)
     network = true,               -- the container may use the network (default: none)
   },
 }

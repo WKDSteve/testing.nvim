@@ -12,7 +12,7 @@
 --- folder that is writable (`/out`: the document and the state of the inner run). No network unless
 --- `ci.container.network = true`; the container is called `testing-ci-<repo>-<target>` and removed when it ends.
 ---
----   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:1`: nvim, stylua, luacheck and git at
+---   linux         the image of `containers/ci/Containerfile` (`localhost/testing-ci:2`: nvim, stylua, luacheck and git at
 ---                 the versions of the hosted CI), or `ci.container.image`
 ---   darwin-like   the image of `containers/darwin-like/Containerfile` (`localhost/testing-darwin-like:1`): bash 3.2 as
 ---                 `bash` and `/bin/sh`, BSD userland (Chimera Linux), `TMPDIR` behind a `/var` symlink; the macOS
@@ -34,7 +34,7 @@ M.TARGETS = { host = true, linux = true, ["darwin-like"] = true, devcontainer = 
 M.ORDER = { "host", "linux", "darwin-like", "devcontainer" }
 
 ---The image of the `linux` target (`containers/ci/Containerfile`).
-M.DEFAULT_IMAGE = "localhost/testing-ci:1"
+M.DEFAULT_IMAGE = "localhost/testing-ci:2"
 
 ---The image of the `darwin-like` target (`containers/darwin-like/Containerfile`).
 M.DARWIN_IMAGE = "localhost/testing-darwin-like:1"
@@ -428,8 +428,10 @@ function M.run_target(target, argv, root, pipeline, sv)
       env = env,
       network = (pipeline.container or {}).network == true,
       name = name,
-      -- the output folder belongs to the user of this machine: root in a rootless container maps to that user
-      user = "0",
+      -- not root: macOS and Linux runners do not run as root either (a suite that names the user, a tool that asks
+      -- root's privileges and aborts without them). Podman's keep-id makes the user of this machine the user in there,
+      -- so the output folder stays writable (docker has no such mode: there the image's user, root, as before)
+      userns = "keep-id",
       -- PID 1 reaps orphans as on a host: without it a killed process tree leaves zombies, and the suite's checks
       -- that nothing is left (child_run, child_rpc_process, health) read as red
       init = true,

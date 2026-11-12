@@ -26,6 +26,8 @@ local M = {}
 ---@field network? boolean true: the container has the network (default: `--network none`).
 ---@field name? string `--name` of the container (it is removed when it ends: `--rm`).
 ---@field user? string `--user` (default: the image's).
+---@field userns? string Podman's `--userns` (`keep-id`: the user of this machine is the user in the container, not root;
+---an output folder of this machine stays writable). Ignored for docker, which has no such mode.
 ---@field init? boolean `--init`: a small init is PID 1 and reaps the orphans, as launchd or systemd do on a host (a
 ---suite that kills a process tree and checks that nothing is left needs it).
 ---@field workdir? string `--workdir` (default: the image's).
@@ -102,6 +104,9 @@ function M.argv(command, opts)
   end
   if opts.user then
     vim.list_extend(argv, { "--user", opts.user })
+  end
+  if opts.userns and not engine(opts):match("docker[^/]*$") then
+    vim.list_extend(argv, { "--userns", opts.userns })
   end
   if opts.init then
     argv[#argv + 1] = "--init"
