@@ -583,7 +583,8 @@ return {
 * An app that does not build, does not start or does not get ready fails the sheet, with what it said.
 * `sheets.browser`: `playwright_dir` is the folder (relative to the root) whose `node_modules` holds `playwright-core`;
   `channel` runs an installed browser (`chrome`, `msedge`) instead of Playwright's Chromium, and without it the sheet is
-  a skip, not a run in another browser.
+  a skip, not a run in another browser. A sheet with an `extension` leaves `channel` aside and always runs in
+  Playwright's Chromium: branded Chrome refuses an unpacked extension.
 * `window` is a part of the title of the app's window, for a desktop sheet; `ended_early` see [Desktop sheets](#desktop-sheets-enginedesktop).
 
 A repository without a Lua spec needs no suite for its sheets:
@@ -782,6 +783,6 @@ produces (a fixture, a build output), or a program it names (`app`, see [Apps](#
 only): Chromium starts with that unpacked extension loaded, in a profile of its own that is thrown away at the end
 (Playwright's persistent context), so a sheet can check what the extension does to a page, or open one of the
 extension's own pages (`open = "chrome-extension://<id>/page.html"`; a `key` in the manifest fixes the id). It needs
-Playwright's full Chromium (the new headless mode, `channel` defaults to `chromium`): the headless shell cannot load
+Playwright's full Chromium (the new headless mode; the project's `channel` does not apply): the headless shell cannot load
 extensions, and branded Chrome refuses `--load-extension` (`ERR_BLOCKED_BY_CLIENT`). Where that Chromium cannot start
 the sheet is a reported skip.

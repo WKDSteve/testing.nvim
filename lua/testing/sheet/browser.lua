@@ -63,6 +63,19 @@ local function prerequisites(root, opts)
   return node, pw
 end
 
+---The browser a sheet runs in: the project's `channel`, except for a sheet with an extension, which always runs in
+---Playwright's Chromium (branded Chrome refuses `--load-extension`; a project that runs its other sheets in Chrome would
+---otherwise skip it everywhere).
+---@param s Testing.Sheet
+---@param opts Testing.Sheet.BrowserOpts
+---@return string|nil
+function M.channel_for(s, opts)
+  if s.extension then
+    return nil
+  end
+  return opts.channel
+end
+
 ---The absolute folder of the sheet's unpacked extension (`extension`, relative to the project root), nil without one.
 ---@param root string
 ---@param s Testing.Sheet
@@ -160,7 +173,7 @@ function M.run(s, opts)
     root = root,
     out_dir = opts.out_dir or (root .. "/TESTS/sheets/out"),
     playwright_dir = pw,
-    channel = opts.channel,
+    channel = M.channel_for(s, opts),
     extension = M.extension_dir(root, s),
     sizes = s.sizes,
     steps = steps,
@@ -225,7 +238,7 @@ function M.driver(s, opts, ctx)
       return {
         headed = opts.headed == true,
         playwright_dir = pw,
-        channel = opts.channel,
+        channel = M.channel_for(s, opts),
         extension = M.extension_dir(ctx.root, s),
       }
     end,

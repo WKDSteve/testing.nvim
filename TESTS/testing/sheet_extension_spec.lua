@@ -82,6 +82,25 @@ return function(H)
     planned and vim.fs.normalize(planned.extension) == vim.fs.normalize(root .. "/ext"),
     "absolute, below the root"
   )
+  -- the project's branded browser (sheets.browser.channel) refuses an unpacked extension: such a sheet runs in Chromium
+  planned = nil
+  browser.run(s, {
+    root = root,
+    node = "node",
+    playwright_dir = root,
+    channel = "chrome",
+    run = function(argv)
+      planned = vim.json.decode(table.concat(vim.fn.readfile(argv[#argv]), " "))
+      return { code = 0, stdout = '{"failures":[],"shots":[]}', stderr = "" }
+    end,
+  })
+  ok(planned and planned.channel == nil, "an extension sheet leaves the project's channel aside")
+  local plain = vim.deepcopy(s)
+  plain.extension = nil
+  ok(
+    browser.channel_for(plain, { channel = "chrome" }) == "chrome",
+    "... a sheet without one keeps it"
+  )
 
   -- 3. a real Chromium, where node, playwright-core and Chromium exist --------------------------------------------------
   local pw_dir = browser.playwright_dir(repo)
