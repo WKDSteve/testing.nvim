@@ -160,4 +160,37 @@ function M.browsers(opts)
   return found
 end
 
+---@class Testing.Tier3.ContainerOpts
+---@field run? fun(argv: string[]): Testing.Container.Result The engine call (specs inject it).
+---@field timeout_ms? integer Deadline of the engine call (default 5000).
+
+---tmux for the PTY capture (`testing.pty`) where it runs directly (Linux, macOS). On Windows it is looked up
+---inside WSL when a case starts, which needs a process: nil there.
+---@param opts Testing.Tier3.Opts|nil
+---@param is_windows? boolean Default: this system.
+---@return string|nil path, boolean applies
+function M.tmux(opts, is_windows)
+  if is_windows == nil then
+    is_windows = vim.fn.has("win32") == 1
+  end
+  if is_windows then
+    return nil, false
+  end
+  return defaults(opts).which("tmux"), true
+end
+
+---The container engine and the image of the container cases (`testing.container`): is it usable? Unlike the
+---lookups above this asks the engine (`podman image exists`), with a short deadline: a stopped Podman machine must
+---not hold up `:checkhealth`.
+---@param opts? Testing.Tier3.ContainerOpts
+---@return boolean ok
+---@return string reason The image when ok, else what is missing.
+function M.container(opts)
+  opts = opts or {}
+  return require("testing.container").available({
+    run = opts.run,
+    timeout_ms = opts.timeout_ms or 5000,
+  })
+end
+
 return M

@@ -232,7 +232,10 @@ the docmap.nvim module graph of the affected selection is available and
 current, and whether the conformance suite and the surface report load; and
 whether |:Testing| is registered.
 
-It is read-only, starts no process and loads no plugin that is lazy-loaded.
+It is read-only and loads no plugin that is lazy-loaded; the processes it
+starts are the version calls of the lint tools and one question to the
+container engine (whether the image of `testing.container` is built, 5 s at
+most).
 `.testing.lua` is a Lua file and loading it executes it, so the health check
 does not: it evaluates the file in an empty environment with an instruction
 budget. A plain table is validated for real; a file that needs more is reported

@@ -82,4 +82,43 @@ return function(H)
     { chromium = { "1100", "1200", "1248" }, firefox = { "1543" } },
     "engines with sorted revisions, the rest ignored"
   )
+
+  -- tmux: looked up directly off Windows; on Windows it lives in WSL and is not looked up here
+  local with_tmux = {
+    which = function(exe)
+      return exe == "tmux" and "/usr/bin/tmux" or nil
+    end,
+  }
+  eq({ tier3.tmux(with_tmux, false) }, { "/usr/bin/tmux", true }, "tmux found off Windows")
+  eq(
+    { tier3.tmux({
+      which = function()
+        return nil
+      end,
+    }, false) },
+    { nil, true },
+    "tmux missing off Windows"
+  )
+  eq({ tier3.tmux(with_tmux, true) }, { nil, false }, "on Windows tmux is not looked up here")
+
+  -- container: the engine is asked whether the image exists, with the short deadline of a health check
+  local seen
+  local function engine_answer(code, stderr)
+    return function(argv)
+      seen = argv
+      return { code = code, stdout = "", stderr = stderr or "" }
+    end
+  end
+  eq(
+    { tier3.container({ run = engine_answer(0) }) },
+    { true, "localhost/testing-linux:1" },
+    "a built image is ok"
+  )
+  eq(seen[2] .. " " .. seen[3], "image exists", "podman is asked whether the image exists")
+  local built, why = tier3.container({ run = engine_answer(1) })
+  ok(built == false and why:find("is not built", 1, true), "an image that is missing: " .. why)
+  local _, gone = tier3.container({ run = engine_answer(127) })
+  ok(gone:find("is not installed", 1, true), "no engine: " .. gone)
+  local _, stuck = tier3.container({ run = engine_answer(124, "timeout") })
+  ok(stuck:find("is not usable", 1, true), "an engine that does not answer in time: " .. stuck)
 end

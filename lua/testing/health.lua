@@ -703,6 +703,20 @@ local function check_tier3(health)
   if browsers.chromium == nil and #names > 0 then
     health.info("Playwright chromium is not installed: the mdview specs need it")
   end
+  local tmux, tmux_applies = tier3.tmux()
+  if tmux_applies and tmux then
+    health.ok("tmux (tier 2.5) found: " .. tmux)
+  elseif tmux_applies then
+    health.info("tmux (tier 2.5) not found (PATH): the PTY cases (testing.pty) are reported skips")
+  end
+  local container_ok, container_why = tier3.container()
+  if container_ok then
+    health.ok("container image built: " .. container_why .. " (testing.container)")
+  else
+    health.info(
+      ("container cases (testing.container): %s; they are reported skips"):format(container_why)
+    )
+  end
 end
 
 ---@return nil

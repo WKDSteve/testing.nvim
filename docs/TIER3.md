@@ -15,6 +15,12 @@ A tool is found through its override (an absolute path to a file), then `PATH`. 
 up in `$PLAYWRIGHT_BROWSERS_PATH`, else `%LOCALAPPDATA%\ms-playwright` or `~/.cache/ms-playwright`; chromium is the
 engine the mdview specs need.
 
+Two more lines of that section: `tmux` on Linux and macOS (looked up on `PATH`; on Windows it lives in WSL and is
+found when a case starts), and the container image of `testing.container` (`localhost/testing-linux:1`, or
+`$TESTING_CONTAINER_IMAGE`). The image line is the one place that starts a process: it asks the engine
+(`podman image exists`, `$TESTING_CONTAINER_ENGINE`) with a deadline of 5 s, so a stopped Podman machine reads as
+"not usable" instead of holding up the check.
+
 A missing tool is information, never an error: the cases that need it are **reported skips**, not green runs.
 
 Install on a private machine only (never on the workstation): `cargo install tauri-driver --locked`; download
