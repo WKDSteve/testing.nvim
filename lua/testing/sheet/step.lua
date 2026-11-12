@@ -229,6 +229,10 @@ function M.evidence_dir(id)
 end
 
 M.NOTES_FILE = "notes.json"
+---The recording of the last stepped run, beside its pictures: every event of `testing-sheet-session/1` as one JSON line,
+---whatever `--format` the client asked for, with no path of this machine in it (`root` left out, `path` relative to
+---the root, a picture by its file name in this folder). A page without a hub (testing-web) plays a run back from it.
+M.EVENTS_FILE = "events.jsonl"
 
 ---@class Testing.SheetStep.NotesDoc
 ---@field id string
@@ -544,9 +548,37 @@ function M.main(argv, sv, deps)
       return ok and true or false
     end
   local before = {}
+  -- the folder of this run (set below, emptied there) and the recording in it (`M.EVENTS_FILE`), opened on first use
+  local evidence_dir, recording
+  local function record(fields)
+    if recording == nil then
+      vim.fn.mkdir(evidence_dir, "p")
+      recording = io.open(evidence_dir .. "/" .. M.EVENTS_FILE, "wb") or false
+    end
+    if not recording then
+      return
+    end
+    local copy = vim.deepcopy(fields)
+    copy.root = nil
+    if type(copy.path) == "string" then
+      local p = vim.fs.normalize(copy.path)
+      local r = vim.fs.normalize(root) .. "/"
+      copy.path = p:sub(1, #r) == r and p:sub(#r + 1) or vim.fs.basename(p)
+    end
+    for _, k in ipairs({ "image", "shot" }) do
+      if type(copy[k]) == "string" then
+        copy[k] = vim.fs.basename(vim.fs.normalize(copy[k]))
+      end
+    end
+    recording:write(vim.json.encode(copy), "\n")
+    recording:flush()
+  end
   local function emit(event, fields)
     fields = fields or {}
     fields.schema, fields.event = M.SCHEMA, event
+    if evidence_dir then
+      record(fields)
+    end
     local line
     if o.format == "text" then
       line = M.text_line(fields, before)
@@ -570,7 +602,7 @@ function M.main(argv, sv, deps)
     steps[n] = { n = n, action = action, value = value, note = step.note }
   end
   -- One folder per sheet, emptied here: what a person looks at is the last run.
-  local evidence_dir = M.evidence_dir(s.id)
+  evidence_dir = M.evidence_dir(s.id)
   vim.fn.delete(evidence_dir, "rf")
   local opts = vim.tbl_extend("force", {
     root = root,
@@ -850,6 +882,11 @@ function M.main(argv, sv, deps)
     skipped = res.skipped,
     ms = math.floor((vim.uv.hrtime() - started) / 1e6),
   })
+  -- the end is the last line of the recording
+  if recording then
+    recording:close()
+    recording = false
+  end
   if res.status == "aborted" then
     return 3
   end

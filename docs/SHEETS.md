@@ -496,6 +496,10 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 * Notes stay beside the pictures of the run (`notes.json` in its folder under `stdpath("cache")`, emptied by the
   next stepped run of the sheet), also after an abort: `testing sheets report` shows them. With `--tasks` a run that
   counts adds them to the task's block as a paragraph (see above); an aborted one writes nothing into the task.
+* The run is recorded beside its pictures too: `events.jsonl`, every event of `testing-sheet-session/1` as one JSON
+  line in order, whatever `--format` the client asked for, an aborted run as far as it got. It names no path of this
+  machine (`root` left out, `path` relative to the root, a picture by its file name in that folder), so the folder can
+  be handed on: a page without a hub plays a run back from it instead of following it live.
 * It writes no state and no snapshot (a missing snapshot is a failure, as on CI). `verdict` in `end` says whether the run
   counts as one: only a run that went through without an abort. Only such a run writes anything: with `--tasks <vault>`
   its state goes into the task's block and a question answered yes ticks its box (a no leaves it, and the sheet is red).

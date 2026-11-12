@@ -464,6 +464,19 @@ end
     )
     eq(start.steps[1].note, "write", "start names every step")
     eq(start.headed, false, "an rpc sheet has no window")
+    -- the recording beside the pictures: the same events, one JSON line each, no path of this machine
+    local rec_path = step_cli.evidence_dir("cli.green") .. "/" .. step_cli.EVENTS_FILE
+    local rec_lines = vim.fn.filereadable(rec_path) == 1 and vim.fn.readfile(rec_path) or {}
+    local recorded = {}
+    for _, line in ipairs(rec_lines) do
+      recorded[#recorded + 1] = vim.json.decode(line)
+    end
+    eq(names(recorded), names(events), "the recording holds every event of the run, in order")
+    eq(recorded[1] and recorded[1].root, nil, "the recording names no root")
+    ok(
+      not table.concat(rec_lines, "\n"):find(vim.fs.normalize(root), 1, true),
+      "no path of this machine in the recording"
+    )
     eq(events[3].note, "write", "step-before says what it will do")
     local after = events[5]
     eq(after.status, "pass", "step-after says how it went")
