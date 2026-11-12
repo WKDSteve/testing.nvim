@@ -669,9 +669,13 @@ return function(H)
       ("{ profiles = { full = { 'a' } }, steps = { a = { run = %s } } }"):format(nv(echo, "a")),
       { [echo] = ECHO }
     )
+    -- how the suite would run is not used (said so); a selection of the suite is a usage error
     local res = run(root, "--", "--jobs", "1")
-    eq(res.code, 2, "-- without a suite step: exit 2")
-    has(res.err, "no suite step", "-- without a suite step: said so")
+    eq(res.code, 0, "-- --jobs without a suite step: not used")
+    has(res.err, "no suite step", "-- --jobs without a suite step: said so")
+    res = run(root, "--", "--filter", "x")
+    eq(res.code, 2, "-- --filter without a suite step: exit 2")
+    has(res.err, "no suite step", "-- --filter without a suite step: said so")
 
     root = project(
       "inproc-timeout",
