@@ -711,7 +711,8 @@ a hard dependency (a missing one in `deps` is exit 3), names it in `deps_optiona
 the built-in heuristic.
 
 ```lua
-require("docmap.testing").affected_specs({ root = root, changed = { "lua/a/b.lua", ... }, spec_roots = { "TESTS" } })
+require("docmap.testing").affected_specs({ root = root, changed = { "lua/a/b.lua", ... }, spec_roots = { "TESTS" },
+                                          verify = true })
   -> { version = 1, specs = { "TESTS/x_spec.lua", ... },                 -- relative paths
        modules = { { id, module, path, role = "changed"|"dependent", specs }, ... },
        unplaced_specs = { "TESTS/dyn_spec.lua" },                        -- the graph cannot place them: run them too
@@ -728,6 +729,13 @@ heuristic below sees those. The selection is the union of what the heuristic rea
 its `unplaced_specs`); a graph can make the selection bigger, never smaller. `complete = false` (a stale graph, a gap
 that blocks) is not narrowed: everything runs, and the reason names the kinds of the gaps. A changed module file the
 answer does not place (neither a node, nor a gap, nor `ignored`) is incomplete as well.
+
+**A stale graph is settled by a rescan.** `docs/map/module_map.json` is a local artifact written by hand (`:DocMap`),
+so every commit after it makes it stale by git history, and a stale graph selects everything. The call therefore
+passes `verify = true`: docmap.nvim then scans the tree, and when its nodes and `require` edges equal the map's the
+graph counts as fresh. The scan runs only when the map is stale, a fresh map costs nothing. Measured on tasks.nvim
+(2026-11-12, 2 MB map, 76 modules): about 0.5 s without the scan, about 7 s with it. A graph that still says
+`complete = false` after it (tasks.nvim: `dynamic_require_in_graph`) runs everything as before.
 
 When the module is absent, throws, answers `nil, err` or answers a shape that does not match, the built-in heuristic
 is used and `r.warnings` says why. The heuristic builds the `require` graph of the project itself (`lua/**.lua`):

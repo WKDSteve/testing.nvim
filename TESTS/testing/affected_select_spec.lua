@@ -351,6 +351,8 @@ return function(H)
   eq(calls[1].root, root, "the provider gets the root")
   eq(calls[1].changed, { "lua/proj/b.lua" }, "and the changed module files")
   eq(calls[1].spec_roots, { "TESTS" }, "and the spec roots of the project")
+  -- a stale graph is settled by a rescan (docmap scans only when its verdict is stale), not taken as "run all"
+  eq(calls[1].verify, true, "and verify, so a stale graph whose edges did not change still narrows")
   eq(r.graph.commit, "abc1234", "the graph metadata is passed on")
 
   -- a graph that names less than the heuristic reaches does not narrow the selection

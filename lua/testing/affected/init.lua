@@ -489,6 +489,9 @@ local function ask_graph(opts, changed)
     changed = vim.deepcopy(changed),
     spec_roots = opts.roots and vim.deepcopy(opts.roots) or nil,
     consumers = opts.consumers,
+    -- settles a stale verdict by a rescan (nodes and require edges equal: the map counts as fresh); docmap scans only
+    -- when the map is stale, so a fresh map costs nothing. Without it every commit after `:DocMap` selected everything.
+    verify = true,
   })
   if not ok then
     return nil, "docmap.testing.affected_specs failed: " .. tostring(res)
