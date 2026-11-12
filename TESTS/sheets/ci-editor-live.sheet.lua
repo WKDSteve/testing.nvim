@@ -3,6 +3,7 @@
 -- The lualine component and the look of the split are for a person (judge / manual below).
 return {
   id = "testing.ci-editor-live",
+  feature = "testing.ci",
   title = ":Testing ci in the editor",
   task = "testing.nvim/ci-editor-live-test-von-testing-ci-ci-repos-im-echten-editor",
   engine = "rpc",

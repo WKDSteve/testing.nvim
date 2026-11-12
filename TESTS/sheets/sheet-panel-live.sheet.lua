@@ -2,6 +2,7 @@
 -- window beside the code, the real keys, the child's screen in the tile, q leaves nothing. A sheet that runs a sheet.
 return {
   id = "testing.sheet-panel-live",
+  feature = "testing.sheet-step",
   title = ":Testing sheet step in the editor",
   task = "testing.nvim/scheibe-3-neovim-panel-fuer-sheets-step",
   engine = "rpc",

@@ -4,6 +4,7 @@
 -- person to look at the terminal (manual below).
 return {
   id = "testing.commands",
+  feature = "testing.editor",
   title = ":Testing subcommands of the bindings checklist",
   task = "testing.nvim/testblatt-bindings-checkliste",
   engine = "rpc",

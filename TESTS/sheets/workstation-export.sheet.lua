@@ -3,6 +3,7 @@
 -- (`testing sheets step workstation-export`, or `testing sheets run --task ...`); its answers go into the task.
 return {
   id = "testing.workstation-export",
+  feature = "testing.export",
   title = "testing export and ci remote on the workstation: read-only token, no runs, Falcon quiet",
   task = "testing.nvim/handlaeufe-auf-der-workstation",
   engine = "manual",
