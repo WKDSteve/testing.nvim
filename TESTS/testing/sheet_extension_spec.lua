@@ -41,6 +41,7 @@ return function(H)
   refused({ extension = "/abs/ext" }, "relative to the project root", "an absolute path")
   refused({ extension = "C:/ext" }, "relative to the project root", "a drive letter")
   refused({ extension = "" }, "relative to the project root", "empty")
+  refused({ extension = "a,b" }, "no comma", "a comma (Chromium would load two folders)")
   refused({ extension = 1 }, "extension must be a string", "not a string")
   refused({
     extension = "ext",

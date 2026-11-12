@@ -739,6 +739,10 @@ function M.validate(s)
     if e == "" or e:find("^[/\\]") or e:find("^%a:") or e:find("%.%.") or e:find("%c") then
       return nil, "extension: a folder relative to the project root (no '..', not absolute)"
     end
+    -- Chromium splits `--load-extension` on commas: one folder would become two
+    if e:find(",", 1, true) then
+      return nil, "extension: no comma in the folder name (Chromium reads a list there)"
+    end
   end
   if s.fakes ~= nil then
     local ferr = M.check_fakes(s.fakes, s.engine)

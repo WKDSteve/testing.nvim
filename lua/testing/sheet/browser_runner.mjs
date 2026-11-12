@@ -92,6 +92,16 @@ async function runStep(page, step, where) {
 // An unpacked extension needs a persistent context (a profile of its own, thrown away at the end): `launch` cannot
 // load one. It answers like a browser (`newPage({ viewport })`, `close()`), so the steps do not know the difference.
 // Headless works with the full Chromium (`channel: 'chromium'`, the new headless mode), not with the headless shell.
+// On Windows a closing Chromium can hold files of its profile for a moment: removing it is tidying up, never a reason to
+// lose the result of the run (a throw here would end the runner after the steps).
+function dropProfile(profile) {
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {
+    // left in the temp folder
+  }
+}
+
 async function launchWithExtension(chromium, headless, channel, extension) {
   if (!existsSync(join(extension, 'manifest.json'))) {
     throw new Error(`the extension ${extension} has no manifest.json`);
@@ -105,7 +115,7 @@ async function launchWithExtension(chromium, headless, channel, extension) {
       args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
     });
   } catch (e) {
-    rmSync(profile, { recursive: true, force: true });
+    dropProfile(profile);
     throw new Error(`chromium with the extension cannot be started (${String(e.message).split('\n')[0]})`);
   }
   return {
@@ -116,7 +126,7 @@ async function launchWithExtension(chromium, headless, channel, extension) {
     },
     close: async () => {
       await context.close().catch(() => {});
-      rmSync(profile, { recursive: true, force: true });
+      dropProfile(profile);
     },
   };
 }
