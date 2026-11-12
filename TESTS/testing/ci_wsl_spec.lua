@@ -57,6 +57,11 @@ return function(H)
   )
   has(script, '"+HEAD:refs/remotes/win/HEAD"', "script: a detached HEAD is fetched too")
   has(script, 'export PATH="$HOME/.local/bin:$PATH"', "script: tools in ~/.local/bin are found")
+  has(
+    script,
+    'XDG_CONFIG_HOME="$M/.xdg-config" nvim ',
+    "script: the run sees no nvim configuration of the distribution (its lua/lib shadowed lib.nvim)"
+  )
   has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
   local lock_at, first_sync = script:find("flock 9", 1, true), script:find("head_of '", 1, true)

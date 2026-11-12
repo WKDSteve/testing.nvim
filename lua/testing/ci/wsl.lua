@@ -163,8 +163,11 @@ function M.script(o)
   lines[#lines + 1] = ('cd "$M/%s" || exit 3'):format(o.repo)
   -- the queue and the metrics are the Windows process's; the mirror is the user's own code (trusted)
   -- the options of `ci commit` before the given arguments: after a `--` they would be the suite's
+  -- a configuration of its own: the runner (`-u NONE` keeps stdpath("config") on the runtimepath) must not see the
+  -- user's nvim configuration of the distribution, whose `lua/lib` shadowed lib.nvim's `lib` in specs that run in it
+  lines[#lines + 1] = 'mkdir -p "$M/.xdg-config"'
   lines[#lines + 1] = (
-    'env -u REPOS_DIR TESTING_QUEUE=off TESTING_METRICS=off TESTING_TRUST=1 REPOS_DIR="$M" '
+    'env -u REPOS_DIR TESTING_QUEUE=off TESTING_METRICS=off TESTING_TRUST=1 REPOS_DIR="$M" XDG_CONFIG_HOME="$M/.xdg-config" '
     .. 'nvim -n -i NONE --headless -u NONE -l "$M/testing.nvim/scripts/testing.lua" ci commit '
     .. '--root=. --no-agent --json="$(wslpath -u %s)" %s'
   ):format(q(o.json), table.concat(args, " "))
