@@ -734,6 +734,43 @@ return function(H)
   end)
   usrcmds.viewer = real_viewer
 
+  -- ---------------------------------------------------------------- lint --file[=a,b]
+
+  eq(
+    usrcmds.lint_files({ "%" }, "C:\\r\\a.lua"),
+    { "C:/r/a.lua" },
+    "lint --file: bare is the buffer"
+  )
+  eq(
+    usrcmds.lint_files(true, "/r/a.lua"),
+    { "/r/a.lua" },
+    "lint --file: a bool from an older composer"
+  )
+  eq(usrcmds.lint_files({ "a.lua,b.lua" }, ""), { "a.lua,b.lua" }, "lint --file=a,b: as given")
+  eq(
+    usrcmds.lint_files({ "%", "b.lua" }, "/r/a.lua"),
+    { "/r/a.lua", "b.lua" },
+    "lint --file --file=b: both"
+  )
+  local none, why = usrcmds.lint_files({ "%" }, "")
+  eq(none, nil, "lint --file without a buffer name")
+  has(why, "current buffer", "lint --file without a buffer name: the reason")
+  has(table.concat(complete("Testing lint --fi"), " "), "--file", "lint: --file is completed")
+  do
+    local editor = require("testing.lint.editor")
+    local real_run = editor.run
+    local seen
+    editor.run = function(o)
+      seen = o
+      return {}
+    end
+    local lroot = mkproj("lintfiles")
+    vim.cmd("Testing lint --file=a.lua,b.lua --file=c.lua --root=" .. vim.fn.fnameescape(lroot))
+    editor.run = real_run
+    eq(seen and seen.scope, "file", ":Testing lint --file=...: the file scope")
+    eq(seen and seen.files, { "a.lua,b.lua", "c.lua" }, ":Testing lint --file=...: each value")
+  end
+
   vim.notify = real_notify
 
   -- ---------------------------------------------------------------- docs

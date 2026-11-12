@@ -977,7 +977,7 @@ The findings themselves are in the document `testing-ci/1` (`--json`), which is 
 
 ```
 testing lint [<check>...] [--file=<f>...|--changed|--all] [--fix] [--on-save] [--agent|--no-agent] [--json] [--root=<dir>]
-:Testing lint [<check>...] [--file|--changed|--all] [--fix] [--root=<dir>]
+:Testing lint [<check>...] [--file[=<a,b>]|--changed|--all] [--fix] [--root=<dir>]
 scripts/test.sh lint [...]      # the same, from the project's own script (a project scaffolded since 2026-11-09; older ones: `testing init --update`)
 ```
 
@@ -1033,7 +1033,7 @@ The lint checks without the rest of the pipeline, for the files that changed, th
 `.testing.lua` and never waits) and, when it ends, fills the quickfix list "testing lint" with the findings (opened
 only when there are some), sets `vim.diagnostic` in the loaded buffers with one namespace per check
 (`testing.lint.<check>`; a checked file without findings has that check's diagnostics cleared) and notifies the
-verdict. `--file` is the file of the current buffer; without a scope flag the changed files are checked. The check
+verdict. A bare `--file` is the file of the current buffer, `--file=a.lua,b.lua` (repeatable) names files as in the CLI; without a scope flag the changed files are checked. The check
 names complete from the project (`testing ci list`, which lists its lint steps) and the lint presets. `--fix` is
 refused while a buffer of a file in its scope has unsaved changes ("save first": the fix rewrites the file on disk);
 after it the buffers of rewritten files are reloaded (`:checktime`). Every run (manual and on save) is numbered when

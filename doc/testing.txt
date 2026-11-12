@@ -185,11 +185,12 @@ from |testing-surface_view|):
         the setting `ci.export_dir`, the repositories to `ci.repos.roots`,
         `--remote` to `ci.export_remote`. Choose that folder in the page.
                                                                 *:Testing-lint*
-:Testing lint [{check}...] [--file|--changed|--all] [--fix] [--root={dir}]
+:Testing lint [{check}...] [--file[={a,b}]|--changed|--all] [--fix] [--root={dir}]
         Run the lint checks (stylua, luacheck, luals: the lint steps of the
         `ci` pipeline, or the named ones) in a headless child
         (`testing lint --json`). Default: the files changed against HEAD and
-        the untracked ones; `--file` the file of the current buffer, `--all`
+        the untracked ones; a bare `--file` the file of the current buffer,
+        `--file=a.lua,b.lua` (repeatable) the named files, `--all`
         everything the step checks in `testing ci`. The findings fill the
         quickfix list "testing lint" (opened only when there are some) and
         become |vim.diagnostic| in the loaded buffers, one namespace per check

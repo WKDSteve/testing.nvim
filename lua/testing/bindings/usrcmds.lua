@@ -45,6 +45,7 @@ M.TYPE_CI_PROFILE = "TESTING_CI_PROFILE"
 M.TYPE_COMMIT = "TESTING_COMMIT"
 M.TYPE_CI_STEPS = "TESTING_CI_STEPS"
 M.TYPE_LINT_CHECK = "TESTING_LINT_CHECK"
+M.TYPE_LINT_FILES = "TESTING_LINT_FILES"
 
 ---Where the text of `:Testing migrate` goes (a viewer); a spec replaces it.
 ---@type fun(lines: string[], title: string)
@@ -328,8 +329,34 @@ function M.ci_run(ctx)
   require("testing.notify").get().info("testing ci: " .. root)
 end
 
----`:Testing lint [check...] [--file|--changed|--all] [--fix]`: the lint checks in a child, findings as quickfix list
----and diagnostics. `--file` is the file of the current buffer.
+---The files of `:Testing lint --file[=a,b]`: each value of the repeatable flag as given (the child splits a value
+---that names no file on commas, as the CLI does), `%` (the bare `--file`) the file of the current buffer.
+---@param values string[]|string|true The bound flag: a list, or one value from an older composer.
+---@param bufname string The name of the current buffer.
+---@return string[]|nil files
+---@return string|nil problem
+function M.lint_files(values, bufname)
+  ---@type (string|true)[]
+  local list = type(values) == "table" and values or { values }
+  local out = {}
+  for _, v in ipairs(list) do
+    if v == "%" or v == true then
+      if bufname == "" then
+        return nil, "--file checks the file of the current buffer, and it has none"
+      end
+      out[#out + 1] = vim.fs.normalize(bufname)
+    elseif type(v) == "string" and v ~= "" then
+      out[#out + 1] = v
+    end
+  end
+  if #out == 0 then
+    return nil, "--file names no file"
+  end
+  return out
+end
+
+---`:Testing lint [check...] [--file[=a,b]|--changed|--all] [--fix]`: the lint checks in a child, findings as quickfix
+---list and diagnostics. A bare `--file` is the file of the current buffer, `--file=a,b` (repeatable) the named ones.
 ---@param ctx { args: table<string, any>, flags: table<string, any>, rest?: string[] }
 function M.lint_run(ctx)
   local say = require("testing.notify").get()
@@ -351,15 +378,20 @@ function M.lint_run(ctx)
     return
   end
   local scope = scopes[1]
-  if scope == "file" and file == "" then
-    say.error("testing lint: --file checks the file of the current buffer, and it has none")
-    return
+  local files
+  if scope == "file" then
+    local problem
+    files, problem = M.lint_files(ctx.flags.file, file)
+    if not files then
+      say.error("testing lint: " .. tostring(problem))
+      return
+    end
   end
   local proc, err = require("testing.lint.editor").run({
     root = root,
     checks = checks,
     scope = scope,
-    files = scope == "file" and { vim.fs.normalize(file) } or nil,
+    files = files,
     fix = ctx.flags.fix,
   })
   if not proc then
@@ -1219,7 +1251,14 @@ function M.routes()
       desc = "Run the lint checks (stylua, luacheck, luals) on the changed files: quickfix and diagnostics",
       args = { { name = "check", type = M.TYPE_LINT_CHECK, optional = true, variadic = true } },
       flags = {
-        { name = "file", bool = true, desc = "Only the file of the current buffer" },
+        {
+          name = "file",
+          type = M.TYPE_LINT_FILES,
+          optional_value = true,
+          bare_value = "%",
+          repeatable = true,
+          desc = "Only these files: bare the current buffer, --file=a,b the named ones (repeatable)",
+        },
         {
           name = "changed",
           bool = true,
@@ -1538,6 +1577,24 @@ local function register_types(composer)
       end
       table.sort(names)
       return prefix(names, lead)
+    end,
+  })
+  composer.register_type(M.TYPE_LINT_FILES, {
+    desc = "files to lint, separated by commas (relative to the root, or absolute)",
+    validate = function(raw)
+      if raw == "" then
+        return false, nil, "expected file names"
+      end
+      return true, raw, nil
+    end,
+    complete = function(lead)
+      local head, tail = lead:match("^(.*,)([^,]*)$")
+      head, tail = head or "", tail or lead
+      local out = {}
+      for _, name in ipairs(vim.fn.getcompletion(tail, "file")) do
+        out[#out + 1] = head .. name
+      end
+      return out
     end,
   })
   composer.register_type(M.TYPE_SPEC, {
