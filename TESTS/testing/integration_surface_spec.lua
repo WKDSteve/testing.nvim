@@ -162,15 +162,18 @@ return {
     ok(res.code == 0, "green: " .. tostring(res.stdout) .. tostring(res.stderr))
     ok(ir ~= nil, "the IR was written")
     local by = hits_by_file(ir)
-    eq(
-      by["TESTS/a_spec.lua"],
-      { "action:fxsurf.open", "binding:<leader>fo", "command:FxOpen" },
-      "child per file: a_spec.lua carries the keymap and the command it drove"
-    )
+    -- the spec itself requires the plugin in a fresh child, inside the window: its `api:` calls count too
+    eq(by["TESTS/a_spec.lua"], {
+      "action:fxsurf.open",
+      "api:fxsurf.open",
+      "api:fxsurf.setup",
+      "binding:<leader>fo",
+      "command:FxOpen",
+    }, "child per file: a_spec.lua carries the keymap, the command and the api functions it drove")
     eq(
       by["TESTS/b_spec.lua"],
-      { "command:Fx status" },
-      "child per file: b_spec.lua carries the route"
+      { "api:fxsurf.setup", "api:fxsurf.status", "command:Fx status" },
+      "child per file: b_spec.lua carries the route and the api functions it drove"
     )
     local bc = busted_hits(ir)
     ok(
@@ -221,7 +224,7 @@ return {
       "in-process run is green: " .. tostring(res2.stdout) .. tostring(res2.stderr)
     )
     local by2 = hits_by_file(ir2)
-    -- in this process the plugin module may be loaded when a case opens, so `api:` hits come on top
+    -- in this process the plugin module may already be loaded when a case opens; `api:` hits come on top
     ok(
       vim.tbl_contains(by2["TESTS/a_spec.lua"] or {}, "binding:<leader>fo")
         and vim.tbl_contains(by2["TESTS/a_spec.lua"], "command:FxOpen"),

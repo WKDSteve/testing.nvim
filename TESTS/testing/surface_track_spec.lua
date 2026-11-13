@@ -360,5 +360,44 @@ return function(H)
     )
     c.cmd("PlainCmd")
     eq(c.lua("return PLAIN_RAN"), 1, "and runs")
+
+    -- ================================================================ an api module first required INSIDE a window
+    -- A child per spec file starts fresh: the spec itself loads the plugin, after `begin_case` looked for it.
+    c.lua([==[
+      ORIG_REQUIRE = require
+      LAZY_LOADS = 0
+      package.preload.fxlazy = function()
+        LAZY_LOADS = LAZY_LOADS + 1
+        return { go = function(x) return x, "second" end, other = function() end }
+      end
+      package.preload.fxearly = function()
+        return { early = function() end }
+      end
+      T = require("testing.surface.track").install({ api = { "fxlazy", "fxearly" } })
+      -- required outside any window: not wrapped yet (the minit's setup() is no case)
+      EARLY = require("fxearly")
+      EARLY_WRAPPED = require("testing.surface.track").unwrap(EARLY.early) ~= EARLY.early
+      T:begin_case({ id = 'lazy::first', file = 'lazy_spec.lua' })
+    ]==])
+    eq(c.lua("return EARLY_WRAPPED"), false, "a module required outside a window is left alone")
+    eq(
+      c.lua("local a, b = require('fxlazy').go(7); return { a, b }"),
+      { 7, "second" },
+      "the wrapped function returns what the original returns"
+    )
+    eq(c.lua("return LAZY_LOADS"), 1, "require loads the module once and returns it")
+    eq(
+      c.lua("return require('fxlazy') == package.loaded.fxlazy"),
+      true,
+      "require still returns the loaded module"
+    )
+    local lazy = c.lua("return T:end_case()")
+    eq(
+      lazy.hit,
+      { "api:fxlazy.go" },
+      "a module the spec required inside the window counts its calls in that window"
+    )
+    eq(c.lua("return T:uninstall()"), {}, "the require hook is put back")
+    eq(c.lua("return require == ORIG_REQUIRE"), true, "require is the original again")
   end)
 end

@@ -55,6 +55,19 @@ M.MAX_KEYS = 5000
 ---@type table<function, function>
 local WRAPPERS = setmetatable({}, { __mode = "k" })
 
+---The wrappers of `api` module functions (a subset of WRAPPERS). A plugin that registers such a function as
+---a handler (`rhs = M.open` after the module was wrapped) still gets its handler wrapped: the api wrapper
+---counts the function, the handler wrapper the keymap / command / autocmd.
+---@type table<function, true>
+local API_WRAPPERS = setmetatable({}, { __mode = "k" })
+
+---Is `f` a handler wrapper of this layer (an api wrapper is not)?
+---@param f any
+---@return boolean
+local function handler_wrapper(f)
+  return WRAPPERS[f] ~= nil and not API_WRAPPERS[f]
+end
+
 ---The function behind a wrapper of this layer (the function itself when it is none). The reader uses
 ---it, so a surface read in an editor that is being tracked still names the plugin's own handlers.
 ---@param f any
@@ -69,7 +82,7 @@ function M.unwrap(f)
 end
 
 ---@class Testing.Surface.TrackCfg
----@field api? string[] Module names whose function fields are wrapped (when loaded) at every `begin_case`.
+---@field api? string[] Module names whose function fields are wrapped (when loaded) at every `begin_case`, and when a case window `require`s one (the global `require` is hooked while installed).
 ---@field rewrap? boolean Re-set the Lua keymaps that exist at install time with a wrapped callback (default true).
 ---@field sink? string File that receives one JSON line per case (and a `run` line on `flush`).
 
@@ -202,7 +215,7 @@ end
 ---@param orig_cb function
 ---@return function|nil wrapper
 local function wrap_keymap(h, mode, lhs, buffer, opts, orig_cb)
-  if type(lhs) ~= "string" or WRAPPERS[orig_cb] or foreign_handler(orig_cb) then
+  if type(lhs) ~= "string" or handler_wrapper(orig_cb) or foreign_handler(orig_cb) then
     return nil
   end
   local key = ("k|%s|%s|%s"):format(mode, ids.norm_lhs(lhs), buffer and "b" or "g")
@@ -264,7 +277,7 @@ local function wrap_command(h, name, command, opts, buffer)
   if
     type(name) ~= "string"
     or type(command) ~= "function"
-    or WRAPPERS[command]
+    or handler_wrapper(command)
     or foreign_handler(command)
   then
     return nil
@@ -314,7 +327,7 @@ local function patch_autocmds(h)
     return function(event, opts)
       if
         not (h.installed and type(opts) == "table" and type(opts.callback) == "function")
-        or WRAPPERS[opts.callback]
+        or handler_wrapper(opts.callback)
         or foreign_handler(opts.callback)
       then
         return orig(event, opts)
@@ -382,7 +395,7 @@ local function wrap_verb(h, name, handle)
   ---@param resolve boolean the value may be a module path (route.run)
   local function wrap_slot(holder, field, path, resolve)
     local orig = holder[field]
-    if orig == nil or WRAPPERS[orig] then
+    if orig == nil or handler_wrapper(orig) then
       return
     end
     local key = ("r|%s|%s"):format(name, table.concat(path, " "))
@@ -490,7 +503,7 @@ local function rewrap_keymaps(h)
     for _, m in ipairs(maps) do
       if
         type(m.callback) == "function"
-        and not WRAPPERS[m.callback]
+        and not handler_wrapper(m.callback)
         and not in_runtime(m.callback)
       then
         local mode = m.mode
@@ -552,7 +565,7 @@ local function note_existing(h)
       if
         type(c) == "table"
         and type(c.callback) == "function"
-        and not WRAPPERS[c.callback]
+        and not handler_wrapper(c.callback)
         and not in_runtime(c.callback)
         -- testing.nvim's own command (plugin/testing.lua goes through lib.nvim's wrapper)
         and name ~= "Testing"
@@ -567,7 +580,7 @@ local function note_existing(h)
     for _, a in ipairs(auts) do
       if
         type(a.callback) == "function"
-        and not WRAPPERS[a.callback]
+        and not handler_wrapper(a.callback)
         and not in_runtime(a.callback)
       then
         m = m + 1
@@ -575,6 +588,32 @@ local function note_existing(h)
     end
   end
   h.existing = { commands = n, autocmds = m }
+end
+
+---Wrap a module of `cfg.api` as soon as it is required while a case window is open. `begin_case` wraps
+---only what is loaded when the window opens; in a fresh editor (a child per spec file, `isolated =
+---"file"`) the plugin is usually first required by the spec itself, inside that window, and its calls
+---would never be counted. Outside a window nothing is wrapped (the minit's `setup()` is no case).
+---@param h Testing.Surface.TrackHandle
+local function patch_require(h)
+  local api = {}
+  for _, name in ipairs(h.cfg.api or {}) do
+    api[name] = true
+  end
+  if next(api) == nil then
+    return
+  end
+  local function after(name, ...)
+    if h.installed and h.case and api[name] then
+      h:wrap_api(name)
+    end
+    return ...
+  end
+  h.patcher:wrap(_G, "require", function(orig)
+    return function(name, ...)
+      return after(name, orig(name, ...))
+    end
+  end, "require")
 end
 
 -- ===========================================================
@@ -605,6 +644,7 @@ function M.install(cfg)
     patch_commands(h)
     patch_autocmds(h)
     patch_composer(h)
+    patch_require(h)
     if cfg.rewrap ~= false then
       rewrap_keymaps(h)
     end
@@ -623,10 +663,11 @@ function M.install(cfg)
 end
 
 ---Wrap the function fields of the configured modules that are loaded (idempotent).
-function Handle:wrap_api()
+---@param only? string Just this module of `cfg.api` (the `require` hook).
+function Handle:wrap_api(only)
   for _, name in ipairs(self.cfg.api or {}) do
     local mod = package.loaded[name]
-    if type(mod) == "table" then
+    if type(mod) == "table" and (only == nil or only == name) then
       local keys = {}
       for k, v in pairs(mod) do
         if
@@ -644,6 +685,7 @@ function Handle:wrap_api()
         local key = ("f|%s.%s"):format(name, k)
         if orig and register(self, key, { kind = "api", id = ids.api(name, k) }) then
           local wrapper = wrap_fn(self, key, orig)
+          API_WRAPPERS[wrapper] = true
           local ok = pcall(rawset, mod, k, wrapper)
           if ok then
             self.made[#self.made + 1] =

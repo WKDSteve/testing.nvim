@@ -110,7 +110,8 @@ How: handlers are wrapped when they are **created**. The layer patches the creat
 (`nvim_set_keymap`, `nvim_buf_set_keymap`, `nvim_create_user_command`, `nvim_buf_create_user_command`,
 `nvim_create_autocmd`) and the composer registry of lib.nvim (the `run` of every route, the `default` of a
 verb). `vim.keymap.set`, `lib.nvim.bindings.*` and a plugin's own wrappers all end in those primitives,
-so one layer sees them all. Keymaps that exist at install time are re-set with a wrapped callback (same
+so one layer sees them all. With `api` it also hooks the global `require`, so a module of `api` that a case loads is
+wrapped right away. Keymaps that exist at install time are re-set with a wrapped callback (same
 options). A wrapper counts and returns what the original returns: arguments, `expr` mappings and the
 `true` of a self-deleting autocmd stay intact; after `uninstall` it does nothing.
 
@@ -289,7 +290,12 @@ Pilot: fileops.nvim (`surface.baseline.json`, the "Surface baseline gate" step o
 * **Aliases.** A handler is counted when the *wrapper* runs. A keymap that holds its own reference to a
   function (`rhs = M.open`) does not count as a call of `api:myplugin.open`; a command that calls
   `M.open()` through the module does. API tracking wraps the function fields of the loaded module at
-  every `begin_case`; call sites that saved the original earlier are not seen.
+  every `begin_case`, and when a case first `require`s the module (the global `require` is hooked while
+  the layer is installed: in a child editor per spec file the spec itself loads the plugin, after the
+  window opened). A module required outside a case window (the minit) is wrapped at the next
+  `begin_case`. Call sites that saved the original earlier are not seen. A handler that is an api
+  function (`rhs = M.open` after the module was wrapped) is counted twice, as the keymap and as the api
+  function.
 * **String handlers.** A keymap with a string rhs (`"<cmd>Session save<cr>"`) and a command given as a
   string cannot be wrapped: they are listed and `untracked`. The command a string rhs runs is observed
   on its own, the keymap is not.
