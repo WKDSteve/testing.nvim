@@ -171,6 +171,14 @@ return function(H)
     -- maintainer's machine, whose global pre-push hook refuses the move from a shallow checkout
     local job = text:match("\n  publish%-ci%-verified:\n(.*)$")
     has(job, "runs-on: ubuntu-latest", "the publish job runs hosted")
+    -- the lookup fails closed: a step without `shell:` runs `bash -e` without pipefail, so a failing
+    -- `git ls-remote | cut -f1` would be an empty tip and fall through to the first-publish push without a lease
+    local pipefail_at = job:find("\n          set -o pipefail\n", 1, true)
+    local lookup_at = job:find("tip=$(git ls-remote", 1, true)
+    ok(
+      pipefail_at ~= nil and lookup_at ~= nil and pipefail_at < lookup_at,
+      "the publish step sets pipefail before the ci-verified lookup"
+    )
     for runs_on in job:gmatch("runs%-on:[^\n]*") do
       ok(
         not runs_on:find("self-hosted", 1, true),
