@@ -7,7 +7,8 @@
 ---
 --- A finding's key is its step, its file and its text, without line and column (they move between two states), and
 --- with every `:<digits>` in the text made `:#` (a message that quotes a position) and the path of a snapshot
---- (`<state>/snap/<sha8>-<random>/tree`) made `<snapshot>`. Equal keys count as a multiset: two
+--- (`<state>/snap/<sha8>-<random>/tree`, and any path into `testing/snap/<sha8>-<random>`, also cut right after it or
+--- written as a Windows or WSL UNC path) made `<snapshot>`. Equal keys count as a multiset: two
 --- equal findings at `head` and one at `base` are one known and one new. A red step without findings (an exit code, a
 --- crash) is compared as a whole: it is known when the step is red at the base too.
 ---
@@ -56,8 +57,12 @@ function M.key(step, f)
   local text = vim.trim(tostring(nonnil(f.text) or ""))
   -- the snapshot of each state sits in a directory of its own (`.../snap/<sha8>-<random>/tree`, maybe cut to
   -- `...nap/`), so a path in the text would tell the same finding apart between head and base
-  text =
-    text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>"):gsub(":%d+", ":#")
+  text = text:gsub("[%w%.:_/\\%-]*[/\\]%x%x%x%x%x%x%x%x%-%w+[/\\]tree", "<snapshot>")
+  -- a path into the snapshot directory that does not go through `tree` (its `state`, or a message cut right after
+  -- `snap/<sha8>-<rand>`), in `/` or `\` form, a Windows or WSL UNC path (`\\wsl.localhost\...`) alike
+  text = text
+    :gsub("[%w%.:_/\\%-]*[/\\]testing[/\\]snap[/\\]%x%x%x%x%x%x%x%x%-%x*", "<snapshot>")
+    :gsub(":%d+", ":#")
   -- so does Neovim's own temp folder (`tempname()`: `.../nvim.<user>/<random>/<n>`), new for every editor
   text = text:gsub("(nvim%.[^/\\%s]*)[/\\]%w+[/\\]%d+", "%1/<tempname>")
   return table.concat({ step, file, text }, "\0")

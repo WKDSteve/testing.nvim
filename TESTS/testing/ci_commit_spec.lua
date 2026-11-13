@@ -189,6 +189,18 @@ return function(H)
             98,
             [[C:\x\testing\snap\55f79695-12b9d4\tree\TESTS\w_spec.lua:5: boom]]
           ),
+          -- cut right after the snapshot directory (no `tree` left): a WSL path as PowerShell prints it
+          f(
+            "TESTS/ps_path_spec.lua",
+            40,
+            [[FAIL Set-Content : Ein Teil des Pfades "\\wsl.localhost\archlinux\home\<USER>\.local\state\nvim\testing\snap\55f79695-9fb4]]
+          ),
+          -- below the snapshot's own state directory
+          f(
+            "TESTS/x_spec.lua",
+            3,
+            "/home/u/.local/state/nvim/testing/snap/55f79695-9fb4c1/state/tmp/x: denied"
+          ),
         }),
       },
     }
@@ -205,14 +217,37 @@ return function(H)
             98,
             [[C:\x\testing\snap\a316102b-77aa01\tree\TESTS\w_spec.lua:5: boom]]
           ),
+          f(
+            "TESTS/ps_path_spec.lua",
+            40,
+            [[FAIL Set-Content : Ein Teil des Pfades "\\wsl.localhost\archlinux\home\<USER>\.local\state\nvim\testing\snap\a316102b-44bd]]
+          ),
+          f(
+            "TESTS/x_spec.lua",
+            3,
+            "/home/u/.local/state/nvim/testing/snap/a316102b-44bd07/state/tmp/x: denied"
+          ),
         }),
       },
     }
     local r = baseline.classify(head, base)
     eq(
       { #r.new, #r.known, #r.fixed },
-      { 0, 2, 0 },
+      { 0, 4, 0 },
       "snapshot paths: the same red spec is known, not new and fixed"
+    )
+    -- only the directory is made equal: another message below it is still another finding
+    eq(
+      baseline.key(
+        "suite",
+        { file = "x", text = "/s/testing/snap/55f79695-9fb4c1/state/a: denied" }
+      )
+        == baseline.key(
+          "suite",
+          { file = "x", text = "/s/testing/snap/a316102b-44bd07/state/b: denied" }
+        ),
+      false,
+      "snapshot paths: what follows the snapshot directory still tells findings apart"
     )
   end
 

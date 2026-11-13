@@ -341,9 +341,10 @@ push (its clean result is the proof the hook takes); a red tip is narrowed down 
 selection of its own after `--` (`--affected`, `--changed`, `--since`, `--file`, `--only`).
 
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
-in the text counts as any position, and so do the folders that are new for every run: the snapshot of a
-state and Neovim's temp folder `nvim.<user>/<random>/<n>`); equal findings count as often as they occur. A red step without findings (an
-exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
+in the text counts as any position, and so do the folders that are new for every run: the snapshot directory
+`testing/snap/<sha8>-<random>` (also when the message is cut right after it, or names it as a Windows or WSL UNC
+path such as `\\wsl.localhost\...`) and Neovim's temp folder `nvim.<user>/<random>/<n>`); equal findings count as
+often as they occur. A red step without findings (an exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
 `inexact`: a false alarm rather than a false green.
 
 | Verdict | Meaning | Exit |
