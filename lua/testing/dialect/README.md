@@ -60,7 +60,9 @@ case, because a script ends its own process: the child driver runs it in a proce
 * failure lines (`[FAIL]`, `FAIL ...`, `not ok`) are failed assertions, also under exit 0 (never greener than the
   script); a summary `N passed, M failed[, K skipped]` is read; `M > 0` is red;
 * exit != 0 without failure lines: a Lua error on stderr is `error`, else one failed assertion `exit code N`;
-* exit 0 without any summary is the one assertion "exit code 0".
+* exit 0 without any summary is the one assertion "exit code 0";
+* the skip and n/a conventions (below) read the printed lines of **both** stdout and stderr: under `nvim -l`
+  (Neovim 0.12) `print()` writes to stderr, so a script's `print("n/a  needs Windows")` lands there.
 
 ## Assertion policy and skips (`testing.policy`)
 

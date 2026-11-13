@@ -197,7 +197,10 @@ function M.build_case(a, rel, run, opts)
     end
   end
   local done = a.end_case()
-  policy.apply(done, { assertions = opts and opts.assertions, printed = lines_of(stdout) })
+  -- both channels: under `nvim -l` (Neovim 0.12) `print()` writes to stderr, so an `n/a` / `skip` line lands there
+  local printed = lines_of(stdout)
+  vim.list_extend(printed, lines_of(stderr))
+  policy.apply(done, { assertions = opts and opts.assertions, printed = printed })
   if opts and opts.on_case then
     opts.on_case(done)
   end

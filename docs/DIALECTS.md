@@ -196,7 +196,8 @@ A file that runs itself (`nvim -l TESTS/units.lua`): it counts its own checks, p
 (`host = "l"`, `--host` overrides). The file is **one case**; its verdict is the exit code **and** the
 `[FAIL]` lines it printed (a script that prints failures and still exits `0` is red), a signal or a
 native crash is `crash`, a limit exceeded is `timeout`. A summary of `0 passed` is a case without
-assertions. The sniffer recognises scripts by a top-level `os.exit(` / `cquit` and no `describe` /
+assertions. A printed `n/a  <reason>` or `skip  <reason>` line counts on stdout and on stderr alike:
+under `nvim -l` (Neovim 0.12) `print()` writes to stderr. The sniffer recognises scripts by a top-level `os.exit(` / `cquit` and no `describe` /
 `function(H)`; a script without the `_spec` suffix needs a `spec_pattern` ([CONFIG.md](CONFIG.md)).
 
 ## Dialect `d`

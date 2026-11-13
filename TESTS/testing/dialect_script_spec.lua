@@ -137,6 +137,25 @@ return function(H)
   eq(case.status, "skip", "a printed skip line and no checks: skip")
   eq(case.notes[1], "the script skipped 1 check(s)", "the skipped count is a note")
 
+  -- the n/a and skip conventions read both channels: under `nvim -l` (Neovim 0.12) `print()` goes to stderr
+  for _, channel in ipairs({ "stdout", "stderr" }) do
+    local function on(text)
+      local run = { code = 0, stdout = "", stderr = "" }
+      run[channel] = text
+      return judge(run)
+    end
+    case = on("ok a\nn/a  needs Windows\n")
+    eq(case.status, "pass", channel .. ": checks made, then n/a: the case stays a pass")
+    eq(case.na, "n/a  needs Windows", channel .. ": ...and carries the n/a line")
+    case = on("n/a  needs tesseract\n0 passed, 0 failed\n")
+    eq(case.status, "skip", channel .. ": no checks and an n/a line: skip")
+    eq(case.na, "n/a  needs tesseract", channel .. ": ...with the n/a line")
+    eq(case.reason, "n/a  needs tesseract", channel .. ": ...as its reason")
+    case = on("skip  needs telescope\n0 passed, 0 failed\n")
+    eq(case.status, "skip", channel .. ": no checks and a skip line: skip")
+    eq(case.reason, "skip  needs telescope", channel .. ": ...with the skip line as its reason")
+  end
+
   -- the case lands in a valid IR
   local told
   case = judge({ code = 0, stdout = "5 passed, 0 failed\n" }, {
