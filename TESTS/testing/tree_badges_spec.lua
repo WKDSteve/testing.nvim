@@ -166,10 +166,25 @@ return function(H)
     tree.reload()
     eq({ told, entry.get(key(red)) }, { 2, nil }, "a reload replaces the badges and tells the tree")
 
+    -- the project never ran: its result directory does not exist yet; the first run has to show anyway
+    ok(vim.uv.fs_stat(state.dir(root, opts)) == nil, "no result directory before the first run")
+    local before = loads
+    vim.fn.mkdir(state.dir(root, opts), "p")
+    vim.wait(4000, function()
+      return loads > before
+    end, 20)
+    ok(loads > before, "the first run's directory appearing makes it read the result")
+
     stop()
     eq(entry.all(), {}, "unsubscribe forgets the badges")
+    local after_stop, told_at_stop = loads, told
     tree.reload()
-    eq(told, 2, "... and nobody is told after it")
+    eq(told, told_at_stop, "... and nobody is told after it")
+    vim.fn.writefile({ "{}" }, state.dir(root, opts) .. "/touched")
+    vim.wait(600, function()
+      return false
+    end)
+    eq(loads, after_stop + 1, "... nor is anything watched for it")
 
     tree.register({
       root = function()

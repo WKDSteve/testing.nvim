@@ -119,21 +119,39 @@ local function stop_watching()
   end
 end
 
----Read the result of the current project and tell the tree. Follows the result file from then on.
+---The nearest folder above `path` that exists.
+---@param path string
+---@return string|nil
+local function existing_ancestor(path)
+  local parent = vim.fs.dirname(path)
+  while parent and parent ~= path do
+    if vim.uv.fs_stat(parent) then
+      return parent
+    end
+    path, parent = parent, vim.fs.dirname(parent)
+  end
+  return nil
+end
+
+---Read the result of the current project and tell the tree. Follows the result file from then on, while a
+---tree is subscribed.
 function M.reload()
   local state = require("testing.state")
   local root = project_root()
   local st = state.load(root, options.state_opts)
   badges = M.badges(st)
   stop_watching()
-  -- the directory, not the file: a run replaces `last.json`, and a watch on the old file would end with it
-  local dir = state.dir(root, options.state_opts)
-  if vim.uv.fs_stat(dir) then
-    watcher = require("lib.nvim.fs.watch").start(dir, function()
-      vim.schedule(M.reload)
-    end, { debounce_ms = 200 })
-  end
   if emit then
+    -- the directory, not the file: a run replaces `last.json`, and a watch on the old file would end with it.
+    -- A project that never ran has no directory yet: the nearest one above it is watched until it appears,
+    -- so the first run shows without a restart.
+    local dir = state.dir(root, options.state_opts)
+    local target = vim.uv.fs_stat(dir) and dir or existing_ancestor(dir)
+    if target then
+      watcher = require("lib.nvim.fs.watch").start(target, function()
+        vim.schedule(M.reload)
+      end, { debounce_ms = 200 })
+    end
     emit()
   end
 end
