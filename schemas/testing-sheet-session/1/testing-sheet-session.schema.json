@@ -19,6 +19,7 @@
     { "if": { "properties": { "event": { "const": "note" } } }, "then": { "$ref": "#/$defs/note" } },
     { "if": { "properties": { "event": { "const": "task" } } }, "then": { "$ref": "#/$defs/task" } },
     { "if": { "properties": { "event": { "const": "error" } } }, "then": { "$ref": "#/$defs/error" } },
+    { "if": { "properties": { "event": { "const": "explain" } } }, "then": { "$ref": "#/$defs/explain" } },
     { "if": { "properties": { "event": { "const": "end" } } }, "then": { "$ref": "#/$defs/end" } }
   ],
   "$defs": {
@@ -163,6 +164,18 @@
         "id": { "type": "string" },
         "outcome": { "type": "string" },
         "message": { "type": "string" }
+      }
+    },
+    "explain": {
+      "description": "The answer to `explain <n> <kind>`: the request an AI would get about a step, for the client to show. Nothing was sent; the run stays where it is. Not part of the recording of a run.",
+      "type": "object",
+      "required": ["size", "n", "kind", "system", "prompt"],
+      "properties": {
+        "size": { "type": "string" },
+        "n": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["what", "watch", "result"] },
+        "system": { "type": "string", "minLength": 1 },
+        "prompt": { "type": "string", "minLength": 1 }
       }
     },
     "error": {

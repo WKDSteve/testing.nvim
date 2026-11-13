@@ -457,6 +457,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
 | `note` | a note was taken: `size`, `n` (the step the run stands before, else the one that ran last), `text`, `time` (UTC) |
 | `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
+| `explain` | the answer to `explain <n> <kind>`: `size`, `n`, `kind`, and the request an AI would get about that step (`system`, `prompt`), for the client to show. Nothing was sent, and it is not part of the recording |
 | `error` | a command it could not do; the run stays paused |
 | `end` | `status` (`pass`, `fail`, `skip`, `manual`, `aborted`), `ok`, `verdict`, `failures`, `snapshots`, `skipped`, `ms`, `answers`, and `notes` when there are any. The target is gone by then |
 
@@ -470,6 +471,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `break <n>`, `clear <n>` | sets or removes a breakpoint, as `--break` does, in every size; the run stays paused |
 | `answer yes\|no [text]` | answers a question; a no fails the step, with the text as its reason |
 | `note <text>` | a note on the step the run stands before (after a failure: the failed one), one line of at most 1000 bytes, at most 200 notes in a run; taken at once, also while a step runs or under `continue`; the run stays where it is |
+| `explain <n> what\|watch\|result` | answers with an `explain` event: the request an AI would get about step `n` of the size the run stands in (the same one `E` builds in the panel, see below). Read while the run is paused or waits for an answer; `result` only for a step that ran. Sends nothing; the run stays where it is |
 | `abort` | ends the run at once |
 
 * Closed stdin is `abort`, and so is a client that dies or stops reading stdout: nothing stays behind. An abort reaches a
@@ -523,6 +525,9 @@ let it run with `--delay=<ms>` (`:Testing sheet step --delay=500`), which waits 
    screen as text (at most 60 rows) and the notes of the step. Pictures are not sent;
 3. only `Send` sends it, through `require("ai").stream` (ai.nvim's providers, keys and policy, ai-desktop included as
    its provider `ai_desktop`); the answer streams in under the request.
+
+A client that is not the editor (testing-desktop's "Step by step" page) gets the same request with the command
+`explain <n> <kind>` and shows it; the command line itself never sends one.
 
 The run is not touched: it stays paused or goes on. A new question ends the one before. Without ai.nvim, or when the
 provider has no key, the panel says so and works as before. A live sheet never runs step by step, so none of its

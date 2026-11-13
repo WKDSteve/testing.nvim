@@ -6,6 +6,9 @@
 --- reads events (`testing-sheet-session/1`, one JSON line each) and writes commands (`next`, `continue`, `until <n>`,
 --- `abort`). Closed stdin is `abort`, so a client that dies leaves no editor or browser behind.
 ---
+--- `explain <n> what|watch|result` answers with the request an AI would get about a step (`testing.sheet.explain`), as
+--- an `explain` event for the client to show. Nothing is sent from here (rule PRIN-60).
+---
 --- A question of a sheet (`ask`) stops the run for `answer yes|no [text]`. With `--run` nobody can answer: it is passed
 --- over and stays a `judge` criterion.
 ---
@@ -52,6 +55,24 @@ function M.note_text(line)
     return nil
   end
   return vim.trim((line:sub(5):gsub("%c", " ")))
+end
+
+---The step and the question of an `explain <n> <kind>` command, nil for any other line. A line that begins with the
+---word and is not of this form gives `false`.
+---@param line string
+---@return { n: integer, kind: string }|false|nil
+function M.explain_args(line)
+  if line ~= "explain" and not line:match("^explain%s") then
+    return nil
+  end
+  local n, kind = line:match("^explain%s+(%d+)%s+(%a+)$")
+  if not n then
+    return false
+  end
+  return {
+    n = tonumber(n) --[[@as integer]],
+    kind = kind,
+  }
 end
 
 ---The commands from stdin, read without blocking the loop: an abort reaches a running step.
@@ -558,6 +579,10 @@ function M.main(argv, sv, deps)
     if not recording then
       return
     end
+    -- a request for an AI is an answer to the client, not a part of the run
+    if fields.event == "explain" then
+      return
+    end
     local copy = vim.deepcopy(fields)
     copy.root = nil
     if type(copy.path) == "string" then
@@ -660,6 +685,48 @@ function M.main(argv, sv, deps)
     end
   end
 
+  -- what each step did, by size and number: what an `explain` of a step that ran is built from
+  local marks = {} ---@type table<string, table<integer, table>>
+
+  ---`explain <n> <kind>`: the request an AI would get about step `n` of the size the run stands in, as an event. It is
+  ---built as the panel builds it (`testing.sheet.explain`) and goes to the client only: nothing is sent anywhere.
+  ---@param want { n: integer, kind: string }|false
+  local function explain(want)
+    if not want then
+      emit(
+        "error",
+        { message = "explain needs a step and a question: explain <n> what|watch|result" }
+      )
+      return
+    end
+    local size = pos and pos.size
+    local mark = size and marks[size] and marks[size][want.n] or nil
+    local step_notes = {}
+    for _, note in ipairs(notes) do
+      if note.size == size and note.n == want.n then
+        step_notes[#step_notes + 1] = note.text
+      end
+    end
+    local req, err = require("testing.sheet.explain").request({
+      doc = { id = s.id, title = s.title, engine = s.engine, app = s.app, steps = steps },
+      size = size,
+      n = want.n,
+      mark = mark,
+      notes = step_notes,
+    }, want.kind)
+    if not req then
+      emit("error", { message = err })
+      return
+    end
+    emit("explain", {
+      size = size,
+      n = want.n,
+      kind = want.kind,
+      system = req.system,
+      prompt = req.prompt,
+    })
+  end
+
   ---A question: waits for its answer. Nil when the run is to end.
   ---@param at Testing.Sheet.NextStep
   ---@return { yes: boolean, note?: string }|nil
@@ -673,10 +740,13 @@ function M.main(argv, sv, deps)
         return nil
       end
       local note = M.note_text(cmd)
-      local plan = not note and parse_command(cmd, at) or nil
+      local want = M.explain_args(cmd)
+      local plan = not note and want == nil and parse_command(cmd, at) or nil
       local answer = parse_answer(cmd)
       if note then
         add_note(note)
+      elseif want ~= nil then
+        explain(want)
       elseif plan and plan.break_n then
         -- the panel does not wait for a stop to send a breakpoint: no error, and the question still stands
         o.breaks[plan.break_n] = not plan.clear or nil
@@ -718,12 +788,15 @@ function M.main(argv, sv, deps)
         return false
       end
       local note = M.note_text(cmd)
+      local want = M.explain_args(cmd)
       local plan, err
-      if not note then
+      if not note and want == nil then
         plan, err = parse_command(cmd, at)
       end
       if note then
         add_note(note)
+      elseif want ~= nil then
+        explain(want)
       elseif not plan then
         emit("error", { message = err })
       elseif plan.abort then
@@ -792,7 +865,7 @@ function M.main(argv, sv, deps)
       if not res then
         return
       end
-      emit("step-after", {
+      local mark = {
         size = res.size,
         n = res.n,
         status = res.status,
@@ -803,7 +876,10 @@ function M.main(argv, sv, deps)
         image = res.image,
         screen = res.screen,
         measure = res.measure,
-      })
+      }
+      marks[res.size] = marks[res.size] or {}
+      marks[res.size][res.n] = mark
+      emit("step-after", vim.deepcopy(mark))
       -- a measured value is a note of the run, as a person would take it: kept, and with --tasks in the task
       if res.measure then
         add_note(require("testing.sheet").measure_text(res.measure))

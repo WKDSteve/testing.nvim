@@ -608,7 +608,9 @@ said first; never on CI, a skip without it. See docs/SHEETS.md, "Live sheets".
 `testing sheets step {sheet} [--root <dir>] [--headed] [--delay <ms>]
 [--break <n>]... [--run]`: one sheet step by step. Events on stdout
 (testing-sheet-session/1, one JSON line each), commands on stdin (`next`,
-`continue`, `until <n>`, `note <text>`, `abort`; closed stdin is `abort`). Writes
+`continue`, `until <n>`, `note <text>`, `explain <n> <kind>`, `abort`; closed
+stdin is `abort`). `explain` answers with the request an AI would get about
+a step, as an event for the client to show, and sends nothing. Writes
 nothing but the notes of the run (beside its pictures, for the report).
 `--run --format=text` writes one line per step instead (size, n/total,
 status, ms, action and value, `# note`, `: reason`, `=> ` a measured value)

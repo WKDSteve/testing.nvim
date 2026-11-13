@@ -8,6 +8,7 @@ export type TestingSheetSessionEvent =
   | Ask
   | Task
   | CommandError
+  | Explain
   | End;
 
 /** One line on stdin of `testing sheets step`. Closed stdin is `abort`. */
@@ -18,6 +19,8 @@ export type TestingSheetSessionCommand =
   | `break ${number}`
   | `clear ${number}`
   | `answer ${"yes" | "no"}${string}`
+  | `note ${string}`
+  | `explain ${number} ${"what" | "watch" | "result"}`
   | "abort";
 
 interface Base {
@@ -115,6 +118,19 @@ export interface Task extends Base {
   id: string;
   outcome: string;
   message?: string;
+}
+
+/**
+ * The answer to `explain <n> <kind>`: the request an AI would get about step `n` of the size the run stands in (what
+ * the step does, what to watch out for, what its result means). For the client to show; nothing was sent.
+ */
+export interface Explain extends Base {
+  event: "explain";
+  size: string;
+  n: number;
+  kind: "what" | "watch" | "result";
+  system: string;
+  prompt: string;
 }
 
 export interface CommandError extends Base {

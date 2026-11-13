@@ -72,6 +72,7 @@ return function(H)
       "ask",
       "task",
       "error",
+      "explain",
       "end",
     }) do
       ok(kinds[event], "the golden transcript has " .. event)
