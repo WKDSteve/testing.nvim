@@ -540,7 +540,11 @@ that saved, a formatter, a spec that rewrote a source during the run), the run w
 only, and the stamp is **not written** (`testing: stamp: not written: an input changed while the run was going`, exit
 1, the same rule that keeps the result cache from storing such a file). The message names the first key line that
 moved for each file, e.g. `TESTS/a_spec.lua [dep ext:lib.nvim/lua/lib/x.lua]`: an `ext:` input lies outside the
-checkout (another session changed a dependency while the run was going), not in the project. The same goes for a changed runner, Neovim or
+checkout (another session changed a dependency while the run was going), not in the project. A file with a key on one
+side only names why the other side has none, e.g. `[no key after the run: reads a file outside the project ('C:/x'),
+which the key cannot see]`: the spec names a place outside the project that was absent before the run (part of the
+key as absent) and the run created it; write such a place below the temp directory instead. A file that is new or gone
+after the run says so. The same goes for a changed runner, Neovim or
 configuration digest and for a checkout whose commit or tree moved during the run (the message says which of `git`,
 `commit` and `tree` differs, and which git call failed with what exit code; a git call that fails is asked once more
 before the stamp is refused, so a held `index.lock` does not cost the stamp). The keys of after the run are

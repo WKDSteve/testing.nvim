@@ -135,7 +135,8 @@ end
 ---@param after Testing.Stamp.Current[]
 ---@return Testing.Stamp.Current[] records
 ---@return string[] moved Files whose inputs differ after the run, in byte order.
----@return table<string, string> why For a moved file: the first key line that differs (`dep ext:lib.nvim/x.lua`).
+---@return table<string, string> why For a moved file: the first key line that differs (`dep ext:lib.nvim/x.lua`), or,
+---without key lines on both sides, what changed (`no key after the run: <reason>`, `gone after the run`, ...).
 function M.reconcile(before, after)
   local now = {}
   for _, r in ipairs(after) do
@@ -158,11 +159,28 @@ function M.reconcile(before, after)
           why[r.file] = d.kind == d.name and d.kind or (d.kind .. " " .. d.name)
         end
       end
+      -- no key line to compare: the file has a key on one side only (a place outside the project the spec names
+      -- that the run created, say), or another reason on both
+      if not why[r.file] then
+        if not n then
+          why[r.file] = "gone after the run"
+        elseif r.key and not n.key then
+          why[r.file] = "no key after the run: " .. tostring(n.uncacheable)
+        elseif n.key and not r.key then
+          why[r.file] = "no key before the run: " .. tostring(r.uncacheable)
+        elseif r.uncacheable ~= n.uncacheable then
+          why[r.file] = ("before: %s; after: %s"):format(
+            tostring(r.uncacheable),
+            tostring(n.uncacheable)
+          )
+        end
+      end
     end
   end
   for _, r in ipairs(after) do
     if not seen[r.file] then
       moved[#moved + 1] = r.file
+      why[r.file] = "new after the run"
     end
   end
   table.sort(moved, function(a, b)

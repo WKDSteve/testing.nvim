@@ -523,6 +523,46 @@ return function(H)
   eq(moved2, { "TESTS/a_spec.lua" }, "the file moved")
   has(moved_why["TESTS/a_spec.lua"], "ext:lib.nvim/lua/lib/x.lua", "and the moved input is named")
 
+  -- without key lines on both sides the reason is still named: a spec that names an absent place outside the
+  -- project (`"C:/real/home"`) and creates it during the run has a key before and none after
+  local outside = rec(
+    "TESTS/a_spec.lua",
+    nil,
+    "reads a file outside the project ('C:/real/home'), which the key cannot see",
+    "outside"
+  )
+  _, moved2, moved_why = write.reconcile(pb, { outside, rec("TESTS/0_spec.lua", K2) })
+  eq(moved2, { "TESTS/0_spec.lua", "TESTS/a_spec.lua" }, "both moved")
+  has(
+    moved_why["TESTS/a_spec.lua"],
+    "no key after the run: reads a file outside the project ('C:/real/home')",
+    "a key before, none after: the reason of after is named"
+  )
+  eq(moved_why["TESTS/0_spec.lua"], "new after the run", "a new file says so")
+  moved_why = select(3, write.reconcile({ rec("TESTS/b_spec.lua", K1) }, { CLOCK_B }))
+  eq(
+    moved_why["TESTS/b_spec.lua"],
+    "no key after the run: reads the clock",
+    "a key lost without key lines"
+  )
+  moved_why = select(3, write.reconcile({ CLOCK_B }, { rec("TESTS/b_spec.lua", K1) }))
+  eq(
+    moved_why["TESTS/b_spec.lua"],
+    "no key before the run: reads the clock",
+    "a key gained: the reason of before is named"
+  )
+  moved_why = select(3, write.reconcile(before, { rec("TESTS/a_spec.lua", K1) }))
+  eq(moved_why["TESTS/b_spec.lua"], "gone after the run", "a file gone after the run says so")
+  moved_why = select(
+    3,
+    write.reconcile({ CLOCK_B }, { rec("TESTS/b_spec.lua", nil, "spawns a process", "process") })
+  )
+  eq(
+    moved_why["TESTS/b_spec.lua"],
+    "before: reads the clock; after: spawns a process",
+    "another reason on both sides: both are named"
+  )
+
   -- the git facts: what differs is named, a failed call is told
   local named = write.fact_differences(
     { git = true, commit = ("a"):rep(40), tree = TREE },
