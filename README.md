@@ -474,3 +474,25 @@ hook: `scripts/test.sh ci --profile=strict` (the whole pipeline plus `luals`), o
 
 testing.nvim is released under the [MIT License](https://opensource.org/licenses/MIT), see
 [LICENSE](LICENSE).
+
+<!-- connections:begin (written by the app-icons tool of the workshop; change integrations.json there, not this block) -->
+## Connections
+
+![testing.nvim: what it uses and what uses it](assets/graphs/testing.nvim.png)
+
+**Uses**
+
+- [ai.nvim](https://github.com/WKDSteve/ai.nvim): A test sheet of testing.nvim can ask ai.nvim to explain a result (`ai.stream`). ([picture](assets/graphs/pair/testing.nvim--ai.nvim.png))
+- [docmap.nvim](https://github.com/WKDSteve/docmap.nvim): testing.nvim asks docmap.nvim which specs a change reaches (`docmap.testing`), unless a provider is given. ([picture](assets/graphs/pair/testing.nvim--docmap.nvim.png))
+- [hover.nvim](https://github.com/WKDSteve/hover.nvim): testing.nvim registers its previews with hover.nvim (`hover.registry`). ([picture](assets/graphs/pair/testing.nvim--hover.nvim.png))
+- [rules.nvim](https://github.com/WKDSteve/rules.nvim): The conformance step of testing.nvim checks a repository against a ruleset through rules.nvim (`rules_bridge`). ([picture](assets/graphs/pair/testing.nvim--rules.nvim.png))
+- [tasks.nvim](https://github.com/WKDSteve/tasks.nvim): A test sheet of testing.nvim names the task of the vault it belongs to (`task = "<area>/<id>"`). ([picture](assets/graphs/pair/testing.nvim--tasks.nvim.png))
+- [terminal.nvim](https://github.com/WKDSteve/terminal.nvim): testing.nvim runs a command in the terminal of terminal.nvim (`terminal.run`) when that is installed. ([picture](assets/graphs/pair/testing.nvim--terminal.nvim.png))
+- [ui.nvim](https://github.com/WKDSteve/ui.nvim): testing.nvim asks its questions with `kit.confirm` of ui.nvim when it is installed. ([picture](assets/graphs/pair/testing.nvim--ui.nvim.png))
+- [lib.nvim](https://github.com/WKDSteve/lib.nvim): the shared base of the plugins.
+
+**Used by**
+
+- [hub-desktop](https://github.com/WKDSteve/hub-desktop): The monitor of hub-desktop shows a light per repository, read from an export folder of testing.nvim (`testing-export/1`). ([picture](assets/graphs/pair/hub-desktop--testing.nvim.png))
+- [testing-desktop](https://github.com/WKDSteve/testing-desktop): testing-desktop reads the versioned documents of testing.nvim (`testing-export/1`); the engine, pinned in `engine.lock`, writes every result. ([picture](assets/graphs/pair/testing-desktop--testing.nvim.png))
+<!-- connections:end -->
