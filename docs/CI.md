@@ -180,7 +180,10 @@ The findings themselves are worked off with the rules of the LuaLS diagnostics (
 
 The in-process presets do not start `nvim -l` inside `nvim -l`: they run through `testing.cli` in the same process
 and with the same services. The suite step is green only when its Result-IR says so: exit `0` without a result is
-`infra` ("the suite wrote no result"), and a `--json` file left from an earlier run is not read. Options after `--` go to the `suite` step: `testing ci -- --jobs 4`. Without a suite step
+`infra` ("the suite wrote no result"), and a `--json` file left from an earlier run is not read. One exception: a
+suite whose selection (`--affected`, `--changed`, `--since`) reached no spec file ran nothing on purpose; the step is
+`skipped` with the reason `nothing affected: ...`, the run is partial (`suite: nothing affected`), and a surface gate
+after it is skipped too (there are no hits to compare). Options after `--` go to the `suite` step: `testing ci -- --jobs 4`. Without a suite step
 in the run, an option that selects part of the suite is an error, one that only says how it runs (`--cached`,
 `--jobs`) is not used and said so (the base of `ci commit --quick -- --cached` runs only its red steps). An option that selects part of the suite (`--file`, `--filter`, `--tags`, `--shard`,
 `--changed`, ... the ones `testing stamp` refuses) makes the whole run **partial**: no sentinel, and the document
@@ -338,7 +341,10 @@ red files of the commit as above, or the whole suite when those cannot be named.
 result, and a clean quick run is **no proof** of the tree: the pre-push hook does not take it. The intended cadence:
 `--quick` for every commit as it is made, one full `testing ci commit HEAD --base=@{upstream} -- --cached` before the
 push (its clean result is the proof the hook takes); a red tip is narrowed down with `--range`. `--quick` refuses a
-selection of its own after `--` (`--affected`, `--changed`, `--since`, `--file`, `--only`).
+selection of its own after `--` (`--affected`, `--changed`, `--since`, `--file`, `--only`). A commit whose diff reaches
+no spec file (a change of the workflow only) gets its own verdict, `nothing-affected` (exit `0`): the other steps ran
+and are green, the suite ran nothing (`ci commit abc1234 NOTHING-AFFECTED quick full 4 steps, the suite reached no spec
+file exit 0`). It is no proof of the tree either.
 
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position, and so do the folders that are new for every run: the snapshot directory
@@ -352,6 +358,7 @@ often as they occur. A red step without findings (an exit code) is compared as a
 | `clean` | the pipeline is green at the commit | `0` |
 | `known-red` | red, and nothing of it is new | `0` |
 | `flaky` | what was new is green on one of up to 3 reruns of its spec files at the commit (red under load only) | `0` |
+| `nothing-affected` | the pipeline is green and the suite's selection (`--quick`) reached no spec file: lint and the other steps ran, no spec did | `0` |
 | `docs-only` / `empty` | the commit changes only documentation (`*.md`, `doc/`, `docs/`, `LICENSE*`, `CHANGELOG*`) or nothing; not run (`--include-docs` runs it) | `0` |
 | `regression` | at least one finding is new | `1` |
 | `unclassified` | red, and there is no base (a root commit) or the base did not run | `1` |

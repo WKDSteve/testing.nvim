@@ -443,5 +443,38 @@ return function(H)
     end
   end
 
+  -- a suite whose selection reaches no spec file (`--affected` on a workflow-only change, the `--quick` of `ci commit`)
+  -- ran nothing on purpose: the step is skipped as `nothing affected`, not infra, and the surface gate after it is
+  -- skipped too (no hits to compare); the run stays exit 0 and partial
+  do
+    local root = project(
+      "nothing-affected",
+      "{ profiles = { full = { 'suite', 'surface' } }, steps = { suite = { preset = 'suite', stamp = false }, surface = { preset = 'surface' } } }",
+      { ["TESTS/a_spec.lua"] = "return function(H)\n  H.ok(true, 'green')\nend\n" }
+    )
+    write(root .. "/.github/workflows/ci.yml", "name: ci\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "workflow only")
+    local res = run(root, "--", "--affected=HEAD~1")
+    eq(res.code, 0, "nothing affected: exit 0, not infra (" .. res.out .. res.err .. ")")
+    lacks(res.out, "wrote no result", "nothing affected: not the infra reason")
+    lacks(res.out, ci.SENTINEL, "nothing affected: no sentinel (nothing was proven)")
+    local doc = doc_of(root)
+    local states = {}
+    for _, s in ipairs(doc.steps) do
+      states[s.name] = { s.state, tostring(s.reason):match("^[^:]+") }
+    end
+    eq(states, {
+      suite = { "skipped", ci.NOTHING_AFFECTED },
+      surface = { "skipped", ci.NOTHING_AFFECTED },
+    }, "nothing affected: the suite and the surface gate are skipped with the reason")
+    eq(doc.partial, true, "nothing affected: the run is partial")
+    eq(
+      require("testing.ci.commit").nothing_affected(doc),
+      true,
+      "nothing affected: ci commit reads it from the document"
+    )
+  end
+
   vim.fn.delete(tmp, "rf")
 end

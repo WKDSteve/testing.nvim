@@ -827,6 +827,45 @@ return function(H)
     r = commit.check(tmp, ("d"):rep(40), args, function() end)
     eq({ r.verdict, r.quick }, { "clean", nil }, "a full run is no quick one")
     eq(kept, 1, "a clean full run keeps its proof")
+    -- a quick run whose diff reaches no spec file (a workflow-only commit): lint green, the suite skipped as
+    -- `nothing affected` by `testing ci` -> its own verdict, exit 0, not infra and not clean
+    commit.run_ci = function(snap, _, extra, suite_args)
+      seen[#seen + 1] = { sha = snap.sha:sub(1, 1), extra = extra, suite = suite_args }
+      return 0,
+        {
+          profile = "full",
+          steps = {
+            { name = "luacheck", state = "green" },
+            {
+              name = "suite",
+              state = "skipped",
+              reason = require("testing.ci").NOTHING_AFFECTED
+                .. ": the selection reached no spec file",
+            },
+          },
+        },
+        ""
+    end
+    kept = 0
+    r = commit.check(tmp, ("e"):rep(40), quick_args, function() end)
+    eq(
+      { r.verdict, r.exit },
+      { "nothing-affected", 0 },
+      "quick, nothing affected: its own verdict, exit 0"
+    )
+    eq(kept, 0, "quick, nothing affected: no proof of the tree")
+    has(
+      commit.headline(r),
+      "NOTHING-AFFECTED quick full 2 steps, the suite reached no spec file exit 0",
+      "quick, nothing affected: the headline says so"
+    )
+    eq(
+      commit.nothing_affected({
+        steps = { { name = "x", state = "skipped", reason = "skipped by the step" } },
+      }),
+      false,
+      "a step skipped for another reason is no nothing-affected run"
+    )
     snapshot_run.keep = saved_keep
     local bad, why = commit.parse({ "HEAD", "--quick", "--", "--file", "x" })
     eq(bad, nil, "quick: refuses a selection of its own")

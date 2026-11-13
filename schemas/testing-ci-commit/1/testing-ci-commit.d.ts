@@ -33,6 +33,8 @@ export type Verdict =
   | "unclassified"
   | "docs-only"
   | "empty"
+  /** Green, and the suite's selection (`--quick`: the diff to the base) reached no spec file: the suite proved nothing. */
+  | "nothing-affected"
   | "error"
   | "infra";
 
@@ -44,7 +46,7 @@ export interface CommitResult {
   /** What red is compared with: `--base` or the first parent; null for a root commit. */
   base?: string | null;
   verdict: Verdict;
-  /** clean, known-red, flaky, docs-only, empty 0; regression, unclassified 1; error 2; infra 3. */
+  /** clean, known-red, flaky, docs-only, empty, nothing-affected 0; regression, unclassified 1; error 2; infra 3. */
   exit: 0 | 1 | 2 | 3;
   profile?: string | null;
   suite_args?: string[];

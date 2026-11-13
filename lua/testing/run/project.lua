@@ -45,6 +45,10 @@ M.EXIT_FAILED = 1
 M.EXIT_USAGE = 2
 M.EXIT_INFRA = 3
 
+---How the line of a run whose `--affected` / `--changed` / `--since` selection reached no spec file begins: nothing
+---ran, exit 0, no Result-IR. `testing ci` reads it to tell that run from one that wrote no result.
+M.NOTHING_AFFECTED_LINE = "no spec file is affected by the changes"
+
 ---@class Testing.Run.Services
 ---@field out fun(s: string) stdout line sink
 ---@field budget_clock? fun(): number Seconds on a monotonic clock, for `--time-budget` (a seam for specs; default: `vim.uv.hrtime`).
@@ -1255,10 +1259,10 @@ function M.execute_run(plan, sv, run_opts, err, ev)
       files = sel.files
       if #files == 0 then
         out(
-          ("no spec file is affected by the changes (%s): nothing ran. This is not a green run (no sentinel); run without %s to run everything"):format(
-            sel.label,
-            sel.label:match("^%-%-%a+")
-          )
+          (
+            M.NOTHING_AFFECTED_LINE
+            .. " (%s): nothing ran. This is not a green run (no sentinel); run without %s to run everything"
+          ):format(sel.label, sel.label:match("^%-%-%a+"))
         )
         return M.EXIT_OK
       end

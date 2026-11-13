@@ -38,7 +38,8 @@
   },
   "$defs": {
     "verdict": {
-      "enum": ["clean", "known-red", "flaky", "regression", "unclassified", "docs-only", "empty", "error", "infra"]
+      "description": "nothing-affected: green, and the suite's selection (--quick: the diff to the base) reached no spec file; the suite proved nothing.",
+      "enum": ["clean", "known-red", "flaky", "regression", "unclassified", "docs-only", "empty", "nothing-affected", "error", "infra"]
     },
     "item": {
       "type": "object",

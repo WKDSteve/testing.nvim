@@ -20,7 +20,8 @@
 --- all of it red at the base too), `flaky` 0 (what was new is green on one of up to `CONFIRM_ATTEMPTS` reruns of its
 --- spec files at the commit), `regression` 1 (something new is red on every one of those reruns too),
 --- `unclassified` 1 (red, and there is no base
---- or the base did not run), `docs-only` / `empty` 0 (not run), `error` 2 (usage, pipeline), `infra` 3 (git, the
+--- or the base did not run), `docs-only` / `empty` 0 (not run), `nothing-affected` 0 (green, and the suite's selection
+--- reached no spec file: `--quick` on a commit that changes no spec input), `error` 2 (usage, pipeline), `infra` 3 (git, the
 --- snapshot, a tool). A result is kept per commit, profile, base, suite options and runner (the trees of testing.nvim
 --- and lib.nvim) in the project's state directory (`ci-commit/`) and returned again without a run (`reused`) until
 --- `--force`.
@@ -69,7 +70,8 @@ M.USAGE = table.concat({
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
   "  --root=<dir>      the repository (default: the current directory)",
   "  -- <options>      passed on to the suite step of both runs",
-  "verdicts: clean 0, known-red 0, flaky 0, docs-only 0, empty 0, regression 1, unclassified 1, error 2, infra 3",
+  "verdicts: clean 0, known-red 0, flaky 0, docs-only 0, empty 0, nothing-affected 0, regression 1, unclassified 1,",
+  "          error 2, infra 3",
 }, "\n")
 
 ---@class Testing.Ci.Commit.Args
@@ -426,6 +428,7 @@ local KEPT = {
   unclassified = true,
   ["docs-only"] = true,
   empty = true,
+  ["nothing-affected"] = true,
 }
 
 ---@param verdict string
@@ -439,6 +442,24 @@ local function exit_of(verdict)
     return M.EXIT_INFRA
   end
   return M.EXIT_OK
+end
+
+---Did the suite of this `testing-ci/1` document run nothing because its selection reached no spec file (a step
+---`skipped` with the reason `testing.ci.NOTHING_AFFECTED`)?
+---@param doc table|nil
+---@return boolean
+function M.nothing_affected(doc)
+  local prefix = require("testing.ci").NOTHING_AFFECTED
+  for _, s in ipairs(doc and doc.steps or {}) do
+    if
+      s.state == "skipped"
+      and type(s.reason) == "string"
+      and s.reason:sub(1, #prefix) == prefix
+    then
+      return true
+    end
+  end
+  return false
 end
 
 ---@param it Testing.Ci.Baseline.Item
@@ -808,7 +829,9 @@ run_check = function(root, sha, args, say, snaps, r, base, mem)
     r.profile = head_doc.profile
   end
   if code == M.EXIT_OK then
-    r.verdict = "clean"
+    -- green, and the suite ran nothing because its selection (`--quick`: the diff to the base) reached no spec file:
+    -- lint and the other steps are green, the suite proved nothing (not `clean`, not `infra`)
+    r.verdict = M.nothing_affected(head_doc) and "nothing-affected" or "clean"
     -- the run at the commit is a snapshot run: a green, complete one is the proof of the commit's tree, so the
     -- pre-push hook (`--snapshot`) and `testing ci --snapshot` do not run the same tree again. A quick run selected:
     -- it proves nothing about the tree
@@ -1009,13 +1032,14 @@ function M.headline(r)
     )
   elseif r.verdict == "docs-only" or r.verdict == "empty" then
     return ("ci commit %s %s %d files, not run %s"):format(short, v, #(r.changed_files or {}), tail)
-  elseif r.verdict == "clean" then
+  elseif r.verdict == "clean" or r.verdict == "nothing-affected" then
     local n = #(r.steps_head or {})
-    return ("ci commit %s %s %s %d steps%s %s"):format(
+    return ("ci commit %s %s %s %d steps%s%s %s"):format(
       short,
       v,
       tostring(r.profile ~= vim.NIL and r.profile or "?"),
       n,
+      r.verdict == "nothing-affected" and ", the suite reached no spec file" or "",
       r.reused and " (kept result)" or "",
       tail
     )
@@ -1082,6 +1106,7 @@ end
 ---Verdicts that come from a run, so a green one could be read as more than it is.
 local RAN = {
   clean = true,
+  ["nothing-affected"] = true,
   ["known-red"] = true,
   flaky = true,
   regression = true,
@@ -1215,6 +1240,7 @@ local VERDICT_ORDER = {
   "flaky",
   "known-red",
   "clean",
+  "nothing-affected",
   "docs-only",
   "empty",
 }

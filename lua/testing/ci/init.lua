@@ -35,6 +35,11 @@ M.SCHEMA = "testing-ci/1"
 ---The last line of a run that is green over a whole profile (a script may read it; a partial run never prints it).
 M.SENTINEL = "TESTING_CI_OK"
 
+---How the `reason` of a suite step begins when its selection (`--affected`, `--changed`, `--since`) reached no spec
+---file: the step is `skipped`, not infra (nothing ran, and that is the answer), and a surface gate after it is skipped
+---too. `testing ci commit` turns a green run with such a suite into the verdict `nothing-affected`.
+M.NOTHING_AFFECTED = "nothing affected"
+
 M.USAGE = table.concat({
   "usage: testing ci [--profile=<name>] [--step=<a,b>] [--keep-going] [--reuse] [--agent|--no-agent] [--json=<file>]",
   "                  [--on=<host,linux,darwin-like,devcontainer>]",
@@ -476,6 +481,7 @@ end
 ---@field matched? integer Process steps: every distinct finding the error format matched, also those a `keep`
 ---dropped.
 ---@field partial? boolean The suite's own verdict was `green-partial`.
+---@field nothing_affected? boolean The suite step's selection reached no spec file (`skipped`, `M.NOTHING_AFFECTED`).
 ---@field notes? string[] What the step output said about how it ran (`Testing.Ci.Planned.notes`, `testing lint`).
 
 local MAX_ERRORS = 20
@@ -676,10 +682,10 @@ end
 ---@param root string
 ---@param suite_args string[]
 ---@param sv table The services of the outer run (`out`, `err`, `env`, `script`).
----@param o { selects: boolean, stamp_out?: string, events?: string, keep_ir?: boolean, suite_ir?: string } `selects`:
+---@param o { selects: boolean, stamp_out?: string, events?: string, keep_ir?: boolean, suite_ir?: string, suite_nothing?: boolean } `selects`:
 ---the suite options select part of the suite (a run that cannot earn a stamp); `stamp_out`: where the stamp goes
 ---(`--state-dir`); `events`: the suite's own events file; `keep_ir`: the suite leaves its Result-IR for a later step;
----`suite_ir`: that Result-IR, the hits of the surface gate.
+---`suite_ir`: that Result-IR, the hits of the surface gate; `suite_nothing`: the suite before reached no spec file.
 ---@return Testing.Ci.StepResult
 ---@return string|nil ir The Result-IR the suite wrote in this step.
 ---@return boolean|nil own The IR is ours (no `--json` of the caller): the run removes it.
@@ -720,6 +726,15 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   end
   -- the surface gate counts what the suite of this run exercised: its hits come from that suite's Result-IR
   if command == "surface" and not select(2, last_option(rest, "from")) then
+    if not o.suite_ir and o.suite_nothing then
+      return {
+        name = step.name,
+        state = "skipped",
+        ms = 0,
+        errors = {},
+        reason = M.NOTHING_AFFECTED .. ": the suite ran no spec file, there are no hits to compare",
+      }
+    end
     if not o.suite_ir then
       return {
         name = step.name,
@@ -746,12 +761,18 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   -- the line `testing stamp` prints when it refuses the stamp: kept apart, the guard lines after it would push it out
   -- of `last` (MAX_ERRORS) and a red step would end without its reason
   local refusal
+  -- the suite's selection reached no spec file (`testing.run.project`): it ran nothing, on purpose
+  local nothing_affected = false
+  local NOTHING_AFFECTED_LINE = require("testing.run.project").NOTHING_AFFECTED_LINE
   local function sink(fn)
     return function(s)
       fn(s)
       for line in tostring(s):gmatch("[^\n]+") do
         if command == "stamp" and line:match("^testing: stamp: not written") then
           refusal = line
+        end
+        if is_suite and line:sub(1, #NOTHING_AFFECTED_LINE) == NOTHING_AFFECTED_LINE then
+          nothing_affected = true
         end
         last[#last + 1] = line
         if #last > MAX_ERRORS then
@@ -855,6 +876,10 @@ local function run_inprocess(planned, root, suite_args, sv, o)
     -- `--cache-clear`, a run that wrote nothing) proves nothing
     if code == 0 and (verdict == "green" or verdict == "green-partial") then
       result.state, result.partial = "green", verdict == "green-partial"
+    elseif code == 0 and nothing_affected then
+      result.state = "skipped"
+      result.reason = M.NOTHING_AFFECTED .. ": the selection reached no spec file, no spec ran"
+      result.nothing_affected = true
     elseif code == 0 then
       result.state, result.reason = "infra", "the suite wrote no result (Result-IR)"
     elseif code == 1 and command == "stamp" and verdict == "green-partial" then
@@ -1406,6 +1431,7 @@ function M.main(argv, sv)
     wants_ir = wants_ir or (not p.skip and p.step.inprocess == "surface")
   end
   local suite_ir, own_suite_ir ---@type string|nil, string|nil
+  local suite_nothing = false
   for _, p in ipairs(planned) do
     local step = p.step
     ---@type Testing.Ci.StepResult
@@ -1475,9 +1501,14 @@ function M.main(argv, sv)
           events = suite_events,
           keep_ir = wants_ir,
           suite_ir = suite_ir,
+          suite_nothing = suite_nothing,
         })
         if step.inprocess == "run" then
           suite_ir = ir
+          suite_nothing = r.nothing_affected == true
+          if suite_nothing then
+            partial_why[#partial_why + 1] = "suite: " .. M.NOTHING_AFFECTED
+          end
           -- ours (not the caller's --json): removed when the run ends
           own_suite_ir = ours and ir or own_suite_ir
         end
