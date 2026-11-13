@@ -59,6 +59,23 @@ local off = state.subscribe(st, function(s, event) end)  -- called on apply; a b
 state.record(root, res, info)                 -- what the driver calls: read again under the lock, apply, write
 ```
 
+## In a tree view
+
+`testing.integrations.tree` shows the last result next to spec files in a tree view. It registers one
+decorator at `lib.nvim.tree.registry`, which filetree.nvim's own tree (`adapter = "native"`) reads:
+
+| On a spec file | Means |
+| --- | --- |
+| `✗ 2/14` | two of its fourteen cases are red |
+| `~` | the file changed since its result was recorded (stale, whatever the result said) |
+| `○` | nothing red, but a case did not run (skipped): not green |
+| `✓` | every case green |
+
+A folder shows the worst of what lies below it, also while it is closed. `setup()` registers it;
+nothing is read before a tree asks, then the result file of the project of the working directory is
+read once and again when it changes. Without a tree that reads the registry nothing happens, and
+without `lib.nvim.tree.registry` (an older lib.nvim) the registration is skipped.
+
 ## An untrusted file
 
 `last.json` is read back like `runs.jsonl`: a size cap (`MAX_BYTES`) before decoding, `pcall` around the

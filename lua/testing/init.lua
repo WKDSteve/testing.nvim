@@ -24,6 +24,11 @@ function M.setup(opts)
   pcall(function()
     require("testing.hover").setup()
   end)
+  -- The last result as a badge on spec files in a tree view: an entry at lib.nvim's registry, read by
+  -- filetree.nvim's own tree when there is one. Nothing is loaded for it before a tree asks.
+  pcall(function()
+    require("testing.integrations.tree").register()
+  end)
   return M
 end
 
