@@ -30,6 +30,8 @@
 ---@field root string Project root (absolute); also the working directory of the child.
 ---@field flags? Testing.Child.Flags
 ---@field json? string Where the IR is written (`run` only); default: a temp file that is removed afterwards.
+---@field live? { state_opts?: Testing.State.Opts, poll_ms?: integer } Handed to `testing.bindings.live.begin` (specs).
+---@field events? string Where the run writes its events (`run` only); default: a file `testing.bindings.live` follows while a tree shows results, else none.
 ---@field system? fun(argv: string[], opts: table, on_exit: fun(res: vim.SystemCompleted)): any Seam for specs (default `vim.system`).
 ---@field trust_asked? boolean The run is the second one after the trust question (`testing.bindings.trust_prompt`): a refusal is not asked about again.
 

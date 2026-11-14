@@ -95,6 +95,8 @@ describe, case, plus the spec files below `TESTS` that never ran.
 | Sign | Means |
 | --- | --- |
 | `✗` | red: `fail`, `error`, `timeout`, `crash`, `xpass` |
+| `●` | running: the file is being run right now |
+| `◌` | queued: the run will get to it |
 | `~` | stale: the file changed since the result was recorded. An old red stays red, an old green is no green |
 | `·` | never ran |
 | `○` | skipped |
@@ -115,7 +117,7 @@ assertions stand below it, each with its line.
 | `R` | run what failed last time (`--lf`) |
 
 The run is the one of `:Testing run` (a headless child, the summary as a notification, the failures in the
-quickfix list); when it ends, the view shows the new result, and every node keeps its place and its open
+quickfix list), and the view follows it while it goes (see below); every node keeps its place and its open
 state. The keys are the view's own, in other views `r` and `R` keep their meaning; move or drop them with
 `setup({ tree = { keys = { run = "<lhs>", failed = false } } })`, the actions stay in the tree's menu. To a tree
 that asks a source for the preview of a node, a red case answers with what it said (status, message,
@@ -123,6 +125,25 @@ expected against actual, the failing assertions).
 
 A spec file that never ran is found by name (`*_spec.lua` below `TESTS`); a project with another
 `spec_pattern` shows such a file after its first run. The view changes no file.
+
+### While a run goes
+
+A run started from this editor (`:Testing run`, `:Testing file`, `r` and `R` in the view, `require("testing").run`)
+is followed case by case, in the view and in the badges of every other view:
+
+1. the files of the run are queued (`◌`), the file that is being run is running (`●`, the badge of a spec file
+   shows `●` too, and so do its folders);
+2. every case gets its result the moment the run records it: its sign and time, the count and the sign of its
+   file, its describe and its folders, and the badge of the file;
+3. a case the run did not get to (a run narrowed to other cases) shows again what it showed before;
+4. when the run has ended, the stored result is read again. A run that was stopped or crashed leaves the last
+   good result: nothing stays `running`.
+
+How: while a tree shows results, the child gets `--events=<file>` ([CLI.md](CLI.md)), a file in a folder `live`
+below the state folder of the project, and the editor reads what is added to it ten times a second. The words of
+a failure are not in that stream; they show when the run has ended. Without a tree that shows results nothing is
+followed: no file, no flag, no timer. A run from elsewhere (a terminal, the CI) shows when it has written its
+result.
 
 ### When it reads
 

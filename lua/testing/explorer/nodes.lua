@@ -130,6 +130,7 @@ end
 ---@field root string  Absolute project root, `/`-separated.
 ---@field cases Testing.State.Case[]
 ---@field stale? table<string, true>  Spec files (relative) whose result is older than the file.
+---@field live? table<string, string>  Case id -> the status to show instead of the recorded one (`running`, `queued`) while a run is going.
 ---@field files? string[]  Spec files there are (relative), whether they ran or not.
 ---@field positions? fun(file: string): Testing.Position[]|nil  The describe/it calls of a spec file that never ran; asked when its node is opened.
 
@@ -151,47 +152,192 @@ function M.data(node)
   return type(data) == "table" and data or nil
 end
 
+local restyle, leaf_sum, style
+
 ---Write on `node` what it shows: its own status for a case, else the worst below it with `red/all` and the time.
 ---Recurses into child lists; a node whose children are not loaded yet keeps the status it carries.
 ---@param node table
 ---@return { worst: string|nil, total: integer, red: integer, ms: number }
 function M.restyle(node)
-  local data = M.data(node)
-  local sum = { worst = nil, total = 0, red = 0, ms = 0 }
-  local is_case = data ~= nil and (data.case ~= nil or data.kind == "assert")
-  if is_case or type(node.children) ~= "table" then
-    if node.status then
-      sum.worst, sum.total = node.status, 1
-      sum.red = M.RED[node.status] and 1 or 0
-      sum.ms = data and data.duration_ms or 0
+  return restyle(node, nil)
+end
+
+---@class Testing.Explorer.Index  What `M.set_many` needs to change cases of a built tree without walking it.
+---@field top table
+---@field by_case table<string, table>  case id -> its node
+---@field by_file table<string, table>  spec file -> its node
+---@field parent table<table, table>
+---@field depth table<table, integer>
+---@field sums table<table, { worst: string|nil, total: integer, red: integer, ms: number }>
+
+---Index a built tree (the lists only: children that are not loaded yet are not in it).
+---@param top table
+---@return Testing.Explorer.Index
+function M.index(top)
+  local index = { top = top, by_case = {}, by_file = {}, parent = {}, depth = {}, sums = {} }
+  local function walk(node, parent, depth)
+    index.parent[node], index.depth[node] = parent, depth
+    local data = M.data(node)
+    if data and data.case and data.kind ~= "assert" then
+      index.by_case[data.case] = node
     end
-    if data and data.kind == "assert" then
-      return { worst = nil, total = 0, red = 0, ms = 0 }
+    if data and data.kind == "file" and data.file then
+      index.by_file[data.file] = node
     end
     if type(node.children) == "table" then
       for _, child in ipairs(node.children) do
-        M.restyle(child)
+        walk(child, node, depth + 1)
+      end
+    end
+  end
+  walk(top, nil, 0)
+  restyle(top, index.sums)
+  return index
+end
+
+---@class Testing.Explorer.Change
+---@field id? string  Case id.
+---@field file? string  Spec file: the change is for its node (a file that is one case, or one whose cases are not loaded).
+---@field status string
+---@field duration_ms? number
+
+---Change the status of cases and write again what they and everything above them show. The cost is the depth of
+---each case times the children on the way up, not the size of the tree.
+---@param index Testing.Explorer.Index
+---@param changes Testing.Explorer.Change[]
+---@return table[] updates  One `{ id, status, icon, hl, columns }` per node that looks different now, deepest first: what `emit.push` takes.
+function M.set_many(index, changes)
+  local dirty, order = {}, {}
+  local function mark(node)
+    if not dirty[node] then
+      dirty[node] = true
+      order[#order + 1] = node
+    end
+  end
+  for _, change in ipairs(changes) do
+    local node = change.id and index.by_case[change.id] or nil
+    if not node and change.file then
+      local file = index.by_file[change.file]
+      -- the node of the file stands for its cases only while it has none of its own in the tree
+      if file and type(file.children) ~= "table" or (file and M.data(file).case) then
+        node = file
+      end
+    end
+    if node then
+      node.status = change.status
+      local data = M.data(node)
+      if data and change.duration_ms then
+        data.duration_ms = change.duration_ms
+      end
+      local up = node
+      while up do
+        mark(up)
+        up = index.parent[up]
+      end
+    end
+  end
+  table.sort(order, function(a, b)
+    return index.depth[a] > index.depth[b]
+  end)
+  local updates = {}
+  for _, node in ipairs(order) do
+    local data = M.data(node)
+    local is_case = data ~= nil and data.case ~= nil
+    local sum
+    if is_case or type(node.children) ~= "table" then
+      sum = leaf_sum(node)
+    else
+      sum = { worst = nil, total = 0, red = 0, ms = 0 }
+      for _, child in ipairs(node.children) do
+        local below = index.sums[child]
+        if below then
+          sum.worst = M.worse(sum.worst, below.worst)
+          sum.total, sum.red, sum.ms =
+            sum.total + below.total, sum.red + below.red, sum.ms + below.ms
+        end
+      end
+    end
+    index.sums[node] = sum
+    if style(node, sum, is_case) then
+      updates[#updates + 1] = {
+        id = node.id,
+        status = node.status,
+        icon = node.icon,
+        hl = node.hl,
+        columns = node.columns,
+      }
+    end
+  end
+  return updates
+end
+
+---What a leaf adds to the nodes above it.
+---@param node table
+---@return { worst: string|nil, total: integer, red: integer, ms: number }
+leaf_sum = function(node)
+  local data = M.data(node)
+  if not node.status or (data and data.kind == "assert") then
+    return { worst = nil, total = 0, red = 0, ms = 0 }
+  end
+  return {
+    worst = node.status,
+    total = 1,
+    red = M.RED[node.status] and 1 or 0,
+    ms = data and data.duration_ms or 0,
+  }
+end
+
+---Write on a node what it shows for this sum.
+---@param node table
+---@param sum { worst: string|nil, total: integer, red: integer, ms: number }
+---@param is_case boolean
+---@return boolean drawn  false for a node that shows nothing of it (the root, an assertion, a note)
+style = function(node, sum, is_case)
+  local data = M.data(node)
+  if not data or data.kind == "root" or data.kind == "assert" then
+    return false
+  end
+  local look = M.look(sum.worst)
+  node.icon, node.hl = look.icon, look.hl
+  local columns = {}
+  if not is_case and sum.total > 0 and type(node.children) == "table" then
+    columns[#columns + 1] = sum.red > 0 and ("%d/%d"):format(sum.red, sum.total)
+      or tostring(sum.total)
+  end
+  local idle = sum.worst == "never" or sum.worst == "running" or sum.worst == "queued"
+  if sum.total > 0 and not idle and (sum.ms > 0 or is_case) then
+    columns[#columns + 1] = M.duration(sum.ms)
+  end
+  node.columns = columns
+  return true
+end
+
+---@param node table
+---@param sums? table<table, table>  Filled with the sum of every node walked.
+---@return { worst: string|nil, total: integer, red: integer, ms: number }
+restyle = function(node, sums)
+  local data = M.data(node)
+  local sum
+  local is_case = data ~= nil and (data.case ~= nil or data.kind == "assert")
+  if is_case or type(node.children) ~= "table" then
+    sum = leaf_sum(node)
+    if type(node.children) == "table" then
+      for _, child in ipairs(node.children) do
+        restyle(child, sums)
       end
     end
   else
+    sum = { worst = nil, total = 0, red = 0, ms = 0 }
     for _, child in ipairs(node.children) do
-      local below = M.restyle(child)
+      local below = restyle(child, sums)
       sum.worst = M.worse(sum.worst, below.worst)
       sum.total, sum.red, sum.ms = sum.total + below.total, sum.red + below.red, sum.ms + below.ms
     end
   end
-  if data and data.kind ~= "root" and data.kind ~= "assert" then
-    local look = M.look(sum.worst)
-    node.icon, node.hl = look.icon, look.hl
-    local columns = {}
-    if not is_case and sum.total > 0 and type(node.children) == "table" then
-      columns[#columns + 1] = sum.red > 0 and ("%d/%d"):format(sum.red, sum.total)
-        or tostring(sum.total)
-    end
-    if sum.total > 0 and sum.worst ~= "never" and (sum.ms > 0 or is_case) then
-      columns[#columns + 1] = M.duration(sum.ms)
-    end
-    node.columns = columns
+  if sums then
+    sums[node] = sum
+  end
+  if style(node, sum, is_case) then
     if data.kind ~= "case" and data.kind ~= "file" or type(node.children) == "table" then
       -- what is red is in sight without a key press; closed by hand it stays closed
       node.open = sum.red > 0 or nil
@@ -267,11 +413,14 @@ end
 ---@param root string
 ---@param case Testing.State.Case
 ---@param stale boolean
+---@param live? table<string, string>
 ---@return table node
-local function case_node(root, case, stale)
+local function case_node(root, case, stale, live)
   ---@type string
   local shown = case.status
-  if stale and not M.RED[shown] then
+  if live and live[case.id] then
+    shown = live[case.id]
+  elseif stale and not M.RED[shown] then
     shown = "stale"
   end
   return {
@@ -412,8 +561,9 @@ end
 ---@param file string
 ---@param cases Testing.State.Case[]
 ---@param stale boolean
+---@param live? table<string, string>
 ---@return table node
-local function file_node(root, file, cases, stale)
+local function file_node(root, file, cases, stale, live)
   local node = {
     id = "tests:file:" .. file,
     label = file:match("([^/]+)$") or file,
@@ -423,7 +573,7 @@ local function file_node(root, file, cases, stale)
   }
   if #cases == 1 and is_whole_file(cases[1]) then
     -- the file is the case
-    local case = case_node(root, cases[1], stale)
+    local case = case_node(root, cases[1], stale, live)
     node.status = case.status
     node.data.lnum = case.data.lnum
     node.data.testing = vim.tbl_extend("force", case.data.testing, { kind = "file" })
@@ -444,7 +594,7 @@ local function file_node(root, file, cases, stale)
     for depth = 1, #titles do
       parent = describe_node(file, parent, index, titles, depth)
     end
-    parent.children[#parent.children + 1] = case_node(root, case, stale)
+    parent.children[#parent.children + 1] = case_node(root, case, stale, live)
   end
   return node
 end
@@ -522,7 +672,7 @@ function M.build(input)
         end
       end
     else
-      node = file_node(root, file, cases, stale[file] == true)
+      node = file_node(root, file, cases, stale[file] == true, input.live)
     end
     local parent = dir_node(file:match("^(.*)/[^/]+$") or "")
     parent.children[#parent.children + 1] = node

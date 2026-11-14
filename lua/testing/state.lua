@@ -173,6 +173,17 @@ local function inside(file)
   return not (file == ".." or file:find("^%.%./") or file:find("/%.%./") or file:find("/%.%.$"))
 end
 
+---Whether a spec file name that came from outside (a result file, the events of a run) may be used: relative to
+---the project, no drive, no `..` segment, not longer than an id. Whoever stats or shows such a name asks first.
+---@param file any
+---@return boolean
+function M.inside(file)
+  return type(file) == "string"
+    and file ~= ""
+    and #file <= M.MAX_ID_BYTES
+    and inside(norm_file(file))
+end
+
 ---Where the state of a project lives. A named class, not an inline `{ state_dir?: string }`: LuaLS cannot pass a
 ---parameter of an inline type with an optional key on to a parameter of the same inline type.
 ---@class Testing.State.Opts
@@ -802,6 +813,54 @@ function M.apply(st, res, info)
   st.run, st.ts, st.partial = res.run.id, ts, info.partial == true
   emit(st, "apply")
   return st
+end
+
+---One case of a run that is still going (an event of `testing.run.events`): its status and duration replace the
+---ones of the case with that id, a case the state does not know is added. The cost does not grow with the state.
+---The words of a failure (message, expected, actual, the failing assertions) are not in an event: they are kept
+---while the status stays what it was and dropped when it changes, so a case never shows the text of another
+---outcome. The file records are left alone: only a finished run (`apply`) says a file ran. Emits `case`.
+---@param st Testing.State
+---@param ev { id: string, file: string, status: string, duration_ms: number }  Untrusted like a result file.
+---@return Testing.State.Case|nil case  nil: the event is not usable and nothing changed
+function M.apply_case(st, ev)
+  if type(ev) ~= "table" then
+    return nil
+  end
+  local case = validate_case({
+    id = ev.id,
+    file = ev.file,
+    status = ev.status,
+    duration_ms = ev.duration_ms,
+  })
+  if not case then
+    return nil
+  end
+  local known = st._by_id[case.id]
+  if known then
+    if known.file ~= case.file then
+      return nil
+    end
+    if known.status ~= case.status then
+      st.summary[known.status] = math.max(0, (st.summary[known.status] or 0) - 1)
+      st.summary[case.status] = (st.summary[case.status] or 0) + 1
+      known.status = case.status
+      known.message, known.expected, known.actual = nil, nil, nil
+      known.fails, known.fails_total = nil, nil
+    end
+    known.duration_ms = case.duration_ms
+    case = known
+  else
+    if #st.cases >= M.MAX_CASES then
+      return nil
+    end
+    case.name = clean(case.id:match(".*::(.*)$"), 300)
+    st.cases[#st.cases + 1] = case
+    st._by_id[case.id] = case
+    st.summary[case.status] = (st.summary[case.status] or 0) + 1
+  end
+  emit(st, "case")
+  return case
 end
 
 -- =========================================================

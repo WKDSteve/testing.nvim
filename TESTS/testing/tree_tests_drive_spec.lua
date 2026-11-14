@@ -42,7 +42,8 @@ vim.fn.mkdir(scratch, "p")
 for _, var in ipairs({ "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME" }) do
   vim.env[var] = scratch
 end
-local sopts = { state_dir = scratch .. "/state" }
+-- the child of the real run below is told to trust the fixture project, and finds lib.nvim where this run does
+vim.env.TESTING_TRUST = "1"
 
 -- the bench looks for lib.nvim and ui.nvim next to filetree.nvim, or where these name them
 local repos = vim.env.REPOS_DIR
@@ -88,12 +89,8 @@ local function record(status)
     end
     result.add_case(res, case)
   end
-  local ok, err = state.record(
-    root,
-    result.finalize(res),
-    { ran_files = { [RED] = true, [GREEN] = true } },
-    sopts
-  )
+  local ok, err =
+    state.record(root, result.finalize(res), { ran_files = { [RED] = true, [GREEN] = true } })
   assert(ok, tostring(err))
 end
 
@@ -121,7 +118,6 @@ local T = dofile(filetree .. "/TESTS/native_drive.lua")({
     require("testing").setup({})
     -- what setup registered, with the result folder of this run and a run that starts nothing
     tree_mod.register({
-      state_opts = sopts,
       run = function(run)
         started[#started + 1] = run
       end,
@@ -287,6 +283,66 @@ T.ok(
 T.ok("... the node kept its place: the case below it is still in sight", line_of("two") ~= nil)
 
 T.eq("nothing was said at warning level", T.loud(mark), {})
+
+-- ── a real run, followed while it goes ───────────────────────────────────────
+-- `r` on the file that never ran, with the real child this time: the run writes its events to a file, the
+-- editor reads it as it grows, and the tree is told case by case.
+tree_mod.register({})
+T.tree()
+vim.cmd("Filetree source tests")
+-- the entry was replaced: the tree shows the view from its top again, and a folder opens by itself only once
+T.wait(function()
+  return line_of("TESTS") ~= nil
+end)
+T.adapter.expand_node({ path = T.dir .. "/TESTS" })
+T.wait(function()
+  return line_of("fresh_spec.lua") ~= nil
+end)
+local follow = require("testing.bindings.live")
+local kinds, synthetic = {}, false
+local unlisten = follow.listen(function(_, batch)
+  for _, ev in ipairs(batch) do
+    kinds[ev.event] = (kinds[ev.event] or 0) + 1
+    synthetic = synthetic or ev.synthetic == true
+  end
+end)
+local verdict
+local real_show = require("testing.bindings.child").show
+require("testing.bindings.child").show = function(v)
+  verdict = v
+end
+on_line("fresh_spec.lua")
+T.feed("r")
+T.eq("a run is followed as soon as it starts", follow.active(), 1)
+T.ok(
+  "the run ends",
+  T.wait(function()
+    return verdict ~= nil
+  end, 120000)
+)
+require("testing.bindings.child").show = real_show
+unlisten()
+T.ok(
+  "its events reached the editor: the plan, the file, its two cases, the end  -- "
+    .. vim.inspect(kinds),
+  kinds.run_start == 1 and kinds.file_start == 1 and kinds.case == 2 and kinds.run_done == 1
+)
+T.ok("... the end the run wrote itself, not one made up for a killed run", not synthetic)
+T.eq("... and nothing is followed after it", follow.active(), 0)
+T.ok(
+  "the file that never ran shows the result of the run",
+  T.wait(function()
+    local line = line_of("fresh_spec.lua")
+    return line ~= nil and T.lines()[line]:find("·", 1, true) == nil
+  end, 6000)
+)
+local after = state.load(root)
+local fresh_cases = 0
+for _, case in ipairs(after.cases) do
+  fresh_cases = fresh_cases + (case.file == FRESH and 1 or 0)
+end
+T.eq("... which stored its two cases", fresh_cases, 2)
+T.ok("... and left the cases of the other files alone", state.case(after, RED_CASE) ~= nil)
 T.eq("no dialog nobody expected", T.unanswered, 0)
 
 -- ── setup({ tree = ... }) ────────────────────────────────────────────────────

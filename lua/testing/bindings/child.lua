@@ -102,6 +102,9 @@ function M.build_argv(sub, opts)
   if sub == "run" and opts.json then
     add_flag(argv, "json", opts.json)
   end
+  if sub == "run" and opts.events then
+    add_flag(argv, "events", opts.events)
+  end
   return argv
 end
 
@@ -340,13 +343,32 @@ function M.start(sub, opts, on_done)
     opts.json = vim.fn.tempname() .. ".testing-ir.json"
     own_json = true
   end
+  -- While a tree shows results, the run writes its events to a file that is read as it grows
+  -- (`testing.bindings.live`); nobody listening: no file, no flag.
+  local live_run
+  if sub == "run" and not opts.events then
+    local ok_live, followed = pcall(function()
+      return require("testing.bindings.live").begin(opts.root, opts.live)
+    end)
+    live_run = ok_live and followed or nil
+    if live_run then
+      opts.events = live_run.path
+    end
+  end
   local argv, err = M.build_argv(sub, opts)
   if err then
+    if live_run then
+      live_run.finish(nil)
+    end
     return false, err
   end
 
   local function finish(res)
     vim.schedule(function()
+      if live_run then
+        -- before the verdict is read: the stream ends here, also for a run that is started again below
+        pcall(live_run.finish, res.code)
+      end
       local function report()
         local ok, verdict = pcall(M.interpret, sub, res, opts)
         if not ok then
@@ -384,6 +406,9 @@ function M.start(sub, opts, on_done)
   local ok, started =
     pcall(system, argv, { cwd = opts.root, text = true, timeout = M.TIMEOUT_MS }, finish)
   if not ok then
+    if live_run then
+      live_run.finish(nil)
+    end
     return false, tostring(started)
   end
   return true

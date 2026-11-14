@@ -10,6 +10,12 @@
 ---    ran (`testing.explorer.nodes` builds them), with the actions "run this node" and "run what failed last
 ---    time", and what a red case said as its preview
 ---
+--- **While a run goes.** A run started from this editor is followed case by case (`testing.bindings.live`,
+--- `testing.explorer.live`): the cases of a file that is being run show `running`, the ones still to come
+--- `queued`, and each result moves its case, everything above it and the badge of its file the moment it is
+--- recorded. When the run has ended, or was killed, the stored result is read again: no case stays `running`.
+--- A run from elsewhere (a terminal, the CI) shows when it has written its result, as before.
+---
 --- Soft in both directions. Nothing here requires a tree plugin: the registry is lib.nvim's, and without
 --- a reader the entries are never looked at. Nothing is loaded before a tree asks either: the result
 --- file is read on the first `subscribe` (or when the view is first shown), and again when it changes on disk
@@ -33,11 +39,12 @@ M.KEYS = { run = "r", failed = "R" }
 M.MAX_SPEC_BYTES = 1024 * 1024
 
 --- Worst first. `skipped` ranks above `passed`: a folder of green and skipped files is not green.
-M.SEVERITY = { "failed", "stale", "skipped", "passed" }
+M.SEVERITY = { "failed", "running", "stale", "skipped", "passed" }
 
 ---@type table<string, { text: string, hl: string }>
 local LOOK = {
   failed = { text = "✗", hl = "DiagnosticError" },
+  running = { text = "●", hl = "DiagnosticInfo" },
   stale = { text = "~", hl = "Comment" },
   skipped = { text = "○", hl = "DiagnosticWarn" },
   passed = { text = "✓", hl = "DiagnosticOk" },
@@ -61,6 +68,12 @@ local options = {}
 local badges = {}
 ---@type Testing.State|nil  the result the badges and the view were made from
 local loaded = nil
+---@type Testing.Explorer.Live|nil  the run that is going, laid over `loaded`
+local session = nil
+---@type Testing.Explorer.Index|nil  the nodes of the view as they were last built
+local shown = nil
+---@type fun()|nil
+local unlisten = nil
 ---@type fun(keys?: string[])|nil
 local emit = nil
 ---@type table<table, true>  the `emit` of every view that shows the source
@@ -187,7 +200,8 @@ function M.reload()
   local st = state.load(root, options.state_opts)
   badges = emit and M.badges(st) or {}
   stop_watching()
-  loaded = nil
+  -- what a run in progress laid over the old result goes with it: the next event starts over on this one
+  loaded, session = nil, nil
   if in_use() then
     loaded = st
     watch(root)
@@ -201,8 +215,13 @@ function M.reload()
   end
 end
 
----Follow the directory of the editor while a tree reads this module.
+---Follow the directory of the editor and the runs started from it while a tree reads this module.
 local function follow_directory()
+  if not unlisten then
+    unlisten = require("testing.bindings.live").listen(function(root, events)
+      M.on_events(root, events)
+    end)
+  end
   if augroup then
     return
   end
@@ -222,11 +241,144 @@ local function release()
     return
   end
   stop_watching()
+  if unlisten then
+    unlisten()
+    unlisten = nil
+  end
   if augroup then
     pcall(vim.api.nvim_del_augroup_by_id, augroup)
     augroup = nil
   end
-  loaded = nil
+  loaded, session, shown = nil, nil, nil
+end
+
+---The badge of a spec file while a run goes: running while one of its cases is running or queued, else what
+---its cases say so far. A file with a result of this run is not stale, whatever its record says.
+---@param live Testing.Explorer.Live
+---@param file string
+---@return table|nil
+function M.live_badge(live, file)
+  local sum = require("testing.explorer.live").file_summary(live, file)
+  if sum.mark then
+    return { text = LOOK.running.text, hl = LOOK.running.hl, status = "running", count = sum.red }
+  end
+  if sum.total == 0 then
+    return nil
+  end
+  local failed = {}
+  for i = 1, sum.red do
+    failed[i] = true
+  end
+  local recorded = require("testing.state").file_summary(live.st, file)
+  return M.badge({
+    file = file,
+    total = sum.total,
+    counts = sum.counts,
+    failed = failed,
+    duration_ms = 0,
+    stale = not live.fresh[file] and recorded ~= nil and recorded.stale,
+  })
+end
+
+---What a spec file without cases of its own in the tree shows while a run goes.
+---@param live Testing.Explorer.Live
+---@param file string
+---@return string
+local function file_status(live, file)
+  local nodes = require("testing.explorer.nodes")
+  local sum = require("testing.explorer.live").file_summary(live, file)
+  if sum.mark then
+    return sum.mark
+  end
+  local worst = nil
+  for status in pairs(sum.counts) do
+    worst = nodes.worse(worst, status)
+  end
+  return worst or "never"
+end
+
+---The events of a run started from this editor (a batch): the store, the badges and the view follow.
+---@param root string
+---@param events table[]
+function M.on_events(root, events)
+  if not in_use() or norm(root) ~= norm(project_root()) then
+    return
+  end
+  local state = require("testing.state")
+  local live = require("testing.explorer.live")
+  local nodes = require("testing.explorer.nodes")
+  if not loaded then
+    loaded = state.load(project_root(), options.state_opts)
+  end
+  if not session or session.st ~= loaded then
+    session = live.new(loaded)
+  end
+  local dirty
+  for _, ev in ipairs(events) do
+    dirty = live.feed(session, ev, dirty)
+  end
+  if not dirty then
+    return
+  end
+  if dirty.done then
+    -- ended or killed: what the run stored (or the last good result) is the truth from here on
+    session = nil
+    M.reload()
+    return
+  end
+  if emit then
+    local paths = {}
+    for file in pairs(dirty.files) do
+      local path = norm(loaded.root .. "/" .. file)
+      badges[path] = M.live_badge(session, file)
+      paths[#paths + 1] = path
+    end
+    if #paths > 0 then
+      emit(paths)
+    end
+  end
+  if next(views) == nil or not shown then
+    return
+  end
+  local changes, blind = {}, {}
+  for id in pairs(dirty.cases) do
+    local case = state.case(loaded, id)
+    local change = {
+      id = id,
+      status = live.status(session, id) or "never",
+      duration_ms = case and case.duration_ms or nil,
+    }
+    if shown.by_case[id] then
+      changes[#changes + 1] = change
+    else
+      blind[#blind + 1] = change
+    end
+  end
+  for file in pairs(dirty.files) do
+    local node = shown.by_file[file]
+    -- a file that is not a case and has no cases in the tree (it never ran): it shows the run as a whole
+    if node and type(node.children) ~= "table" and not nodes.data(node).case then
+      changes[#changes + 1] = { file = file, status = file_status(session, file) }
+    end
+  end
+  local updates = nodes.set_many(shown, changes)
+  -- a case the tree got from reading a file that never ran: its node is the tree's, not in the index
+  for _, change in ipairs(blind) do
+    local look = nodes.look(change.status)
+    local timed = nodes.GREEN[change.status] or nodes.RED[change.status]
+    updates[#updates + 1] = {
+      id = "tests:case:" .. change.id,
+      status = change.status,
+      icon = look.icon,
+      hl = look.hl,
+      columns = timed and { nodes.duration(change.duration_ms or 0) } or {},
+    }
+  end
+  for view in pairs(views) do
+    for _, update in ipairs(updates) do
+      pcall(view.push, update)
+    end
+  end
 end
 
 ---The spec files there are, relative to the root.
@@ -266,22 +418,36 @@ function M.root_node()
   -- what was read is current only while the result file is followed, and only for that project
   local st = (watcher and loaded and loaded.root == root) and loaded
     or state.load(root, options.state_opts)
+  -- a run that is going: its marks are drawn, and a file with a result of this run is not stale
+  local live = (session and session.st == st) and session or nil
   local stale, seen = {}, {}
   for _, case in ipairs(st.cases) do
     if not seen[case.file] then
       seen[case.file] = true
-      stale[case.file] = state.is_stale(st, case.file) or nil
+      if not (live and live.fresh[case.file]) then
+        stale[case.file] = state.is_stale(st, case.file) or nil
+      end
     end
   end
-  return nodes.build({
+  local top = nodes.build({
     root = root,
     cases = st.cases,
     stale = stale,
+    live = live and live.marks or nil,
     files = spec_files(root),
     positions = function(file)
       return positions_of(root, file)
     end,
   })
+  shown = nodes.index(top)
+  if live then
+    local changes = {}
+    for file in pairs(live.file_marks) do
+      changes[#changes + 1] = { file = file, status = file_status(live, file) }
+    end
+    nodes.set_many(shown, changes)
+  end
+  return top
 end
 
 ---Start a run of the current project with these flags.
