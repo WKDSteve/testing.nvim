@@ -61,8 +61,11 @@ state.record(root, res, info)                 -- what the driver calls: read aga
 
 ## In a tree view
 
-`testing.integrations.tree` shows the last result next to spec files in a tree view. It registers one
-decorator at `lib.nvim.tree.registry`, which filetree.nvim's own tree (`adapter = "native"`) reads:
+`testing.integrations.tree` shows the last result in a tree view. It registers two entries at
+`lib.nvim.tree.registry`, which filetree.nvim's own tree (`adapter = "native"`) reads: a badge next to spec
+files in every view, and a view of its own, `tests`.
+
+### The badge
 
 | On a spec file | Means |
 | --- | --- |
@@ -71,10 +74,63 @@ decorator at `lib.nvim.tree.registry`, which filetree.nvim's own tree (`adapter 
 | `○` | nothing red, but a case did not run (skipped): not green |
 | `✓` | every case green |
 
-A folder shows the worst of what lies below it, also while it is closed. `setup()` registers it;
-nothing is read before a tree asks, then the result file of the project of the working directory is
-read once and again when it changes. Without a tree that reads the registry nothing happens, and
-without `lib.nvim.tree.registry` (an older lib.nvim) the registration is skipped.
+A folder shows the worst of what lies below it, also while it is closed.
+
+### The view `tests`
+
+`:Filetree source tests` (or the view bar of the tree) shows the last result as a tree: folder, spec file,
+describe, case, plus the spec files below `TESTS` that never ran.
+
+```
+▾ Tests
+  ▾ ✗ TESTS/
+    ▸ · fresh_spec.lua                 never ran: opening it lists its describe / it calls
+    ▸ ✓ green_spec.lua          2  8ms
+    ▾ ✗ red_spec.lua          1/2  8ms red over all, the time
+      ▾ ✗ red                 1/2  8ms
+          ✓ one                    4ms
+          ✗ two                    4ms
+```
+
+| Sign | Means |
+| --- | --- |
+| `✗` | red: `fail`, `error`, `timeout`, `crash`, `xpass` |
+| `~` | stale: the file changed since the result was recorded. An old red stays red, an old green is no green |
+| `·` | never ran |
+| `○` | skipped |
+| `✓` | green: `pass`, `xfail` |
+
+A folder, a file and a describe show the worst below them, in this order: `crash`, `error`, `timeout`,
+`fail`, `xpass`, `running`, `queued`, `stale`, `never`, `skip`, `xfail`, `pass`. A skipped case keeps
+what is above it from being green. What is red is open when the view is shown. The number next to the view
+in the bar is the count of red cases.
+
+A spec file that is one case (the `return function(H)` dialects) is that case; when it is red, its failing
+assertions stand below it, each with its line.
+
+| Key | Does |
+| --- | --- |
+| `<CR>` | on a case or an assertion: the spec file at that line; on a file: the file |
+| `r` | run what the node stands for: the case, the describe, the file, the folder, or everything on the top line; with several nodes marked, all of them |
+| `R` | run what failed last time (`--lf`) |
+
+The run is the one of `:Testing run` (a headless child, the summary as a notification, the failures in the
+quickfix list); when it ends, the view shows the new result, and every node keeps its place and its open
+state. The keys are the view's own, in other views `r` and `R` keep their meaning; move or drop them with
+`setup({ tree = { keys = { run = "<lhs>", failed = false } } })`, the actions stay in the tree's menu. To a tree
+that asks a source for the preview of a node, a red case answers with what it said (status, message,
+expected against actual, the failing assertions).
+
+A spec file that never ran is found by name (`*_spec.lua` below `TESTS`); a project with another
+`spec_pattern` shows such a file after its first run. The view changes no file.
+
+### When it reads
+
+`setup()` registers both entries (`setup({ tree = false })` registers nothing); nothing is read before a
+tree asks. Then the result file of the project of the working directory is read once, and again when it
+changes or the directory changes. Without a tree that reads the registry nothing happens, and without
+`lib.nvim.tree.registry` (an older lib.nvim) the registration is skipped. `:checkhealth testing` says which
+(`tests source: registered`, `not registered`, `no tree registry`).
 
 ## An untrusted file
 

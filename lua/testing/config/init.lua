@@ -20,6 +20,7 @@ local cfg = require("lib.lua.config").new(DEFAULTS, {
     lint = "table",
     hover = "table",
     surface_view = "table",
+    tree = "table|boolean",
   },
 })
 
@@ -30,6 +31,10 @@ M.EXPORT_REMOTE = { always = true, never = true, ask = true }
 ---The actions of the matrix view whose key `surface_view.keys` sets (`testing.surface.view`).
 ---@type table<string, true>
 local VIEW_ACTIONS = { jump = true, status = true, kind = true, export = true }
+
+---The actions of the view `tests` whose key `tree.keys` sets (`testing.integrations.tree`).
+---@type table<string, true>
+local TREE_ACTIONS = { run = true, failed = true }
 
 ---Per-key type check; the single source of truth for which keys exist.
 ---@type table<string, fun(v: any): boolean>
@@ -92,6 +97,40 @@ local CHECKS = {
           return false
         end
         seen[code] = true
+      end
+    end
+    return true
+  end,
+  tree = function(v)
+    if type(v) == "boolean" then
+      return true
+    end
+    if type(v) ~= "table" then
+      return false
+    end
+    for key in pairs(v) do
+      if key ~= "keys" then
+        return false
+      end
+    end
+    if v.keys == nil then
+      return true
+    end
+    if type(v.keys) ~= "table" then
+      return false
+    end
+    for action, lhs in pairs(v.keys) do
+      if not TREE_ACTIONS[action] then
+        return false
+      end
+      local list = type(lhs) == "table" and lhs or { lhs }
+      for _, one in ipairs(list) do
+        if one ~= false and (type(one) ~= "string" or one == "") then
+          return false
+        end
+      end
+      if type(lhs) == "table" and #lhs == 0 then
+        return false
       end
     end
     return true

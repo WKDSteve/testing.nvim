@@ -55,6 +55,9 @@
 ---@class Testing.LintConfigOptions
 ---@field on_save? boolean
 
+---@class Testing.TreeConfigOptions
+---@field keys? { run?: string|string[]|false, failed?: string|string[]|false } Keys of the view `tests` in a tree (default `r`, `R`); false keeps the action in the menu only.
+
 ---@class Testing.Config
 --- The effective configuration: `DEFAULTS` with the user's valid options merged on top.
 ---@field notify_prefix string Prefix of every message shown through lib.nvim.notify. Non-empty.
@@ -62,6 +65,7 @@
 ---@field hover Testing.HoverConfig The hover over a test (`testing.hover`).
 ---@field ci Testing.CiConfig `:Testing ci` from the editor.
 ---@field lint Testing.LintConfig `:Testing lint` and the check on save.
+---@field tree boolean|Testing.TreeConfigOptions The last result in a tree view (`testing.integrations.tree`); false registers nothing.
 ---@field surface_view Testing.SurfaceViewConfig The keys of the matrix view of `:Testing surface --matrix`.
 ---@field project Testing.ProjectConfig Defaults of a project's `.testing.lua`; not settable through `setup()`.
 
@@ -211,6 +215,7 @@
 ---@field hover? Testing.HoverConfigOptions
 ---@field ci? Testing.CiConfigOptions
 ---@field lint? Testing.LintConfigOptions
+---@field tree? boolean|Testing.TreeConfigOptions
 ---@field surface_view? Testing.SurfaceViewConfigOptions
 
 return {}

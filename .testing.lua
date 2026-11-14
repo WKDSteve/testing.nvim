@@ -11,7 +11,10 @@ return {
   roots = { "TESTS" },
   -- Sniff the dialect per file. The specs of this repo are `return function(H)` files on
   -- TESTS/harness.lua.
-  dialect = "auto",
+  -- TESTS/testing/tree_tests_drive_spec.lua drives the own tree of filetree.nvim on that plugin's bench, which sets
+  -- up and quits the editor itself: a script in its own process (it passes with a note where filetree.nvim is not
+  -- found).
+  dialect = { ["TESTS/testing/tree_tests_drive_spec.lua"] = "script", ["*"] = "auto" },
   -- Every spec file runs in a child editor of its own, four at a time. `auto` would run all files one after the other
   -- in ONE editor, where `--jobs` changes nothing: 8 minutes against 2 for this suite (187 files, many of which
   -- start editors themselves), and nothing leaks from one file into the next.
@@ -23,7 +26,8 @@ return {
   deps = {},
   -- Specs that start the runner on fixture projects of their own (`scripts/testing.lua <tmp>`) inherit the trust
   -- decision of `scripts/test.sh` (`TESTING_TRUST=1`); on CI the built-in `CI` does the same (docs/CONFIG.md).
-  env_allow = { "TESTING_TRUST" },
+  -- FILETREE_NVIM_DIR, UI_NVIM_DIR: where the tree drive spec finds filetree.nvim and what it needs.
+  env_allow = { "TESTING_TRUST", "FILETREE_NVIM_DIR", "UI_NVIM_DIR" },
   -- The cache folder is named after this key, not after the absolute path of the checkout, so a cache restored
   -- on a CI runner with another checkout path is found (docs/CI-CACHE.md). It is a name only: every entry still
   -- carries its full spec key.

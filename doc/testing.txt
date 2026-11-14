@@ -108,6 +108,17 @@ lint ~
     checks that may run on save, never luals) and only its diagnostics are
     updated, see |:Testing-lint|.
 
+                                                                 *testing-tree*
+tree ~
+    Type: boolean | { keys?: { run?, failed? } }, each an lhs, a list of them
+    or false. Default: `true`.
+    The last result in a tree view that reads `lib.nvim.tree.registry`
+    (filetree.nvim's own tree): a badge next to spec files and the view
+    `tests` (folder, spec file, describe, case; `:Filetree source tests`).
+    In that view `r` runs what the node stands for and `R` what failed last
+    time; `keys` moves them, `false` leaves an action in the menu only.
+    `tree = false` registers nothing. See docs/STATE.md, "In a tree view".
+
 ==============================================================================
 5. Commands                                                      *testing-commands*
 

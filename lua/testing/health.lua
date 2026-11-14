@@ -770,6 +770,27 @@ function M.check()
     end
   end
 
+  health.start("testing.nvim: tree view")
+  local okt, tree = pcall(require, "testing.integrations.tree")
+  if not okt then
+    health.error("testing.integrations.tree does not load: " .. tostring(tree), {
+      "This is a defect of testing.nvim",
+    })
+  else
+    local state = tree.status()
+    if state == "registered" then
+      health.ok(
+        "tests source: registered (a tree that reads lib.nvim's registry shows the view `tests` and the badges)"
+      )
+    elseif state == "no tree registry" then
+      health.info("tests source: no tree registry (lib.nvim has no `lib.nvim.tree.registry`)")
+    else
+      health.info(
+        "tests source: not registered (`tree = false`, or require('testing').setup() has not run)"
+      )
+    end
+  end
+
   health.start("testing.nvim: configuration")
   local config = require("testing.config")
   local cfg = config.get()

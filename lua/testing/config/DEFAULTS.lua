@@ -30,6 +30,10 @@ local DEFAULTS = {
   -- `:Testing lint` (docs/CI.md). `on_save = true`: a written file is linted in the background (only the checks
   -- that may run on save, never luals) and its diagnostics are updated.
   lint = { on_save = false },
+  -- The last result in a tree view (filetree.nvim's own tree, docs/STATE.md): a badge on spec files and the view
+  -- `tests`. `true`, `false` (nothing is registered), or `{ keys = { run = "r", failed = "R" } }` for the keys of
+  -- that view (an lhs, a list of them, or false: the action stays in the menu).
+  tree = true,
   -- Defaults of `.testing.lua` in a project root.
   project = {
     -- Lua module root of the project (conformance and coverage need it); "" = the directory name

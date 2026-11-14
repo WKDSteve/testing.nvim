@@ -195,7 +195,10 @@ Known limits, not hidden:
   terminal byte stream yet; the picture of an RPC sheet's screen is drawn and photographed by a browser, not taken
   from a terminal), and the `judge` criteria are for a person, no AI reviewer. `testing sheets step` goes
   through a sheet step by step, for a client on stdin and stdout.
-- Not implemented at all: a test UI (tree, hover), adapters for other test frameworks. Keys for
+- A test tree exists as a view of filetree.nvim's own tree ([docs/STATE.md](docs/STATE.md#in-a-tree-view)): the
+  last result per folder, file, describe and case, and runs from a node. It follows a run when the run has
+  ended, not case by case, and there is no explorer window without that tree.
+- Not implemented at all: adapters for other test frameworks. Keys for
   some of these exist in `.testing.lua` and are validated, but nothing acts on them.
 
 ## What testing.nvim does differently
