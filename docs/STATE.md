@@ -113,15 +113,16 @@ assertions stand below it, each with its line.
 | Key | Does |
 | --- | --- |
 | `<CR>` | on a case or an assertion: the spec file at that line; on a file: the file |
+| `<Tab>` | the tree's preview: on a red case what it said, else the file |
 | `r` | run what the node stands for: the case, the describe, the file, the folder, or everything on the top line; with several nodes marked, all of them. On the nodes of the pipeline: the step, or the profile |
 | `R` | run what failed last time (`--lf`) |
 
 The run is the one of `:Testing run` (a headless child, the summary as a notification, the failures in the
 quickfix list), and the view follows it while it goes (see below); every node keeps its place and its open
 state. The keys are the view's own, in other views `r` and `R` keep their meaning; move or drop them with
-`setup({ tree = { keys = { run = "<lhs>", failed = false } } })`, the actions stay in the tree's menu. To a tree
-that asks a source for the preview of a node, a red case answers with what it said (status, message,
-expected against actual, the failing assertions).
+`setup({ tree = { keys = { run = "<lhs>", failed = false } } })`, the actions stay in the tree's menu. The
+preview of the tree (`<Tab>`) shows for a red case what it said: status, message, expected against actual,
+the failing assertions with their lines; for every other node it shows the file, as always.
 
 ### The last pipeline run
 

@@ -106,6 +106,7 @@ end
 local T = dofile(filetree .. "/TESTS/native_drive.lua")({
   name = "tree_tests_drive_spec (testing.nvim)",
   files = { "README.md", "lua/x.lua", RED, GREEN, FRESH },
+  features = { preview = { enabled = true, mode = "float", cursor_debounce_ms = 10 } },
   before_setup = function(T)
     T.mkfile(RED, spec("red"))
     T.mkfile(GREEN, spec("green"))
@@ -308,6 +309,42 @@ T.ok(
   end)
 )
 T.ok("a describe is drawn as a group: no slash after its name", line_is("✗ red") ~= nil)
+
+-- ── the preview of a red case ────────────────────────────────────────────────
+-- the tree asks the source of the node first; a filetree.nvim that does not yet is left out
+if pcall(require, "filetree.features.ui.preview.custom") then
+  ---The lines of the float that shows `needle`, joined.
+  local function float_with(needle)
+    for _, float in ipairs(T.floats()) do
+      local text = table.concat(float.lines, "\n")
+      if text:find(needle, 1, true) then
+        return text
+      end
+    end
+    return nil
+  end
+  on_line("two")
+  T.feed("<Tab>")
+  T.ok(
+    "<Tab> on a red case shows what it said",
+    T.wait(function()
+      return float_with("expected 1, got 2") ~= nil
+    end)
+  )
+  local said = float_with("expected 1, got 2") or ""
+  has("... its status", said, "status: fail")
+  has("... expected against actual", said, "## expected")
+  has("... and the failing assertion with its line", said, "- line 3: expected 1, got 2")
+  T.feed("<Tab>")
+  T.ok(
+    "<Tab> again takes it away",
+    T.wait(function()
+      return float_with("expected 1, got 2") == nil
+    end)
+  )
+else
+  T.na("this filetree.nvim does not ask a source for a preview yet")
+end
 
 -- ── the jump ─────────────────────────────────────────────────────────────────
 on_line("two")
