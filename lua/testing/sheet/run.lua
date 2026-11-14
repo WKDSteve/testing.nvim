@@ -17,12 +17,74 @@
 ---   refuses the whole run, unless `TESTING_ALLOW_WORKSTATION=1`. Another value than `workstation` / `default` is
 ---   refused as a typo.
 --- * A red sheet carries its first failure line into the block (`red: <line>`).
+--- * `--result` prints one more line, the last one on stdout: a document of `testing-sheet-run/1`
+---   (`schemas/testing-sheet-run/1/`) with the state of each sheet and what became of each task. The exit code
+---   is 1 for a red sheet and for a task that could not be written alike; a program that started the run (a
+---   hub) tells the two apart by `red` and `written` instead of by the wording of the lines above.
 
 local M = {}
 
-M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live]\n"
-  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live]\n"
-  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict] [--live]"
+M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live] [--result]\n"
+  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live] [--result]\n"
+  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict] [--live] [--result]"
+
+---The schema of the document `--result` prints.
+M.SCHEMA = "testing-sheet-run/1"
+
+---The outcomes of a task that mean its block stands as the run left it.
+local WRITTEN = { changed = true, unchanged = true, would_change = true }
+
+---One line of text without control characters, cut to a length a reader can show.
+---@param text any
+---@return string|nil
+local function line(text)
+  if text == nil then
+    return nil
+  end
+  local s = tostring(text):gsub("%c", " ")
+  if #s > 300 then
+    s = s:sub(1, 300) .. "..."
+  end
+  return s
+end
+
+---The document of `--result`: what ran and what was written, for a program that started the run.
+---@param o table The options of the run (`id`, `vault`).
+---@param entries Testing.SheetReport.Entry[] The sheets of the run, with their `case`.
+---@param red boolean A sheet is red (under `--strict` a skip too).
+---@param results Testing.SheetTasks.Result[]|nil What became of the tasks; nil: none was to be written.
+---@param exit integer
+---@param problem? string Why the tasks could not be written at all (exit 3).
+---@return table
+function M.result_doc(o, entries, red, results, exit, problem)
+  local sheets = {}
+  for _, e in ipairs(entries) do
+    sheets[#sheets + 1] = {
+      id = e.sheet and e.sheet.id or e.rel,
+      status = e.case and e.case.status or "fail",
+    }
+  end
+  local tasks_out, written = {}, nil
+  if results then
+    written = true
+    for _, r in ipairs(results) do
+      tasks_out[#tasks_out + 1] = { id = r.id, outcome = r.outcome, message = line(r.message) }
+      written = written and WRITTEN[r.outcome] == true
+    end
+  elseif problem then
+    written = false
+  end
+  return {
+    schema = M.SCHEMA,
+    exit = exit,
+    task = o.id or vim.NIL,
+    sheets = sheets,
+    red = red and true or false,
+    tasks = tasks_out,
+    written = written == nil and vim.NIL or written,
+    problem = line(problem),
+  }
+end
 
 ---@class Testing.SheetRun.Deps
 ---@field call? Testing.SheetTasks.Call A stand-in for the engine of tasks.nvim (specs).
@@ -194,14 +256,14 @@ function M.main(argv, sv, deps)
   deps = deps or {}
   local getenv = deps.getenv or vim.uv.os_getenv
   ---@type table<string, any>
-  local o = { dry_run = false, all = false, strict = false, live = false }
+  local o = { dry_run = false, all = false, strict = false, live = false, result = false }
   local roots = {}
   -- `--sheet <id>` (repeatable): these sheets of the roots, by id or file name, as `--all` runs them
   local wanted, wanted_list = {}, {}
   local i = 1
   while i <= #argv do
     local a = argv[i]
-    if a == "--dry-run" or a == "--all" or a == "--strict" or a == "--live" then
+    if a == "--dry-run" or a == "--all" or a == "--strict" or a == "--live" or a == "--result" then
       o[a:sub(3):gsub("-", "_")] = true
       i = i + 1
     else
@@ -460,14 +522,25 @@ function M.main(argv, sv, deps)
   end
   -- a job that exists to prove something must not stay green because the browser is missing
   red = red or (o.strict and skipped)
+  ---The last line of stdout with `--result`, then the exit code.
+  ---@param exit integer
+  ---@param results Testing.SheetTasks.Result[]|nil
+  ---@param problem? string
+  ---@return integer
+  local function done(exit, results, problem)
+    if o.result then
+      sv.out(vim.json.encode(M.result_doc(o, mine, red, results, exit, problem)))
+    end
+    return exit
+  end
   if not o.vault or deps.no_write then
-    return red and 1 or 0
+    return done(red and 1 or 0, nil)
   end
   ---@cast call -?
   local results, serr = tasks.sync(mine, { call = call, dry_run = o.dry_run })
   if not results then
     sv.err("testing sheets: " .. tostring(serr))
-    return 3
+    return done(3, nil, tostring(serr))
   end
   local failed = false
   for _, r in ipairs(results) do
@@ -478,10 +551,9 @@ function M.main(argv, sv, deps)
         r.message and (": " .. r.message) or ""
       )
     )
-    failed = failed
-      or not (r.outcome == "changed" or r.outcome == "unchanged" or r.outcome == "would_change")
+    failed = failed or not WRITTEN[r.outcome]
   end
-  return (red or failed) and 1 or 0
+  return done((red or failed) and 1 or 0, results)
 end
 
 return M

@@ -373,7 +373,7 @@ the engine could not be reached or the file not written.
 ## One task, now (`testing sheets run`)
 
 ```
-testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live]
+testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live] [--result]
 ```
 
 runs the sheets that name the task (a sheet that does not load too) and, with `--tasks`, writes their state into
@@ -397,6 +397,30 @@ the task's block: no suite, no second command. tasks.nvim's `:Tasks sheet-run` c
 
 Exit codes: 0 green (or waiting for a person) and written, 1 a sheet is red or the task could not be written, 2 bad
 usage, refused (trust, workstation) or no sheet names the task, 3 the engine of tasks.nvim could not be reached.
+
+### For a program that started the run (`--result`)
+
+Exit 1 is a red sheet and a task that could not be written alike, and the lines above are for a person. With
+`--result` (any form of `sheets run`) the command prints one more line, the last one on stdout: a document of
+`testing-sheet-run/1` ([schema](../schemas/testing-sheet-run/1/testing-sheet-run.schema.json),
+[types](../schemas/testing-sheet-run/1/testing-sheet-run.d.ts); a reader ignores unknown fields):
+
+```json
+{"schema":"testing-sheet-run/1","exit":1,"task":"ui.nvim/float","sheets":[{"id":"ui.float","status":"pass"}],"red":false,"tasks":[{"id":"ui.nvim/float","outcome":"failed","message":"conflict: stale"}],"written":false}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `exit` | the exit code of the command |
+| `task` | the task of `--task`; `null` for `--all` and `--sheet` |
+| `sheets` | each sheet of the run with its `status`: `pass` (also one that waits for a person), `fail` (also one that does not load, named by its file), `skip` |
+| `red` | a sheet is red; under `--strict` a skipped one too |
+| `tasks` | with `--tasks`: each task with its `outcome` (`changed`, `unchanged`, `would_change`: the block stands; `failed`, `missing`, `truncated`: it does not) and, when it does not, the `message` |
+| `written` | every block stands; `false`: one does not, or tasks.nvim could not be reached (`problem`, exit 3); `null`: nothing was to be written (no `--tasks`) |
+
+So `red: false, written: false` with exit 1 is "the sheets are green, the task does not say so". A run that was
+refused or could not start (exit 2, or 3 before a sheet ran) prints no document. Without `--result` nothing changes:
+tasks.nvim's `:Tasks sheet-run` reads the lines as before.
 
 ## Hand over to an AI (`testing sheets prompt`, `testing sheets accept`)
 

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WKDSteve/testing.nvim/schemas/testing-sheet-run/1/testing-sheet-run.schema.json",
+  "title": "testing-sheet-run/1",
+  "description": "The last line of stdout of `testing sheets run ... --result` (docs/SHEETS.md): what ran and what was written, for a program that started the run. The exit code is 1 for a red sheet and for a task that could not be written alike; `red` and `written` tell the two apart. A run that was refused or could not start (exit 2, or 3 before a sheet ran) prints no document. Texts carry no control characters and no more than about 300 characters. A reader ignores unknown fields and refuses a higher schema.",
+  "type": "object",
+  "required": ["schema", "exit", "task", "sheets", "red", "tasks", "written"],
+  "properties": {
+    "schema": { "const": "testing-sheet-run/1" },
+    "exit": { "description": "The exit code of the command: 0 green and written, 1 a sheet is red or a task was not written, 3 the engine of tasks.nvim could not be reached or the Result-IR not written.", "enum": [0, 1, 3] },
+    "task": { "description": "The task of `--task`; null for `--all` and `--sheet`.", "type": ["string", "null"] },
+    "sheets": { "description": "The sheets of the run, in the order they ran.", "type": "array", "items": { "$ref": "#/$defs/sheet" } },
+    "red": { "description": "A sheet is red: it failed or does not load; under `--strict` a skipped sheet too.", "type": "boolean" },
+    "tasks": { "description": "With `--tasks`: what became of the block of each task. Empty without it.", "type": "array", "items": { "$ref": "#/$defs/task" } },
+    "written": { "description": "Whether every task's block stands as the run left it (`changed`, `unchanged`; `would_change` under `--dry-run`). false: at least one was not written, or tasks.nvim could not be reached (`problem`). null: nothing was to be written (no `--tasks`).", "type": ["boolean", "null"] },
+    "problem": { "description": "Why no task could be written at all (exit 3).", "type": "string" }
+  },
+  "$defs": {
+    "sheet": {
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "description": "The id of the sheet; of a sheet that does not load, its file below the root.", "type": "string", "minLength": 1 },
+        "status": { "description": "skip: it could not run here (no browser, a live sheet without --live); a sheet that waits for a person's judgement is pass.", "enum": ["pass", "fail", "skip"] }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "outcome"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "outcome": { "description": "changed, unchanged, would_change (a dry run): the block stands. failed (a conflict, a refusal, broken markers), missing (not an open task), truncated (not read, or too long to send back): it does not. A reader takes any other word as not written.", "type": "string", "minLength": 1 },
+        "message": { "description": "The reason of an outcome that is not written.", "type": "string" }
+      }
+    }
+  }
+}
