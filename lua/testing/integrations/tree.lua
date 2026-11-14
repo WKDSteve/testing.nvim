@@ -8,7 +8,8 @@
 ---    is the tree's, from the `all()` this module answers
 ---  - a source `tests`: folder, spec file, describe and case of the last result plus the spec files that never
 ---    ran (`testing.explorer.nodes` builds them), with the actions "run this node" and "run what failed last
----    time", and what a red case said as its preview
+---    time", and what a red case said as its preview. The last pipeline run of the project stands first
+---    (`testing.explorer.ci`): its steps with their state and findings, and "run this step again"
 ---
 --- **While a run goes.** A run started from this editor is followed case by case (`testing.bindings.live`,
 --- `testing.explorer.live`): the cases of a file that is being run show `running`, the ones still to come
@@ -30,6 +31,7 @@ M.DECORATOR = "tests"
 M.SOURCE = "tests"
 M.ACTION_RUN = "tests.run"
 M.ACTION_FAILED = "tests.run_failed"
+M.ACTION_CI = "tests.ci"
 
 --- Keys of the view `tests`. They are the view's own: in another view the keys keep their meaning.
 ---@type table<string, string>
@@ -61,6 +63,7 @@ local IDLE = { skip = true }
 ---@field keys? { run?: string|string[]|false, failed?: string|string[]|false }  Keys in the view `tests` (default `r` and `R`; false: the action is in the menu only).
 ---@field files? fun(root: string): string[]  The spec files there are, relative to the root (default: `*_spec.lua` below `TESTS`).
 ---@field run? fun(opts: { root: string, flags: table })  Starts a run (default: `require("testing").run`).
+---@field ci_run? fun(opts: { root: string, profile: string, steps?: string[] })  Starts a pipeline run (default: `testing.ci.editor.run`).
 
 ---@type Testing.Tree.Opts
 local options = {}
@@ -429,11 +432,15 @@ function M.root_node()
       end
     end
   end
+  -- the last pipeline run of the project, when there is one: it stands first
+  local ci = require("testing.explorer.ci")
+  local ok_ci, doc = pcall(ci.read, root, options.state_opts)
   local top = nodes.build({
     root = root,
     cases = st.cases,
     stale = stale,
     live = live and live.marks or nil,
+    first = (ok_ci and doc) and { ci.node(nodes.norm(root), doc) } or nil,
     files = spec_files(root),
     positions = function(file)
       return positions_of(root, file)
@@ -495,6 +502,27 @@ function M.run(list)
     flags.file, flags.filter = files, narrowed and filters or nil
   end
   M.start(flags)
+end
+
+---Start the pipeline the marked nodes stand for: its profile, or only the marked steps of it (`--step=`).
+---@param list table[]
+function M.ci_run(list)
+  local run = require("testing.explorer.ci").run_of(list)
+  if not run then
+    return
+  end
+  local opts = { root = project_root(), profile = run.profile, steps = run.steps }
+  if options.ci_run then
+    options.ci_run(opts)
+    return
+  end
+  local notify = require("testing.notify").get()
+  local started, err = require("testing.ci.editor").run(opts)
+  if not started then
+    notify.error("testing ci: " .. tostring(err))
+    return
+  end
+  notify.info(("testing ci %s: %s"):format(opts.profile, opts.root))
 end
 
 ---Run what failed last time (`--lf`).
@@ -601,6 +629,16 @@ function M.register(opts)
           return nodes.run_flags(node) ~= nil
         end,
         run = M.run,
+      },
+      {
+        -- the same key on the nodes of the pipeline: there it runs the pipeline, or the step
+        name = M.ACTION_CI,
+        desc = "Run this pipeline, or this step of it (testing.nvim)",
+        key = key_of(keys.run, M.KEYS.run),
+        when = function(node)
+          return require("testing.explorer.ci").run_of({ node }) ~= nil
+        end,
+        run = M.ci_run,
       },
       {
         name = M.ACTION_FAILED,

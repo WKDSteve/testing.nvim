@@ -196,8 +196,8 @@ Known limits, not hidden:
   from a terminal), and the `judge` criteria are for a person, no AI reviewer. `testing sheets step` goes
   through a sheet step by step, for a client on stdin and stdout.
 - A test tree exists as a view of filetree.nvim's own tree ([docs/STATE.md](docs/STATE.md#in-a-tree-view)): the
-  last result per folder, file, describe and case, runs from a node, and a run from the editor followed case by
-  case. There is no explorer window without that tree.
+  last result per folder, file, describe and case, runs from a node, a run from the editor followed case by
+  case, and the last pipeline run with its steps and findings. There is no explorer window without that tree.
 - Not implemented at all: adapters for other test frameworks. Keys for
   some of these exist in `.testing.lua` and are validated, but nothing acts on them.
 

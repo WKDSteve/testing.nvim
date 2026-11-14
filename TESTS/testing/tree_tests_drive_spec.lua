@@ -65,7 +65,7 @@ local RED, GREEN, FRESH = "TESTS/red_spec.lua", "TESTS/green_spec.lua", "TESTS/f
 local RED_CASE = RED .. "::red::two"
 
 local state, result, tree_mod, root
-local started = {}
+local started, pipelines = {}, {}
 
 ---Record a run of the two spec files that ran; `two` of the red file has this status.
 local function record(status)
@@ -115,11 +115,33 @@ local T = dofile(filetree .. "/TESTS/native_drive.lua")({
     tree_mod = require("testing.integrations.tree")
     root = require("testing.bindings.usrcmds").resolve_root(nil, nil)
     record("fail")
+    -- the last pipeline run of the project, as `testing ci` leaves it in the state folder
+    local ci_path = require("testing.explorer.ci").path(root)
+    vim.fn.mkdir(vim.fs.dirname(ci_path), "p")
+    vim.fn.writefile({
+      vim.json.encode({
+        schema = "testing-ci/1",
+        profile = "fast",
+        verdict = "red",
+        steps = {
+          { name = "stylua", state = "green", ms = 700, findings = {} },
+          {
+            name = "luacheck",
+            state = "red",
+            ms = 1500,
+            findings = { { file = "lua/x.lua", line = 1, col = 7, text = "unused variable x" } },
+          },
+        },
+      }),
+    }, ci_path)
     require("testing").setup({})
     -- what setup registered, with the result folder of this run and a run that starts nothing
     tree_mod.register({
       run = function(run)
         started[#started + 1] = run
+      end,
+      ci_run = function(run)
+        pipelines[#pipelines + 1] = run
       end,
     })
   end,
@@ -246,6 +268,37 @@ T.feed("R")
 T.eq("R runs what failed last time", started[#started].flags, { raw = { "--lf" } })
 T.eq("four runs, one per key press", #started, 4)
 
+-- ── the last pipeline run ────────────────────────────────────────────────────
+T.ok("the last pipeline run stands first in the view", line_of("Pipeline fast") == 2)
+has("... red, with the count of its red steps", right_of("Pipeline fast"), "1/2")
+T.ok(
+  "a red step is open: its finding is in sight",
+  T.wait(function()
+    return line_of("unused variable x") ~= nil
+  end)
+)
+has("... with the place it points to", right_of("unused variable x"), "lua/x.lua:1")
+on_line("luacheck")
+T.feed("r")
+T.eq(
+  "r on a step runs that step of the pipeline again",
+  pipelines[#pipelines],
+  { root = root, profile = "fast", steps = { "luacheck" } }
+)
+on_line("Pipeline fast")
+T.feed("r")
+T.eq("r on the pipeline runs its profile", pipelines[#pipelines], { root = root, profile = "fast" })
+T.eq("... and neither started a test run", #started, 4)
+on_line("unused variable x")
+T.feed("<CR>")
+T.ok(
+  "<CR> on a finding opens the file it names",
+  T.wait(function()
+    return vim.api.nvim_buf_get_name(0):gsub("\\", "/"):find("lua/x.lua", 1, true) ~= nil
+  end)
+)
+T.eq("... at its line and column", vim.api.nvim_win_get_cursor(0), { 1, 6 })
+
 -- ── a file that never ran ────────────────────────────────────────────────────
 T.adapter.expand_node({ path = T.dir .. "/" .. FRESH })
 T.ok(
@@ -355,7 +408,7 @@ end
 T.eq(
   "setup({ tree = { keys } }) moves the keys of the view",
   keys,
-  { ["tests.run"] = "gr", ["tests.run_failed"] = false }
+  { ["tests.run"] = "gr", ["tests.ci"] = "gr", ["tests.run_failed"] = false }
 )
 require("testing").setup({ tree = false })
 T.eq(

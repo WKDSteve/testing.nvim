@@ -285,17 +285,13 @@ return function(H)
       { event = "run_start", files = { "../../etc/x_spec.lua", "C:/x_spec.lua" } }
     )
     none = live.feed(hostile, { event = "file_start", file = "/abs/x_spec.lua" }, none)
-    none = live.feed(
-      hostile,
-      {
-        event = "case",
-        file = "../x_spec.lua",
-        id = "../x_spec.lua::a",
-        status = "pass",
-        duration_ms = 1,
-      },
-      none
-    )
+    none = live.feed(hostile, {
+      event = "case",
+      file = "../x_spec.lua",
+      id = "../x_spec.lua::a",
+      status = "pass",
+      duration_ms = 1,
+    }, none)
     eq(
       { next(none.files), next(none.cases), next(hostile.file_marks), #hostile.st.cases },
       { nil, nil, nil, 4 },

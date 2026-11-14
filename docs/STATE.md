@@ -113,7 +113,7 @@ assertions stand below it, each with its line.
 | Key | Does |
 | --- | --- |
 | `<CR>` | on a case or an assertion: the spec file at that line; on a file: the file |
-| `r` | run what the node stands for: the case, the describe, the file, the folder, or everything on the top line; with several nodes marked, all of them |
+| `r` | run what the node stands for: the case, the describe, the file, the folder, or everything on the top line; with several nodes marked, all of them. On the nodes of the pipeline: the step, or the profile |
 | `R` | run what failed last time (`--lf`) |
 
 The run is the one of `:Testing run` (a headless child, the summary as a notification, the failures in the
@@ -122,6 +122,31 @@ state. The keys are the view's own, in other views `r` and `R` keep their meanin
 `setup({ tree = { keys = { run = "<lhs>", failed = false } } })`, the actions stay in the tree's menu. To a tree
 that asks a source for the preview of a node, a red case answers with what it said (status, message,
 expected against actual, the failing assertions).
+
+### The last pipeline run
+
+When the project has a pipeline run on record (`testing ci`, [CI.md](CI.md)), it stands first in the view:
+
+```
+▾ Tests
+  ▾ ✗ Pipeline fast           1/3  2.2s  red steps over all, the time
+      ✓ stylua                     700ms
+    ▾ ✗ luacheck                   1.5s
+        unused variable x   lua/x.lua:3
+      ○ suite                            skipped: the reason stands below it
+  ▾ ✗ TESTS/
+```
+
+A step shows its state: `✓` green (or proven by an earlier run), `✗` red or the tools were missing, `○`
+skipped. Below a red step stand its findings; `<CR>` on one opens the file at its line and column. `r` on a
+step runs that step again (`:Testing ci <profile> --step=<name>`), on a finding the step it belongs to, on the
+`Pipeline` line the whole profile; with several steps marked, those. A pipeline run that has ended shows by
+itself, like a new result.
+
+The document is the one `:Testing ci status` shows (`ci.json` in the state folder, the last run of any
+profile). It is read as untrusted input: a size cap, every field checked, a step whose name could not be an
+argument of the next run is left out, and a finding that points out of the project keeps its text and loses
+its place.
 
 A spec file that never ran is found by name (`*_spec.lua` below `TESTS`); a project with another
 `spec_pattern` shows such a file after its first run. The view changes no file.

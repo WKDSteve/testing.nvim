@@ -114,7 +114,11 @@ function M.duration(ms)
 end
 
 ---@class Testing.Explorer.Data  `node.data.testing`: what an action needs to know about a node.
----@field kind "root"|"dir"|"file"|"describe"|"case"|"assert"
+---@field kind "root"|"dir"|"file"|"describe"|"case"|"assert"|"ci"|"ci_step"|"ci_finding"
+---@field profile? string  Pipeline profile (the nodes of `testing.explorer.ci`).
+---@field step? string  Pipeline step.
+---@field verdict? string
+---@field time? string
 ---@field file? string  Spec file, relative to the project root (a folder for `dir`).
 ---@field case? string  Case id (a case, also a spec file that is one case).
 ---@field describe? string[]  The describe titles above and including a describe node.
@@ -133,6 +137,7 @@ end
 ---@field live? table<string, string>  Case id -> the status to show instead of the recorded one (`running`, `queued`) while a run is going.
 ---@field files? string[]  Spec files there are (relative), whether they ran or not.
 ---@field positions? fun(file: string): Testing.Position[]|nil  The describe/it calls of a spec file that never ran; asked when its node is opened.
+---@field first? table[]  Nodes that stand before the folders (the pipeline of `testing.explorer.ci`).
 
 ---One spelling for a path, the one a tree asks with: `/`-separated, drive letter upper case.
 ---@param path string
@@ -153,6 +158,21 @@ function M.data(node)
 end
 
 local restyle, leaf_sum, style
+
+---Whether a node is one unit for the adding up: a case or a pipeline step. It counts once, whatever is below it.
+---@param data Testing.Explorer.Data|nil
+---@return boolean
+local function is_unit(data)
+  return data ~= nil and (data.case ~= nil or data.kind == "ci_step")
+end
+
+---Whether a node is a detail of a unit (a failing assertion, a finding of a step): it counts nothing and shows
+---no sign of its own.
+---@param data Testing.Explorer.Data|nil
+---@return boolean
+local function is_detail(data)
+  return data ~= nil and (data.kind == "assert" or data.kind == "ci_finding")
+end
 
 ---Write on `node` what it shows: its own status for a case, else the worst below it with `red/all` and the time.
 ---Recurses into child lists; a node whose children are not loaded yet keeps the status it carries.
@@ -242,7 +262,7 @@ function M.set_many(index, changes)
   local updates = {}
   for _, node in ipairs(order) do
     local data = M.data(node)
-    local is_case = data ~= nil and data.case ~= nil
+    local is_case = is_unit(data)
     local sum
     if is_case or type(node.children) ~= "table" then
       sum = leaf_sum(node)
@@ -276,7 +296,7 @@ end
 ---@return { worst: string|nil, total: integer, red: integer, ms: number }
 leaf_sum = function(node)
   local data = M.data(node)
-  if not node.status or (data and data.kind == "assert") then
+  if not node.status or is_detail(data) then
     return { worst = nil, total = 0, red = 0, ms = 0 }
   end
   return {
@@ -294,7 +314,7 @@ end
 ---@return boolean drawn  false for a node that shows nothing of it (the root, an assertion, a note)
 style = function(node, sum, is_case)
   local data = M.data(node)
-  if not data or data.kind == "root" or data.kind == "assert" then
+  if not data or data.kind == "root" or is_detail(data) then
     return false
   end
   local look = M.look(sum.worst)
@@ -318,7 +338,7 @@ end
 restyle = function(node, sums)
   local data = M.data(node)
   local sum
-  local is_case = data ~= nil and (data.case ~= nil or data.kind == "assert")
+  local is_case = is_unit(data) or is_detail(data)
   if is_case or type(node.children) ~= "table" then
     sum = leaf_sum(node)
     if type(node.children) == "table" then
@@ -355,12 +375,12 @@ end
 ---@return { status?: string, counts: table<string, integer>, total: integer }
 function M.aggregate(node, child_aggs, default)
   local data = M.data(node)
-  if #child_aggs == 0 or (data and data.case) then
+  if #child_aggs == 0 or is_unit(data) then
     local status = node.status
     return {
       status = status,
       counts = (status and M.RED[status]) and { [status] = 1 } or {},
-      total = (data and data.kind == "assert") and 0 or 1,
+      total = is_detail(data) and 0 or 1,
     }
   end
   local worst, counts, total = nil, {}, 0
@@ -682,14 +702,19 @@ function M.build(input)
     by_label(node.children)
   end
   by_label(top.children)
-  if #top.children == 0 then
+  local folders = #top.children
+  if folders == 0 then
     top.children[1] =
       { id = "tests:none", label = "no spec files and no result yet", kind = "note" }
   end
+  for i, node in ipairs(input.first or {}) do
+    table.insert(top.children, i, node)
+  end
   M.restyle(top)
   -- a project with one spec folder opens on its content
-  if #top.children == 1 and top.children[1].kind == "dir" then
-    top.children[1].open = true
+  local only = top.children[#top.children]
+  if folders == 1 and only.kind == "dir" then
+    only.open = true
   end
   return top
 end
