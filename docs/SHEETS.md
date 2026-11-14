@@ -419,7 +419,8 @@ Exit 1 is a red sheet and a task that could not be written alike, and the lines 
 | `written` | every block stands; `false`: one does not, or tasks.nvim could not be reached (`problem`, exit 3); `null`: nothing was to be written (no `--tasks`) |
 
 So `red: false, written: false` with exit 1 is "the sheets are green, the task does not say so". A run that was
-refused or could not start (exit 2, or 3 before a sheet ran) prints no document. Without `--result` nothing changes:
+refused or could not start (exit 2, or 3 before a sheet ran), or whose Result-IR (`--json`) could not be written,
+prints no document. Without `--result` nothing changes:
 tasks.nvim's `:Tasks sheet-run` reads the lines as before.
 
 ## Hand over to an AI (`testing sheets prompt`, `testing sheets accept`)

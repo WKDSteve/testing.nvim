@@ -5,7 +5,7 @@
  */
 export interface TestingSheetRun {
   schema: "testing-sheet-run/1";
-  /** 0 green and written, 1 a sheet is red or a task was not written, 3 tasks.nvim or the Result-IR failed. */
+  /** 0 green and written, 1 a sheet is red or a task was not written, 3 tasks.nvim could not be reached after the sheets ran. */
   exit: 0 | 1 | 3;
   /** The task of `--task`; null for `--all` and `--sheet`. */
   task: string | null;
