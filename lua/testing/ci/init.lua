@@ -1142,6 +1142,11 @@ function M.main(argv, sv)
   if argv[1] == "hook" then
     return require("testing.ci.hook").main(vim.list_slice(argv, 2), sv)
   end
+  -- show, ask, release and re-run the refused jobs: the short way after a refused job (a wizard in a terminal).
+  -- Before the multi-repository run: `release --repos` is its first step, not `testing ci --repos=<a,b>`
+  if argv[1] == "release" then
+    return require("testing.ci.release").main(vim.list_slice(argv, 2), sv)
+  end
   if require("testing.ci.repos").wanted(argv) then
     return require("testing.ci.repos").main(argv, sv)
   end
@@ -1154,10 +1159,6 @@ function M.main(argv, sv)
   end
   if argv[1] == "trust" then
     return require("testing.ci.runner_guard").trust_main(vim.list_slice(argv, 2), sv)
-  end
-  -- show, ask, release and re-run the refused jobs: the short way after a refused job (a wizard in a terminal)
-  if argv[1] == "release" then
-    return require("testing.ci.release").main(vim.list_slice(argv, 2), sv)
   end
   local out, err = sv.out, sv.err
   local args, problem = M.parse(argv)

@@ -299,4 +299,31 @@ return function(H)
     { { 71, "failure", true }, { 74, "cancelled", true } },
     "json release: the failed and the cancelled run are re-run"
   )
+
+  -- ------------------------------------------------------------------ through `testing ci`
+
+  -- `testing ci release --repos` is the first step of the wizard, not the multi-repository run `testing ci --repos=`:
+  -- the command line hands every form of `release` to this module (an app asks the steps one by one)
+  o = sink()
+  eq(
+    require("testing.ci").main({ "release", "--repos", "--json", "--runners=" .. root }, o.sv),
+    0,
+    "testing ci release --repos --json: exit 0"
+  )
+  eq(#o.out, 1, "... one document on stdout")
+  eq(o.err, {}, "... and nothing on stderr (not the usage of the multi-repository run)")
+  local cli = vim.json.decode(o.out[1] or "{}")
+  eq({ cli.schema, cli.step, cli.exit }, { release.SCHEMA, "repos", 0 }, "... the step repos")
+  eq(
+    { cli.repos and cli.repos[1].name, cli.repos and cli.repos[1].mode },
+    { "o/r", "auto" },
+    "... with the repository of the list"
+  )
+  o = sink()
+  eq(
+    require("testing.ci").main({ "release", "--repos", "--runners=" .. root }, o.sv),
+    0,
+    "testing ci release --repos: the text form too"
+  )
+  has(joined(o), "o/r", "... names the repository of the list")
 end
