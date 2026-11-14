@@ -483,8 +483,10 @@ testing.nvim is released under the [MIT License](https://opensource.org/licenses
 **Uses**
 
 - [ai.nvim](https://github.com/WKDSteve/ai.nvim): A test sheet of testing.nvim can ask ai.nvim to explain a result (`ai.stream`). ([picture](assets/graphs/pair/testing.nvim--ai.nvim.png))
+- [appkit](https://github.com/WKDSteve/appkit): The desktop steps of a test sheet go to `sheet-driver` of appkit, which drives the window of a program by accessible name (`testing-sheet-driver/1`). ([picture](assets/graphs/pair/testing.nvim--appkit.png))
 - [docmap.nvim](https://github.com/WKDSteve/docmap.nvim): testing.nvim asks docmap.nvim which specs a change reaches (`docmap.testing`), unless a provider is given. ([picture](assets/graphs/pair/testing.nvim--docmap.nvim.png))
 - [hover.nvim](https://github.com/WKDSteve/hover.nvim): testing.nvim registers its previews with hover.nvim (`hover.registry`). ([picture](assets/graphs/pair/testing.nvim--hover.nvim.png))
+- [mdview.nvim](https://github.com/WKDSteve/mdview.nvim): The browser steps of a test sheet borrow `playwright-core` from the `node_modules` of a sibling mdview.nvim checkout when the project has none. ([picture](assets/graphs/pair/testing.nvim--mdview.nvim.png))
 - [rules.nvim](https://github.com/WKDSteve/rules.nvim): The conformance step of testing.nvim checks a repository against a ruleset through rules.nvim (`rules_bridge`). ([picture](assets/graphs/pair/testing.nvim--rules.nvim.png))
 - [tasks.nvim](https://github.com/WKDSteve/tasks.nvim): A test sheet of testing.nvim names the task of the vault it belongs to (`task = "<area>/<id>"`). ([picture](assets/graphs/pair/testing.nvim--tasks.nvim.png))
 - [terminal.nvim](https://github.com/WKDSteve/terminal.nvim): testing.nvim runs a command in the terminal of terminal.nvim (`terminal.run`) when that is installed. ([picture](assets/graphs/pair/testing.nvim--terminal.nvim.png))
