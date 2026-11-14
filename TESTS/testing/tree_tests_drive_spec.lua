@@ -242,17 +242,10 @@ T.eq("r on a case runs that case", started[#started] and started[#started].flags
 T.eq("... in the project of the tree", started[#started] and started[#started].root, root)
 on_line("red_spec.lua")
 T.feed("r")
-T.eq(
-  "r on a spec file runs that file",
-  started[#started].flags,
-  { file = { RED }, filter = { RED } }
-)
+T.eq("r on a spec file runs that file", started[#started].flags, { file = { RED } })
 on_line("TESTS")
 T.feed("r")
-T.eq("r on a folder runs what is below it", started[#started].flags, {
-  file = { "TESTS/" },
-  filter = { "TESTS/" },
-})
+T.eq("r on a folder runs what is below it", started[#started].flags, { file = { "TESTS/" } })
 T.feed("R")
 T.eq("R runs what failed last time", started[#started].flags, { raw = { "--lf" } })
 T.eq("four runs, one per key press", #started, 4)
@@ -295,6 +288,24 @@ T.ok("... the node kept its place: the case below it is still in sight", line_of
 
 T.eq("nothing was said at warning level", T.loud(mark), {})
 T.eq("no dialog nobody expected", T.unanswered, 0)
+
+-- ── setup({ tree = ... }) ────────────────────────────────────────────────────
+local registry = require("lib.nvim.tree.registry")
+require("testing").setup({ tree = { keys = { run = "gr", failed = false } } })
+local keys = {}
+for _, action in ipairs(registry.get("source", "tests").actions) do
+  keys[action.name] = action.key or false
+end
+T.eq(
+  "setup({ tree = { keys } }) moves the keys of the view",
+  keys,
+  { ["tests.run"] = "gr", ["tests.run_failed"] = false }
+)
 require("testing").setup({ tree = false })
+T.eq(
+  "setup({ tree = false }) takes the view and the badge out",
+  { registry.get("source", "tests"), registry.get("decorator", "tests") },
+  {}
+)
 vim.fn.delete(scratch, "rf")
 T.finish()

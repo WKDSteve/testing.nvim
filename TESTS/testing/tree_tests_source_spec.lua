@@ -216,8 +216,8 @@ return function(H)
     run.run({ find(top, "tests:file:" .. red) }, {})
     eq(runs[#runs], {
       root = root,
-      flags = { file = { red }, filter = { red } },
-    }, "run on a file: that file")
+      flags = { file = { red } },
+    }, "run on a file: that file, and no filter (a filtered file counts as run in part)")
     local case_id = red .. "::two"
     local case_node = find(top, "tests:case:" .. case_id)
     ok(case_node ~= nil, "the red case is a node")
@@ -283,6 +283,10 @@ return function(H)
       eq(#problems, 1, "tree: " .. name .. " is refused")
     end
     eq(config.get().tree, true, "tree is on by default")
+    config.setup({ tree = { keys = { run = "gr" } } })
+    eq(config.get().tree, { keys = { run = "gr" } }, "tree: a table of keys is kept as given")
+    config.setup({ tree = false })
+    eq(config.get().tree, false, "tree: false is kept")
   end)
   finish()
   if not worked then

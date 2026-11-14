@@ -305,7 +305,7 @@ end
 ---@param list table[]
 function M.run(list)
   local nodes = require("testing.explorer.nodes")
-  local files, filters, whole, any = {}, {}, false, false
+  local files, filters, whole, any, narrowed = {}, {}, false, false, false
   for _, node in ipairs(list or {}) do
     local flags = nodes.run_flags(node)
     if flags then
@@ -313,6 +313,7 @@ function M.run(list)
       if not flags.file then
         whole = true
       end
+      narrowed = narrowed or flags.filter ~= nil
       vim.list_extend(files, flags.file or {})
       -- a file marked next to a case: `--filter` narrows every selected file, so the file is a filter too
       vim.list_extend(filters, flags.filter or flags.file or {})
@@ -323,7 +324,9 @@ function M.run(list)
   end
   local flags = {}
   if not whole then
-    flags.file, flags.filter = files, filters
+    -- no `--filter` unless a case or a describe asked for one: a file that ran with a filter counts as run in
+    -- part, and its result would stay outdated
+    flags.file, flags.filter = files, narrowed and filters or nil
   end
   M.start(flags)
 end
