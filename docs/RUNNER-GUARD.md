@@ -155,7 +155,12 @@ It refuses when:
 - a signature does not match its payload;
 - none of the last three reviewed commits is an ancestor (history rewritten), there is no reviewed commit at all, or
   the range holds more than 250 commits;
-- there is no `ssh-keygen` on the `PATH` (Windows has its OpenSSH client there).
+- there is no `ssh-keygen` on the `PATH` (Windows has its OpenSSH client there);
+- GitHub gave no answer to the comparison (an exhausted API rate limit, HTTP 403 or 429, or the network). That is
+  not "no ancestor": the refusal says `the comparison with GitHub failed (<error>)`, with the minutes until the rate
+  limit resets when that was the error, and names `gh run rerun <run id> --failed` instead of a release. A restart
+  once GitHub answers is enough; only a `404` (GitHub does not know the commit, or no common ancestor) reads as a
+  rewritten history.
 
 A refused job names `testing ci trust` as before. Rules 2 and 3 come first: a pull request or a foreign actor is
 refused, signed or not.

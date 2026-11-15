@@ -733,6 +733,7 @@ return function(H)
       end
       local compared
       local during
+      local rate_asked = false
       local function check(e, private)
         compared = {}
         local o = sink()
@@ -746,6 +747,10 @@ return function(H)
             if args[4] == ".private" then
               return tostring(private == true) .. "\n"
             end
+            if args[2] == "rate_limit" then
+              rate_asked = true
+              return "605\n"
+            end
             local base = (args[2] or ""):match(
               "^repos/WKDSteve/tasks%.nvim/compare/(%x+)%.%.%.%x+$"
             )
@@ -754,8 +759,8 @@ return function(H)
               if during then
                 during()
               end
-              local doc = compare(base)
-              return doc and vim.json.encode(doc) or nil, doc and nil or "HTTP 404"
+              local doc, cerr = compare(base)
+              return doc and vim.json.encode(doc) or nil, doc and nil or (cerr or "HTTP 404")
             end
             return nil, "unexpected " .. table.concat(args, " ")
           end,
@@ -818,6 +823,47 @@ return function(H)
         1,
         "signed: nothing recorded"
       )
+
+      -- the comparison fails (an exhausted rate limit, the network): still refused, but said as what it is, with the
+      -- restart of the job instead of a release (appkit, 2026-11-14: "none of the last 3 reviewed commits is an
+      -- ancestor" while the direct parent was on the list)
+      reset()
+      compare = function()
+        return nil, "gh: API rate limit exceeded for user ID 1. (HTTP 403)"
+      end
+      code, text = check(env({ GITHUB_SHA = SHA4, GITHUB_RUN_ID = "4242" }))
+      eq(code, 1, "query failed: still refused")
+      has(
+        text,
+        "the comparison with GitHub failed (gh: API rate limit exceeded",
+        "query failed: names the error"
+      )
+      has(text, "the rate limit resets in 10 min", "query failed: ... and when the limit resets")
+      ok(rate_asked, "query failed: the reset time comes from rate_limit")
+      ok(not text:find("is an ancestor", 1, true), "query failed: no word of a rewritten history")
+      has(
+        text,
+        "gh run rerun 4242 --failed -R WKDSteve/tasks.nvim",
+        "query failed: restart the job"
+      )
+      ok(not text:find("ci release WKDSteve", 1, true), "query failed: no release offered")
+      reset()
+      compare = function()
+        return nil, "error connecting to api.github.com"
+      end
+      code, text = check()
+      eq(code, 1, "network: still refused")
+      has(text, "failed (error connecting to api.github.com)", "network: names the error")
+      ok(not text:find("rate limit resets", 1, true), "network: no rate-limit line")
+      -- a 404 is GitHub's answer: no ancestor among the reviewed commits
+      reset()
+      compare = function()
+        return nil
+      end
+      code, text = check()
+      eq(code, 1, "404: refused")
+      has(text, "is an ancestor of", "404: the history is the reason")
+      has(text, "ci release WKDSteve/tasks.nvim", "404: ... and the release is offered")
 
       reset()
       compare = ahead({ commit(SHA4, p4, sign("theirs", p4)) })

@@ -80,6 +80,7 @@ local function real_env()
     GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY"),
     GITHUB_REPOSITORY_OWNER = os.getenv("GITHUB_REPOSITORY_OWNER"),
     GITHUB_SHA = os.getenv("GITHUB_SHA"),
+    GITHUB_RUN_ID = os.getenv("GITHUB_RUN_ID"),
     TESTING_RUNNER_ROOT = os.getenv("TESTING_RUNNER_ROOT"),
     TESTING_ALLOWED_SIGNERS = os.getenv("TESTING_ALLOWED_SIGNERS"),
     USERPROFILE = os.getenv("USERPROFILE"),
@@ -395,6 +396,29 @@ end
 
 local SSH_ARMOR = "-----BEGIN SSH SIGNATURE-----"
 
+---Why a request to GitHub failed, said for a person: the error and, for an exhausted rate limit (HTTP 403 or 429, or
+---the words "rate limit"), how long until it resets (`rate_limit` itself does not count against it).
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param err string|nil
+---@return string
+local function query_failure(ctx, err)
+  local text = tostring(err or "no answer"):gsub("%c", " "):sub(1, 200)
+  local lower = text:lower()
+  if
+    lower:find("rate limit", 1, true)
+    or text:find("HTTP 403", 1, true)
+    or text:find("HTTP 429", 1, true)
+  then
+    local out = gh(ctx, { "api", "rate_limit", "--jq", ".resources.core.reset" })
+    local reset = tonumber(out and out:match("%d+"))
+    if reset then
+      local left = math.max(0, reset - ((ctx and ctx.now) or os.time()))
+      text = ("%s; the rate limit resets in %d min"):format(text, math.ceil(left / 60))
+    end
+  end
+  return text
+end
+
 ---Rule 6: may `sha` run because every commit it adds to a reviewed ancestor is signed by a registered device?
 ---@param repo string `owner/name`
 ---@param sha string
@@ -403,6 +427,7 @@ local SSH_ARMOR = "-----BEGIN SSH SIGNATURE-----"
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@return boolean ok
 ---@return string why the signers when ok, else the reason
+---@return boolean|nil failed true: GitHub gave no answer (rate limit, network), not "no ancestor"
 function M.signed_release(repo, sha, entry, signers, ctx)
   local kg = keygen(ctx)
   if not kg then
@@ -412,18 +437,32 @@ function M.signed_release(repo, sha, entry, signers, ctx)
   if #shas == 0 then
     return false, "no reviewed commit to start from (release one with testing ci trust)"
   end
-  local doc, tried = nil, 0
+  local doc, tried, failed = nil, 0, nil
   for i = #shas, 1, -1 do
     if tried >= M.MAX_BASES then
       break
     end
     tried = tried + 1
-    local text = gh(ctx, { "api", ("repos/%s/compare/%s...%s"):format(repo, shas[i].sha, sha) })
+    local text, err =
+      gh(ctx, { "api", ("repos/%s/compare/%s...%s"):format(repo, shas[i].sha, sha) })
     local ok, d = pcall(vim.json.decode, text or "")
     if ok and type(d) == "table" and d.status == "ahead" then
       doc = d
       break
+    elseif not text and not tostring(err):find("HTTP 404", 1, true) then
+      -- no answer at all (an exhausted rate limit, the network): that is no "not an ancestor" (a 404 is GitHub's
+      -- answer for a commit it does not know or a range without a common ancestor)
+      failed = failed or err or "no answer"
+    elseif text and not (ok and type(d) == "table" and type(d.status) == "string") then
+      failed = failed or "GitHub answered the comparison with no status"
     end
+  end
+  if not doc and failed then
+    return false,
+      ("the comparison with GitHub failed (%s): no answer, which says nothing about the history"):format(
+        query_failure(ctx, failed)
+      ),
+      true
   end
   if not doc then
     return false,
@@ -498,6 +537,7 @@ local function check(sv, ctx)
     sv.out("runner-guard: allowed: " .. reason)
     return 0
   end
+  local query_failed = false
   if why == "unreviewed" and key and is_sha(facts.sha:lower()) then
     local root = M.root(ctx)
     local signers, snote = M.signers_path(ctx, root)
@@ -506,7 +546,8 @@ local function check(sv, ctx)
     end
     if signers then
       local sha = facts.sha:lower()
-      local good, who = M.signed_release(facts.repo, sha, facts.entry, signers, ctx)
+      local good, who
+      good, who, query_failed = M.signed_release(facts.repo, sha, facts.entry, signers, ctx)
       if good then
         local done, err = update(M.store_path(root), function(rs)
           local e = rs[key] or { mode = "auto", shas = {} }
@@ -533,7 +574,16 @@ local function check(sv, ctx)
     end
   end
   sv.err("runner-guard: JOB REFUSED: " .. reason)
-  if
+  if query_failed then
+    -- a release would not help: the commits may well be signed, GitHub only did not say so
+    local run_id = read_var(ctx, "GITHUB_RUN_ID")
+    sv.err(
+      ("runner-guard: restart the job once GitHub answers again: gh run rerun %s --failed -R %s"):format(
+        (run_id and run_id:match("^%d+$")) and run_id or "<run id>",
+        repo
+      )
+    )
+  elseif
     facts.sha
     and facts.sha:match("^%x+$")
     and key
