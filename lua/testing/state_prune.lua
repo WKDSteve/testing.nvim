@@ -7,7 +7,8 @@
 --- `prune` removes a folder whose marker names a path that no longer exists: a worktree of a sabotage probe or a
 --- session, long gone, left dozens of them.
 ---
---- Never removed: a folder without a marker (written before markers; listed as a count), a folder whose marker does
+--- Never removed: a folder whose project's parent folder is not there either (a drive or share not mounted now), a
+--- folder without a marker (written before markers; listed as a count), a folder whose marker does
 --- not belong to it (its hash is not the one of the path it names), a link, a folder with a lock file younger than
 --- `BUSY_S` (a run writing there), and anything that is not directly below `<state>/testing/` with the name form
 --- `<name>-<12 hex>`.
@@ -87,7 +88,7 @@ end
 ---@field dir string
 ---@field name string
 ---@field root? string The project key of the marker.
----@field state "gone"|"present"|"unmarked"|"foreign"|"busy"
+---@field state "gone"|"present"|"unmarked"|"foreign"|"busy"|"unreachable"
 
 ---Look at every project folder below `<base>/testing/`.
 ---@param base string The state directory (`stdpath('state')`).
@@ -118,6 +119,10 @@ function M.scan(base, now)
       e.state = "foreign"
     elseif vim.uv.fs_stat(key) then
       e.state = "present"
+    elseif not vim.uv.fs_stat(vim.fs.dirname(key)) then
+      -- the folder it was in is not there either: a drive or a share that is not mounted now (an external disk, WSL
+      -- that is not running) says nothing about the project; only a project gone from a folder that is there is gone
+      e.state = "unreachable"
     elseif busy(dir, now) then
       e.state = "busy"
     else
@@ -160,7 +165,7 @@ function M.main(argv, sv)
     end
   end
   base = base or vim.fn.stdpath("state") --[[@as string]]
-  local count = { gone = 0, present = 0, unmarked = 0, foreign = 0, busy = 0 }
+  local count = { gone = 0, present = 0, unmarked = 0, foreign = 0, busy = 0, unreachable = 0 }
   local failed = 0
   for _, e in ipairs(M.scan(base)) do
     count[e.state] = count[e.state] + 1
@@ -183,7 +188,12 @@ function M.main(argv, sv)
       dry and "to remove" or "removed",
       count.present,
       count.unmarked,
-      count.foreign > 0 and (", %d with a marker of another folder"):format(count.foreign) or ""
+      (count.foreign > 0 and (", %d with a marker of another folder"):format(count.foreign) or "")
+        .. (
+          count.unreachable > 0
+            and (", %d whose folder is not reachable now (kept)"):format(count.unreachable)
+          or ""
+        )
     )
   )
   return failed > 0 and 3 or 0

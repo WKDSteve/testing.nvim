@@ -71,11 +71,16 @@ return function(H)
   write(unmarked_dir .. "/last.json", "{}")
   local foreign_dir = base .. "/testing/foreign-aaaaaaaaaaaa"
   prune.mark(foreign_dir, gone)
+  -- a project on a drive or share that is not there now (its parent folder is missing too): kept
+  local away = tmp .. "/unplugged/drive/project"
+  local away_dir = history.dir(project("unplugged/drive/project"), opts)
+  prune.mark(away_dir, away)
   local odd_dir = base .. "/testing/not-a-project"
   write(odd_dir .. "/root.json", vim.json.encode({ v = 1, root = gone }))
   vim.fn.delete(gone, "rf")
   vim.fn.delete(busy, "rf")
   vim.fn.delete(tmp .. "/wt-old", "rf")
+  vim.fn.delete(tmp .. "/unplugged", "rf")
 
   local code, out = run({ "prune", "--dry-run", "--state-dir=" .. base })
   eq(code, 0, "dry run: exit 0")
@@ -93,6 +98,14 @@ return function(H)
   ok(vim.uv.fs_stat(unmarked_dir) ~= nil, "prune: a folder without a marker is left alone")
   ok(vim.uv.fs_stat(foreign_dir) ~= nil, "prune: a marker of another folder removes nothing")
   ok(vim.uv.fs_stat(odd_dir) ~= nil, "prune: a folder of another name form is not looked at")
+  ok(
+    vim.uv.fs_stat(away_dir) ~= nil,
+    "prune: a project whose parent folder is not there either (a drive not mounted) is kept"
+  )
+  ok(
+    out:find("1 whose folder is not reachable now (kept)", 1, true) ~= nil,
+    "prune: ... and counted"
+  )
   ok(
     out:find("1 removed, 1 kept (project there), 1 without a marker", 1, true) ~= nil,
     "prune: the tally: " .. out
