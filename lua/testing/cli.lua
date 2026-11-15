@@ -652,6 +652,10 @@ local function execute(argv, sv)
       getenv = (sv --[[@as Testing.Cli.Services]]).getenv,
     })
   end
+  -- `testing state prune`: remove the state folders of projects that are gone (docs/CLI.md)
+  if argv[1] == "state" then
+    return require("testing.state_prune").main(vim.list_slice(argv, 2), sv)
+  end
   -- `testing status`: is the repository (or the fleet) proven, one line each (docs/CLI.md)
   if argv[1] == "status" then
     return require("testing.status").main(vim.list_slice(argv, 2), sv)

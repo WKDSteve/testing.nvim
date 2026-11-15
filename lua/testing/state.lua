@@ -989,6 +989,10 @@ function M.record(root, res, info, opts)
   if not locked then
     return false, tostring(ok)
   end
+  if ok then
+    -- the marker that lets `testing state prune` tell this folder's project (a convenience: never fails the record)
+    pcall(require("testing.state_prune").mark, M.dir(root, opts), root)
+  end
   return ok, err, result_state
 end
 
