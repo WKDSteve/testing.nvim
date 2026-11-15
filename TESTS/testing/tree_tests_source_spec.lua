@@ -9,6 +9,10 @@
 
 return function(H)
   local ok = H.ok
+  local W = dofile(
+    vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))
+      .. "/watch_support.lua"
+  )
   local function eq(actual, expected, msg)
     return ok(
       vim.deep_equal(actual, expected),
@@ -156,10 +160,12 @@ return function(H)
     eq(resets, 0, "subscribing tells nothing: the view was just built")
     local before = loads
     vim.fn.mkdir(state.dir(root, sopts), "p")
-    vim.fn.writefile({ "{}" }, state.dir(root, sopts) .. "/touched")
-    vim.wait(4000, function()
+    -- written again while not seen: the watch may not be armed yet right after subscribe (FSEvents on macOS)
+    W.until_seen(function(n)
+      vim.fn.writefile({ "{}", tostring(n) }, state.dir(root, sopts) .. "/touched")
+    end, function()
       return resets > 0
-    end, 20)
+    end)
     ok(loads > before, "a change of the result directory makes it read the result")
     ok(resets > 0, "... and the view is told to ask for the root again")
     before = loads

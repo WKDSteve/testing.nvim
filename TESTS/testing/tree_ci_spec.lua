@@ -8,6 +8,10 @@
 
 return function(H)
   local ok = H.ok
+  local W = dofile(
+    vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))
+      .. "/watch_support.lua"
+  )
   local function eq(actual, expected, msg)
     return ok(
       vim.deep_equal(actual, expected),
@@ -310,10 +314,12 @@ return function(H)
     for _, s in ipairs(green.steps) do
       s.state, s.findings, s.findings_total, s.reason = "green", {}, 0, nil
     end
-    write_doc(green)
-    vim.wait(4000, function()
+    -- written again while not seen: the watch may not be armed yet right after subscribe (FSEvents on macOS)
+    W.until_seen(function()
+      write_doc(green)
+    end, function()
       return resets > 0
-    end, 20)
+    end)
     ok(resets > 0, "a pipeline run that ended tells the view")
     shown = source.root({})
     eq(

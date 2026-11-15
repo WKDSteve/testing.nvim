@@ -8,6 +8,10 @@
 
 return function(H)
   local ok = H.ok
+  local W = dofile(
+    vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))
+      .. "/watch_support.lua"
+  )
   local function eq(actual, expected, msg)
     return ok(
       vim.deep_equal(actual, expected),
@@ -169,10 +173,13 @@ return function(H)
     -- the project never ran: its result directory does not exist yet; the first run has to show anyway
     ok(vim.uv.fs_stat(state.dir(root, opts)) == nil, "no result directory before the first run")
     local before = loads
-    vim.fn.mkdir(state.dir(root, opts), "p")
-    vim.wait(4000, function()
+    -- made again while not seen: the watch may not be armed yet right after subscribe (FSEvents on macOS)
+    W.until_seen(function()
+      vim.fn.delete(state.dir(root, opts), "d")
+      vim.fn.mkdir(state.dir(root, opts), "p")
+    end, function()
       return loads > before
-    end, 20)
+    end)
     ok(loads > before, "the first run's directory appearing makes it read the result")
 
     stop()
