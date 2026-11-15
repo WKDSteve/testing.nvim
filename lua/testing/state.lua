@@ -98,7 +98,7 @@ local uv = vim.uv or vim.loop
 ---@field summary table<string, integer>
 ---@field files table<string, Testing.State.File>
 ---@field specs? string[]  Every spec file the last run discovered (sorted), whether it ran or not. nil: no run recorded one.
----@field specs_ts? integer  When that list was recorded (Unix time).
+---@field specs_ts? integer  When that list was made (Unix time): a spec file written later is not in it.
 ---@field cases Testing.State.Case[]
 ---@field notes string[]
 ---@field package _by_id table<string, Testing.State.Case> Only this module (its functions take the state, they are no methods).
@@ -782,6 +782,7 @@ end
 ---@class Testing.State.ApplyInfo
 ---@field ran_files? table<string, true>  Files that ran WITHOUT a case restriction: they forget ids they no longer produce and their file record is renewed.
 ---@field known_files? table<string, true>  Every discovered file; records and cases of other files are dropped, and the list is kept as `specs`. nil = keep all.
+---@field known_time? integer  When `known_files` were discovered (Unix time; default: the time of the record).
 ---@field partial? boolean  The run covered a selection or stopped early.
 ---@field time? integer  Unix time (tests).
 ---@field stat? fun(root: string, file: string): { mtime_ns: string, size: integer }|nil  Replaces `M.stat` (tests).
@@ -840,7 +841,12 @@ function M.apply(st, res, info)
       end
     end
     table.sort(specs)
-    st.specs, st.specs_ts = specs, ts
+    -- the moment of the discovery, not of the record: a spec written while the run went is newer than the list
+    local at = info.known_time
+    if type(at) ~= "number" or at ~= at or at < 0 or at > ts then
+      at = ts
+    end
+    st.specs, st.specs_ts = specs, math.floor(at)
   end
   st.run, st.ts, st.partial = res.run.id, ts, info.partial == true
   emit(st, "apply")

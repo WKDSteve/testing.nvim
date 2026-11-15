@@ -537,6 +537,11 @@ return function(H)
           total = 2,
           suite_events = events,
         }) .. "\n")
+        -- the step after the suite has started before the editor reads the suite's own events
+        rf:write(
+          vim.json.encode({ v = 1, event = "step_end", ts = 1, step = "suite_again" }) .. "\n"
+        )
+        rf:write(vim.json.encode({ v = 1, event = "step_start", ts = 1, step = "after" }) .. "\n")
         rf:close()
         qrun_events = run_events
         local ef = assert(io.open(events, "wb"))
@@ -630,14 +635,20 @@ return function(H)
       ok(step_two, "quiet run: without a plan the events say step 2 of 2")
       editor.tail_events = real_tail
       eq(tails, 1, "quiet run: one reader for the suite's file, also for a second suite step")
-      local kinds, progress, foreign = {}, {}, 0
+      local kinds, progress, foreign, of_step = {}, {}, 0, {}
       for _, t in ipairs(told) do
         kinds[#kinds + 1] = t.ev.event
         foreign = foreign + (t.root == qroot and 0 or 1)
         if t.ev.event == "suite_progress" then
           progress[#progress + 1] = ("%s/%s"):format(tostring(t.ev.done), tostring(t.ev.total))
+          of_step[tostring(t.ev.step)] = true
         end
       end
+      eq(
+        of_step,
+        { suite_again = true },
+        "listen: the progress of the suite names the suite step, not the step that runs when its events are read"
+      )
       eq(foreign, 0, "listen: every event comes with the root of its run")
       eq(
         { kinds[1], kinds[2], kinds[3], kinds[4], kinds[5] },

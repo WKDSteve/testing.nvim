@@ -84,8 +84,8 @@ local shown = nil
 local unlisten = nil
 ---@type fun()|nil
 local unlisten_ci = nil
----@type { root: string, live: Testing.Explorer.Ci.Live }|nil  the pipeline run that is going, laid over `ci.json`
-local pipeline = nil
+---@type table<string, Testing.Explorer.Ci.Live>  project root -> its pipeline run that is going, laid over `ci.json`
+local pipelines = {}
 ---@type fun(keys?: string[])|nil
 local emit = nil
 ---@type table<table, true>  the `emit` of every view that shows the source
@@ -275,8 +275,8 @@ local function release()
     pcall(vim.api.nvim_del_augroup_by_id, augroup)
     augroup = nil
   end
-  -- a pipeline that goes on while nobody looks is not followed: its end shows as a new `ci.json`
-  loaded, session, shown, pipeline = nil, nil, nil, nil
+  -- a pipeline that goes on while no tree reads this module is not followed: its end shows as a new `ci.json`
+  loaded, session, shown, pipelines = nil, nil, nil, {}
 end
 
 ---The badge of a spec file while a run goes: running while one of its cases is running or queued, else what
@@ -412,29 +412,38 @@ end
 ---@param root string
 ---@param ev table  As `testing.ci.editor.listen` hands it out: the words of the child, checked by `testing.explorer.ci`.
 function M.on_ci_event(root, ev)
-  if next(views) == nil or norm(root) ~= norm(project_root()) then
+  if not in_use() then
     return
   end
   local ci = require("testing.explorer.ci")
   local where = norm(root)
+  -- The run is followed whether or not it is in sight: while the view is hidden or shows another project, a
+  -- step that ends and the end of the run are taken in all the same, or the view would come back to a step
+  -- that runs for ever. Only the telling is for the project on screen.
+  local on_screen = next(views) ~= nil and where == norm(project_root())
   if type(ev) == "table" and ev.event == "run_start" then
-    local live = ci.live_start(ev)
-    pipeline = live and { root = where, live = live } or nil
-    reset_views()
+    pipelines[where] = ci.live_start(ev)
+    if on_screen then
+      reset_views()
+    end
     return
   end
-  if not pipeline or pipeline.root ~= where then
+  local live = pipelines[where]
+  if not live then
     return
   end
-  local what, name = ci.live_feed(pipeline.live, ev)
+  local what, name = ci.live_feed(live, ev)
   if what == "done" then
     -- ended or killed: the root reads `ci.json` again, the document the run wrote or the last one
-    pipeline = nil
-    reset_views()
-  elseif what == "reset" then
+    pipelines[where] = nil
+  end
+  if not on_screen then
+    return
+  end
+  if what == "done" or what == "reset" then
     reset_views()
   elseif what == "step" and shown and shown.by_step[name] then
-    local step = pipeline.live.by_name[name]
+    local step = live.by_name[name]
     local updates = require("testing.explorer.nodes").set_many(shown, {
       {
         step = name,
@@ -543,7 +552,8 @@ function M.root_node()
   end
   -- the pipeline of the project, when there is one: it stands first. A run that is going, else the last one
   local ci = require("testing.explorer.ci")
-  local ok_ci, doc = true, (pipeline and pipeline.root == norm(root)) and pipeline.live.doc or nil
+  local going = pipelines[norm(root)]
+  local ok_ci, doc = true, going and going.doc or nil
   if not doc then
     ok_ci, doc = pcall(ci.read, root, options.state_opts)
   end

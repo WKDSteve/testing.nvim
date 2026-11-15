@@ -521,6 +521,48 @@ return function(H)
     eq(live_resets, after_stop, "... and is told nothing more")
     eq(#source.root({}).children[1].children, 4, "... the run it followed is forgotten with it")
 
+    -- a run that goes on while the view is off screen: the tree shows the files (the badges keep this module
+    -- awake), the run goes on and ends, and the view comes back to what is true by then
+    editor.listen = function(fn)
+      heard = fn
+      return function() end
+    end
+    local stop_badges = registry.get("decorator", "tests").subscribe(function() end)
+    editor.listen = real_listen
+    local function show()
+      return source.subscribe({}, {
+        reset = function()
+          shown = source.root({})
+        end,
+        push = function() end,
+        invalidate = function() end,
+      })
+    end
+    local hide = show()
+    feed(1)
+    eq(#shown.children[1].children, 3, "off screen: the run starts while the view is shown")
+    hide()
+    feed(2)
+    feed(3)
+    hide = show()
+    shown = source.root({})
+    eq(
+      { steps_of()[1][2], steps_of()[2][2] },
+      { "pass", "queued" },
+      "off screen: a step that ended meanwhile has its state when the view is back"
+    )
+    hide()
+    feed(10)
+    hide = show()
+    shown = source.root({})
+    eq(
+      #shown.children[1].children,
+      4,
+      "off screen: a run that ended meanwhile leaves no step queued or running: the document shows"
+    )
+    hide()
+    stop_badges()
+
     os.remove(ci.path(root, sopts))
     eq(
       source.root({}).children[1].kind,

@@ -698,7 +698,7 @@ end
 
 ---Step 7: what the run leaves for the next one: the history, the last result per case, the run state and
 ---the last green run. A convenience: a failure to write is a note, never the verdict.
----@param ctx { root: string, sv: Testing.Run.Services, err: fun(s: string), res: Testing.Result, report: table, selector: table, lf: table|nil, known: table, stat_before: table, verdict: table, infra_failed: boolean }
+---@param ctx { root: string, sv: Testing.Run.Services, err: fun(s: string), res: Testing.Result, report: table, selector: table, lf: table|nil, known: table, discovered_at: integer, stat_before: table, verdict: table, infra_failed: boolean }
 local function record_run_state(ctx)
   local root, sv, err, res, report = ctx.root, ctx.sv, ctx.err, ctx.res, ctx.report
   local selector, known, stat_before, verdict =
@@ -732,6 +732,7 @@ local function record_run_state(ctx)
     local rok, rerr = require("testing.state").record(root, res, {
       ran_files = ran_files,
       known_files = known,
+      known_time = ctx.discovered_at,
       partial = not full,
       stat = function(_, file)
         return stat_before[file]
@@ -1182,6 +1183,8 @@ function M.execute_run(plan, sv, run_opts, err, ev)
   for _, f in ipairs(ordered) do
     known[f.rel] = true
   end
+  -- a spec file written after this moment is not in `known`: the store keeps the moment with the list
+  local discovered_at = os.time()
 
   -- 3. selection by file / path
   local selector = select_mod.new({
@@ -1734,6 +1737,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     selector = selector,
     lf = lf_by_file,
     known = known,
+    discovered_at = discovered_at,
     stat_before = stat_before,
     verdict = verdict,
     infra_failed = printer.infra_failed,

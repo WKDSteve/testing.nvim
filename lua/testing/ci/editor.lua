@@ -1306,6 +1306,8 @@ function M.run(o)
   local poll_run, poll_suite = function() end, function() end
   local stop_suite = function() end
   local suite_file = nil ---@type string|nil
+  -- the step the suite's events belong to: read later than the run's, they must not be counted for the step after it
+  local suite_step = nil ---@type string|nil
   local function poll_events()
     poll_run()
     poll_suite()
@@ -1344,7 +1346,7 @@ function M.run(o)
       live.files_done, live.cases, live.failed, live.current = 0, 0, 0, nil
       tell(
         o.root,
-        { event = "suite_progress", step = live.step, done = 0, total = live.files_total }
+        { event = "suite_progress", step = suite_step, done = 0, total = live.files_total }
       )
     elseif ev.event == "file_start" then
       live.current = ev.file
@@ -1358,7 +1360,7 @@ function M.run(o)
       })
       tell(o.root, {
         event = "suite_progress",
-        step = live.step,
+        step = suite_step,
         done = live.files_done,
         total = live.files_total,
       })
@@ -1375,6 +1377,7 @@ function M.run(o)
       from_events = true
       live.step, live.t0 = ev.step, vim.uv.hrtime()
       progress:update({ text = ev.step, current = ev.index, total = ev.total })
+      suite_step = type(ev.suite_events) == "string" and ev.step or suite_step
       -- one reader per file: a second suite step of the same run appends to the same file, the reader goes on
       if type(ev.suite_events) == "string" and ev.suite_events ~= suite_file then
         stop_suite()

@@ -288,6 +288,34 @@ return function(H)
       "a run without a discovered list keeps the old one and its time"
     )
     eq(state.new(root).specs, nil, "a project that never ran has no list")
+    -- the list is as old as the discovery, not as the record: a spec written while the run went is newer than it
+    local timed = state.new(root)
+    state.apply(timed, ir({ { spec_a, "alpha", "pass" } }, "run-6c"), {
+      known_files = files_of(spec_a),
+      known_time = 1799999000,
+      time = 1800000000,
+    })
+    eq(
+      { timed.specs_ts, timed.ts },
+      { 1799999000, 1800000000 },
+      "the time of the list is when the files were discovered"
+    )
+    for name, odd in pairs({
+      ["later than the record"] = 1800000001,
+      ["no number"] = "soon",
+      ["negative"] = -1,
+    }) do
+      state.apply(timed, ir({ { spec_a, "alpha", "pass" } }, "run-6d"), {
+        known_files = files_of(spec_a),
+        known_time = odd,
+        time = 1800000000,
+      })
+      eq(
+        timed.specs_ts,
+        1800000000,
+        "a discovery time that is " .. name .. " is the time of the record"
+      )
+    end
   end
 
   -- prev.json: newly red -----------------------------------------------------------
