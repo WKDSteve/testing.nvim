@@ -462,7 +462,11 @@ In the container `testing ci` runs again on the repository. It is mounted **read
 checkout and every dependency checkout too) and **copied** into the container's own file system before the run
 (`/tmp/ci/repo`, `/tmp/ci/deps/<name>`, `$<NAME>_DIR` pointing at the copies): through the mount of a Windows drive
 (Podman on WSL, 9p) every file lookup of a `require` or a git call costs milliseconds, and a suite ran twice as long
-with its deadlines broken. The copy goes with the container. One output folder is writable (the document and the
+with its deadlines broken. Of a git checkout only what git sees is copied (the tracked files, the untracked ones that
+are not ignored, and `.git`): lib.nvim took 75 s and 53 MB instead of 181 to 266 s and 117 MB (2026-11-15, Podman on
+WSL, under load). Without git or tar in the image (darwin-like has no tar), for a plain folder, and for a linked
+worktree (its `.git` names a path of the host) the whole folder is copied. Podman before 4.0 has no `--passwd-entry`;
+the run then ends before it starts, and the message says so. The copy goes with the container. One output folder is writable (the document and the
 state of the inner run). The run is **not root**, as on a hosted runner: with Podman the user of this machine is the
 user in there (`--userns=keep-id`), named `runner` with its HOME in `/tmp/home` (`--passwd-entry`; keep-id would take
 the name of the engine's machine, `user` on WSL); docker keeps the image's user. The container has **no network**

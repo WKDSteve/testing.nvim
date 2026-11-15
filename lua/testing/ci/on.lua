@@ -289,8 +289,21 @@ M.WORK = "/tmp/ci"
 M.COPY_SCRIPT = table.concat({
   'root="$1"',
   "shift",
+  -- what a checkout holds for git: the tracked files and the untracked ones that are not ignored (the working tree
+  -- as the run sees it), plus `.git` when it is a folder; a build folder, `.deps/` of a pin or a large ignored
+  -- cache stays behind. Without git or without a repository there (a plain folder): all of it, as before.
+  "copy_tree() {",
+  '  if [ -e "$1/.git" ] && command -v git >/dev/null 2>&1 && command -v tar >/dev/null 2>&1'
+    .. ' && git -c safe.directory="*" -C "$1" rev-parse --git-dir >/dev/null 2>&1; then',
+  '    (cd "$1" && git -c safe.directory="*" ls-files -z --cached --others --exclude-standard'
+    .. ' | tar -cf - --null --no-recursion -T - 2>/dev/null) | tar -xpf - -C "$2" || return 1',
+  '    if [ -d "$1/.git" ]; then cp -R -p "$1/.git" "$2/.git" || return 1; fi',
+  "    return 0",
+  "  fi",
+  '  cp -R -p "$1/." "$2"',
+  "}",
   'while [ "$1" != "--" ]; do',
-  '  mkdir -p "$2" && cp -R -p "$1/." "$2" || { echo "testing ci --on: cannot copy $1 to $2" >&2; exit 3; }',
+  '  mkdir -p "$2" && copy_tree "$1" "$2" || { echo "testing ci --on: cannot copy $1 to $2" >&2; exit 3; }',
   "  shift 2",
   "done",
   "shift",
@@ -527,6 +540,8 @@ function M.run_target(target, argv, root, pipeline, sv)
   if not doc then
     local tail = vim.trim(((res.stderr or "") ~= "" and res.stderr or res.stdout or ""):sub(-300))
     local hint = res.code == 127 and " (is nvim in the image?)"
+      -- Podman before 4.0 has no --passwd-entry: the run ends before it starts
+      or (tail:find("passwd-entry", 1, true) and " (this Podman has no --passwd-entry: Podman 4.0 or later is needed)")
       or (tail:find("already in use", 1, true) and (" (another run of %s is in %s: podman ps)"):format(
         repo,
         name

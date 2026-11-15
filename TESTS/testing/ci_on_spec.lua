@@ -192,8 +192,12 @@ return function(H)
     has(argv, "LIB_NVIM_DIR=/tmp/ci/deps/lib.nvim", "and where lib.nvim is: its copy")
     -- the run works on a copy in the container (a lookup through the mount of a Windows drive costs milliseconds)
     has(argv, "/src/repo /tmp/ci/repo", "the repository is copied before the run")
-    -- with what every image has: the darwin-like one (Chimera) has no tar, and a copy that fails ends the container
-    ok(not on.COPY_SCRIPT:find("tar", 1, true), "the copy needs no tar")
+    -- with what every image has: the darwin-like one (Chimera) has no tar, and a copy that fails ends the container;
+    -- without tar or git the whole folder is copied, as before
+    ok(
+      on.COPY_SCRIPT:find("command -v tar", 1, true) ~= nil,
+      "the copy asks for tar before it uses it"
+    )
     has(on.COPY_SCRIPT, "exit 3", "a failed copy is infrastructure")
     has(argv, "/src/deps/lib.nvim /tmp/ci/deps/lib.nvim", "and lib.nvim")
     has(argv, "localhost/testing-ci:3", "the image of containers/ci")
