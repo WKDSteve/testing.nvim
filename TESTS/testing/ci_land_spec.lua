@@ -93,6 +93,20 @@ return function(H)
   has(w.text, "landed on main", "green: says so")
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")
+  has(w.text, "CI-10:", "green: while the hosted CI runs, the line of rule CI-10")
+
+  -- the line of CI-10 can be turned off: in the environment and with vim.g
+  do
+    local saved_env, saved_g = vim.env.TESTING_CI_HINT, vim.g.testing_ci_hint
+    vim.env.TESTING_CI_HINT = "0"
+    local quiet = scenario({ states = { { overall = "success" } } })
+    vim.env.TESTING_CI_HINT = saved_env
+    vim.g.testing_ci_hint = false
+    local quiet_g = scenario({ states = { { overall = "success" } } })
+    vim.g.testing_ci_hint = saved_g
+    eq(quiet.text:find("CI-10:", 1, true), nil, "TESTING_CI_HINT=0: no line of CI-10")
+    eq(quiet_g.text:find("CI-10:", 1, true), nil, "vim.g.testing_ci_hint = false: no line of CI-10")
+  end
 
   -- from a linked worktree the check branch carries the repository's name, not the folder's
   do

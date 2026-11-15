@@ -1212,6 +1212,8 @@ return function(H)
     has(res.err, "waity (running)", "--wait: ... and when that changes")
     local _, n_running = res.err:gsub("waity %(running%)", "")
     eq(n_running, 1, "--wait: an unchanged state is said once")
+    local _, n_hint = res.err:gsub("CI%-10:", "")
+    eq(n_hint, 1, "--wait: the line of rule CI-10, once")
     local conditional, not_modified = 0, 0
     for _, r in ipairs(requests) do
       if r.path == runs_path and r.etag then
@@ -1240,6 +1242,20 @@ return function(H)
     eq(sleeps, { 30, 30, 15 }, "--wait=75s: the last pause ends at the limit")
     has(stuck.err, "not finished after 1m15s: waity (queued)", "--wait: names what is not finished")
     has(stuck.out, "REPO", "--wait: ... after the table")
+
+    -- with --json: no line of CI-10 (beside a document)
+    clock, phase, sleeps = NOW, 1, {}
+    show(1)
+    local quiet = run({ "--wait=45s", "--json", "--state-dir", tmp .. "/wait-state3", waity }, {
+      now = function()
+        return clock
+      end,
+      sleep = function(s)
+        clock = clock + s
+      end,
+    })
+    has(quiet.err, "waity (queued)", "--wait --json: it waits")
+    eq(quiet.err:find("CI-10:", 1, true), nil, "--wait --json: no line of CI-10")
 
     -- GitHub does not answer one round (a 502): no verdict yet, so the wait goes on instead of ending with exit 3
     do

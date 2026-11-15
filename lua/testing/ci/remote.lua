@@ -1435,6 +1435,10 @@ function M.wait(repos, opts, limit, sv)
     local now_text = table.concat(going, ", ")
     if now_text ~= last then
       sv.err(("testing ci remote: waiting (%s): %s"):format(M.human(elapsed), now_text))
+      -- once, when the waiting begins; never beside a document (`--json`)
+      if last == nil and not opts.json then
+        require("testing.ci.hint").say(sv.err)
+      end
       last = now_text
     end
     M.deps.sleep(math.min(M.WAIT_POLL_S, limit - elapsed))
@@ -1546,8 +1550,12 @@ function M.main(argv, sv)
   end
   local records, info, unfinished
   if args.wait then
-    records, info, unfinished =
-      M.wait(repos, { workflow = args.workflow, state_dir = state_dir }, args.wait, sv)
+    records, info, unfinished = M.wait(
+      repos,
+      { workflow = args.workflow, state_dir = state_dir, json = args.json },
+      args.wait,
+      sv
+    )
   else
     records, info = M.collect(repos, { workflow = args.workflow, state_dir = state_dir })
   end

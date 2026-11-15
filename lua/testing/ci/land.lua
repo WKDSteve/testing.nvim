@@ -252,6 +252,8 @@ function M.run(args, say, state_dir)
     say(("land: the push of %s failed: %s"):format(check, vim.trim(err)))
     return M.EXIT_INFRA
   end
+  -- the hosted CI takes minutes: rule CI-10, the next small task meanwhile
+  require("testing.ci.hint").say(say)
   local function drop_check()
     if args.keep then
       say(("land: the check branch %s stays (--keep)"):format(check))
