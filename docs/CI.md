@@ -974,7 +974,9 @@ between.
 **Cache.** Per checkout `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json` (`--state-dir`, default
 `stdpath('state')`; two checkouts of one repository keep their own) holds the ETags and the last answers (only the fields used). The runs are asked with `If-None-Match`: a `304` reuses
 the stored answer and does not count against the rate limit. The jobs of a completed run whose `updated_at` did not
-change are not asked again at all; an open run's jobs are asked again, conditionally. Offline, a repository is
+change are not asked again at all; an open run's jobs are asked again, conditionally. GitHub can mark a run completed
+before its jobs list says so: a stored list with a job that has not completed is asked for again, without its ETag, and
+until then the repository reads `running` with the note `the run completed, its jobs list not yet`. Offline, a repository is
 `unknown`, never its stored state.
 
 Exit codes: `0` nothing red, `1` a repository is `failure`, `rejected`, `cancelled` or `no_runner`, `2` usage, `3` a repository

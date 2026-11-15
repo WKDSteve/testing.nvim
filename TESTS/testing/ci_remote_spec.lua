@@ -684,6 +684,51 @@ return function(H)
   eq(third.code, remote.EXIT_RED, "a red windows leg is exit 1")
   eq(vim.json.decode(third.out).repos[1].os.windows.state, "failure", "... in the windows cell")
 
+  -- GitHub marks a run completed before its jobs list says so (terminal.nvim, 2026-11-14: `ok ok ok`, the note
+  -- `running`, also with --wait): the lagging list is not the final answer of the completed run. It is asked for
+  -- again next time, without its ETag (a 304 on it would keep the lagging list), until every job has completed.
+  do
+    local runs = API[R .. "alpha.nvim/actions/runs"]
+    local jobs = API[R .. "alpha.nvim/actions/runs/10/jobs"]
+    runs.etag = '"runs-alpha-3"'
+    runs.body.workflow_runs[1].updated_at = "2026-10-31T12:00:00Z"
+    jobs.etag = '"jobs-alpha-lag"'
+    jobs.body.jobs[2].conclusion = "success"
+    jobs.body.jobs[4].status = "in_progress"
+    jobs.body.jobs[4].conclusion = vim.NIL
+    local lag = vim.json.decode(run({ "--json", dirs.alpha }).out).repos[1]
+    eq(
+      lag.overall,
+      "running",
+      "lagging jobs: a job still running is no green, whatever the run says"
+    )
+    has(
+      lag.note,
+      "its jobs list not yet",
+      "lagging jobs: the note says the list lags behind the run"
+    )
+    -- the same ETag for the caught-up list: only a request without it gets the new answer
+    jobs.body.jobs[4].status = "completed"
+    jobs.body.jobs[4].conclusion = "success"
+    -- (each run starts its own list of requests)
+    local caught = vim.json.decode(run({ "--json", dirs.alpha }).out).repos[1]
+    local asked_jobs
+    for k = 1, #requests do
+      if requests[k].path == R .. "alpha.nvim/actions/runs/10/jobs" then
+        asked_jobs = requests[k].etag or "none"
+      end
+    end
+    eq(asked_jobs, "none", "lagging jobs: asked again, without the stored ETag")
+    eq(caught.overall, "success", "lagging jobs: green once the list has caught up")
+    run({ "--json", dirs.alpha })
+    for k = 1, #requests do
+      ok(
+        requests[k].path ~= R .. "alpha.nvim/actions/runs/10/jobs",
+        "lagging jobs: a caught-up completed list is stored like any other (no request)"
+      )
+    end
+  end
+
   -- ------------------------------------------------------------------ a job that never got a runner
 
   local norun = run({ "--json", dirs.norun })

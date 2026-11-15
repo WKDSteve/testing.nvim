@@ -612,6 +612,11 @@ function M.classify(rec, run, jobs, non_gating, now)
     overall = "failure"
     notes[#notes + 1] = "run concluded " .. run.conclusion
   end
+  -- GitHub said the run completed while a gating job still runs in its list: the list lags behind, asked again
+  -- next time (never green before every job is)
+  if run.status == "completed" and (overall == "running" or overall == "queued") then
+    notes[#notes + 1] = "the run completed, its jobs list not yet: ask again"
+  end
   if not overall then
     -- every job is non-gating: nothing decides, which is no verdict (never green), said so
     notes[#notes + 1] = "only non-gating jobs"
@@ -701,6 +706,19 @@ local function write_cache(path, cache)
     -- a convenience, not part of the verdict: a cache that cannot be written only costs a full request next time
     pcall(require("lib.nvim.fs.write.atomic"), path, enc, { mkdirp = true })
   end
+end
+
+---Whether every job of a list has completed. GitHub can mark a run completed before its jobs list says so (the jobs
+---answer lags behind the run): such a list is no final answer, however the run reads.
+---@param jobs table[]|nil
+---@return boolean
+local function all_completed(jobs)
+  for _, job in ipairs(jobs or {}) do
+    if job.status ~= "completed" then
+      return false
+    end
+  end
+  return true
 end
 
 ---Ask GitHub about one repository; `done()` once `rec` is filled.
@@ -796,6 +814,11 @@ local function fetch(rec, ctx, done)
           return finish()
         end
         local jc = cache.jobs and cache.jobs.run_id == run.id and cache.jobs or nil
+        -- a completed run whose stored jobs list lags behind it (a job still running in it) is asked for afresh,
+        -- without its ETag: a 304 on that ETag would bring the lagging list back, round after round
+        if jc and run.status == "completed" and not all_completed(jc.list) then
+          jc = nil
+        end
         -- a completed run that did not change since its jobs were stored: no request at all
         if
           jc
