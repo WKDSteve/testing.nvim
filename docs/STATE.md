@@ -150,6 +150,36 @@ step runs that step again (`:Testing ci <profile> --step=<name>`), on a finding 
 `Pipeline` line the whole profile; with several steps marked, those. A pipeline run that has ended shows by
 itself, like a new result.
 
+**While a pipeline goes.** A pipeline started from this editor (`:Testing ci`, `r` on the pipeline or a step)
+is followed step by step:
+
+```
+▾ Tests
+  ▾ ✗ Pipeline fast           1/3  2.2s
+      ✓ stylua                     700ms
+    ▾ ✗ luacheck                   1.5s
+        2 finding(s), listed when the run has ended
+      ● suite                     12/187   the spec file it is at, of how many
+```
+
+1. the planned steps are queued (`◌`) and take the place of the last run; the pipeline line opens, so the
+   steps are in sight;
+2. the step that is going is running (`●`); the suite step shows the spec file it is at, of how many;
+3. a step that has ended shows its state and its time. Its findings are not known before the run has written
+   its document: a step that has some says how many;
+4. when the run has ended, `ci.json` is read again: the document the run wrote, with the findings. A run
+   that was stopped or crashed wrote none, so the last document shows again: nothing stays queued or running.
+
+A run with `--step=` plans only those steps, and so does the document it leaves. A pipeline started elsewhere
+(a terminal, a hook) shows when it has ended. How: the child of `:Testing ci` writes `testing ci --events`
+([CI.md](CI.md)), `testing.ci.editor.listen(fn)` hands every event on, and `testing.explorer.ci` checks them
+like the document. One thing to know: the tree opens a node by itself once per node, so a step that was open
+before the run and is red again after it is closed; its findings are one key press away.
+
+The spec folders stand next to the pipeline, not below its `suite` step: the cases are the last result of the
+working tree (`last.json`), and a pipeline may run on a snapshot whose suite never writes there. Each line of
+the view has one source, so the two cannot contradict each other on one line.
+
 The document is the one `:Testing ci status` shows (`ci.json` in the state folder, the last run of any
 profile). It is read as untrusted input: a size cap, every field checked, a step whose name could not be an
 argument of the next run is left out, and a finding that points out of the project keeps its text and loses

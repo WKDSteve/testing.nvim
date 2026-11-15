@@ -14,6 +14,20 @@
 ---
 --- A step is one unit for the tree, like a case: its state is its status, its findings stand below it and count
 --- nothing. `testing.explorer.nodes` draws and adds up the nodes built here.
+---
+--- **A run that is going** (`M.live_start`, `M.live_feed`): the events of a pipeline run started from the editor
+--- (`testing.ci.editor.listen`, testing-ci-events/1) make a document of their own, laid over the last one while
+--- the run goes. Pure: no file, no timer, no window.
+---
+---   run_start       the planned steps are `queued`; the pipeline node asks to be open
+---   step_start      the step is `running`
+---   suite_progress  the running step shows how far it is ("12/187")
+---   step_end        the step has its state and its time. The findings are not in the event: a step that has
+---                   some says how many, and lists them when the run has ended
+---   run_done        the session is over, whether the run ended or was killed: `ci.json` is read again, and that
+---                   is the document the run wrote, or the last one when it wrote none
+---
+--- The events are untrusted like the document: the same checks, field by field.
 
 local M = {}
 
@@ -35,6 +49,7 @@ M.STATUS = {
   error = "error",
   skipped = "skip",
   running = "running",
+  queued = "queued",
 }
 
 ---@class Testing.Explorer.Ci.Finding
@@ -50,12 +65,14 @@ M.STATUS = {
 ---@field reason? string
 ---@field findings Testing.Explorer.Ci.Finding[]
 ---@field findings_total integer
+---@field progress? string  How far a running step is (a run that is going).
 
 ---@class Testing.Explorer.Ci.Doc
 ---@field profile string
 ---@field verdict string
 ---@field time? string
 ---@field steps Testing.Explorer.Ci.Step[]
+---@field live? boolean  The document of a run that is going (`M.live_start`).
 
 ---A name that may go on a command line as `--step=<name>` / a profile.
 ---@param s any
@@ -193,7 +210,10 @@ function M.node(root, doc)
     if step.findings_total > #step.findings then
       children[#children + 1] = {
         id = ("tests:ci:finding:%s:more"):format(step.name),
-        label = ("... and %d more"):format(step.findings_total - #step.findings),
+        -- a run that is going knows the count only: the findings are in the document it writes at its end
+        label = doc.live and ("%d finding(s), listed when the run has ended"):format(
+          step.findings_total
+        ) or ("... and %d more"):format(step.findings_total - #step.findings),
         kind = "note",
       }
     end
@@ -215,6 +235,7 @@ function M.node(root, doc)
           step = step.name,
           recorded = step.state,
           duration_ms = step.ms,
+          progress = step.progress,
         },
       },
     }
@@ -225,9 +246,97 @@ function M.node(root, doc)
     kind = "ci",
     children = steps,
     data = {
-      testing = { kind = "ci", profile = doc.profile, verdict = doc.verdict, time = doc.time },
+      testing = {
+        kind = "ci",
+        profile = doc.profile,
+        verdict = doc.verdict,
+        time = doc.time,
+        -- a run that is going is watched: its steps are in sight
+        unfold = doc.live or nil,
+      },
     },
   }
+end
+
+---@class Testing.Explorer.Ci.Live
+---@field doc Testing.Explorer.Ci.Doc  What the view shows while the run goes.
+---@field by_name table<string, Testing.Explorer.Ci.Step>
+
+---Begin the session of a run from its `run_start`. nil: the event is none, or names no profile and no step that
+---could be shown.
+---@param ev any
+---@return Testing.Explorer.Ci.Live|nil
+function M.live_start(ev)
+  if type(ev) ~= "table" or ev.event ~= "run_start" or type(ev.steps) ~= "table" then
+    return nil
+  end
+  local profile = name_of(ev.profile)
+  if not profile then
+    return nil
+  end
+  local doc = { profile = profile, verdict = "running", steps = {}, live = true }
+  local by_name = {}
+  for i = 1, math.min(#ev.steps, M.MAX_STEPS) do
+    local name = name_of(ev.steps[i])
+    if name and not by_name[name] then
+      local step = { name = name, state = "queued", ms = 0, findings = {}, findings_total = 0 }
+      by_name[name] = step
+      doc.steps[#doc.steps + 1] = step
+    end
+  end
+  if #doc.steps == 0 then
+    return nil
+  end
+  return { doc = doc, by_name = by_name }
+end
+
+---Take one event of the run in.
+---@param live Testing.Explorer.Ci.Live
+---@param ev any
+---@return "step"|"reset"|"done"|nil what  `step`: that step shows something else (a push is enough); `reset`: the lines below it changed (the view asks for the root again); `done`: the run is over; nil: nothing changed
+---@return string|nil step
+function M.live_feed(live, ev)
+  local kind = type(ev) == "table" and ev.event or nil
+  if kind == "run_done" then
+    return "done", nil
+  end
+  local step = kind and type(ev.step) == "string" and live.by_name[ev.step] or nil
+  if not step then
+    return nil, nil
+  end
+  -- a count of findings or a reason is a line below the step
+  local function below()
+    return step.findings_total > 0
+      or (step.reason ~= nil and (M.STATUS[step.state] or "never") ~= "pass")
+  end
+  if kind == "step_start" then
+    local had = below()
+    step.state, step.ms, step.reason, step.progress, step.findings_total = "running", 0, nil, nil, 0
+    return had and "reset" or "step", step.name
+  elseif kind == "suite_progress" then
+    if step.state ~= "running" then
+      return nil, nil
+    end
+    local done = (ev.done == 0 and 0) or whole(ev.done, 1e7)
+    local total = whole(ev.total, 1e7)
+    local text = done and (total and ("%d/%d"):format(done, total) or tostring(done)) or nil
+    if text == step.progress then
+      return nil, nil
+    end
+    step.progress = text
+    return "step", step.name
+  elseif kind == "step_end" then
+    local had = below()
+    local ms = ev.ms
+    if type(ms) ~= "number" or ms ~= ms or ms < 0 or ms > 1e12 then
+      ms = 0
+    end
+    step.state, step.ms, step.progress = name_of(ev.state) or "unknown", ms, nil
+    step.reason = require("testing.state").title(ev.reason)
+    step.findings_total = whole(ev.findings_total, 1e9) or 0
+    return (had or below()) and "reset" or "step", step.name
+  end
+  return nil, nil
 end
 
 ---The pipeline run the marked nodes stand for: the profile, and the steps when only steps (or their findings)

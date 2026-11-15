@@ -121,7 +121,8 @@ end
 ---@field time? string
 ---@field file? string  Spec file, relative to the project root (a folder for `dir`).
 ---@field case? string  Case id (a case, also a spec file that is one case).
----@field sole? boolean  The one spec folder of the project: it starts open.
+---@field unfold? boolean  The node starts open whatever is below it: the one spec folder of a project, a pipeline that is running.
+---@field progress? string  How far a running unit is ("12/187"), drawn while it runs (a pipeline step).
 ---@field describe? string[]  The describe titles above and including a describe node.
 ---@field recorded? string  The status the run recorded (the shown one may be `stale`).
 ---@field message? string
@@ -187,6 +188,7 @@ end
 ---@field top table
 ---@field by_case table<string, table>  case id -> its node
 ---@field by_file table<string, table>  spec file -> its node
+---@field by_step table<string, table>  pipeline step -> its node
 ---@field parent table<table, table>
 ---@field depth table<table, integer>
 ---@field sums table<table, { worst: string|nil, total: integer, red: integer, ms: number }>
@@ -195,7 +197,8 @@ end
 ---@param top table
 ---@return Testing.Explorer.Index
 function M.index(top)
-  local index = { top = top, by_case = {}, by_file = {}, parent = {}, depth = {}, sums = {} }
+  local index =
+    { top = top, by_case = {}, by_file = {}, by_step = {}, parent = {}, depth = {}, sums = {} }
   local function walk(node, parent, depth)
     index.parent[node], index.depth[node] = parent, depth
     local data = M.data(node)
@@ -204,6 +207,9 @@ function M.index(top)
     end
     if data and data.kind == "file" and data.file then
       index.by_file[data.file] = node
+    end
+    if data and data.kind == "ci_step" and data.step then
+      index.by_step[data.step] = node
     end
     if type(node.children) == "table" then
       for _, child in ipairs(node.children) do
@@ -219,6 +225,8 @@ end
 ---@class Testing.Explorer.Change
 ---@field id? string  Case id.
 ---@field file? string  Spec file: the change is for its node (a file that is one case, or one whose cases are not loaded).
+---@field step? string  Pipeline step: the change is for its node.
+---@field progress? string  For a step: how far it is, drawn while it runs (nil takes it away).
 ---@field status string
 ---@field duration_ms? number
 
@@ -242,6 +250,12 @@ function M.set_many(index, changes)
       -- the node of the file stands for its cases only while it has none of its own in the tree
       if file and type(file.children) ~= "table" or (file and M.data(file).case) then
         node = file
+      end
+    end
+    if not node and change.step then
+      node = index.by_step[change.step]
+      if node then
+        M.data(node).progress = change.progress
       end
     end
     if node then
@@ -329,6 +343,9 @@ style = function(node, sum, is_case)
   if sum.total > 0 and not idle and (sum.ms > 0 or is_case) then
     columns[#columns + 1] = M.duration(sum.ms)
   end
+  if is_case and data.progress and sum.worst == "running" then
+    columns[#columns + 1] = data.progress
+  end
   node.columns = columns
   return true
 end
@@ -360,9 +377,9 @@ restyle = function(node, sums)
   end
   if style(node, sum, is_case) then
     if data.kind ~= "case" and data.kind ~= "file" or type(node.children) == "table" then
-      -- what is red is in sight without a key press, and so is the content of the one spec folder; closed by
+      -- what is red is in sight without a key press, and so is what a node asks to show (`unfold`); closed by
       -- hand it stays closed
-      node.open = (sum.red > 0 or data.sole == true) or nil
+      node.open = (sum.red > 0 or data.unfold == true) or nil
     end
   end
   return sum
@@ -716,7 +733,7 @@ function M.build(input)
   -- `restyle` decides `open` again (`M.index` runs one), and a green folder would be closed by it
   local only = top.children[#top.children]
   if folders == 1 and only.kind == "dir" then
-    M.data(only).sole = true
+    M.data(only).unfold = true
   end
   M.restyle(top)
   return top

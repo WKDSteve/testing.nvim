@@ -300,6 +300,49 @@ T.ok(
 )
 T.eq("... at its line and column", vim.api.nvim_win_get_cursor(0), { 1, 6 })
 
+-- ── a pipeline that is going ─────────────────────────────────────────────────
+-- the events of a run as the editor hands them on (`testing.ci.editor.listen`): the step lines move in the tree
+---Whether the line of the step `name` shows `sign`.
+local function shows(name, sign)
+  local line = line_is(name)
+  return line ~= nil and T.lines()[line]:find(sign, 1, true) ~= nil
+end
+T.tree()
+tree_mod.on_ci_event(
+  root,
+  { event = "run_start", profile = "fast", steps = { "stylua", "luacheck" } }
+)
+T.ok(
+  "a pipeline run that starts shows its planned steps as queued",
+  T.wait(function()
+    return shows("stylua", "◌") and shows("luacheck", "◌")
+  end)
+)
+T.ok("... the finding of the last run is gone with it", line_of("unused variable x") == nil)
+tree_mod.on_ci_event(root, { event = "step_start", step = "stylua", index = 1, total = 2 })
+T.ok(
+  "the step that is going shows as running, without a new root",
+  T.wait(function()
+    return shows("stylua", "●")
+  end)
+)
+tree_mod.on_ci_event(root, { event = "step_end", step = "stylua", state = "green", ms = 700 })
+T.ok(
+  "... and its state when it has ended",
+  T.wait(function()
+    return shows("stylua", "✓")
+  end)
+)
+has("... with its time", right_of("stylua"), "700ms")
+tree_mod.on_ci_event(root, { event = "run_done", synthetic = true })
+-- (the red step is closed now: `open` works once per node id in the tree, and this one was open before the run)
+T.ok(
+  "a run that was killed leaves the last document: the step is red again, nothing stays queued",
+  T.wait(function()
+    return shows("luacheck", "✗") and shows("stylua", "✓")
+  end)
+)
+
 -- ── a file that never ran ────────────────────────────────────────────────────
 T.adapter.expand_node({ path = T.dir .. "/" .. FRESH })
 T.ok(

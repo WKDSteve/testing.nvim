@@ -4,7 +4,7 @@
 -- the profile, on a step only that step. The pipeline run is a stand-in that records what it was asked.
 
 -- the case body is the guard: an assertion before each use proves the value, and a nil raises and fails the case
----@diagnostic disable: need-check-nil
+---@diagnostic disable: need-check-nil, duplicate-set-field
 
 return function(H)
   local ok = H.ok
@@ -322,6 +322,204 @@ return function(H)
       "... which shows the new run: green, four steps, closed"
     )
     stop()
+
+    -- a pipeline that is going -------------------------------------------------------------------
+    -- The stream is what `testing ci --events` wrote for a run of three steps with --keep-going (recorded; the
+    -- `suite_progress` lines are the editor's, from the suite's own stream). The view is told as a tree would
+    -- be: `reset` makes it ask for the root again, `push` changes one node.
+    local RECORDED = {
+      '{"event":"run_start","profile":"fast","root":"proj","steps":["stylua","luacheck","suite"],"ts":1,"v":1}',
+      '{"event":"step_start","index":1,"step":"stylua","total":3,"ts":1,"v":1}',
+      '{"event":"step_end","exit":0,"findings_total":0,"index":1,"ms":700,"state":"green","step":"stylua","total":3,"ts":2,"v":1}',
+      '{"event":"step_start","index":2,"step":"luacheck","total":3,"ts":2,"v":1}',
+      '{"event":"step_end","exit":1,"findings_total":2,"index":2,"ms":1500,"state":"red","step":"luacheck","total":3,"ts":3,"v":1}',
+      '{"event":"step_start","index":3,"step":"suite","suite_events":"e.suite.ndjson","total":3,"ts":3,"v":1}',
+      '{"event":"suite_progress","step":"suite","done":0,"total":2}',
+      '{"event":"suite_progress","step":"suite","done":1,"total":2}',
+      '{"event":"step_end","exit":0,"findings_total":0,"index":3,"ms":4000,"state":"green","step":"suite","total":3,"ts":9,"v":1}',
+      '{"event":"run_done","exit":1,"first_red":"luacheck","ts":9,"verdict":"red","v":1}',
+    }
+    local editor = require("testing.ci.editor")
+    local real_listen = editor.listen
+    local heard, unheard = nil, 0
+    editor.listen = function(fn)
+      heard = fn
+      return function()
+        unheard = unheard + 1
+      end
+    end
+    local live_resets, pushes = 0, {}
+    local stop_live = source.subscribe({}, {
+      reset = function()
+        live_resets = live_resets + 1
+        shown = source.root({})
+      end,
+      push = function(update)
+        pushes[update.id] = update
+      end,
+      invalidate = function() end,
+    })
+    editor.listen = real_listen
+    ok(type(heard) == "function", "a view on screen listens to the pipeline runs of the editor")
+    shown = source.root({})
+    ---Feed line `i` of the recording; answers how many resets and which pushes it caused.
+    local function feed(i, other_root)
+      local before = live_resets
+      pushes = {}
+      heard(other_root or root, vim.json.decode(RECORDED[i]))
+      return live_resets - before
+    end
+    local function steps_of()
+      return vim.tbl_map(function(s)
+        return { s.label, s.status, s.icon, s.columns }
+      end, shown.children[1].children)
+    end
+
+    eq(feed(1, root .. "-other"), 0, "a run of another project changes nothing here")
+    eq(#shown.children[1].children, 4, "... the last document is still shown")
+    eq(feed(1), 1, "run_start: the view asks for the root again")
+    eq(steps_of(), {
+      { "stylua", "queued", "◌", {} },
+      { "luacheck", "queued", "◌", {} },
+      { "suite", "queued", "◌", {} },
+    }, "... and shows the planned steps as queued, in place of the last run")
+    eq(
+      { shown.children[1].label, shown.children[1].icon, shown.children[1].open },
+      { "Pipeline fast", "◌", true },
+      "... the pipeline is open while its run goes: the steps are in sight"
+    )
+
+    eq(feed(2), 0, "step_start: no new root")
+    eq(
+      { pushes["tests:ci:step:stylua"].icon, pushes["tests:ci:step:stylua"].status },
+      { "●", "running" },
+      "... the step is pushed as running"
+    )
+    eq(pushes["tests:ci"].icon, "●", "... and the pipeline above it")
+    eq(feed(3), 0, "step_end of a green step: a push")
+    eq(
+      { pushes["tests:ci:step:stylua"].icon, pushes["tests:ci:step:stylua"].columns },
+      { "✓", { "700ms" } },
+      "... with its state and its time"
+    )
+    eq(
+      pushes["tests:ci"].icon,
+      "◌",
+      "... the pipeline shows the worst of its steps: two are queued"
+    )
+    feed(4)
+    eq(
+      feed(5),
+      1,
+      "step_end of a step with findings: they are lines below it, the root is asked for again"
+    )
+    local red_step = child(shown.children[1], "luacheck")
+    eq(
+      { red_step.icon, red_step.columns, red_step.open, red_step.children[1].label },
+      { "✗", { "1.5s" }, true, "2 finding(s), listed when the run has ended" },
+      "... the step is red and open, and says how many findings wait for the end of the run"
+    )
+    eq(
+      shown.children[1].columns,
+      { "1/3", "2.2s" },
+      "... the pipeline counts it: one red of three, and the time so far"
+    )
+    feed(6)
+    eq(pushes["tests:ci:step:suite"].icon, "●", "the suite step runs")
+    feed(7)
+    eq(pushes["tests:ci:step:suite"].columns, { "0/2" }, "... and shows how far it is")
+    feed(8)
+    eq(pushes["tests:ci:step:suite"].columns, { "1/2" }, "... file by file")
+    eq(pushes["tests:ci"].icon, "✗", "... the pipeline stays red meanwhile")
+    eq(feed(8), 0, "the same progress again is nothing new")
+    eq(pushes, {}, "... no push")
+    feed(9)
+    eq(
+      pushes["tests:ci:step:suite"].columns,
+      { "4.0s" },
+      "step_end: the progress gives way to the time"
+    )
+    -- the run writes its document, then says it is done
+    write_doc(DOC)
+    eq(feed(10), 1, "run_done: the root is asked for again")
+    eq(
+      { #shown.children[1].children, child(shown.children[1], "luacheck").children[1].label },
+      { 4, "unused variable 'x'" },
+      "... and is the document the run wrote, with the findings"
+    )
+    eq(nodes.data(shown.children[1]).unfold, nil, "... a run that has ended is no longer held open")
+    eq(feed(2), 0, "an event after the end of the run changes nothing")
+    eq(pushes, {}, "... no push")
+
+    -- a killed run: the planned steps show, then the end the editor made up brings the last document back
+    feed(1)
+    feed(2)
+    eq(#shown.children[1].children, 3, "a second run: its steps again")
+    local before_kill = live_resets
+    heard(root, { event = "run_done", synthetic = true })
+    eq(
+      { live_resets - before_kill, #shown.children[1].children },
+      { 1, 4 },
+      "a killed run leaves the last document: nothing stays queued or running"
+    )
+
+    -- the events are the words of a child: what could not be shown or run is not taken
+    for name, bad in pairs({
+      ["a profile that is no name"] = {
+        event = "run_start",
+        profile = "fast --all",
+        steps = { "a" },
+      },
+      ["no steps"] = { event = "run_start", profile = "fast" },
+      ["only steps that are no names"] = {
+        event = "run_start",
+        profile = "fast",
+        steps = { "--force", 7, "two words" },
+      },
+    }) do
+      heard(root, bad)
+      eq(#shown.children[1].children, 4, "refused: " .. name .. " (the last document stays)")
+    end
+    heard(
+      root,
+      { event = "run_start", profile = "fast", steps = { "ok", "--force", "ok", "also" } }
+    )
+    eq(
+      vim.tbl_map(function(s)
+        return s.label
+      end, shown.children[1].children),
+      { "ok", "also" },
+      "a step whose name could not go on a command line is dropped, and a name counts once"
+    )
+    pushes = {}
+    heard(root, { event = "step_start", step = "nobody" })
+    heard(root, { event = "suite_progress", step = "also", done = 1, total = 2 })
+    heard(root, "junk")
+    eq(
+      pushes,
+      {},
+      "a step the run did not plan, progress of a step that is not running, junk: nothing"
+    )
+    heard(root, { event = "step_start", step = "ok" })
+    heard(root, { event = "suite_progress", step = "ok", done = -4, total = "many" })
+    eq(pushes["tests:ci:step:ok"].columns, {}, "progress that is no number is not drawn")
+    heard(
+      root,
+      { event = "step_end", step = "ok", state = "red\27[31m", ms = -1, reason = "bell\7" }
+    )
+    local odd = child(shown.children[1], "ok")
+    eq(
+      { odd.status, odd.children[1].label:find("[%c]") },
+      { "never", nil },
+      "a state that is no plain word is not green, a reason is one clean line"
+    )
+
+    stop_live()
+    eq(unheard, 1, "a view that is gone stops listening")
+    local after_stop = live_resets
+    tree.on_ci_event(root, vim.json.decode(RECORDED[1]))
+    eq(live_resets, after_stop, "... and is told nothing more")
+    eq(#source.root({}).children[1].children, 4, "... the run it followed is forgotten with it")
 
     os.remove(ci.path(root, sopts))
     eq(

@@ -566,6 +566,11 @@ return function(H)
       end
       local h_before = #handles
       local finished_q = false
+      -- somebody who follows the run (a tree view): told every event, and an end when the child wrote none
+      local told = {}
+      local unlisten = editor.listen(function(lroot, ev)
+        told[#told + 1] = { root = lroot, ev = ev }
+      end)
       local started_q = editor.run({
         root = qroot,
         profile = "full",
@@ -625,6 +630,31 @@ return function(H)
       ok(step_two, "quiet run: without a plan the events say step 2 of 2")
       editor.tail_events = real_tail
       eq(tails, 1, "quiet run: one reader for the suite's file, also for a second suite step")
+      local kinds, progress, foreign = {}, {}, 0
+      for _, t in ipairs(told) do
+        kinds[#kinds + 1] = t.ev.event
+        foreign = foreign + (t.root == qroot and 0 or 1)
+        if t.ev.event == "suite_progress" then
+          progress[#progress + 1] = ("%s/%s"):format(tostring(t.ev.done), tostring(t.ev.total))
+        end
+      end
+      eq(foreign, 0, "listen: every event comes with the root of its run")
+      eq(
+        { kinds[1], kinds[2], kinds[3], kinds[4], kinds[5] },
+        { "run_start", "step_start", "step_end", "step_start", "step_start" },
+        "listen: the events of the run, in the order the child wrote them"
+      )
+      eq(
+        progress,
+        { "0/2", "1/2", "0/1", "1/1" },
+        "listen: the suite step says how far it is, file by file, and a second suite run counts from zero"
+      )
+      eq(
+        { kinds[#kinds], told[#told].ev.synthetic },
+        { "run_done", true },
+        "listen: a run that ended without saying so gets its end, marked as made up"
+      )
+      unlisten()
       eq(vim.uv.fs_stat(qrun_events), nil, "quiet run: the run's events file is removed")
       eq(
         vim.uv.fs_stat(qrun_events .. ".suite.ndjson"),
@@ -662,12 +692,18 @@ return function(H)
         end,
       })
       editor.step_plan = real_plan
+      local told_r = 0
+      local unlisten_r = editor.listen(function()
+        told_r = told_r + 1
+      end)
       ok(
         vim.wait(3000, function()
           return done_r
         end),
         "reused run: ends"
       )
+      unlisten_r()
+      eq(told_r, 0, "listen: a run whose child wrote no event is not given an end either")
       local rtext = table.concat(
         vim.api.nvim_buf_get_lines(vim.fn.bufnr(editor.view_name(rroot)), 0, -1, false),
         "\n"

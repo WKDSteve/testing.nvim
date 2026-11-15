@@ -32,6 +32,39 @@ function M.progress(opts)
   return require("lib.nvim.progress").create(opts)
 end
 
+---@type (fun(root: string, ev: table))[]
+local listeners = {}
+
+---Get the events of every pipeline run started from this editor, while it goes: `fn(root, ev)` with `ev.event` one of
+---
+---   run_start, step_start, step_end, run_done   as the child wrote them (`testing ci --events`, testing-ci-events/1)
+---   suite_progress                               `{ step, done, total }`: the suite step finished a spec file
+---
+---A run that ended without its `run_done` (killed, crashed) gets one with `synthetic = true`: a listener is never
+---left with a step that runs for ever. The events are the child's words, decoded and no more: a listener checks
+---what it uses.
+---@param fn fun(root: string, ev: table)
+---@return fun() unlisten
+function M.listen(fn)
+  listeners[#listeners + 1] = fn
+  return function()
+    for i, f in ipairs(listeners) do
+      if f == fn then
+        table.remove(listeners, i)
+        return
+      end
+    end
+  end
+end
+
+---@param root string
+---@param ev table
+local function tell(root, ev)
+  for _, fn in ipairs(vim.list_slice(listeners)) do
+    pcall(fn, root, ev)
+  end
+end
+
 ---@param root string
 ---@return string
 local function key(root)
@@ -1309,6 +1342,10 @@ function M.run(o)
       -- every suite run counts from zero (a pipeline may have more than one suite step, writing to one file)
       live.files_total = ev.files_selected or ev.files_total
       live.files_done, live.cases, live.failed, live.current = 0, 0, 0, nil
+      tell(
+        o.root,
+        { event = "suite_progress", step = live.step, done = 0, total = live.files_total }
+      )
     elseif ev.event == "file_start" then
       live.current = ev.file
     elseif ev.event == "file_end" then
@@ -1319,10 +1356,21 @@ function M.run(o)
         text = live.files_total and ("suite %d/%d"):format(live.files_done, live.files_total)
           or ("suite %d"):format(live.files_done),
       })
+      tell(o.root, {
+        event = "suite_progress",
+        step = live.step,
+        done = live.files_done,
+        total = live.files_total,
+      })
     end
   end
+  -- what the listeners were told: a run that started and never said it ended is ended for them (see `M.listen`)
+  local told_start, told_done = false, false
   local stop_events
   stop_events, poll_run = M.tail_run_events(events, function(ev)
+    told_start = true
+    told_done = told_done or ev.event == "run_done"
+    tell(o.root, ev)
     if ev.event == "step_start" and type(ev.step) == "string" then
       from_events = true
       live.step, live.t0 = ev.step, vim.uv.hrtime()
@@ -1351,6 +1399,10 @@ function M.run(o)
       stop_suite()
       pcall(os.remove, events)
       entry.running = false
+      if told_start and not told_done then
+        told_done = true
+        tell(o.root, { event = "run_done", synthetic = true })
+      end
       local doc = read_json(json)
       pcall(os.remove, json)
       local function report()

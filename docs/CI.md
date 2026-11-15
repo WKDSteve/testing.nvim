@@ -754,6 +754,13 @@ run under 150 ms): the step that just started, step n of m. The editor starts th
 the [events of the run](#events-of-a-run) while it goes, so the count needs no plan. It ends with `green`, `partial`
 or `failed`. Not part of this version: the terminal.nvim view.
 
+**Following a run from Lua.** `require("testing.ci.editor").listen(function(root, ev) end)` hands on every event of a
+pipeline started from the editor while it goes (it returns the function that stops it): `run_start`, `step_start`,
+`step_end` and `run_done` as the child wrote them, and `suite_progress` (`step`, `done`, `total`) when the suite step
+finished a spec file. A run that ended without its `run_done` (stopped, crashed) gets one with `synthetic = true`. The
+events are the words of the child, decoded and no more; the view `tests` of a tree is the reader that comes with
+testing.nvim ([STATE.md](STATE.md#the-last-pipeline-run)).
+
 **A quiet suite, and a line that says what is going on.** The `step_start` of the suite step names the file of the
 suite's own events ([OUTPUT-FORMATS.md](OUTPUT-FORMATS.md#events-stream)); the editor reads it while the suite goes.
 The progress indicator says `suite 12/187` (spec files done of selected), and the **last line of the buffer** is a

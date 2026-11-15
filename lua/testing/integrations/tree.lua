@@ -11,6 +11,11 @@
 ---    time", and what a red case said as its preview. The last pipeline run of the project stands first
 ---    (`testing.explorer.ci`): its steps with their state and findings, and "run this step again"
 ---
+--- **While a pipeline goes.** A pipeline started from this editor (`testing.ci.editor.listen`) moves its step
+--- nodes the same way: the planned steps are `queued`, the one that is going is `running` (the suite with "file n
+--- of m"), each gets its state and time when it ends. When the run has ended, or was killed, `ci.json` is read
+--- again: the document the run wrote, or the last one.
+---
 --- **While a run goes.** A run started from this editor is followed case by case (`testing.bindings.live`,
 --- `testing.explorer.live`): the cases of a file that is being run show `running`, the ones still to come
 --- `queued`, and each result moves its case, everything above it and the badge of its file the moment it is
@@ -77,6 +82,10 @@ local session = nil
 local shown = nil
 ---@type fun()|nil
 local unlisten = nil
+---@type fun()|nil
+local unlisten_ci = nil
+---@type { root: string, live: Testing.Explorer.Ci.Live }|nil  the pipeline run that is going, laid over `ci.json`
+local pipeline = nil
 ---@type fun(keys?: string[])|nil
 local emit = nil
 ---@type table<table, true>  the `emit` of every view that shows the source
@@ -195,6 +204,14 @@ local function watch(root)
   end
 end
 
+---Tell every view to ask for the root again. The nodes are merged by id: what is there again keeps its place
+---and its open state.
+local function reset_views()
+  for view in pairs(views) do
+    pcall(view.reset)
+  end
+end
+
 ---Read the result of the current project and tell the tree. Follows the result file from then on, while a
 ---tree is subscribed.
 function M.reload()
@@ -211,10 +228,7 @@ function M.reload()
     if emit then
       emit()
     end
-    for view in pairs(views) do
-      -- the nodes are merged by id: what is there again keeps its place and its open state
-      pcall(view.reset)
-    end
+    reset_views()
   end
 end
 
@@ -223,6 +237,11 @@ local function follow_directory()
   if not unlisten then
     unlisten = require("testing.bindings.live").listen(function(root, events)
       M.on_events(root, events)
+    end)
+  end
+  if not unlisten_ci then
+    unlisten_ci = require("testing.ci.editor").listen(function(root, ev)
+      M.on_ci_event(root, ev)
     end)
   end
   if augroup then
@@ -248,11 +267,16 @@ local function release()
     unlisten()
     unlisten = nil
   end
+  if unlisten_ci then
+    unlisten_ci()
+    unlisten_ci = nil
+  end
   if augroup then
     pcall(vim.api.nvim_del_augroup_by_id, augroup)
     augroup = nil
   end
-  loaded, session, shown = nil, nil, nil
+  -- a pipeline that goes on while nobody looks is not followed: its end shows as a new `ci.json`
+  loaded, session, shown, pipeline = nil, nil, nil, nil
 end
 
 ---The badge of a spec file while a run goes: running while one of its cases is running or queued, else what
@@ -384,6 +408,49 @@ function M.on_events(root, events)
   end
 end
 
+---One event of a pipeline run started from this editor: the step nodes of the view follow.
+---@param root string
+---@param ev table  As `testing.ci.editor.listen` hands it out: the words of the child, checked by `testing.explorer.ci`.
+function M.on_ci_event(root, ev)
+  if next(views) == nil or norm(root) ~= norm(project_root()) then
+    return
+  end
+  local ci = require("testing.explorer.ci")
+  local where = norm(root)
+  if type(ev) == "table" and ev.event == "run_start" then
+    local live = ci.live_start(ev)
+    pipeline = live and { root = where, live = live } or nil
+    reset_views()
+    return
+  end
+  if not pipeline or pipeline.root ~= where then
+    return
+  end
+  local what, name = ci.live_feed(pipeline.live, ev)
+  if what == "done" then
+    -- ended or killed: the root reads `ci.json` again, the document the run wrote or the last one
+    pipeline = nil
+    reset_views()
+  elseif what == "reset" then
+    reset_views()
+  elseif what == "step" and shown and shown.by_step[name] then
+    local step = pipeline.live.by_name[name]
+    local updates = require("testing.explorer.nodes").set_many(shown, {
+      {
+        step = name,
+        status = ci.STATUS[step.state] or "never",
+        duration_ms = step.ms,
+        progress = step.progress,
+      },
+    })
+    for view in pairs(views) do
+      for _, update in ipairs(updates) do
+        pcall(view.push, update)
+      end
+    end
+  end
+end
+
 ---The spec files there are, relative to the root. No code of the project runs for it (the real discovery needs
 ---`.testing.lua`, which only a run executes, behind the trust gate). Two things are read instead:
 ---
@@ -474,9 +541,12 @@ function M.root_node()
       end
     end
   end
-  -- the last pipeline run of the project, when there is one: it stands first
+  -- the pipeline of the project, when there is one: it stands first. A run that is going, else the last one
   local ci = require("testing.explorer.ci")
-  local ok_ci, doc = pcall(ci.read, root, options.state_opts)
+  local ok_ci, doc = true, (pipeline and pipeline.root == norm(root)) and pipeline.live.doc or nil
+  if not doc then
+    ok_ci, doc = pcall(ci.read, root, options.state_opts)
+  end
   local top = nodes.build({
     root = root,
     cases = st.cases,
