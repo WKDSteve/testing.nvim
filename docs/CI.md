@@ -964,7 +964,9 @@ GitHub origin; a name containing `vault` is left out (notes, tasks, rules: no co
 read* and *Metadata: read*), else `gh auth token`. Never `GITHUB_TOKEN`: it is not read, and it is taken out of the
 environment of `gh` (which would print it back). The token goes to curl through its configuration on stdin, never on
 a command line, and appears in no output, no document, no cache file and no error. Without a token every repository
-that needs GitHub is `unknown` and the exit code is `3`.
+that needs GitHub is `unknown` ("could not ask"; the CI was not asked, it is not red) and the exit code is `3`. A
+`gh auth token` that only timed out (exit 124, a busy machine) is asked again, three times in all, with a short pause
+between.
 
 **Cache.** Per checkout `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json` (`--state-dir`, default
 `stdpath('state')`; two checkouts of one repository keep their own) holds the ETags and the last answers (only the fields used). The runs are asked with `If-None-Match`: a `304` reuses

@@ -1160,19 +1160,16 @@ function M.collect(repos, opts)
   end
   if #pending > 0 then
     -- the token of the caller (a hub's, on stdin) comes before the adapter's own sources
-    local ok, token, source = true, opts.token, "the caller"
+    local token, source = opts.token, "the caller"
     if not token then
-      ok, token, source = pcall(M.deps.token)
-    end
-    if not ok then
-      token, source = nil, tostring(token)
+      token, source = M.token()
     end
     if not token then
       info.token_error = text(source, 300)
       for _, rec in ipairs(pending) do
         rec.overall = "unknown"
         rec.error = "no GitHub token: " .. info.token_error
-        rec.note = "no GitHub token"
+        rec.note = "could not ask: no GitHub token"
       end
     else
       info.token_source = source
@@ -1466,14 +1463,53 @@ function M.history_main(args, repos, state_dir, sv)
     end
   end
   if info.token_error then
-    sv.err(
-      ("testing ci remote: no GitHub token (%s); set $%s (read-only) or run `gh auth login`"):format(
-        info.token_error,
-        M.TOKEN_ENV
-      )
-    )
+    sv.err(M.token_message(info.token_error))
   end
   return history.exit_code(records)
+end
+
+---How often the token is asked for before the run gives up, and the pause before the next try (seconds): a `gh auth
+---token` that times out on a busy machine (exit 124) is asked again, it is not a red CI.
+M.TOKEN_ATTEMPTS = 3
+M.TOKEN_RETRY_S = 2
+
+---The token through `M.deps.token`, asked again while the lookup only timed out.
+---@return string|nil token
+---@return string source_or_reason
+function M.token()
+  local token, source
+  for attempt = 1, M.TOKEN_ATTEMPTS do
+    local ok, t, s = pcall(M.deps.token)
+    if ok then
+      token, source = t, s
+    else
+      token, source = nil, tostring(t)
+    end
+    local timed_out = not token
+      and (
+        tostring(source):find("exit 124", 1, true) ~= nil
+        or tostring(source):lower():find("timed out", 1, true) ~= nil
+      )
+    if token or not timed_out then
+      return token, source
+    end
+    if attempt < M.TOKEN_ATTEMPTS then
+      M.deps.sleep(M.TOKEN_RETRY_S * attempt)
+    else
+      source = ("%s (asked %d times)"):format(source, M.TOKEN_ATTEMPTS)
+    end
+  end
+  return token, source
+end
+
+---The line for a run without a token: the CI was not asked, which is not a red CI.
+---@param reason string
+---@return string
+function M.token_message(reason)
+  return ("testing ci remote: could not ask GitHub, this is not a red CI: no GitHub token (%s); set $%s (read-only) or run `gh auth login`"):format(
+    reason,
+    M.TOKEN_ENV
+  )
 end
 
 ---`testing ci remote ...`.
@@ -1531,12 +1567,7 @@ function M.main(argv, sv)
     end
   end
   if info.token_error then
-    sv.err(
-      ("testing ci remote: no GitHub token (%s); set $%s (read-only) or run `gh auth login`"):format(
-        info.token_error,
-        M.TOKEN_ENV
-      )
-    )
+    sv.err(M.token_message(info.token_error))
   end
   if unfinished and #unfinished > 0 then
     sv.err(

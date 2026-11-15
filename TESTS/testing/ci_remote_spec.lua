@@ -834,6 +834,53 @@ return function(H)
   has(nd["alpha.nvim"].error, "no GitHub token", "no token: ... said so")
   eq(nd.zeta.overall, "no_github", "no token: a repository that needs none is still reported")
   has(none.err, "TESTING_GITHUB_TOKEN", "no token: the error names the variable to set")
+  has(none.err, "could not ask GitHub, this is not a red CI", "no token: not read as a red CI")
+  has(none.out, "could not ask", "no token: the row says it could not ask")
+
+  -- a `gh auth token` that times out under load (exit 124) is tries again; any other failure is final
+  local tries, slept = 0, {}
+  local retried = run({ "--json", dirs.alpha }, {
+    token = function()
+      tries = tries + 1
+      if tries < 3 then
+        return nil, "$TESTING_GITHUB_TOKEN is not set; `gh auth token` failed (exit 124)"
+      end
+      return TOKEN, "gh"
+    end,
+    sleep = function(s)
+      slept[#slept + 1] = s
+    end,
+  })
+  eq(tries, 3, "token timeout: asked again until it answers")
+  eq(#slept, 2, "token timeout: a pause before each new try")
+  ok(
+    retried.code ~= remote.EXIT_INFRA,
+    "token timeout, then a token: the CI is asked: " .. retried.err
+  )
+  ok(#requests > 0, "token timeout, then a token: GitHub was asked")
+  tries = 0
+  local gave_up = run({ "--json", dirs.alpha }, {
+    token = function()
+      tries = tries + 1
+      return nil, "`gh auth token` failed (exit 124)"
+    end,
+    sleep = function() end,
+  })
+  eq(tries, remote.TOKEN_ATTEMPTS, "token timeout every time: asked TOKEN_ATTEMPTS times")
+  eq(gave_up.code, remote.EXIT_INFRA, "token timeout every time: exit 3, not 1")
+  has(
+    gave_up.err,
+    "asked " .. remote.TOKEN_ATTEMPTS .. " times",
+    "token timeout every time: says so"
+  )
+  tries = 0
+  run({ "--json", dirs.alpha }, {
+    token = function()
+      tries = tries + 1
+      return nil, "`gh auth token` failed (exit 1)"
+    end,
+  })
+  eq(tries, 1, "a token failure that is no timeout: asked once")
 
   transport_fail = "curl: (6) Could not resolve host: api.github.com"
   local offline = run({ "--json", dirs.delta })

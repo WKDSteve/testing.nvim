@@ -396,15 +396,12 @@ function M.collect(repos, opts)
     return rec.owner ~= nil
   end, records)
   if #pending > 0 then
-    local ok, token, source = pcall(remote.deps.token)
-    if not ok then
-      token, source = nil, tostring(token)
-    end
+    local token, source = remote.token()
     if not token then
       info.token_error = tostring(source):sub(1, 300)
       for _, rec in ipairs(pending) do
         rec.error = "no GitHub token: " .. info.token_error
-        rec.note = "no GitHub token"
+        rec.note = "could not ask: no GitHub token"
       end
     else
       info.token_source, info.token = source, token
