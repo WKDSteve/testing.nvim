@@ -74,7 +74,13 @@ the winbar legend and the `?` cheatsheet are built from the same table.
 subcommands, `--flags` and their values are completed with `<Tab>`, and a wrong
 subcommand prints the usage. The lists are computed when you press the key:
 `--reporter=` offers the reporters the plugin has at that moment and `--file=`
-offers the spec files that exist below the project root now. The command is
+offers the spec files of the project as they are now: the list the last run
+discovered (so a project with its own `roots` or `spec_pattern` gets its
+`TESTS/units.lua` offered, and a file that is gone since is left out) plus the
+files named `*_spec.lua` below `TESTS` that the run did not list and that were
+written since. Before the first run it is the files found by name. Nothing of
+the project is executed for it, and the result file is read again only when it
+changed (the view `tests` of a tree shows the same list). The command is
 registered when the plugin loads (`plugin/testing.lua`) and again, harmlessly,
 by `setup()`.
 

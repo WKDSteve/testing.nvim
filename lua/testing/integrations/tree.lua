@@ -460,14 +460,9 @@ function M.on_ci_event(root, ev)
   end
 end
 
----The spec files there are, relative to the root. No code of the project runs for it (the real discovery needs
----`.testing.lua`, which only a run executes, behind the trust gate). Two things are read instead:
----
----  - the list the last run discovered (`specs` of the result file, data like the rest of it): what the
----    project's own `roots` and `spec_pattern` make a spec, minus what is gone since
----  - the files named `*_spec.lua` below `TESTS`. Before the first run that is all there is. After it, such a
----    file the run did not list is shown only when it was written since: an older one is a file the project's
----    pattern leaves out (a fixture), a newer one a spec the next run will find
+---The spec files there are, relative to the root. No code of the project runs for it: the list the last
+---run discovered plus the files found by name that were written since (`testing.discover.known`, the
+---rule the completion of `--file=` uses too).
 ---@param root string
 ---@param st Testing.State
 ---@return string[]
@@ -475,42 +470,7 @@ function M.spec_files(root, st)
   if options.files then
     return options.files(root)
   end
-  local ok, named = pcall(require("testing.bindings.usrcmds").spec_files, root)
-  named = ok and named or {}
-  local specs = st.specs
-  if not specs then
-    return named
-  end
-  local on_disk, has_cases = {}, {}
-  for _, file in ipairs(named) do
-    on_disk[file] = true
-  end
-  for _, case in ipairs(st.cases) do
-    has_cases[case.file] = true
-  end
-  local out, listed = {}, {}
-  for _, file in ipairs(specs) do
-    listed[file] = true
-    -- a file with cases is in the view anyway, and one the walk just saw is there: only the rest is asked for
-    local there = on_disk[file] or has_cases[file]
-    if not there then
-      local stat = vim.uv.fs_stat(root .. "/" .. file)
-      there = stat ~= nil and stat.type == "file"
-    end
-    if there then
-      out[#out + 1] = file
-    end
-  end
-  local since = st.specs_ts or 0
-  for _, file in ipairs(named) do
-    if not listed[file] then
-      local stat = vim.uv.fs_stat(root .. "/" .. file)
-      if stat and stat.mtime.sec >= since then
-        out[#out + 1] = file
-      end
-    end
-  end
-  return out
+  return require("testing.discover.known").merge(root, st)
 end
 
 ---The describe/it calls of a spec file, read from its text.

@@ -77,18 +77,33 @@ function M.resolve_root(explicit, from)
   return abs(found or vim.fn.getcwd())
 end
 
----Spec files below `<root>/TESTS`, relative to the root (what `--file=` matches against).
+---The files named `*_spec.lua` below `<root>/TESTS`, relative to the root.
 ---@param root string
 ---@return string[]
 function M.spec_files(root)
-  local found = vim.fs.find(function(name)
-    return name:match("_spec%.lua$") ~= nil
-  end, { path = root .. "/TESTS", type = "file", limit = 1000 })
-  local out = {}
-  for _, path in ipairs(found) do
-    out[#out + 1] = require("lib.nvim.fs.relpath")(path, root)
+  return require("testing.discover.known").named(root)
+end
+
+---What `--file=<Tab>` offers for `lead`: the spec files the last run of the project discovered (a
+---project with its own `roots` or `spec_pattern` has specs that are not named `*_spec.lua`) plus the
+---files found by name, see `testing.discover.known`. Nothing of the project is executed, and the
+---result file is read again only when it changed.
+---@param root string
+---@param lead string
+---@param opts? Testing.State.Opts
+---@return string[]
+function M.spec_candidates(root, lead, opts)
+  local ok, files = pcall(require("testing.discover.known").of, root, opts)
+  if not ok then
+    return {}
   end
-  table.sort(out)
+  -- A substring is what `--file` means, so offer the whole path for any part the user typed.
+  local out = {}
+  for _, f in ipairs(files) do
+    if lead == "" or f:find(lead, 1, true) then
+      out[#out + 1] = f
+    end
+  end
   return out
 end
 
@@ -1605,18 +1620,7 @@ local function register_types(composer)
       return true, raw, nil
     end,
     complete = function(lead)
-      local ok, files = pcall(M.spec_files, M.resolve_root())
-      if not ok then
-        return {}
-      end
-      -- A substring is what `--file` means, so offer the whole path for any part the user typed.
-      local out = {}
-      for _, f in ipairs(files) do
-        if lead == "" or f:find(lead, 1, true) then
-          out[#out + 1] = f
-        end
-      end
-      return out
+      return M.spec_candidates(M.resolve_root(), lead)
     end,
   })
 end

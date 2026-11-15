@@ -10,6 +10,9 @@ on what it finds; problems are `findings` (data).
 * `harness_profile.lua`: static reading of a project's `harness.lua`: may a fixed shim stand in for it?
 * `positions.lua`: `describe`/`it` positions, tree-sitter with a regex fallback (the answer names its backend).
 * `lua_text.lua`: comment/string scanner the sniffers use (`code_only`, `strip_comments`, `strings`).
+* `known.lua`: the spec files as far as they are known without running anything of the project: the list the last
+  run recorded plus the files named `*_spec.lua` written since (`merge`), and the same read from the result file
+  with one `stat` per call (`of`). The view `tests` of a tree and the completion of `--file=` read it.
 
 Rules: no depth limit; symlinked directories are reported and not entered (ERR-34); legacy places
 (`docs/TESTS`, `tests`, `test`, `scripts`) are listed and reported (NEW-48); busted specs below `lua/` are reported,

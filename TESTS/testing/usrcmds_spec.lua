@@ -154,9 +154,97 @@ return function(H)
   local cands = stype.complete("")
   ok(type(cands) == "table", "the spec completion returns a list")
   for _, c in ipairs(cands) do
-    ok(c:match("_spec%.lua$") ~= nil, "a spec candidate is a spec file: " .. c)
+    -- this repository's own result file may be read here: a spec is a Lua file, whatever its name
+    ok(c:match("%.lua$") ~= nil, "a spec candidate is a spec file: " .. c)
   end
   eq(stype.complete("zzz-no-such-spec-file"), {}, "the spec completion filters by what was typed")
+
+  -- spec files: what the last run discovered is offered too (a project with its own spec_pattern)
+  do
+    local state = require("testing.state")
+    local known = require("testing.discover.known")
+    local sopts = { state_dir = tmp .. "/state-completion" }
+    known.reset()
+    eq(
+      usrcmds.spec_candidates(proj, "", sopts),
+      { "TESTS/a_spec.lua", "TESTS/sub/b_spec.lua" },
+      "before the first run: the files found by name"
+    )
+    eq(known.stats.loads, 0, "and no result file is read while there is none")
+
+    -- a `.testing.lua` that would leave a mark if anything executed it
+    local marker = proj .. "/executed"
+    vim.fn.writefile({
+      ("local f = io.open(%q, 'w'); f:write('x'); f:close()"):format(marker),
+      'error("the completion executed .testing.lua")',
+    }, proj .. "/.testing.lua")
+    vim.fn.writefile({ "return function() end" }, proj .. "/TESTS/units.lua")
+    -- the run listed units.lua (the project's pattern), a_spec.lua and a file that is gone since;
+    -- sub/b_spec.lua is older than the list and not in it: a fixture of that project
+    local past = os.time() - 3600
+    vim.uv.fs_utime(proj .. "/TESTS/sub/b_spec.lua", past, past)
+    local result = require("testing.core.result")
+    local function run_result(id)
+      return result.finalize(result.new({ root = proj, id = id }))
+    end
+    local res = run_result("2026-01-01T00:00:00Z-0001")
+    local recorded, why = state.record(proj, res, {
+      known_files = {
+        ["TESTS/units.lua"] = true,
+        ["TESTS/a_spec.lua"] = true,
+        ["TESTS/gone.lua"] = true,
+      },
+    }, sopts)
+    ok(recorded, "fixture: a result file with the list of the run: " .. tostring(why))
+
+    local loads = known.stats.loads
+    eq(
+      usrcmds.spec_candidates(proj, "", sopts),
+      { "TESTS/a_spec.lua", "TESTS/units.lua" },
+      "the recorded list: a spec without the suffix is offered, one that is gone and a fixture are not"
+    )
+    eq(known.stats.loads, loads + 1, "the result file was read once")
+    eq(
+      usrcmds.spec_candidates(proj, "units", sopts),
+      { "TESTS/units.lua" },
+      "a part of the name narrows"
+    )
+    eq(usrcmds.spec_candidates(proj, "zzz", sopts), {}, "nothing matches")
+    eq(
+      known.stats.loads,
+      loads + 1,
+      "a second <Tab> on an unchanged result file reads nothing again"
+    )
+
+    -- a spec written after the run is offered at once: the next run will find it
+    vim.fn.writefile({ "return function() end" }, proj .. "/TESTS/new_spec.lua")
+    eq(
+      usrcmds.spec_candidates(proj, "new", sopts),
+      { "TESTS/new_spec.lua" },
+      "a spec file written since the run is offered"
+    )
+    eq(known.stats.loads, loads + 1, "still without reading the result file")
+
+    -- another run: the result file changed, and is read again
+    local again = state.record(
+      proj,
+      run_result("2026-01-01T00:00:01Z-0002"),
+      { known_files = { ["TESTS/a_spec.lua"] = true } },
+      sopts
+    )
+    ok(again, "fixture: a second run")
+    local after = usrcmds.spec_candidates(proj, "units", sopts)
+    eq(known.stats.loads, loads + 2, "a changed result file is read again")
+    eq(after, {}, "and its list is the one that counts")
+
+    eq(vim.fn.filereadable(marker), 0, "nothing of the project was executed")
+    vim.fn.delete(proj .. "/.testing.lua")
+    vim.fn.delete(proj .. "/TESTS/units.lua")
+    vim.fn.delete(proj .. "/TESTS/new_spec.lua")
+    local now = os.time()
+    vim.uv.fs_utime(proj .. "/TESTS/sub/b_spec.lua", now, now)
+    known.reset()
+  end
 
   -- ---------------------------------------------------------------- root and current spec
 
