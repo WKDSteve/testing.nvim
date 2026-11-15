@@ -92,6 +92,20 @@ jobs:
           repository: WKDSteve/lib.nvim
           path: .deps/lib.nvim
           ref: ci-verified
+      # The test sheet testing.tests-view-pipeline shows the view tests in its own tree, for real.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/filetree.nvim
+          path: .deps/filetree.nvim
+          ref: ci-verified
+      # filetree.nvim needs it to set up; only that test sheet loads the two.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/ui.nvim
+          path: .deps/ui.nvim
+          ref: ci-verified
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false

@@ -21,6 +21,12 @@ return {
     docs = "docs/BINDINGS.md",
   },
   {
+    id = "testing.tree",
+    title = "The view tests of a tree shows the last result and the pipeline of the project, and follows a run while it goes",
+    surface = { "config:tree" },
+    docs = "docs/STATE.md",
+  },
+  {
     id = "testing.cache",
     title = "--cached skips the specs whose inputs did not change; --changed runs the ones a change touches",
     docs = "docs/CACHE.md",

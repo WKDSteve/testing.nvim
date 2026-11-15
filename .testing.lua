@@ -123,6 +123,16 @@ return {
           ref = "ci-verified",
           why = "lib.nvim is a hard runtime dependency the runner resolves itself (deps stays empty): .deps/lib.nvim.",
         },
+        {
+          repo = "WKDSteve/filetree.nvim",
+          ref = "ci-verified",
+          why = "The test sheet testing.tests-view-pipeline shows the view tests in its own tree, for real.",
+        },
+        {
+          repo = "WKDSteve/ui.nvim",
+          ref = "ci-verified",
+          why = "filetree.nvim needs it to set up; only that test sheet loads the two.",
+        },
       },
       publish = { why = "Every repository of the fleet checks testing.nvim out at ci-verified." },
       -- `testing ci land`: a check branch ci/** runs the hosted legs, main moves only once it is green there
