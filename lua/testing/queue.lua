@@ -10,6 +10,11 @@
 --- (`lib.nvim.fs.create_exclusive`), holding the pid of its holder, a token, the start time and what runs. A second
 --- heavy run waits and says once what it waits for; a lock whose pid is gone is taken over.
 ---
+--- Fair: a run that has to wait leaves a ticket in `<lock name>.waiting/` (the time it began to wait, its pid). A free
+--- slot goes to the oldest ticket whose process is alive; a run with older live tickets ahead of it does not take a
+--- slot, even when it looks first (every waiter looks every `POLL_MS`, so without the tickets whoever came first took
+--- it, and a run waited an hour behind later ones). Tickets of processes that are gone are removed by whoever sees them.
+---
 --- Re-entrant: the holder puts its token into `$TESTING_HEAVY_RUN`, so its children (`ci commit` starts `testing ci` on
 --- the commit and on the base) are part of its run and never wait for it; inside one process a counter does the same.
 ---
@@ -43,6 +48,14 @@ M.POLL_MS = 2000
 M.MAX_WAIT_MS = 4 * 60 * 60 * 1000
 ---Seconds since the epoch, for `started` in the lock (replaced by specs).
 M.time = os.time
+---Milliseconds since the epoch: the order of the waiting tickets across processes (replaced by specs).
+---@return integer
+function M.clock_ms()
+  local sec, usec = uv.gettimeofday()
+  return sec * 1000 + math.floor(usec / 1000)
+end
+---A ticket that cannot be read as one is removed after this long (one being written is not).
+M.GARBAGE_TICKET_S = 60
 
 ---@class Testing.Queue
 ---@field path string The lock file of the first slot (slot n: `<name>-<n>.lock` beside it).
@@ -129,6 +142,52 @@ local function read_lock(path)
   return ok and type(doc) == "table" and doc or nil, text
 end
 
+---The folder of the waiting tickets beside the lock `path`.
+---@param path string
+---@return string
+function M.waiting_dir(path)
+  return (path:gsub("%.lock$", "")) .. ".waiting"
+end
+
+---The live tickets ahead of `mine` (every live one without `mine`); tickets of processes that are gone are removed.
+---@param dir string
+---@param mine string|nil The file name of this run's ticket.
+---@param pid integer This process.
+---@return integer ahead
+---@return table|nil first The oldest live ticket.
+local function tickets_ahead(dir, mine, pid)
+  local names = {}
+  for name, kind in vim.fs.dir(dir) do
+    if kind == "file" and name:match("%.json$") then
+      names[#names + 1] = name
+    end
+  end
+  -- zero-padded milliseconds first: the order of the names is the order of the waits
+  table.sort(names)
+  local ahead, first = 0, nil
+  for _, name in ipairs(names) do
+    if mine and name >= mine then
+      break
+    end
+    local path = dir .. "/" .. name
+    local doc = read_lock(path)
+    local holder = doc and type(doc.pid) == "number" and math.floor(doc.pid) or nil
+    if holder and holder ~= pid and M.alive(holder) then
+      ahead = ahead + 1
+      first = first or doc
+    elseif holder then
+      -- gone (or a leftover of this very process, which waits for one slot at a time)
+      os.remove(path)
+    else
+      local st = uv.fs_stat(path)
+      if st and os.time() - st.mtime.sec > M.GARBAGE_TICKET_S then
+        os.remove(path)
+      end
+    end
+  end
+  return ahead, first
+end
+
 ---Take the queue for a heavy run, waiting while another one holds it.
 ---@param q Testing.Queue|nil nil: no queue (a library call).
 ---@param what string What runs (said to whoever waits).
@@ -200,24 +259,62 @@ function M.acquire(q, what, say, opts)
     return "busy", {}
   end
 
+  local dir = M.waiting_dir(q.path)
+  ---@type string|nil
+  local ticket = nil
+  local function leave()
+    if ticket then
+      os.remove(dir .. "/" .. ticket)
+      ticket = nil
+    end
+  end
+
+  ---How many slots are free (no lock, or the lock of a process that is gone).
+  local function free_slots()
+    local free = 0
+    for n = 1, slots do
+      local cur = read_lock(M.slot_path(q.path, n))
+      local holder = cur and type(cur.pid) == "number" and math.floor(cur.pid) or nil
+      if not uv.fs_stat(M.slot_path(q.path, n)) or (holder and not M.alive(holder)) then
+        free = free + 1
+      end
+    end
+    return free
+  end
+
   while true do
     local busy = {}
-    for n = 1, slots do
-      local state, detail = try(n)
-      if state == "taken" then
-        if waited then
-          say("testing: queue: your turn, " .. what .. " starts")
+    local ahead, first = tickets_ahead(dir, ticket, pid)
+    if ahead == 0 or ahead < free_slots() then
+      for n = 1, slots do
+        local state, detail = try(n)
+        if state == "taken" then
+          leave()
+          if waited then
+            say("testing: queue: your turn, " .. what .. " starts")
+          end
+          return { held = held, waited_s = (now() - wait_from) / 1000 }
+        elseif state == "broken" then
+          leave()
+          -- a temp directory that refuses the file: run, and say that nothing was queued
+          say(("testing: queue: no lock file (%s): %s runs without waiting"):format(detail, what))
+          return { noop = true }
         end
-        return { held = held, waited_s = (now() - wait_from) / 1000 }
-      elseif state == "broken" then
-        -- a temp directory that refuses the file: run, and say that nothing was queued
-        say(("testing: queue: no lock file (%s): %s runs without waiting"):format(detail, what))
-        return { noop = true }
+        busy[#busy + 1] = detail
       end
-      busy[#busy + 1] = detail
     end
-    local cur = busy[1] or {}
+    if not ticket then
+      -- the place in the line; without one (a folder that refuses it) this run only looks, as before
+      vim.fn.mkdir(dir, "p")
+      local name = ("%015d-%s.json"):format(M.clock_ms(), token)
+      local body = vim.json.encode({ pid = pid, token = token, since = M.time(), what = what })
+      if create_exclusive(dir .. "/" .. name, body .. "\n") then
+        ticket = name
+      end
+    end
+    local cur = busy[1] or read_lock(q.path) or first or {}
     if now() >= deadline then
+      leave()
       return nil,
         ("waited %d min for %s (pid %s): given up"):format(
           math.floor((opts.max_wait_ms or M.MAX_WAIT_MS) / 60000),
@@ -229,11 +326,12 @@ function M.acquire(q, what, say, opts)
       waited = true
       local since = tonumber(cur.started)
       say(
-        ("testing: queue: waiting for %s (pid %s%s)%s: %d heavy run(s) at a time on this machine"):format(
+        ("testing: queue: waiting for %s (pid %s%s)%s%s: %d heavy run(s) at a time on this machine"):format(
           tostring(cur.what or "another heavy run"),
           tostring(cur.pid),
           since and (", for %d s"):format(math.max(0, os.time() - since)) or "",
           #busy > 1 and (" and %d more"):format(#busy - 1) or "",
+          ahead > 0 and (", %d run(s) waiting before this one"):format(ahead) or "",
           slots
         )
       )

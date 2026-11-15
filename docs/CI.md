@@ -555,6 +555,12 @@ The waiting run says once what it waits for (`testing: queue: waiting for ci com
 directory: `scripts/test.sh` points `stdpath('state')` at a throwaway folder), made exclusively, with the pid, a token,
 the start and what runs. A lock whose process is gone is taken over. Waiting ends after four hours (exit 3).
 
+The line is fair: a run that has to wait leaves a ticket in `<temp>/testing/heavy-run-<user>.waiting/` (when it began to
+wait, its pid), and a free slot goes to the oldest waiting run whose process is alive. A run that finds a slot free but
+older runs waiting does not take it (`..., 1 run(s) waiting before this one`). Every waiter looks every two seconds;
+without the tickets whoever looked first took the slot, and a run once waited an hour behind later ones. Tickets of
+processes that are gone are removed by the next run that sees them.
+
 It is re-entrant: the holder hands its token to its children (`$TESTING_HEAVY_RUN`), so the runs `testing ci commit`
 starts at the commit and at its base are part of its turn; a nested call in the same process shares the hold. Only the
 command-line entry arms the queue: a spec or an editor that calls `cli.main` as a library never waits, and a suite sets

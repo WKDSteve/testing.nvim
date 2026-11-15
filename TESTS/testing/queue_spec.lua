@@ -139,6 +139,83 @@ return function(H)
   has(said[#said], "your turn", "wait: says when it starts")
   queue.release(h)
 
+  -- fair: a free slot goes to the oldest live waiter, not to whoever looks first (terminal.nvim waited an hour on
+  -- 2026-11-14 while later runs went through)
+  do
+    local dir = queue.waiting_dir(lock)
+    local function tickets()
+      local out = {}
+      for name in vim.fs.dir(dir) do
+        out[#out + 1] = name
+      end
+      table.sort(out)
+      return out
+    end
+    local function ticket(name, doc)
+      vim.fn.mkdir(dir, "p")
+      local f = assert(io.open(dir .. "/" .. name, "wb"))
+      f:write(vim.json.encode(doc))
+      f:close()
+    end
+    local saved_clock = queue.clock_ms
+    queue.clock_ms = function()
+      return 2000
+    end
+    said = {}
+    write_lock({ pid = parent, token = "holder", started = os.time(), what = "the holder" })
+    -- an earlier waiter (alive), and one whose process is gone
+    ticket("000000000001000-earlier.json", { pid = parent, token = "earlier", what = "earlier" })
+    ticket("000000000000500-dead.json", { pid = 2147480000, token = "dead", what = "dead" })
+    local looks = 0
+    h = queue.acquire(q(), "suite F", say, {
+      poll_ms = 1,
+      sleep = function()
+        looks = looks + 1
+        if looks == 1 then
+          eq(
+            #tickets(),
+            2,
+            "fair: the dead ticket is gone, this run's is there beside the earlier one"
+          )
+        elseif looks == 2 then
+          os.remove(lock) -- the holder ends; the earlier waiter has not looked yet
+        elseif looks == 3 then
+          -- the earlier waiter takes its turn and leaves the line
+          write_lock({ pid = parent, token = "earlier", started = os.time(), what = "earlier" })
+          os.remove(dir .. "/000000000001000-earlier.json")
+        elseif looks == 5 then
+          os.remove(lock)
+        end
+      end,
+    })
+    ok(h and h.held, "fair: taken in the end")
+    eq(looks, 5, "fair: a free slot with an earlier live waiter is left to it")
+    eq(read().what, "suite F", "fair: ... then the lock is this run's")
+    has(said[1], "1 run(s) waiting before this one", "fair: says how many wait before it")
+    eq(tickets(), {}, "fair: the ticket is gone once the run has its turn")
+    queue.release(h)
+
+    -- a newcomer finds the slot free but a live waiter in the line: it waits too (and gives up here), without a
+    -- ticket left behind
+    ticket("000000000001000-earlier.json", { pid = parent, token = "earlier", what = "earlier" })
+    local clk = 0
+    local late, late_why = queue.acquire(q(), "suite G", say, {
+      max_wait_ms = 100,
+      poll_ms = 50,
+      now = function()
+        return clk
+      end,
+      sleep = function(ms)
+        clk = clk + ms
+      end,
+    })
+    eq(late, nil, "fair: a newcomer does not overtake a waiting run")
+    has(late_why, "given up", "fair: ... and gives up at its deadline")
+    eq(tickets(), { "000000000001000-earlier.json" }, "fair: the newcomer's ticket goes with it")
+    vim.fn.delete(dir, "rf")
+    queue.clock_ms = saved_clock
+  end
+
   -- two slots: a second run goes at once while the first one runs; a third waits for either
   said = {}
   write_lock({ pid = parent, token = "other", started = os.time(), what = "first" })
