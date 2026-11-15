@@ -108,6 +108,33 @@ return function(H)
     "is_output: case only matters where the file system keeps it apart"
   )
 
+  -- a sheet whose `out_dir` is elsewhere in the repository: `cache.outputs` of .testing.lua names that folder
+  do
+    local before = key_of("TESTS/loader_spec.lua")
+    put("build/shots/one.png", "png\n")
+    ok(
+      key_of("TESTS/loader_spec.lua") ~= before,
+      "without cache.outputs a folder a run writes is an input"
+    )
+    cache.extra_outputs = { "./build/shots/" }
+    local configured = key_of("TESTS/loader_spec.lua")
+    put("build/shots/two.png", "png\n")
+    local after = key_of("TESTS/loader_spec.lua")
+    ok(cache.is_output("build/shots/x.png"), "is_output: a folder of cache.outputs")
+    cache.extra_outputs = nil
+    ok(configured == after, "a folder of cache.outputs is no input")
+  end
+  local _, problems =
+    require("testing.config.project").validate({ cache = { outputs = { "../x" } } })
+  ok(#problems > 0, "cache.outputs: a folder outside the root is refused")
+  local valid, none =
+    require("testing.config.project").validate({ cache = { outputs = { "build/shots" } } })
+  eq(
+    { valid.cache.outputs, #none },
+    { { "build/shots" }, 0 },
+    "cache.outputs: a relative folder is taken"
+  )
+
   vim.fn.delete(root, "rf")
   vim.fn.delete(cdir, "rf")
 end

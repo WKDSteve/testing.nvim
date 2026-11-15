@@ -626,6 +626,11 @@ local SCHEMA = {
       end,
       expect = "a name of letters, digits, '_', '.', '-' (at most 64): the cache folder is named after it, not after the checkout path",
     },
+    -- folders a run writes into (a test sheet's `out_dir` inside the repository): never an input of a cache key
+    outputs = {
+      check = list_of(is_safe_relpath, 0),
+      expect = 'a list of folders relative to the root, without "..": what a run writes there is no input',
+    },
   },
   coverage = {
     bindings = { check = is_unit, expect = "a number between 0 and 1" },

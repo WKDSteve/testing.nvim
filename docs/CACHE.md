@@ -174,7 +174,8 @@ and nothing else: it is tested in its own repository):
   resolves, takes the **whole project** (everything below the root except `.git`, `.deps`, `.cache`,
   `node_modules`) into the key,
 - no directory digest (the whole project, the spec root, a declared or literal directory) enters `TESTS/sheets/out`
-  (on Windows and macOS in any case, `tests/sheets/OUT` is the same folder):
+  (on Windows and macOS in any case, `tests/sheets/OUT` is the same folder), nor a folder of `cache.outputs` of
+  `.testing.lua` (a sheet whose `out_dir` is elsewhere in the repository):
   the test sheets write the page they open and their screenshots there while the suite runs. In a fresh tree
   (`ci commit`, `ci --snapshot`, the WSL mirror) that folder appears during the run, and as an input it changed the
   key of every spec that reads files of `TESTS/`, so nothing was stored (`not written: an input changed while the run

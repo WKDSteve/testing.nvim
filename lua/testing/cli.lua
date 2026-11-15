@@ -841,6 +841,7 @@ local function execute(argv, sv)
   end
   require("testing.cache.store").project_key = plan.project.cache and plan.project.cache.project_key
     or nil
+  require("testing.cache").extra_outputs = plan.project.cache and plan.project.cache.outputs or nil
   -- the runner itself stores into the directory it was told to use, also while a spec of an in-process
   -- window is running next to it (jobs > 1): the fs guard must not count that as a write of the spec
   if sv.cache_dir then

@@ -687,6 +687,11 @@ end
 ---`TESTS/sheets/out` is where the test sheets put the page they open and their screenshots (`testing.sheet`).
 M.OUTPUT_DIRS = { "TESTS/sheets/out" }
 
+---Further output folders of the project: `cache.outputs` of its `.testing.lua` (set by the CLI for the run, as
+---`testing.cache.store.project_key`), e.g. the `out_dir` of a test sheet that writes elsewhere in the repository.
+---@type string[]|nil
+M.extra_outputs = nil
+
 ---Is `rel` (project-relative, `/`) a folder of `M.OUTPUT_DIRS` or below one? Where the file system ignores case
 ---(Windows, macOS) `tests/sheets/OUT` is the same folder, so is it here.
 ---@param rel string
@@ -696,7 +701,10 @@ function M.is_output(rel)
   if fold then
     rel = rel:lower()
   end
-  for _, out in ipairs(M.OUTPUT_DIRS) do
+  local outs = vim.list_extend(vim.list_slice(M.OUTPUT_DIRS), M.extra_outputs or {})
+  for _, out in ipairs(outs) do
+    -- `./build/shots/` and `build\shots` name the same folder as `build/shots`
+    out = out:gsub("\\", "/"):gsub("^%./", ""):gsub("/+$", "")
     out = fold and out:lower() or out
     if rel == out or rel:sub(1, #out + 1) == out .. "/" then
       return true
