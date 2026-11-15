@@ -149,6 +149,27 @@ return function(H)
   has(w.text, "is red on the hosted CI", "red: says so")
   has(w.text, "macos    failure  https://x/job/9", "red: names the red system")
 
+  -- red while another system still runs: the wait ends at the first red system, and the last line says so (the tail
+  -- `windows running` / `run: ...` read like land giving up, m1-review 2026-11-13)
+  w = scenario({
+    states = {
+      {
+        overall = "failure",
+        os = {
+          ubuntu = { state = "failure", url = "https://x/job/1" },
+          windows = { state = "running", url = "https://x/job/2" },
+        },
+        run = { url = "https://x/run/4" },
+      },
+    },
+  })
+  eq(w.code, 1, "red, one still running: exit 1")
+  eq(
+    w.said[#w.said],
+    "land: red (ubuntu failure); origin/main does not move, nothing landed",
+    "red, one still running: the last line is the verdict with the red system"
+  )
+
   -- all jobs green while the run is still in progress is no verdict: a later job or the conclusion can still be red
   w = scenario({
     states = {

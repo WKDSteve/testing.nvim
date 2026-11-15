@@ -342,6 +342,21 @@ function M.run(args, say, state_dir)
     if url then
       say("  run: " .. url)
     end
+    -- the verdict once more as the last line: a red system ends the wait while others still run, and a reader of
+    -- the tail (`windows running`, `run: ...`) took that for land giving up (m1-review, 2026-11-13)
+    local red = {}
+    for _, sys in ipairs(vim.tbl_keys(type(rec.os) == "table" and rec.os or {})) do
+      if RED[rec.os[sys].state] then
+        red[#red + 1] = ("%s %s"):format(sys, rec.os[sys].state)
+      end
+    end
+    table.sort(red)
+    say(
+      ("land: red (%s); %s does not move, nothing landed"):format(
+        #red > 0 and table.concat(red, ", ") or tostring(rec.overall),
+        upstream
+      )
+    )
     drop_check()
     return M.EXIT_RED
   end

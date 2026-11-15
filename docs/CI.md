@@ -519,6 +519,8 @@ For a public repository the hosted runners are free and check all three systems;
 long suite before a push at all. `testing ci land` pushes the commit to a check branch `ci/<repo>-<sha12>` (`<repo>` the repository's name, from a linked worktree too), waits for
 the run of the CI workflow for exactly that commit (`testing ci remote`), and only when it is green moves `<branch>` to
 it, as a plain fast-forward push. `<branch>` is never red; a red run leaves it where it was and names the red systems.
+The first red system ends the wait, even while other systems still run (they show as `running`); the last line
+is then `land: red (<system> <state>, ...); <remote>/<branch> does not move, nothing landed`.
 Green means the run is completed: while it is still in progress, jobs that are all green so far are no verdict (a job
 created later or the run's own conclusion could still be red).
 
