@@ -578,7 +578,8 @@ The line is fair: a run that has to wait leaves a ticket in `<temp>/testing/heav
 wait, its pid), and a free slot goes to the oldest waiting run whose process is alive. A run that finds a slot free but
 older runs waiting does not take it (`..., 1 run(s) waiting before this one`). Every waiter looks every two seconds;
 without the tickets whoever looked first took the slot, and a run once waited an hour behind later ones. Tickets of
-processes that are gone are removed by the next run that sees them.
+processes that are gone are removed by the next run that sees them, and so is a ticket older than any wait can be
+(four hours and one of slack: its pid may belong to another process by then).
 
 A stopped run gives its turn back. `scripts/test.sh` passes a TERM, INT or HUP on to its nvim, and it ends nvim
 when its caller is gone without a signal (an agent's background task that is stopped: on Windows only the outer shell

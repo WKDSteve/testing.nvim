@@ -172,7 +172,11 @@ local function tickets_ahead(dir, mine, pid)
     local path = dir .. "/" .. name
     local doc = read_lock(path)
     local holder = doc and type(doc.pid) == "number" and math.floor(doc.pid) or nil
-    if holder and holder ~= pid and M.alive(holder) then
+    local since = doc and tonumber(doc.since)
+    -- older than any wait can be (MAX_WAIT_MS, and an hour of slack): a process whose pid was taken by another one
+    -- would else hold the line for good
+    local expired = since and M.time() - since > M.MAX_WAIT_MS / 1000 + 3600
+    if holder and holder ~= pid and not expired and M.alive(holder) then
       ahead = ahead + 1
       first = first or doc
     elseif holder then

@@ -212,6 +212,19 @@ return function(H)
     eq(late, nil, "fair: a newcomer does not overtake a waiting run")
     has(late_why, "given up", "fair: ... and gives up at its deadline")
     eq(tickets(), { "000000000001000-earlier.json" }, "fair: the newcomer's ticket goes with it")
+
+    -- a ticket older than any wait can be is a crashed run's whose pid another process has now: it holds nobody
+    os.remove(dir .. "/000000000001000-earlier.json")
+    ticket("000000000000900-reused.json", {
+      pid = parent,
+      token = "reused",
+      what = "crashed long ago",
+      since = os.time() - math.floor(queue.MAX_WAIT_MS / 1000) - 7200,
+    })
+    local fresh_h = queue.acquire(q(), "suite H", say, { max_wait_ms = 100, poll_ms = 50 })
+    ok(fresh_h and fresh_h.held, "fair: an expired ticket of a live pid does not hold the line")
+    eq(tickets(), {}, "fair: ... and is removed")
+    queue.release(fresh_h)
     vim.fn.delete(dir, "rf")
     queue.clock_ms = saved_clock
   end
