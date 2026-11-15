@@ -104,8 +104,9 @@ describe, case, plus the spec files below `TESTS` that never ran.
 
 A folder, a file and a describe show the worst below them, in this order: `crash`, `error`, `timeout`,
 `fail`, `xpass`, `running`, `queued`, `stale`, `never`, `skip`, `xfail`, `pass`. A skipped case keeps
-what is above it from being green. What is red is open when the view is shown. The number next to the view
-in the bar is the count of red cases.
+what is above it from being green. What is red is open when the view is shown, and so is the spec folder of
+a project that has only one, red or not; a node closed by hand stays closed. The number next to the view in
+the bar is the count of red cases.
 
 A spec file that is one case (the `return function(H)` dialects) is that case; when it is red, its failing
 assertions stand below it, each with its line.

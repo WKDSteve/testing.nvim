@@ -148,6 +148,21 @@ return function(H)
     "what is red is open, the rest is not"
   )
   eq(tests.open, true, "the one spec folder is open")
+  -- nothing red below it: the folder is open because it is the only one, and stays so when the tree is indexed
+  -- (the index writes on every node again what it shows)
+  local calm = nodes.build({
+    root = ROOT,
+    cases = { case("TESTS/unit/green_spec.lua", { "g" }, "one", "pass", { line = 1 }) },
+  })
+  local calm_dir = calm.children[#calm.children]
+  eq(calm_dir.open, true, "the one spec folder is open when nothing below it is red")
+  nodes.index(calm)
+  eq(calm_dir.open, true, "... and still after the tree was indexed")
+  eq(
+    child(calm_dir, "unit").open,
+    nil,
+    "... a folder below it that is not the only one of the project stays closed"
+  )
   eq({ nodes.duration(7.4), nodes.duration(1400), nodes.duration(125000) }, {
     "7ms",
     "1.4s",

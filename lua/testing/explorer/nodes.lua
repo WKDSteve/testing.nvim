@@ -121,6 +121,7 @@ end
 ---@field time? string
 ---@field file? string  Spec file, relative to the project root (a folder for `dir`).
 ---@field case? string  Case id (a case, also a spec file that is one case).
+---@field sole? boolean  The one spec folder of the project: it starts open.
 ---@field describe? string[]  The describe titles above and including a describe node.
 ---@field recorded? string  The status the run recorded (the shown one may be `stale`).
 ---@field message? string
@@ -359,8 +360,9 @@ restyle = function(node, sums)
   end
   if style(node, sum, is_case) then
     if data.kind ~= "case" and data.kind ~= "file" or type(node.children) == "table" then
-      -- what is red is in sight without a key press; closed by hand it stays closed
-      node.open = sum.red > 0 or nil
+      -- what is red is in sight without a key press, and so is the content of the one spec folder; closed by
+      -- hand it stays closed
+      node.open = (sum.red > 0 or data.sole == true) or nil
     end
   end
   return sum
@@ -710,12 +712,13 @@ function M.build(input)
   for i, node in ipairs(input.first or {}) do
     table.insert(top.children, i, node)
   end
-  M.restyle(top)
-  -- a project with one spec folder opens on its content
+  -- a project with one spec folder opens on its content. Written on the node and not as `open` here: every
+  -- `restyle` decides `open` again (`M.index` runs one), and a green folder would be closed by it
   local only = top.children[#top.children]
   if folders == 1 and only.kind == "dir" then
-    only.open = true
+    M.data(only).sole = true
   end
+  M.restyle(top)
   return top
 end
 

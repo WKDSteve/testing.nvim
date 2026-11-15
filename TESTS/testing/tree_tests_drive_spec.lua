@@ -380,14 +380,14 @@ T.eq("nothing was said at warning level", T.loud(mark), {})
 tree_mod.register({})
 T.tree()
 vim.cmd("Filetree source tests")
--- the entry was replaced: the tree shows the view from its top again, and a folder opens by itself only once
-T.wait(function()
-  return line_of("TESTS") ~= nil
-end)
-T.adapter.expand_node({ path = T.dir .. "/TESTS" })
-T.wait(function()
-  return line_of("fresh_spec.lua") ~= nil
-end)
+-- the entry was replaced: the tree shows the view from its top again. Nothing is red now, and the one spec folder
+-- is open all the same: its files are in sight without a key press
+T.ok(
+  "after the source registered again the one spec folder is open, with nothing red below it",
+  T.wait(function()
+    return line_of("fresh_spec.lua") ~= nil
+  end)
+)
 local follow = require("testing.bindings.live")
 local kinds, synthetic = {}, false
 local unlisten = follow.listen(function(_, batch)

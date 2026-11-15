@@ -168,10 +168,12 @@ return function(H)
 
     current = state.new(root)
     tree.reload()
+    local calm = entry.root({})
+    eq(find(calm, "tests:file:" .. red).status, "never", "a reload replaces what the view shows")
     eq(
-      find(entry.root({}), "tests:file:" .. red).status,
-      "never",
-      "a reload replaces what the view shows"
+      find(calm, "tests:dir:TESTS").open,
+      true,
+      "the one spec folder starts open, also when nothing below it is red"
     )
     current = st
 
