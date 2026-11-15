@@ -60,7 +60,9 @@ return {
         vim.o.ruler = false
         -- no Nerd Font in a snapshot: the tree draws no file icons
         vim.g.have_nerd_font = false
-        _G.sheet_root = root
+        -- the root as the editor names it when it starts a pipeline and tells the view (`:Testing ci`, `r` in the
+        -- view): resolved, so on macOS /private/var/... and not the /var/... of tempname()
+        _G.sheet_root = require("testing.bindings.usrcmds").resolve_root(nil, nil)
 
         ---The rows of the tree window as the screen shows them: the signs and the columns at the right are drawn
         ---by the tree, they are not text of its buffer.
@@ -76,6 +78,25 @@ return {
             out[#out + 1] = table.concat(cells)
           end
           return out
+        end
+        ---Whether the tree window has drawn the same for `ms` milliseconds: what a snapshot waits for (decorators of
+        ---the tree answer debounced, a moment after the rows).
+        function _G.steady(ms)
+          -- the text and the highlight of every cell: a decorator may only colour a name
+          local cells = { table.concat(_G.tree_lines(), "|") }
+          local win = _G.tree.get_winid()
+          local pos = vim.fn.win_screenpos(win)
+          for r = pos[1], pos[1] + vim.api.nvim_win_get_height(win) do
+            for c = pos[2], pos[2] + vim.api.nvim_win_get_width(win) - 1 do
+              cells[#cells + 1] = vim.fn.screenattr(r, c)
+            end
+          end
+          local shot, now = table.concat(cells, ","), vim.uv.now()
+          if shot ~= _G.steady_shot then
+            _G.steady_shot, _G.steady_since = shot, now
+            return false
+          end
+          return now - _G.steady_since >= ms
         end
         ---The line of the tree that holds `text` (plain), or nil.
         function _G.line_of(text)
@@ -139,6 +160,7 @@ return {
       wait = [[_G.line_of("Pipeline fast") ~= nil and _G.shows("stylua", "◌") and _G.shows("suite", "◌")]],
       note = "it stands first, open, its three steps queued",
     },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "queued", masks = TREE_ONLY },
     { lua = [[_G.feed({ event = "step_start", step = "stylua", index = 1, total = 3 })]] },
     { wait = [[_G.shows("stylua", "●")]], note = "the first step runs" },
@@ -150,6 +172,7 @@ return {
       wait = [[_G.shows("stylua", "✓") and _G.shows("stylua", "700ms") and _G.shows("luacheck", "●")]],
       note = "it ended green with its time; the second step runs",
     },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "running", masks = TREE_ONLY },
     {
       lua = [[_G.feed({ event = "step_end", step = "luacheck", state = "red", ms = 1500, exit = 1, findings_total = 2 })]],
@@ -166,6 +189,7 @@ return {
       wait = [[_G.shows("suite", "●") and _G.shows("suite", "1/2")]],
       note = "the suite counts its files",
     },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "red", masks = TREE_ONLY },
     {
       lua = [[_G.feed({ event = "step_end", step = "suite", state = "green", ms = 4000, exit = 0, findings_total = 0 })
@@ -192,6 +216,7 @@ return {
       note = "the findings of the red step stand below it",
     },
     { expect = [[_G.shows("suite", "✓") and _G.shows("suite", "4.0s")]] },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "findings", masks = TREE_ONLY },
     {
       lua = [[vim.api.nvim_set_current_win(_G.tree.get_winid())
@@ -213,6 +238,7 @@ return {
       wait = [[_G.shows("luacheck", "●") and _G.line_of("unused variable 'x'") == nil and _G.line_of("stylua") == nil]],
       note = "it runs again: the findings of the run before are gone, the pipeline shows the steps of this run",
     },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "again", masks = TREE_ONLY },
     {
       lua = [[_G.feed({ event = "step_end", step = "luacheck", state = "green", ms = 900, exit = 0, findings_total = 0 })
@@ -225,6 +251,7 @@ return {
       timeout = 5000,
       note = "the pipeline is green",
     },
+    { wait = [[_G.steady(600)]], timeout = 8000, note = "the tree has drawn the same for a while" },
     { screen = "green", masks = TREE_ONLY },
   },
   judge = {
