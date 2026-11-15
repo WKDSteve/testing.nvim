@@ -27,6 +27,11 @@ the skip reason), `expected` and `actual`. Per spec file: `{ mtime_ns, size, run
 was recorded. The Result-IR carries `describe` and `name` as additive optional fields of a case
 ([OUTPUT-FORMATS.md](OUTPUT-FORMATS.md)); a reader that does not find them falls back to the id.
 
+Per project: `specs`, every spec file the last run discovered (sorted, whether it ran or not; a run narrowed
+with `--file` discovers them all the same), and `specs_ts`, when. A reader that must not run the discovery
+itself, because that executes `.testing.lua`, takes the list from here (the view `tests` below). A result file
+written before this field existed has none (`state.specs == nil`).
+
 ## Merged, not replaced
 
 `testing --file a_spec.lua` must not make the results of `b_spec.lua` disappear. A run replaces the cases it
@@ -79,7 +84,7 @@ A folder shows the worst of what lies below it, also while it is closed.
 ### The view `tests`
 
 `:Filetree source tests` (or the view bar of the tree) shows the last result as a tree: folder, spec file,
-describe, case, plus the spec files below `TESTS` that never ran.
+describe, case, plus the spec files that never ran.
 
 ```
 ▾ Tests
@@ -150,8 +155,19 @@ profile). It is read as untrusted input: a size cap, every field checked, a step
 argument of the next run is left out, and a finding that points out of the project keeps its text and loses
 its place.
 
-A spec file that never ran is found by name (`*_spec.lua` below `TESTS`); a project with another
-`spec_pattern` shows such a file after its first run. The view changes no file.
+**Which spec files there are.** The view never runs the discovery: that needs `.testing.lua`, which is code of
+the project and is executed by a run only, behind the trust gate ([CONFIG.md](CONFIG.md)). It reads two things
+instead:
+
+- the list the last run discovered (`specs` of `last.json`). A project with its own `roots` or `spec_pattern`
+  (filetree.nvim: `TESTS/units.lua`) lists its never-run specs from it, after any one run, a narrowed one too.
+  A file of the list that is gone is left out;
+- the files named `*_spec.lua` below `TESTS`. Before the first run that is all there is. After it, such a file
+  the run did not list is shown only when it was written since that run: an older one is a file the project's
+  pattern leaves out (a fixture), a newer one is a spec the next run will find.
+
+So a spec with another name that was added since the last run shows after the next run, and a project that
+is not trusted shows what its names say and nothing else. The view changes no file.
 
 ### While a run goes
 

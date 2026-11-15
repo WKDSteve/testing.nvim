@@ -133,6 +133,11 @@ return function(H)
   local loaded = state.load(root, opts)
   eq(loaded.run, "run-1", "load: the run id")
   eq(#loaded.cases, 3, "load: every case")
+  eq(
+    { loaded.specs, loaded.specs_ts },
+    { { spec_a, spec_b }, 1700000000 },
+    "load: the spec files the run discovered, sorted, and when"
+  )
   eq(loaded.notes, {}, "load: nothing to note")
   local snap = state.snapshot(loaded)
   eq(snap.summary.pass, 1, "snapshot: pass")
@@ -272,6 +277,18 @@ return function(H)
   reread = state.load(root, opts)
   eq(state.case(reread, spec_a .. "::alpha").status, "fail", "abort: the finished case is recorded")
   eq(reread.partial, true, "abort: the state says the run was partial")
+  eq(reread.specs, { spec_a }, "the discovered list is the one of the last run that had one")
+  -- a caller that names no discovered files (it keeps every record) leaves the list alone
+  do
+    local kept = state.load(root, opts)
+    state.apply(kept, ir({ { spec_a, "alpha", "fail" } }, "run-6b"), { time = 1800000000 })
+    eq(
+      { kept.specs, kept.specs_ts == 1800000000 },
+      { { spec_a }, false },
+      "a run without a discovered list keeps the old one and its time"
+    )
+    eq(state.new(root).specs, nil, "a project that never ran has no list")
+  end
 
   -- prev.json: newly red -----------------------------------------------------------
   local prev = state.load_prev(root, opts)
@@ -370,6 +387,37 @@ return function(H)
     "hostile: no record for a path outside"
   )
   ok(bad.files["TESTS/ok_spec.lua"] ~= nil, "hostile: the record inside stays")
+
+  -- the discovered list is stat'ed by a tree view: the same rule, name by name
+  bad = load_with(vim.json.encode({
+    v = 1,
+    cases = {},
+    specs = {
+      "TESTS/z_spec.lua",
+      "../x",
+      "/etc/passwd",
+      "C:/w",
+      "TESTS/a/../../b",
+      "",
+      7,
+      string.rep("x", state.MAX_ID_BYTES + 1),
+      "TESTS/z_spec.lua",
+      "TESTS/units.lua",
+    },
+    specs_ts = "soon",
+  }))
+  eq(
+    { bad.specs, bad.specs_ts },
+    { { "TESTS/units.lua", "TESTS/z_spec.lua" }, 0 },
+    "hostile: of a discovered list only the names inside the project stay, once each; a time that is none is 0"
+  )
+  has(
+    table.concat(bad.notes, " "),
+    "8 unusable spec file name(s)",
+    "hostile: and the rest is counted"
+  )
+  bad = load_with(vim.json.encode({ v = 1, cases = {}, specs = "all of them" }))
+  eq(bad.specs, nil, "hostile: a list that is none is no list")
 
   local esc = "\27[31mred\27[0m\0nul"
   local mixed = vim.json.encode({

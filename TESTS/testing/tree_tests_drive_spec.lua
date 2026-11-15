@@ -433,6 +433,11 @@ for _, case in ipairs(after.cases) do
 end
 T.eq("... which stored its two cases", fresh_cases, 2)
 T.ok("... and left the cases of the other files alone", state.case(after, RED_CASE) ~= nil)
+T.eq(
+  "... and the list of the spec files it discovered, which the view reads instead of discovering itself",
+  after.specs,
+  { FRESH, GREEN, RED }
+)
 T.eq("no dialog nobody expected", T.unanswered, 0)
 
 -- ── setup({ tree = ... }) ────────────────────────────────────────────────────

@@ -188,6 +188,60 @@ return function(H)
     end)
     eq(loads, loads_at_stop, "... and nothing is watched")
 
+    -- the spec files a run discovered --------------------------------------------------------
+    -- a project with its own `spec_pattern`: `TESTS/units.lua` is a spec there, `TESTS/fixture_spec.lua` is not.
+    -- Its `.testing.lua` says so, and is never executed for the view: the list is the one a run left behind.
+    local marker = root .. "/executed"
+    write(".testing.lua", {
+      ("local f = io.open(%q, 'w'); f:write('x'); f:close()"):format(marker),
+      'error("the view executed .testing.lua")',
+    })
+    local units, fixture, gone = "TESTS/units.lua", "TESTS/fixture_spec.lua", "TESTS/gone.lua"
+    write(units, { "return function() end" })
+    write(fixture, { "return function() end" })
+    local function listed(specs_time)
+      local with = state.new(root)
+      state.apply(with, ir({ { red, "one", "pass" } }), {
+        ran_files = { [red] = true },
+        known_files = { [red] = true, [green] = true, [units] = true, [gone] = true },
+        time = specs_time,
+      })
+      current = with
+      local shown = entry.root({})
+      local names = {}
+      for _, name in ipairs({ red, green, fresh, units, fixture, gone }) do
+        local node = find(shown, "tests:file:" .. name)
+        names[name] = node and (node.status or "ran") or nil
+      end
+      return names
+    end
+    eq(
+      listed(os.time() + 3600),
+      { [red] = "ran", [green] = "never", [units] = "never" },
+      "the view lists what the last run discovered: a spec of the project's own pattern that never ran, "
+        .. "no file that is gone, and no `_spec.lua` the run left out"
+    )
+    eq(
+      listed(1),
+      {
+        [red] = "ran",
+        [green] = "never",
+        [units] = "never",
+        [fresh] = "never",
+        [fixture] = "never",
+      },
+      "... a `_spec.lua` below TESTS written since that run is a spec the next run will find: listed"
+    )
+    current = state.new(root)
+    local unlisted = entry.root({})
+    eq(
+      { find(unlisted, "tests:file:" .. units), find(unlisted, "tests:file:" .. fixture).status },
+      { nil, "never" },
+      "before the first run the files are found by name alone"
+    )
+    eq(vim.uv.fs_stat(marker), nil, "the project's .testing.lua was never executed for any of it")
+    current = st
+
     -- the decorator steps back on the nodes of the view -----------------------------------
     local decorator = registry.get("decorator", "tests")
     local stop_badges = decorator.subscribe(function() end)

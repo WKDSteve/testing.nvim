@@ -61,7 +61,7 @@ local IDLE = { skip = true }
 ---@field root? fun(): string  The project root to show (default: the project of the current directory).
 ---@field state_opts? Testing.State.Opts  Handed to `testing.state.load`.
 ---@field keys? { run?: string|string[]|false, failed?: string|string[]|false }  Keys in the view `tests` (default `r` and `R`; false: the action is in the menu only).
----@field files? fun(root: string): string[]  The spec files there are, relative to the root (default: `*_spec.lua` below `TESTS`).
+---@field files? fun(root: string): string[]  The spec files there are, relative to the root (default: what the last run discovered, and `*_spec.lua` below `TESTS`; see `M.spec_files`).
 ---@field run? fun(opts: { root: string, flags: table })  Starts a run (default: `require("testing").run`).
 ---@field ci_run? fun(opts: { root: string, profile: string, steps?: string[] })  Starts a pipeline run (default: `testing.ci.editor.run`).
 
@@ -384,15 +384,57 @@ function M.on_events(root, events)
   end
 end
 
----The spec files there are, relative to the root.
+---The spec files there are, relative to the root. No code of the project runs for it (the real discovery needs
+---`.testing.lua`, which only a run executes, behind the trust gate). Two things are read instead:
+---
+---  - the list the last run discovered (`specs` of the result file, data like the rest of it): what the
+---    project's own `roots` and `spec_pattern` make a spec, minus what is gone since
+---  - the files named `*_spec.lua` below `TESTS`. Before the first run that is all there is. After it, such a
+---    file the run did not list is shown only when it was written since: an older one is a file the project's
+---    pattern leaves out (a fixture), a newer one a spec the next run will find
 ---@param root string
+---@param st Testing.State
 ---@return string[]
-local function spec_files(root)
+function M.spec_files(root, st)
   if options.files then
     return options.files(root)
   end
-  local ok, files = pcall(require("testing.bindings.usrcmds").spec_files, root)
-  return ok and files or {}
+  local ok, named = pcall(require("testing.bindings.usrcmds").spec_files, root)
+  named = ok and named or {}
+  local specs = st.specs
+  if not specs then
+    return named
+  end
+  local on_disk, has_cases = {}, {}
+  for _, file in ipairs(named) do
+    on_disk[file] = true
+  end
+  for _, case in ipairs(st.cases) do
+    has_cases[case.file] = true
+  end
+  local out, listed = {}, {}
+  for _, file in ipairs(specs) do
+    listed[file] = true
+    -- a file with cases is in the view anyway, and one the walk just saw is there: only the rest is asked for
+    local there = on_disk[file] or has_cases[file]
+    if not there then
+      local stat = vim.uv.fs_stat(root .. "/" .. file)
+      there = stat ~= nil and stat.type == "file"
+    end
+    if there then
+      out[#out + 1] = file
+    end
+  end
+  local since = st.specs_ts or 0
+  for _, file in ipairs(named) do
+    if not listed[file] then
+      local stat = vim.uv.fs_stat(root .. "/" .. file)
+      if stat and stat.mtime.sec >= since then
+        out[#out + 1] = file
+      end
+    end
+  end
+  return out
 end
 
 ---The describe/it calls of a spec file, read from its text.
@@ -441,7 +483,7 @@ function M.root_node()
     stale = stale,
     live = live and live.marks or nil,
     first = (ok_ci and doc) and { ci.node(nodes.norm(root), doc) } or nil,
-    files = spec_files(root),
+    files = M.spec_files(root, st),
     positions = function(file)
       return positions_of(root, file)
     end,

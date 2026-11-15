@@ -97,6 +97,8 @@ local uv = vim.uv or vim.loop
 ---@field partial boolean  The last run did not cover every file or stopped early.
 ---@field summary table<string, integer>
 ---@field files table<string, Testing.State.File>
+---@field specs? string[]  Every spec file the last run discovered (sorted), whether it ran or not. nil: no run recorded one.
+---@field specs_ts? integer  When that list was recorded (Unix time).
 ---@field cases Testing.State.Case[]
 ---@field notes string[]
 ---@field package _by_id table<string, Testing.State.Case> Only this module (its functions take the state, they are no methods).
@@ -435,6 +437,27 @@ function M.validate(root, raw)
       notes[#notes + 1] = ("%d unusable file record(s) ignored"):format(bad)
     end
   end
+  if type(raw.specs) == "table" and #raw.specs <= M.MAX_FILES then
+    local specs, seen_spec, bad = {}, {}, 0
+    for _, file in ipairs(raw.specs) do
+      local rel = M.inside(file) and norm_file(file) or nil
+      if rel and not seen_spec[rel] then
+        seen_spec[rel] = true
+        specs[#specs + 1] = rel
+      else
+        bad = bad + 1
+      end
+    end
+    if bad > 0 then
+      notes[#notes + 1] = ("%d unusable spec file name(s) ignored"):format(bad)
+    end
+    table.sort(specs)
+    st.specs = specs
+    local sts = raw.specs_ts
+    st.specs_ts = (type(sts) == "number" and sts == sts and sts >= 0 and sts <= 4102444800)
+        and math.floor(sts)
+      or 0
+  end
   reindex(st)
   recount(st)
   return st, notes
@@ -758,7 +781,7 @@ end
 
 ---@class Testing.State.ApplyInfo
 ---@field ran_files? table<string, true>  Files that ran WITHOUT a case restriction: they forget ids they no longer produce and their file record is renewed.
----@field known_files? table<string, true>  Every discovered file; records and cases of other files are dropped. nil = keep all.
+---@field known_files? table<string, true>  Every discovered file; records and cases of other files are dropped, and the list is kept as `specs`. nil = keep all.
 ---@field partial? boolean  The run covered a selection or stopped early.
 ---@field time? integer  Unix time (tests).
 ---@field stat? fun(root: string, file: string): { mtime_ns: string, size: integer }|nil  Replaces `M.stat` (tests).
@@ -809,6 +832,15 @@ function M.apply(st, res, info)
         st.files[file] = nil
       end
     end
+    -- what the run discovered, for a reader that must not run the discovery itself (a tree view)
+    local specs = {}
+    for file in pairs(known) do
+      if M.inside(file) and #specs < M.MAX_FILES then
+        specs[#specs + 1] = norm_file(file)
+      end
+    end
+    table.sort(specs)
+    st.specs, st.specs_ts = specs, ts
   end
   st.run, st.ts, st.partial = res.run.id, ts, info.partial == true
   emit(st, "apply")
@@ -894,6 +926,8 @@ local function to_json(st)
     ts = st.ts,
     partial = st.partial,
     files = st.files,
+    specs = st.specs,
+    specs_ts = st.specs_ts,
     cases = cases,
   }
 end
