@@ -332,6 +332,12 @@ WSL needs `nvim`, `git` and the tools of the pipeline (`stylua`, `luacheck`, at 
 the release binaries can live there without `sudo`: `wsl.exe -e bash scripts/wsl-tools.sh` installs stylua and
 luacheck at those versions and Node 22 (for testing.nvim's contract step), checksums checked. A missing one ends the check as `infra`, as on Windows. What is
 Windows-specific is checked by the windows leg of the hosted CI. Not with `--repos-root`.
+Green in the mirror says nothing about timing on a slow file system: the mirror is on ext4, and a spec that holds
+a few hundred milliseconds can pass there and fail when the same checkout runs from `/mnt/<drive>` (the 9p mount, much
+slower per file call). filetree.nvim's `native_watch_spec` was red for a day from `/mnt/e` while every `--wsl` run and
+the hosted ubuntu leg stayed green (a stale time base, filetree.nvim `e760652`). A spec with a time window that touches
+files is worth one run by hand from the mount (`wsl.exe -e bash -lc 'cd /mnt/e/repos/<repo> && scripts/test.sh --file
+<spec>'`) before it is called done.
 
 **`--quick`: each commit cheaply, the whole state once.** With `--quick` the suite at the commit runs only the spec
 files the diff to the base reaches (`--affected=<base>`, the selection of [CACHE.md](CACHE.md)); the other steps run as
