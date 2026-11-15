@@ -561,6 +561,11 @@ older runs waiting does not take it (`..., 1 run(s) waiting before this one`). E
 without the tickets whoever looked first took the slot, and a run once waited an hour behind later ones. Tickets of
 processes that are gone are removed by the next run that sees them.
 
+A stopped run gives its turn back. `scripts/test.sh` passes a TERM, INT or HUP on to its nvim, and it ends nvim
+when its caller is gone without a signal (an agent's background task that is stopped: on Windows only the outer shell
+ends). The script checks its caller every two seconds; `TESTING_KEEP_RUNNING=1` turns that off for a run that is meant
+to outlive its shell. On Windows nvim's own children end with it.
+
 It is re-entrant: the holder hands its token to its children (`$TESTING_HEAVY_RUN`), so the runs `testing ci commit`
 starts at the commit and at its base are part of its turn; a nested call in the same process shares the hold. Only the
 command-line entry arms the queue: a spec or an editor that calls `cli.main` as a library never waits, and a suite sets

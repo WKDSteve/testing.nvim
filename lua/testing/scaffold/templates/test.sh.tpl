@@ -189,10 +189,34 @@ forward() {
 trap 'forward 130' INT
 trap 'forward 143' TERM
 trap 'forward 129' HUP
+# A caller that is killed outright sends no signal at all (a stopped background task of an agent: Windows ends the
+# outer shell only, this script and its nvim went on and the next run of the same commit queued behind them). A
+# watcher looks at the caller every two seconds and ends nvim when it is gone. TESTING_KEEP_RUNNING=1 turns it off
+# (a run meant to outlive its shell).
+caller=$PPID
+# shellcheck disable=SC2329 # started from run_nvim below
+watch_caller() {
+  while kill -0 "$1" 2>/dev/null; do
+    if ! kill -0 "$caller" 2>/dev/null; then
+      printf '%s\n' "testing: the caller of scripts/test.sh is gone: nvim is stopped" >&2 || true
+      kill -TERM "$1" 2>/dev/null || true
+      return 0
+    fi
+    sleep 2
+  done
+}
 run_nvim() {
   nvim "$@" <&0 &
   nvim_pid=$!
-  wait "$nvim_pid"
+  watcher=""
+  if [ "${TESTING_KEEP_RUNNING:-}" != 1 ] && [ "$caller" -gt 1 ]; then
+    watch_caller "$nvim_pid" </dev/null >/dev/null &
+    watcher=$!
+  fi
+  local code=0
+  wait "$nvim_pid" || code=$?
+  [ -z "$watcher" ] || kill "$watcher" 2>/dev/null || true
+  return "$code"
 }
 # `scripts/test.sh surface --from ir.json --baseline surface.baseline.json`: the surface regression gate (docs/SURFACE.md)
 if [ "${1:-}" = "surface" ]; then

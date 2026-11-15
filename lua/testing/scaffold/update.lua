@@ -223,6 +223,8 @@ do
   M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] = "^trap 'rm %-rf \"%$scratch\"' EXIT$"
   -- the old `fail()` ended with a fixed code; the new one exits with $FAIL_CODE (3 under `ci`)
   M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] = "^exit 1$"
+  -- run_nvim waited bare before it watched its caller (`wait "$nvim_pid" || code=$?` now)
+  M.SUPERSEDED_SH[#M.SUPERSEDED_SH + 1] = '^wait "%$nvim_pid"$'
 end
 
 ---@param line string Trimmed.

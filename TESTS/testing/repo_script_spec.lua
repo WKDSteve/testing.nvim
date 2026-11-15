@@ -145,6 +145,41 @@ return function(H)
       "gone",
       "a TERM to the script ends its nvim: " .. (res.stderr or "")
     )
+    os.remove(dir .. "/pid")
+    -- a caller killed outright sends the script nothing (a stopped background task: only the outer shell ends); the
+    -- script sees its caller gone and ends nvim
+    write(
+      dir .. "/caller.sh",
+      table.concat({
+        'bin="$FAKE_DIR/bin"; if command -v cygpath >/dev/null 2>&1; then bin="$(cygpath -u "$bin")"; fi',
+        'export PATH="$bin:$PATH"',
+        'bash "$1" --file x >/dev/null 2>&1 &',
+        "wait",
+        "",
+      }, "\n")
+    )
+    write(
+      dir .. "/probe2.sh",
+      table.concat({
+        'bash "$FAKE_DIR/caller.sh" "$1" &',
+        "c=$!",
+        'for _ in $(seq 1 150); do [ -s "$FAKE_DIR/pid" ] && break; sleep 0.1; done',
+        '[ -s "$FAKE_DIR/pid" ] || { echo no-start; kill -KILL "$c"; exit 0; }',
+        'p=$(cat "$FAKE_DIR/pid")',
+        'kill -KILL "$c"',
+        'for _ in $(seq 1 100); do kill -0 "$p" 2>/dev/null || { echo gone; exit 0; }; sleep 0.1; done',
+        'echo alive; kill -KILL "$p" 2>/dev/null; exit 0',
+        "",
+      }, "\n")
+    )
+    res = vim
+      .system({ bash, dir .. "/probe2.sh", script }, { cwd = repo, env = { FAKE_DIR = dir }, text = true })
+      :wait(60000)
+    eq(
+      vim.trim(res.stdout or ""),
+      "gone",
+      "a caller killed outright: the script ends its nvim: " .. (res.stderr or "")
+    )
     vim.fn.delete(dir, "rf")
   end
 end

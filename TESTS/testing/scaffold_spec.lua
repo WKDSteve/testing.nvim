@@ -264,6 +264,7 @@ return function(H)
   -- a TERM/INT/HUP to the script reaches nvim (behaviour: repo_script_spec runs the dogfood copy for real)
   has(sh, "trap 'forward 143' TERM", "test.sh passes a TERM on to nvim")
   has(sh, "trap 'forward 130' INT", "test.sh passes an INT on to nvim")
+  has(sh, 'watch_caller "$nvim_pid"', "test.sh ends nvim when its caller is gone")
   for line in sh:gmatch("[^\n]+") do
     ok(
       not line:match('^%s*nvim .*%-l "%$DRIVER"'),
