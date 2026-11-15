@@ -12,6 +12,13 @@
 --- equal findings at `head` and one at `base` are one known and one new. A red step without findings (an exit code, a
 --- crash) is compared as a whole: it is known when the step is red at the base too.
 ---
+--- A spec file of the suite step that is red at `head` and at `base` with another failing check (a flaky suite: the
+--- timing hits another case each run) is one known item, not one new and one fixed: what is left unmatched of a spec
+--- file at `head` is paired with what is left of the same file at `base`, one with one, and such a known item carries
+--- the base's text in `other`. That is weaker evidence than the same text twice and stronger than a regression; the
+--- verdict stays `known-red`, the report says "with another failure". A head item of that file without a partner is
+--- new: a second failure in a file that was red already is still found.
+---
 --- When a list of findings was cut (`findings_total` above the number kept), the comparison is not exact: what is
 --- left over counts as new (a false alarm rather than a false green) and `exact` is false.
 
@@ -25,6 +32,7 @@ local M = {}
 ---@field col? integer
 ---@field text string
 ---@field whole? boolean The step is red without findings: the item is the step itself.
+---@field other? string Known with another failure: the text of the base's finding in the same spec file.
 
 ---@class Testing.Ci.Baseline.Result
 ---@field new Testing.Ci.Baseline.Item[]
@@ -106,6 +114,17 @@ local function key_of(item)
   return M.key(item.step, item)
 end
 
+---The spec file of a suite item (`spec`, else `file`), nil for a whole step.
+---@param item Testing.Ci.Baseline.Item
+---@return string|nil
+local function file_of(item)
+  if item.whole then
+    return nil
+  end
+  local f = item.spec or item.file
+  return f and tostring(f):gsub("\\", "/") or nil
+end
+
 ---@param doc table|nil
 ---@return table<string, table>
 local function steps_by_name(doc)
@@ -145,13 +164,43 @@ function M.classify(head, base)
       if h_cut then
         res.exact = false
       end
+      local unmatched = {}
       for _, it in ipairs(h_items) do
         local k = key_of(it)
         if (pool[k] or 0) > 0 then
           pool[k] = pool[k] - 1
           res.known[#res.known + 1] = it
         else
+          unmatched[#unmatched + 1] = it
+        end
+      end
+      -- the suite: a spec file red at both ends with other checks is the same red file (see the description)
+      local partners = {}
+      if hs.name == "suite" then
+        for _, it in ipairs(b_items) do
+          local k, f = key_of(it), file_of(it)
+          if f and (pool[k] or 0) > 0 then
+            pool[k] = pool[k] - 1
+            partners[f] = partners[f] or {}
+            table.insert(partners[f], it)
+          end
+        end
+      end
+      for _, it in ipairs(unmatched) do
+        local f = file_of(it)
+        local p = f and partners[f] and table.remove(partners[f], 1)
+        if p then
+          it.other = p.text
+          res.known[#res.known + 1] = it
+        else
           res.new[#res.new + 1] = it
+        end
+      end
+      -- a base item that found no partner goes back to the pool: it is fixed
+      for _, list in pairs(partners) do
+        for _, it in ipairs(list) do
+          local k = key_of(it)
+          pool[k] = (pool[k] or 0) + 1
         end
       end
       -- what is left of the base is fixed (not when the head's list was cut: the rest may be in its tail)

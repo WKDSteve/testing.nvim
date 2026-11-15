@@ -274,7 +274,13 @@ return function(H)
     local other = baseline.classify(gio("pnjAMs/22", [[ab12CD\3]]), {
       steps = { step("suite", "red", { f("TESTS/file_spec.lua", 183, "trash failed: another") }) },
     })
-    eq(#other.new, 2, "temp folders: another message is still new")
+    -- (the file is red at the base with another message: one of the two is known with another failure, the other
+    -- one is new)
+    eq(
+      { #other.new, #other.known, other.known[1] and other.known[1].other },
+      { 1, 1, "trash failed: another" },
+      "temp folders: another message is not the same finding"
+    )
   end
 
   do
@@ -299,6 +305,102 @@ return function(H)
     eq({ #r.new, #r.known, #r.fixed }, { 1, 1, 0 }, "cut: the rest is new, nothing is called fixed")
   end
 
+  do
+    -- a flaky suite red at both ends: the same text is known; another text in the same spec file is known "with
+    -- another failure" (filetree.nvim's adapter_lines.lua, 2026-11-14: was one new and one fixed, REGRESSION); a
+    -- spec file red only at the head is new, and so is a second failure in a file that was red already
+    local function suite(list)
+      return { steps = { step("suite", "red", list) } }
+    end
+    local same = baseline.classify(
+      suite({ f("TESTS/a.lua", 3, "FAIL two-live: x") }),
+      suite({ f("TESTS/a.lua", 3, "FAIL two-live: x") })
+    )
+    eq({ #same.new, #same.known, #same.fixed }, { 0, 1, 0 }, "flaky suite: the same text is known")
+    eq(same.known[1].other, nil, "flaky suite: ... with nothing else to say")
+    local another = baseline.classify(
+      suite({ f("TESTS/a.lua", 5, "FAIL filter-tab: no placeholder") }),
+      suite({ f("TESTS/a.lua", 3, "FAIL two-live: x") })
+    )
+    eq(
+      { #another.new, #another.known, #another.fixed },
+      { 0, 1, 0 },
+      "flaky suite: another text in the same file is one known, not new plus fixed"
+    )
+    eq(another.known[1].other, "FAIL two-live: x", "flaky suite: ... carrying the base's text")
+    local only_head = baseline.classify(
+      suite({ f("TESTS/a.lua", 5, "FAIL x"), f("TESTS/b.lua", 1, "FAIL y") }),
+      suite({ f("TESTS/a.lua", 5, "FAIL x") })
+    )
+    eq(
+      { #only_head.new, #only_head.known, only_head.new[1] and only_head.new[1].file },
+      { 1, 1, "TESTS/b.lua" },
+      "flaky suite: a spec file red only at the head is new"
+    )
+    local second = baseline.classify(
+      suite({ f("TESTS/a.lua", 5, "FAIL x"), f("TESTS/a.lua", 9, "FAIL z") }),
+      suite({ f("TESTS/a.lua", 5, "FAIL x") })
+    )
+    eq(
+      { #second.new, #second.known },
+      { 1, 1 },
+      "flaky suite: a second failure in a red file is new"
+    )
+    local lint = baseline.classify(
+      { steps = { step("lint", "red", { f("lua/a.lua", 1, "unused y") }) } },
+      { steps = { step("lint", "red", { f("lua/a.lua", 1, "unused x") }) } }
+    )
+    eq(
+      { #lint.new, #lint.fixed },
+      { 1, 1 },
+      "flaky suite: only the suite pairs, lint stays by text"
+    )
+    -- the report names them, with the base's text
+    local lines = commit.lines({
+      sha = "abcdef1234567890",
+      verdict = "known-red",
+      exit = 0,
+      exact = true,
+      new = {},
+      known = another.known,
+      fixed = { { step = "suite", file = "TESTS/c.lua", text = "FAIL gone" } },
+      problems = {},
+      rerun = "x",
+    }, true)
+    eq(
+      lines[1],
+      "ci commit abcdef1 KNOWN-RED 0 new, 1 known (1 with another failure), 1 fixed exit 0",
+      "flaky suite: the verdict line counts them"
+    )
+    eq(
+      lines[2],
+      "  known suite TESTS/a.lua:5:1 FAIL filter-tab: no placeholder  (red at the base with another failure: FAIL two-live: x)",
+      "flaky suite: the known line names the suite, both texts"
+    )
+    eq(lines[3], "  fixed suite TESTS/c.lua FAIL gone", "flaky suite: fixed is named too")
+    -- the agent report lists the first few, then counts
+    local many = {}
+    for i = 1, commit.AGENT_LISTED + 2 do
+      many[i] = { step = "lint", file = "f" .. i, text = "w" }
+    end
+    lines = commit.lines({
+      sha = "abcdef1234567890",
+      verdict = "known-red",
+      exit = 0,
+      exact = true,
+      new = {},
+      known = many,
+      fixed = {},
+      problems = {},
+      rerun = "x",
+    }, true)
+    eq(
+      lines[#lines],
+      "  known lint: 2 more (red at the base too)",
+      "agent report: the rest of the known items counted"
+    )
+  end
+
   -- the report
   do
     local r = {
@@ -319,7 +421,7 @@ return function(H)
       "report: the verdict line"
     )
     eq(lines[2], "  new   lint lua/a.lua:3:5 unused x", "report: the new finding")
-    eq(lines[3], "  known suite: 1 (red at the base too)", "report: known as a count (agent)")
+    eq(lines[3], "  known suite: red", "report: known by name (agent), as new is")
     eq(lines[4], "  rerun " .. r.rerun, "report: how to reproduce")
     local term = commit.lines(r, false)
     eq(term[3], "  known suite: red", "report: known in full (terminal)")

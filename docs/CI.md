@@ -356,7 +356,14 @@ A finding is its step, its file and its text, without line and column (they move
 in the text counts as any position, and so do the folders that are new for every run: the snapshot directory
 `testing/snap/<sha8>-<random>` (also when the message is cut right after it, or names it as a Windows or WSL UNC
 path such as `\\wsl.localhost\...`) and Neovim's temp folder `nvim.<user>/<random>/<n>`); equal findings count as
-often as they occur. A red step without findings (an exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
+often as they occur. A spec file of the suite step that is red at the commit and at the base with another failing
+check (a flaky suite: the timing hits another case each run) is one known finding "with another failure", not one new
+and one fixed: what is left unmatched in a spec file at the commit is paired with what is left of the same file at the
+base, one with one. That is weaker evidence than the same text twice and stronger than a regression: the verdict stays
+`known-red`, the headline says `1 known (1 with another failure)` and the line shows both texts (`  known suite
+TESTS/a.lua:5 FAIL filter-tab: ...  (red at the base with another failure: FAIL two-live: ...)`). A second failure in a
+file that was red already, or a red file the base does not have, is still new; only the suite pairs (a new lint warning
+in a file with others is new). A red step without findings (an exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
 `inexact`: a false alarm rather than a false green.
 
 | Verdict | Meaning | Exit |
@@ -380,7 +387,9 @@ with `--snapshot` ([Prove HEAD without the working tree](#prove-head-without-the
 
 **The report is written for an agent first.** Its first line is the verdict
 (`ci commit abc1234 REGRESSION 2 new, 1 known, 0 fixed (luacheck 2) exit 1`), then only the new findings
-(`  new   luacheck lua/a.lua:3:5 unused variable x`), one count per known and fixed step, and `rerun` with the command
+(`  new   luacheck lua/a.lua:3:5 unused variable x`), the first five known and the first five fixed findings named the
+same way (which suite, which line; `  known suite: red` for a step red as a whole), the rest counted per step
+(`  known luacheck: 12 more (red at the base too)`), and `rerun` with the command
 that reproduces it. The terminal report (`--no-agent`) lists every finding. `--json=<file>` writes the document
 `testing-ci-commit/1` (`schemas/testing-ci-commit/1/`, with a `.d.ts`): per commit `sha`, `base`, `verdict`, `exit`,
 `changed_files`, `new`/`known`/`fixed`, `problems`, `rerun` and both `testing-ci/1` documents.

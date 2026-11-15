@@ -472,6 +472,8 @@ local function item_doc(it)
     col = it.col or vim.NIL,
     text = it.text,
     whole = it.whole or false,
+    -- only on a known item red at the base with another failure (additive: readers of /1 without it are unchanged)
+    other = it.other,
   }
 end
 
@@ -997,8 +999,30 @@ local function where(it)
   end
   local file, line, col = field(it.file), field(it.line), field(it.col)
   local pos = file and (file .. (line and (":" .. line) or "") .. (col and (":" .. col) or ""))
-  return ("%s %s%s"):format(it.step, pos and (pos .. " ") or "", it.text)
+  local other = field(it.other)
+  return ("%s %s%s%s"):format(
+    it.step,
+    pos and (pos .. " ") or "",
+    it.text,
+    other and ("  (red at the base with another failure: %s)"):format(other) or ""
+  )
 end
+
+---How many of the known items are red at the base with another failure.
+---@param known table[]|nil
+---@return integer
+local function changed_count(known)
+  local n = 0
+  for _, it in ipairs(known or {}) do
+    if it.other ~= nil and it.other ~= vim.NIL then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+---In the agent report, so many known or fixed items are named one per line; the rest is counted per step.
+M.AGENT_LISTED = 5
 
 ---The first line of one commit's report.
 ---@param r table
@@ -1019,11 +1043,13 @@ function M.headline(r)
       by[#by + 1] = ("%s %d"):format(g.step, g.n)
     end
     local flaky = #(r.flaky or {}) > 0 and (", %d flaky"):format(#r.flaky) or ""
-    return ("ci commit %s %s %d new, %d known, %d fixed%s%s%s %s"):format(
+    local changed = changed_count(r.known)
+    return ("ci commit %s %s %d new, %d known%s, %d fixed%s%s%s %s"):format(
       short,
       v,
       #r.new,
       #r.known,
+      changed > 0 and (" (%d with another failure)"):format(changed) or "",
       #r.fixed,
       flaky,
       #by > 0 and (" (" .. table.concat(by, ", ") .. ")") or "",
@@ -1068,11 +1094,20 @@ function M.lines(r, agent)
     out[#out + 1] = "  flaky " .. where(it) .. " (green when run again)"
   end
   if agent then
-    for _, g in ipairs(baseline.by_step(r.known or {})) do
-      out[#out + 1] = ("  known %s: %d (red at the base too)"):format(g.step, g.n)
-    end
-    for _, g in ipairs(baseline.by_step(r.fixed or {})) do
-      out[#out + 1] = ("  fixed %s: %d"):format(g.step, g.n)
+    -- the first few by name (which suite, which line), the rest counted per step
+    for _, kind in ipairs({ "known", "fixed" }) do
+      local items = r[kind] or {}
+      for i = 1, math.min(#items, M.AGENT_LISTED) do
+        out[#out + 1] = ("  %-5s %s"):format(kind, where(items[i]))
+      end
+      for _, g in ipairs(baseline.by_step(vim.list_slice(items, M.AGENT_LISTED + 1))) do
+        out[#out + 1] = ("  %-5s %s: %d more%s"):format(
+          kind,
+          g.step,
+          g.n,
+          kind == "known" and " (red at the base too)" or ""
+        )
+      end
     end
   else
     for _, it in ipairs(r.known or {}) do

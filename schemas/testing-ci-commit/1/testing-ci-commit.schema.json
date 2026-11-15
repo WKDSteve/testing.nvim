@@ -50,7 +50,11 @@
         "line": { "type": ["integer", "null"] },
         "col": { "type": ["integer", "null"] },
         "text": { "type": "string" },
-        "whole": { "type": "boolean" }
+        "whole": { "type": "boolean" },
+        "other": {
+          "type": "string",
+          "description": "A known suite item whose spec file is red at the base with another failure: the base's text. Absent otherwise."
+        }
       }
     },
     "steps": {

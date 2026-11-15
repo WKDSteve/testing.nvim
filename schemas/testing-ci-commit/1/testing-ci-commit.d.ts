@@ -87,4 +87,6 @@ export interface Item {
   text: string;
   /** The step is red without findings: the item is the step itself. */
   whole: boolean;
+  /** A known suite item whose spec file is red at the base with another failure: the base's text. Absent otherwise. */
+  other?: string;
 }
