@@ -275,9 +275,23 @@ asks less and holds more: what the specs exercise today must stay exercised.
 2. `scripts/test.sh surface ...` (the `test.sh` of `testing init` has the subcommand; older copies need the same
    four lines as the `conformance` branch).
 3. Let CI write the IR of one Linux run (`scripts/test.sh --json "$RUNNER_TEMP/testing-ir.json"`) and upload it
-   (`actions/upload-artifact`, name `surface-ir`). Write the baseline **from that artifact**, not from your machine: a
-   spec that behaves differently on the runner (a missing tool, another OS) would turn an entry into a false
-   regression: `scripts/test.sh surface --from <downloaded ir> --write-baseline surface.baseline.json`; commit it.
+   on every outcome. The generated workflow (`testing init --workflow`) uploads its IR (`testing-ir-<os>`) only when a
+   leg fails (`if: failure()`), so a green run leaves none; add a step of your own on the Linux leg, as the pilot does:
+
+   ```yaml
+   - uses: actions/upload-artifact@v7
+     if: matrix.os == 'ubuntu-latest' && always()
+     with:
+       name: surface-ir
+       path: ${{ runner.temp }}/testing-ir.json
+       if-no-files-found: ignore
+       retention-days: 7
+   ```
+
+   Write the baseline **from that artifact**, not from your machine: a spec that behaves differently on the runner (a
+   missing tool, another OS) would turn an entry into a false regression: `scripts/test.sh surface --from <downloaded
+   ir> --write-baseline surface.baseline.json`; commit it. Without such a step, a Linux run of your own is the next best
+   source (WSL, `scripts/test.sh --json ir.json`); read the first gate run's result before trusting it.
 4. CI step on that one Linux leg: `bash scripts/test.sh surface --from "$RUNNER_TEMP/testing-ir.json" --baseline
    surface.baseline.json --require-signed-baseline`. A regression is exit 1, a baseline edited by hand is exit 1.
 5. To accept an intended change (a command removed, a spec dropped on purpose), rewrite the file from a green Linux run
