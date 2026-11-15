@@ -181,14 +181,14 @@ if [ "${1:-}" = "ci" ]; then
     fi
   done
   # a subcommand goes first (`ci verify`, `ci commit`, ...): `testing ci` reads it as its first argument; `list`, `hook`,
-  # `runner-guard` and `trust` take no --state-dir
+  # `runner-guard`, `trust` and `release` take no --state-dir
   sub=()
   case "${1:-}" in
-    verify | commit | remote | overview)
+    verify | commit | remote | overview | land)
       sub=("$1")
       shift
       ;;
-    list | hook | runner-guard | trust)
+    list | hook | runner-guard | trust | release)
       sub=("$1")
       shift
       state_args=()

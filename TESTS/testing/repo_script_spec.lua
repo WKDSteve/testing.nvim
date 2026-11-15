@@ -45,6 +45,22 @@ return function(H)
     end
   end
 
+  -- `scripts/test.sh ci <sub>` hands every subcommand of `testing ci` on as its first argument (`land` and `release`
+  -- were read as an unknown argument once): the subcommand's own usage answers, not the one of the pipeline
+  if bash ~= "" and vim.fn.executable("nvim") == 1 then
+    for _, sub in ipairs({ "land", "release", "remote", "overview" }) do
+      local res = vim
+        .system({ bash, script, "ci", sub, "--help" }, { cwd = repo, text = true })
+        :wait(60000)
+      local out = (res.stdout or "") .. (res.stderr or "")
+      ok(
+        out:find("unknown argument", 1, true) == nil
+          and out:find("testing ci " .. sub, 1, true) ~= nil,
+        ("scripts/test.sh ci %s --help: the subcommand answers: %s"):format(sub, out)
+      )
+    end
+  end
+
   -- every `actions/checkout` step of the workflows (the generated ci.yml and the hand-written lib-suite.yml) says
   -- `persist-credentials: false`; the job that pushes keeps the token
   local checkouts = {}

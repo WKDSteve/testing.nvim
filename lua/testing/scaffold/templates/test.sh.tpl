@@ -215,17 +215,18 @@ if [ "${1:-}" = "conformance" ]; then
   exit $?
 fi
 # `scripts/test.sh ci [--profile=fast] [...]`: the pipeline of the `ci` section, or the one derived from the repository
-# (stylua, luacheck, the suite; docs/CI.md of testing.nvim), in the same environment. `ci verify`, `ci list` and
-# `ci hook` are its subcommands: --state-dir goes after `verify` (it reads the proof there), the others take none.
+# (stylua, luacheck, the suite; docs/CI.md of testing.nvim), in the same environment. A subcommand of `testing ci` goes
+# first, as its first argument: --state-dir goes after `verify`, `commit`, `remote`, `overview` and `land` (they keep
+# their proof and caches there); `list`, `hook`, `runner-guard`, `trust` and `release` take none.
 if [ "${1:-}" = "ci" ]; then
   shift
   ci_args=()
   case "${1:-}" in
-    verify)
+    verify | commit | remote | overview | land)
+      ci_args=("$1" --state-dir "$real_state")
       shift
-      ci_args=(verify --state-dir "$real_state")
       ;;
-    list | hook) ;;
+    list | hook | runner-guard | trust | release) ;;
     *) ci_args=(--state-dir "$real_state") ;;
   esac
   run_nvim -n -i NONE --headless -u NONE -l "$DRIVER" ci ${ci_args[@]+"${ci_args[@]}"} "$@"

@@ -385,8 +385,10 @@ carries `system`. After the push, `testing ci remote` shows the CI per system; t
 no second run under WSL or in a container here: the worktree, the dependencies and the trust would each need a
 translated path, and macOS would stay uncovered anyway. By hand it works: the specs run under WSL from `/mnt/<drive>`.
 
-From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD` (the script's `--state-dir`
-before the subcommand is understood).
+From a repository with the template's `scripts/test.sh`: `scripts/test.sh ci commit HEAD`. The script hands every
+subcommand of `testing ci` on as its first argument (`verify`, `commit`, `remote`, `overview` and `land` with its
+`--state-dir` after it; `list`, `hook`, `runner-guard`, `trust` and `release` without), so `scripts/test.sh ci land`
+works as well; `testing init --update` brings an older copy of the script up to date.
 
 Since a time, and across repositories: `testing ci commit --since=<time>` checks every non-merge commit of `HEAD` newer
 than the time (git's date: `2.days.ago`, `2026-11-01`), oldest first; `testing ci commit --repos-root=<dir>

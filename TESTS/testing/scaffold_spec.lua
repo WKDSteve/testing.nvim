@@ -246,7 +246,7 @@ return function(H)
   has(sh, '"$DRIVER" ci ${ci_args[@]+', "test.sh has the ci subcommand")
   has(
     sh,
-    "ci_args=(verify --state-dir",
+    'ci_args=("$1" --state-dir "$real_state")',
     "test.sh: ci verify reads the proof from the real state directory"
   )
   has(sh, "FAIL_CODE=3", "test.sh: a missing runner is exit 3 for ci")
@@ -641,6 +641,16 @@ return function(H)
     "derived: stylua",
     "test.sh ci list: the derived pipeline of the generated project"
   )
+  -- every subcommand of `testing ci` goes first (with --state-dir after it, or none): its own usage answers
+  for _, sub in ipairs({ "land", "release", "remote", "commit" }) do
+    local ci_sub = run({ bash, "scripts/test.sh", "ci", sub, "--help" }, run_proj, deps_env)
+    local said = tostring(ci_sub.stdout) .. tostring(ci_sub.stderr)
+    ok(
+      said:find("unknown argument", 1, true) == nil
+        and said:find("testing ci " .. sub, 1, true) ~= nil,
+      "test.sh ci " .. sub .. " --help: the subcommand answers: " .. said
+    )
+  end
   local ci_missing = run({ bash, "scripts/test.sh", "ci", "list" }, run_proj, env_path)
   eq(ci_missing.code, 3, "test.sh ci without the runner: exit 3")
 
