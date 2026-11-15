@@ -5,6 +5,7 @@
 
 return function(H)
   local ok = H.ok
+  local eq = H.eq
   local cache = require("testing.cache")
   local hash = require("testing.cache.hash")
 
@@ -100,6 +101,12 @@ return function(H)
     "is_output: not a sibling with the same prefix"
   )
   ok(not cache.is_output("TESTS/sheets"), "is_output: not its parent")
+  -- where the file system ignores case, `tests/sheets/OUT` is the same folder; elsewhere it is another one
+  eq(
+    cache.is_output("tests/Sheets/OUT/a.png"),
+    require("testing.platform").is_case_insensitive(),
+    "is_output: case only matters where the file system keeps it apart"
+  )
 
   vim.fn.delete(root, "rf")
   vim.fn.delete(cdir, "rf")

@@ -687,11 +687,17 @@ end
 ---`TESTS/sheets/out` is where the test sheets put the page they open and their screenshots (`testing.sheet`).
 M.OUTPUT_DIRS = { "TESTS/sheets/out" }
 
----Is `rel` (project-relative, `/`) a folder of `M.OUTPUT_DIRS` or below one?
+---Is `rel` (project-relative, `/`) a folder of `M.OUTPUT_DIRS` or below one? Where the file system ignores case
+---(Windows, macOS) `tests/sheets/OUT` is the same folder, so is it here.
 ---@param rel string
 ---@return boolean
 function M.is_output(rel)
+  local fold = require("testing.platform").is_case_insensitive()
+  if fold then
+    rel = rel:lower()
+  end
   for _, out in ipairs(M.OUTPUT_DIRS) do
+    out = fold and out:lower() or out
     if rel == out or rel:sub(1, #out + 1) == out .. "/" then
       return true
     end
