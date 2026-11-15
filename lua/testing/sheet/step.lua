@@ -257,7 +257,7 @@ M.EVENTS_FILE = "events.jsonl"
 
 ---@class Testing.SheetStep.NotesDoc
 ---@field id string
----@field root string
+---@field root string In the file only `root_hash` (the folder can be handed on, it names no path of this machine).
 ---@field date string Local date of the run, `YYYY-MM-DD`.
 ---@field status string How the run ended (`pass`, `fail`, `aborted`, ...).
 ---@field notes Testing.SheetStep.Note[]
@@ -276,6 +276,18 @@ local function same_root(a, b)
   return a == b
 end
 
+---What `notes.json` keeps of the project instead of its path: the sha256 of the root, case folded where the file
+---system ignores case, so the same project is known again without the folder naming a path of this machine.
+---@param root string
+---@return string
+function M.root_hash(root)
+  local key = vim.fs.normalize(root):gsub("/+$", "")
+  if require("testing.platform").is_case_insensitive() then
+    key = key:lower()
+  end
+  return vim.fn.sha256(key)
+end
+
 ---The notes of the last stepped run of a sheet of this project, nil when it had none (or ran in another project).
 ---@param root string
 ---@param id string
@@ -292,7 +304,8 @@ function M.last_notes(root, id)
     not ok
     or type(doc) ~= "table"
     or doc.id ~= id
-    or not same_root(doc.root, root)
+    -- `root` was kept by older runs; `root_hash` since the folder names no path of this machine
+    or not (doc.root_hash ~= nil and doc.root_hash == M.root_hash(root) or same_root(doc.root, root))
     or type(doc.notes) ~= "table"
     or #doc.notes == 0
   then
@@ -909,7 +922,13 @@ function M.main(argv, sv, deps)
   local run_date = os.date("%Y-%m-%d") --[[@as string]]
   if #notes > 0 then
     -- kept beside the pictures of the run, for `testing sheets report`; an aborted run's notes too
-    local doc = { id = s.id, root = root, date = run_date, status = res.status, notes = notes }
+    local doc = {
+      id = s.id,
+      root_hash = M.root_hash(root),
+      date = run_date,
+      status = res.status,
+      notes = notes,
+    }
     local wok, werr = require("lib.nvim.fs.write.atomic")(
       evidence_dir .. "/" .. M.NOTES_FILE,
       vim.json.encode(doc),

@@ -269,6 +269,24 @@ end
     ok(kept.date:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil, "... and its date")
     eq(step_cli.last_notes(root .. "-other", "note.walk"), nil, "a sheet of the same id elsewhere")
 
+    -- the folder of the run can be handed on: no file in it names the root (notes.json keeps its hash)
+    local evidence = step_cli.evidence_dir("note.walk")
+    local files = vim.fn.readdir(evidence)
+    ok(vim.tbl_contains(files, step_cli.NOTES_FILE), "the notes are in the folder of the run")
+    for _, name in ipairs(files) do
+      local fh = io.open(evidence .. "/" .. name, "rb")
+      local body = fh and fh:read("*a") or ""
+      if fh then
+        fh:close()
+      end
+      -- JSON writes `/` as `\/` and `\` as `\\`
+      local flat = body:gsub("\\/", "/"):gsub("\\\\", "/"):lower()
+      ok(
+        not flat:find(vim.fs.normalize(root):lower(), 1, true),
+        "no path of this machine in " .. name
+      )
+    end
+
     local report = require("testing.sheet.report")
     local text = report.render(report.collect({ root }, { cases = {} }))
     has(text, "notes of the stepped run on " .. kept.date .. " (pass):", "the report shows them")
