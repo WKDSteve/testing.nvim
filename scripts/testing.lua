@@ -77,6 +77,11 @@ local trust_store = trust_mod.store_from_args(arg or {}) or trust_mod.path()
 local queue = require("testing.queue").from_env(os.getenv)
 -- one line per heavy run (testing.metrics, `testing stats`): armed here only, like the queue
 local metrics = require("testing.metrics").from_env(os.getenv)
+-- a heavy run starts with a low CPU priority, so the self-hosted runners on this machine get the CPU first; its
+-- children inherit it (testing.priority: never under CI, off with TESTING_PRIORITY=normal); armed here only
+pcall(function()
+  require("testing.priority").apply(arg or {}, os.getenv)
+end)
 local ok_run, code = pcall(cli.main, arg or {}, {
   env = env,
   script = this,

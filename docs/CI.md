@@ -599,6 +599,17 @@ flakes. The bottleneck is shared (starting processes, the file system, the virus
 once take as long as two after each other and are flakier. On Linux, where a process starts in a fraction of that time
 (the hosted ubuntu leg runs the same specs in 126 s against 331 s on windows), more slots may pay: measure first.
 
+### Low priority for heavy runs
+
+A heavy run of the command line (a suite, `testing ci` with `ci commit` and `ci land`, `testing sheets run`) lowers
+its own CPU priority before it starts anything: `BelowNormal` on Windows, nice 10 on Linux and WSL
+(`testing.priority`, libuv's `os_setpriority`). Every process it starts inherits that (cargo, node, Chrome, the child
+editors), so self-hosted CI runners on the same machine, which run at normal priority, get the CPU first and their
+load-sensitive tests do not time out next to a session's local run. Under `CI` nothing changes (a runner job keeps the
+priority its runner gave it); `TESTING_PRIORITY=normal` keeps the normal priority by hand; a process that already runs
+lower (`Idle`, a higher nice) is never raised. Like the queue, only the command-line entry does it, never a library
+call of `cli.main`.
+
 ## Metrics: what the runs cost
 
 Whether a cadence saves anything is a question of numbers, not of impressions. Every heavy run of the command line
