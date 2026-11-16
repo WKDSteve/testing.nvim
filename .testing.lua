@@ -47,7 +47,9 @@ return {
   -- (observed 2026-11-04, cause unexplained; tasks-vault: testing.nvim/flaky-timeout-suspend-und-lint-luals) and
   -- a real CI run once timed it out near the old 180 s ceiling. Raised with the same margin as back then: the
   -- deadline is a safety net against a hang, not a performance gate.
-  timeouts = { file_ms = 300000 },
+  -- `case_ms` limits a case of a busted file only, and the only one here is ci_editor_sheet_spec: one case per test
+  -- sheet, and testing.commands runs ten `:Testing` subcommands in a child editor (about 30 s on a quiet machine).
+  timeouts = { file_ms = 300000, case_ms = 180000 },
   -- Dogfood: every guard is an ERROR here. A spec of this repository that leaves an autocmd, a buffer,
   -- a stub in package.preload or a runtimepath entry behind fails its own case, named precisely.
   -- Guards are safety nets for accidents, not a sandbox (docs/GUARDS.md).
