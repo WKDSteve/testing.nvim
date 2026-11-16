@@ -134,7 +134,10 @@ end
       { { toggle = "a", value = 1 }, "takes a value" },
       { { close = "" }, "must not be empty" },
       { { close = { window = "a" } }, "close must be a string" },
-      { { click = "a", timeout = 10 }, "timeout belongs to a wait, prompt, close or lua step" },
+      {
+        { click = "a", timeout = 10 },
+        "timeout belongs to a wait, prompt, close, lua or steady step",
+      },
     }) do
       local none, why = sheet.validate({
         id = "x",

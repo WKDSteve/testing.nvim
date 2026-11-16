@@ -597,7 +597,7 @@ local function start(S, async_cb)
   S.kill_reason, S.trace_artifact, S.api_params, S.ui, S.boot = nil, nil, nil, false, nil
   -- what the attached UI was told about attributes: a new process numbers them anew
   S.hl, S.default_colors = {}, nil
-  S.grid, S.drawn = nil, nil
+  S.grid, S.drawn, S.changed_at = nil, nil, nil
   S.stdin_closed, S.death_output = nil, nil
   S.async = {}
   S.notifies, S.prompts = {}, {}
@@ -908,6 +908,7 @@ end
 ---@field settle fun(timeout_ms?: integer, settle_opts?: { interval_ms?: integer, rounds?: integer, raise?: boolean }): boolean, string|nil
 ---@field screen fun(): table
 ---@field ui_screen fun(mode?: string): table|nil The screen as the attached UI was last told it, no call into the child.
+---@field ui_quiet_ms fun(): number|nil How long the screen the UI was told has not changed, nil before it drew.
 ---@field prompt fun(): string|nil The mode of the prompt the child stands in (`M.PROMPTS`), nil when none.
 ---@field notifies fun(nopts?: { clear?: boolean }): table[]
 ---@field prompts fun(nopts?: { clear?: boolean }): table[]
@@ -1178,6 +1179,13 @@ local function build_child(S, opts)
   ---@return table|nil
   function child.ui_screen(mode)
     return M._ui_screen(S, mode or "?")
+  end
+
+  ---How long (ms) the screen the attached UI was told has not changed (no cell, no cursor), nil before it drew
+  ---anything: what a snapshot waits for when parts of the UI draw debounced after the lines.
+  ---@return number|nil
+  function child.ui_quiet_ms()
+    return S.changed_at and (uv.hrtime() - S.changed_at) / 1e6 or nil
   end
 
   ---The prompt the child stands in, by its mode (`r` hit-enter, `rm` more, `r?` `confirm()`; `M.PROMPTS`), nil when
@@ -1591,12 +1599,27 @@ function M._take_grid(S, batch)
     end
   elseif name == "flush" then
     local d = S.drawn
+    -- `S.changed_at`: when a flush last changed a cell or the cursor (a redraw of the same picture does not count)
+    local changed = d.cursor[1] ~= g.cursor[1] or d.cursor[2] ~= g.cursor[2]
     for r in pairs(g.dirty) do
-      local row = g.row[r]
+      local row, old = g.row[r], d.row[r]
+      if
+        not changed
+        and (
+          not old
+          or not vim.deep_equal(old.text, row.text)
+          or not vim.deep_equal(old.hl, row.hl)
+        )
+      then
+        changed = true
+      end
       d.row[r] = { text = { unpack(row.text) }, hl = { unpack(row.hl) } }
     end
     g.dirty = {}
     d.cursor = { g.cursor[1], g.cursor[2] }
+    if changed or not S.changed_at then
+      S.changed_at = uv.hrtime()
+    end
   end
 end
 

@@ -39,6 +39,7 @@ return {
 | `input = s` | queued through `child.input` (returns at once); the way into insert mode (`input = "A"`, then a `wait` for the mode): `keys` feeds with `x`, which ends insert mode again | never |
 | `lua = s` (`timeout` ms, default the RPC limit of 10 s) | runs in the child; `timeout` is the limit of this one call, for a command that computes before it returns (`:checkhealth`) | it raises, or does not return in time |
 | `settle = ms` | waits until the child is idle | it is not idle in time |
+| `steady = ms` (`timeout` ms, default `ms` + 2000) | waits until the screen the attached UI was told has not changed for `ms` (no cell, no colour, no cursor): what a `screen` needs when parts of the UI draw debounced after the lines (decorators), or a file watcher keeps `settle` from ever being idle. Read from the redraw events, no call into the child | the screen still changes (the line says how long ago it last did), or the UI drew nothing |
 | `wait = expr` (`timeout` ms, default 2000) | polls a Lua expression in the child; one poll may wait as long as the step (a child still busy with the command before answers it only then) | it is not truthy in time |
 | `expect = expr` | evaluates a Lua expression in the child now | it is not truthy |
 | `screen = name` (`masks`, `cursor`, `mode`, `groups`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24`; `groups = true` keeps the highlight group of every attribute letter in it | the snapshot differs (or is missing on CI) |
@@ -751,6 +752,10 @@ return {
 
 ## Pitfalls when writing a sheet
 
+* On macOS `tempname()` lies under `/var` and `getcwd()` under `/private/var` (a link): a sheet that compares a root
+  with the working directory compares the resolved paths (`vim.uv.fs_realpath`).
+* Two `nvim_input_mouse` clicks on one cell within `'mousetime'` are a double click: wait that long between them, or
+  click another cell.
 * A command that computes for a long time (`:Bindings check`, `:checkhealth`) goes in as `input`, or as a `lua` step
   with a `timeout` of its own: `keys` waits for an empty typeahead and runs into the RPC timeout (10 s, less under load
   than it looks: `:checkhealth testing` takes 7 s on a quiet machine).

@@ -31,6 +31,7 @@
 ---   input = s     queued through `child.input` (returns at once)
 ---   lua = s       run in the child (`child.lua`; `timeout` ms raises the RPC limit of this call)
 ---   settle = ms   wait until the child is idle (`child.settle`; not idle is a failure)
+---   steady = ms   wait until the screen the UI was told has not changed for `ms` (`timeout` ms, default ms + 2000)
 ---   wait = expr   poll a Lua expression in the child until it is truthy (`timeout` ms, default 2000)
 ---   expect = expr a Lua expression in the child must be truthy now
 ---   screen = name compare the screen with a snapshot (`testing.screen`; `masks`, `cursor`, `mode`
@@ -68,6 +69,7 @@ M.ACTIONS = {
   "input",
   "lua",
   "settle",
+  "steady",
   "wait",
   "expect",
   "screen",
@@ -97,6 +99,7 @@ M.ENGINE_ACTIONS = {
     input = true,
     lua = true,
     settle = true,
+    steady = true,
     wait = true,
     expect = true,
     screen = true,
@@ -166,6 +169,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field input? string
 ---@field lua? string
 ---@field settle? integer
+---@field steady? integer Milliseconds the screen the UI was told must stay unchanged.
 ---@field wait? string
 ---@field timeout? integer Milliseconds of a `wait` (one poll may take as long), the RPC limit of a `lua` step, or how long a `close` waits for its window.
 ---@field expect? string
@@ -251,6 +255,7 @@ local STEP_KEYS = {
   input = "string",
   lua = "string",
   settle = "number",
+  steady = "number",
   wait = "string",
   timeout = "number",
   expect = "string",
@@ -514,6 +519,7 @@ local function check_step(step, i, engine)
   end
   if
     (action == "settle" and not pos_int(step.settle, M.MAX_MS))
+    or (action == "steady" and not pos_int(step.steady, M.MAX_MS))
     or (step.timeout and not pos_int(step.timeout, M.MAX_MS))
   then
     return at .. ": milliseconds must be a whole number from 1 to " .. M.MAX_MS
@@ -527,8 +533,9 @@ local function check_step(step, i, engine)
     and action ~= "prompt"
     and action ~= "close"
     and action ~= "lua"
+    and action ~= "steady"
   then
-    return at .. ": timeout belongs to a wait, prompt, close or lua step"
+    return at .. ": timeout belongs to a wait, prompt, close, lua or steady step"
   end
   if action == "prompt" and not M.PROMPT_NAMES[step.prompt] then
     return at .. '.prompt: "hit-enter", "more" or "confirm"'

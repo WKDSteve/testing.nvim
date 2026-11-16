@@ -60,7 +60,8 @@ return function(H)
   local _, err =
     sheet.validate({ id = "a", title = "T", steps = { { keys = "x", timeout = 100 } } })
   ok(
-    tostring(err):find("timeout belongs to a wait, prompt, close or lua step", 1, true) ~= nil,
+    tostring(err):find("timeout belongs to a wait, prompt, close, lua or steady step", 1, true)
+      ~= nil,
     "keys: " .. tostring(err)
   )
 

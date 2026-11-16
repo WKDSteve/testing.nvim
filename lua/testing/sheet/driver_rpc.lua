@@ -71,6 +71,25 @@ local function run_step(child, step, ctx)
     if not idle then
       return why or "not idle"
     end
+  elseif step.steady then
+    -- read from what the attached UI was told, no call into the child: decorators that draw debounced after the lines
+    -- change the picture without a call to wait for, and a file watcher keeps `settle` from ever being idle
+    local timeout = step.timeout or (step.steady + require("testing.sheet").DEFAULT_WAIT_MS)
+    local deadline = vim.uv.hrtime() + timeout * 1e6
+    while true do
+      local quiet = child.ui_quiet_ms()
+      if quiet and quiet >= step.steady then
+        break
+      end
+      if ctx.cancelled() then
+        return "aborted"
+      end
+      if vim.uv.hrtime() >= deadline then
+        return quiet and ("the screen changed %d ms ago, still after %d ms"):format(quiet, timeout)
+          or ("the UI drew nothing in %d ms"):format(timeout)
+      end
+      vim.wait(20)
+    end
   elseif step.prompt then
     -- asked through `nvim_get_mode`, which the editor answers in a prompt too: no call waits behind it
     local timeout = step.timeout or require("testing.sheet").DEFAULT_WAIT_MS

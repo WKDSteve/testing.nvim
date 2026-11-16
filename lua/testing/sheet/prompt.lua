@@ -47,6 +47,7 @@ a person can do), notes. Each step has exactly one action and may carry a note:
 | input = "..." | queued; the way into insert mode (input = "A", then a wait for the mode) | never |
 | lua = "..." | Lua run in the child editor (the plugin's API, options) | it raises |
 | settle = ms | waits until the child is idle | not idle in time |
+| steady = ms | waits until the screen has not changed for ms (debounced decorators drew) | it still changes |
 | wait = "expr", timeout = ms | polls a Lua expression in the child | not truthy in time |
 | expect = "expr" | evaluates a Lua expression now | not truthy |
 | screen = "name" | compares the screen with a snapshot (masks = { { row = n } } hide rows) | it differs |
