@@ -50,7 +50,7 @@ local code = guard.main({ "check" }, sv, {
   env = {
     GITHUB_EVENT_NAME = "push", GITHUB_ACTOR = "WKDSteve", GITHUB_TRIGGERING_ACTOR = "WKDSteve",
     GITHUB_REPOSITORY = "WKDSteve/tasks.nvim", GITHUB_REPOSITORY_OWNER = "WKDSteve",
-    GITHUB_SHA = %q, GITHUB_RUN_ID = run_id ~= "" and run_id or nil, GITHUB_RUN_ATTEMPT = attempt,
+    GITHUB_SHA = %q, GITHUB_RUN_ID = run_id ~= "-" and run_id or nil, GITHUB_RUN_ATTEMPT = attempt,
   },
   root = root, now = 5, nvim = "/x/nvim", script = "/x/scripts/testing.lua", ssh_keygen = vim.v.progpath,
   gh = function(args)
@@ -141,7 +141,7 @@ os.exit(code)
   os.remove(root .. "/_answers")
 
   -- 4. without a run id each job asks for itself ------------------------------------------------------------------
-  _, _, asked = jobs(2, "")
+  _, _, asked = jobs(2, "-") -- "-": no run id (an empty argument does not reach the process on Windows)
   eq(asked, 2, "no run id: no sharing")
 
   vim.fn.delete(root, "rf")
