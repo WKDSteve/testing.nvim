@@ -217,8 +217,15 @@ function M.new(s, opts, ctx, how)
       end
       local reason, err = watch.verdict()
       watch = nil
-      -- a later procs step judges from here on
-      local _, again = watch_app()
+      -- a later procs step (after this one, or in the next size) judges from here on; without one no watch runs on
+      local again
+      local later = #(s.sizes or {}) > 1
+      for i = n + 1, #(s.steps or {}) do
+        later = later or s.steps[i].procs ~= nil
+      end
+      if later then
+        again = select(2, watch_app())
+      end
       return { reason = err or reason or again }
     end
     if app then

@@ -195,7 +195,11 @@ put(a["-OutDir"] .. "/procs.json", "\239\187\191" .. vim.json.encode({ verdict =
     eq({ res.status, res.failures }, { "pass", {} }, "a clean watch: green")
     local log = root .. "/watch.log"
     local pids = vim.fn.filereadable(log) == 1 and vim.fn.readfile(log) or {}
-    eq(#pids, 3, "a watch from the start, one after each procs step")
+    eq(
+      #pids,
+      2,
+      "a watch from the start, one more after a procs step with another after it, none after the last"
+    )
     ok(tonumber(pids[1]) and tonumber(pids[1]) > 0, "... of the app's process")
     eq(pids[2], pids[1], "... the same process each time")
 
