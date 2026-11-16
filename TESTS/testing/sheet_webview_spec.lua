@@ -12,7 +12,8 @@ return function(H)
   local function eq(actual, expected, msg)
     return ok(
       vim.deep_equal(actual, expected),
-      ("%s: expected %s, got %s"):format(msg, vim.inspect(expected), vim.inspect(actual))
+      -- what came first: the report cuts a long message, and a failed run's own words are what tells why
+      ("%s: got %s, expected %s"):format(msg, vim.inspect(actual), vim.inspect(expected))
     )
   end
   local function has(haystack, needle, msg)
