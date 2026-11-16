@@ -134,10 +134,13 @@ function M.new(s, opts, ctx, how)
     if not argv then
       return skip, nil
     end
-    if not (app and app.pid) then
+    -- the driver starts the app (webview: tauri-driver under the runner): the driver process is watched, the app is
+    -- one of its descendants
+    local pid = how.driver_starts_app and proc and proc.pid or (app and app.pid)
+    if not pid then
       return nil, "a procs step needs an app this harness starts (its process)"
     end
-    local w, err = pw.start(argv, app.pid, { cancelled = ctx.cancelled })
+    local w, err = pw.start(argv, pid, { cancelled = ctx.cancelled })
     if not w then
       return nil, err
     end

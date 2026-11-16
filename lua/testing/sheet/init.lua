@@ -140,6 +140,8 @@ M.ENGINE_ACTIONS = {
     expect = true,
     shot = true,
     ask = true,
+    -- the verdict of app-proc-watch on the driver process, whose tauri-driver starts the app (`testing.sheet.proc_watch`)
+    procs = true,
   },
   -- by accessible name, `wait` and `expect` also as { name, state, value }
   desktop = {
@@ -190,7 +192,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field toggle? string
 ---@field set? string
 ---@field close? string A part of the title of the one window of another program to close (desktop).
----@field procs? "clean" No shell and no console window of the app up to this step, by app-proc-watch (desktop).
+---@field procs? "clean" No shell and no console window of the app up to this step, by app-proc-watch (desktop; webview: of the driver process, which starts tauri-driver and the app).
 ---@field value? number What a `set` step sets.
 ---@field ask? string A question to a person: asked in a stepped run, a `judge` criterion in any other.
 ---@field masks? (string|table)[]

@@ -214,6 +214,36 @@ put(a["-OutDir"] .. "/procs.json", "\239\187\191" .. vim.json.encode({ verdict =
     os.remove(root .. "/watch.finds")
   end
 
+  -- 3b. a webview sheet: tauri-driver starts the app, so the watch is on the driver process (the runner that starts
+  -- tauri-driver, which starts the app), from its start on ---------------------------------------------------------------
+  do
+    os.remove(root .. "/watch.log")
+    os.remove(root .. "/driver.pid")
+    local s = assert(sheet.validate({
+      id = "w.p",
+      title = "T",
+      engine = "webview",
+      app = "window",
+      steps = { { wait = "true" }, { procs = "clean" } },
+    }))
+    local o = opts()
+    local pid_driver = write(
+      "pid_driver.lua",
+      ('local f = assert(io.open(%q, "wb")); f:write(tostring(vim.fn.getpid())); f:close()\n'):format(
+        root .. "/driver.pid"
+      ) .. table.concat(vim.fn.readfile(fake_driver), "\n")
+    )
+    o.driver_argv = { nvim, "--headless", "-u", "NONE", "-l", pid_driver }
+    local res = sheet.run(s, o)
+    eq({ res.status, res.failures }, { "pass", {} }, "a webview sheet takes a procs step: green")
+    local log = root .. "/watch.log"
+    local pids = vim.fn.filereadable(log) == 1 and vim.fn.readfile(log) or {}
+    local driver_pid = vim.fn.filereadable(root .. "/driver.pid") == 1
+        and vim.fn.readfile(root .. "/driver.pid")[1]
+      or "none"
+    eq(pids, { driver_pid }, "... one watch, of the driver process")
+  end
+
   -- 4. the real tool on a real process (only where it is named) ----------------------------------------------------------
   local argv, skip = pw.find()
   if not argv then

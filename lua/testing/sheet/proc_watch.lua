@@ -1,10 +1,11 @@
 -- @cache-env TESTING_PROC_WATCH
 ---@module 'testing.sheet.proc_watch'
----@brief The processes and console windows of a desktop sheet's app, measured by app-proc-watch: a `procs` step.
+---@brief The processes and console windows of a desktop or webview sheet's app, by app-proc-watch: a `procs` step.
 ---@description
 --- A desktop sheet with a `procs = "clean"` step runs its app under app-proc-watch (a PowerShell 7 tool of the author's
 --- tasks-vault, `TOOLS/scripts/app-proc-watch/app-proc-watch.ps1`, named by `$TESTING_PROC_WATCH`) in attach mode: it
---- watches the app's process from its start on. The step ends that watch (`-StopFile`) and reads its verdict: no shell
+--- watches the app's process from its start on (a webview sheet: the driver process, whose tauri-driver starts
+--- the app). The step ends that watch (`-StopFile`) and reads its verdict: no shell
 --- (cmd, powershell, ...) as a descendant of the app and no console window, up to that step. A later `procs` step
 --- watches again from there. Without the tool, pwsh or Windows the sheet is a reported skip, never green; on the
 --- workstation too (process snapshots there can read as an attack to an EDR).

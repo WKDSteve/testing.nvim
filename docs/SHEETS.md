@@ -748,6 +748,9 @@ return {
   `http://127.0.0.1:<port>`, is reached the same way).
   There is no `open` (the app shows its own page), no `scheme` and no `drag`: WebDriver has neither the media
   emulation nor HTML5 drag and drop.
+* `procs = "clean"` works as in a desktop sheet ([app-proc-watch](#desktop-sheets-engine--desktop)), but tauri-driver
+  starts the app, so the watch is on the driver process from its start on: the runner, tauri-driver, msedgedriver and
+  the app with its WebView2 are all its descendants (a console program's `conhost` is no finding).
 * `wait` and `expect` are JavaScript expressions, run as the body of a function (no `eval`, which the app's
   Content-Security-Policy may refuse); a promise is awaited. A selector that matches nothing is waited for 5 s.
 * `press` takes Playwright's key names (`Enter`, `Tab`, `Escape`, `ArrowDown`, `Control+k`, one character).
