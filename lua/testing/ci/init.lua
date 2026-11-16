@@ -1107,33 +1107,48 @@ M.internal = {
   this_os = this_os,
 }
 
+-- The subcommands that read `--state-dir`, and those that have none.
+local SUB_WITH_STATE_DIR =
+  { verify = true, commit = true, land = true, remote = true, overview = true }
+local SUB_WITHOUT_STATE_DIR =
+  { hook = true, release = true, list = true, ["runner-guard"] = true, trust = true }
+
+---`scripts/test.sh ci <sub>` puts its `--state-dir <dir>` in front of the subcommand (copies of the script older
+---than the list in its template do so for every subcommand but `verify`, `list` and `hook`). A subcommand that reads
+---it gets it right after its name, one that has none goes on without it; the pipeline (no subcommand) keeps it.
+---@param argv string[]
+---@return string[]
+local function state_dir_after_sub(argv)
+  local n, joined
+  if argv[1] == "--state-dir" and argv[2] ~= nil then
+    n, joined = 2, "--state-dir=" .. argv[2]
+  elseif (argv[1] or ""):match("^%-%-state%-dir=.") then
+    n, joined = 1, argv[1]
+  else
+    return argv
+  end
+  local sub = argv[n + 1]
+  local rest = vim.list_slice(argv, n + 2)
+  if SUB_WITH_STATE_DIR[sub] then
+    table.insert(rest, 1, joined)
+  elseif not SUB_WITHOUT_STATE_DIR[sub] then
+    return argv
+  end
+  table.insert(rest, 1, sub)
+  return rest
+end
+
 ---`testing ci ...`.
 ---@param argv string[] The arguments after `ci`.
 ---@param sv table `out`, `err` (sinks), `env`, `script`; `state_dir` (specs).
 ---@return integer exit_code
 function M.main(argv, sv)
+  argv = state_dir_after_sub(argv)
   if argv[1] == "verify" then
     return require("testing.ci.verify").main(vim.list_slice(argv, 2), sv)
   end
-  -- `scripts/test.sh ci commit <rev>` puts its `--state-dir <dir>` in front of the subcommand
-  local commit_at = argv[1] == "commit" and 1
-    or (argv[1] or ""):match("^%-%-state%-dir=.") and argv[2] == "commit" and 2
-    or argv[1] == "--state-dir" and argv[3] == "commit" and 3
-  if commit_at then
-    local rest = vim.list_slice(argv, commit_at + 1)
-    if commit_at > 1 then
-      table.insert(rest, 1, table.concat(vim.list_slice(argv, 1, commit_at - 1), "="))
-    end
-    return require("testing.ci.commit").main(rest, sv)
-  end
-  -- so does `scripts/test.sh ci land|remote|overview`: the subcommand goes first, the directory after it, where those
-  -- take it as `--state-dir=<dir>` (without this the wrapper's `ci land` printed the usage of `testing ci`)
-  local SUBS = { land = true, remote = true, overview = true }
-  local dir_eq = (argv[1] or ""):match("^%-%-state%-dir=(.+)$")
-  if dir_eq and SUBS[argv[2]] then
-    argv = vim.list_extend({ argv[2], "--state-dir=" .. dir_eq }, vim.list_slice(argv, 3))
-  elseif argv[1] == "--state-dir" and argv[2] and SUBS[argv[3]] then
-    argv = vim.list_extend({ argv[3], "--state-dir=" .. argv[2] }, vim.list_slice(argv, 4))
+  if argv[1] == "commit" then
+    return require("testing.ci.commit").main(vim.list_slice(argv, 2), sv)
   end
   -- the hosted CI checks a commit on a branch of its own, main moves to it when green (testing.ci.land)
   if argv[1] == "land" then
