@@ -253,4 +253,30 @@ return function(H)
   ok(why ~= nil, "args: ... and says why")
 
   land.deps = saved
+
+  -- scripts/test.sh puts its --state-dir in front of the subcommand: land, remote and overview are still found, and
+  -- the state directory goes with them (found 2026-11-16: `scripts/test.sh ci land` printed the usage of `testing ci`)
+  for _, sub in ipairs({ "land", "remote", "overview" }) do
+    local mod = require("testing.ci." .. sub)
+    local real = mod.main
+    local seen
+    mod.main = function(argv)
+      seen = argv
+      return 0
+    end
+    local code1 = require("testing.ci").main({ "--state-dir", "/st", sub, "--keep" }, { env = {} })
+    local got1 = seen
+    seen = nil
+    local code2 = require("testing.ci").main({ "--state-dir=/st", sub }, { env = {} })
+    local got2 = seen
+    mod.main = real
+    eq(code1, 0, sub .. ": --state-dir <dir> in front: dispatched")
+    eq(
+      got1,
+      { "--state-dir=/st", "--keep" },
+      sub .. ": ... with the state directory and its own arguments"
+    )
+    eq(code2, 0, sub .. ": --state-dir=<dir> in front: dispatched")
+    eq(got2, { "--state-dir=/st" }, sub .. ": ... with the state directory")
+  end
 end

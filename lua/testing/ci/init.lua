@@ -1126,6 +1126,15 @@ function M.main(argv, sv)
     end
     return require("testing.ci.commit").main(rest, sv)
   end
+  -- so does `scripts/test.sh ci land|remote|overview`: the subcommand goes first, the directory after it, where those
+  -- take it as `--state-dir=<dir>` (without this the wrapper's `ci land` printed the usage of `testing ci`)
+  local SUBS = { land = true, remote = true, overview = true }
+  local dir_eq = (argv[1] or ""):match("^%-%-state%-dir=(.+)$")
+  if dir_eq and SUBS[argv[2]] then
+    argv = vim.list_extend({ argv[2], "--state-dir=" .. dir_eq }, vim.list_slice(argv, 3))
+  elseif argv[1] == "--state-dir" and argv[2] and SUBS[argv[3]] then
+    argv = vim.list_extend({ argv[3], "--state-dir=" .. argv[2] }, vim.list_slice(argv, 4))
+  end
   -- the hosted CI checks a commit on a branch of its own, main moves to it when green (testing.ci.land)
   if argv[1] == "land" then
     return require("testing.ci.land").main(vim.list_slice(argv, 2), sv)
