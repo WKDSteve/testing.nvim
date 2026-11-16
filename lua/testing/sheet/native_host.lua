@@ -70,7 +70,8 @@ function M.check(v)
     or p:match("^[/\\]")
     or p:match("^%a:")
     or p:find("%c")
-    or vim.tbl_contains(vim.split(p:gsub("\\", "/"), "/"), "..")
+    -- a part that is two dots; a pattern, not the literal, which the cache key would read as a path outside
+    or ("/" .. p:gsub("\\", "/") .. "/"):find("/%.%./")
   then
     return "native_host.path: the host program, relative to the project root (no '..', not absolute)"
   end
