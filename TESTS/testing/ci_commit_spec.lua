@@ -131,6 +131,17 @@ return function(H)
     vim.fn.delete(tree, "rf")
   end
 
+  -- what --wsl mirrors as testing.nvim when the project does not declare it: the checkout, not its lua/ folder
+  -- (from the nvim config: "/mnt/e/repos/testing.nvim/lua does not appear to be a git repository")
+  do
+    local own = commit.own_dir()
+    ok(
+      vim.uv.fs_stat(own .. "/scripts/testing.lua") ~= nil,
+      "own_dir is the checkout (got " .. own .. ")"
+    )
+    ok(vim.uv.fs_stat(own .. "/lua/testing/ci/commit.lua") ~= nil, "... with lua/ below it")
+  end
+
   -- the comparison
   local function step(name, state, findings, total)
     return {

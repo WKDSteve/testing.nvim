@@ -254,6 +254,15 @@ function M.is_doc(file)
     or name:match("^CHANGELOG") ~= nil
 end
 
+---The checkout of this testing.nvim (its root, the folder with `lua/` and `scripts/`): what `--wsl` mirrors when the
+---project does not declare testing.nvim itself (the nvim config).
+---@return string
+function M.own_dir()
+  -- lua/testing/ci/commit.lua: four levels up
+  local here = vim.fs.normalize(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p"))
+  return vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(here))))
+end
+
 ---The dependency names the commit declares: `deps` of its `.testing.lua`, `DEPS` of its `TESTS/minimal_init.lua`
 ---(read as text: the commit's own files are not executed here), the runner and lib.nvim.
 ---@param tree string
@@ -1405,8 +1414,7 @@ function M.main_wsl(argv, args, sv)
       dirs[name] = found.dir
     end
   end
-  local this = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
-  dirs["testing.nvim"] = dirs["testing.nvim"] or vim.fs.normalize(this)
+  dirs["testing.nvim"] = dirs["testing.nvim"] or M.own_dir()
   if not dirs["lib.nvim"] then
     err("testing ci commit --wsl: lib.nvim was not found")
     return M.EXIT_INFRA
