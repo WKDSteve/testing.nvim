@@ -150,6 +150,11 @@ return function(H)
 
     -- told when the result changes ------------------------------------------------------
     local resets = 0
+    -- the directory exists before the watch starts, so the watch is on it and sees every write below. Made after
+    -- `subscribe`, the watch sat on an ancestor (a project that never ran, tree_badges_spec covers it), which is
+    -- not recursive: a missed `mkdir` was never seen again, however often a file below it was written (macOS,
+    -- run 43859651198)
+    vim.fn.mkdir(state.dir(root, sopts), "p")
     local stop = entry.subscribe({}, {
       reset = function()
         resets = resets + 1
@@ -159,7 +164,6 @@ return function(H)
     })
     eq(resets, 0, "subscribing tells nothing: the view was just built")
     local before = loads
-    vim.fn.mkdir(state.dir(root, sopts), "p")
     -- written again while not seen: the watch may not be armed yet right after subscribe (FSEvents on macOS)
     W.until_seen(function(n)
       vim.fn.writefile({ "{}", tostring(n) }, state.dir(root, sopts) .. "/touched")
