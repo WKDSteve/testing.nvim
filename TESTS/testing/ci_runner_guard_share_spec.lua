@@ -33,7 +33,9 @@ return function(H)
     })
   )
   write(root .. "/allowed_signers", "me@x ssh-ed25519 AAAA\n")
-  local log = root .. "/compare.log"
+  -- one file per comparison, not lines appended to one file: two processes appending at the same moment lose a line on
+  -- Windows (the C runtime seeks to the end, then writes), and "no run id: no sharing" saw 1 of 2 (run 43921883913)
+  local log = root .. "/compare"
 
   -- one hook process: the check with a fake gh that logs a comparison and answers it a second later
   local script = root .. "/hook.lua"
@@ -58,7 +60,8 @@ local code = guard.main({ "check" }, sv, {
       return "false\n"
     end
     if (args[2] or ""):find("/compare/", 1, true) then
-      local f = assert(io.open(log, "ab"))
+      vim.fn.mkdir(log, "p")
+      local f = assert(io.open(("%%s/%%d-%%d"):format(log, vim.fn.getpid(), vim.uv.hrtime()), "wb"))
       f:write(args[2] .. "\n")
       f:close()
       vim.uv.sleep(1000)
@@ -74,7 +77,7 @@ os.exit(code)
 
   ---Start `n` hook processes at once; their exit codes and outputs, and how many comparisons GitHub saw.
   local function jobs(n, run_id, attempt)
-    os.remove(log)
+    vim.fn.delete(log, "rf")
     local procs = {}
     for i = 1, n do
       procs[i] = vim.system({
@@ -96,14 +99,7 @@ os.exit(code)
       local r = p:wait(60000)
       codes[i], outs[i] = r.code, (r.stdout or "") .. (r.stderr or "")
     end
-    local asked = 0
-    local f = io.open(log, "rb")
-    if f then
-      for _ in f:lines() do
-        asked = asked + 1
-      end
-      f:close()
-    end
+    local asked = #vim.fn.glob(log .. "/*", true, true)
     return codes, outs, asked
   end
 
