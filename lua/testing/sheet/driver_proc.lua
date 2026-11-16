@@ -22,6 +22,9 @@ function M.new(s, opts, ctx, how)
   local margin = opts.driver_margin_ms or 60000
   local stop_ms = opts.driver_stop_ms or 6000
   local proc, exit_code, app
+  ---The watch of the app's processes while the sheet has a `procs` step (`testing.sheet.proc_watch`).
+  ---@type Testing.Sheet.ProcWatch|nil
+  local watch
   local answers, partial, stderr = {}, "", {}
 
   ---Fast context: only tables.
@@ -113,6 +116,33 @@ function M.new(s, opts, ctx, how)
     return nil, ("the %s did not answer in %d ms"):format(how.label, ms)
   end
 
+  local wants_procs = false
+  for _, st in ipairs(s.steps or {}) do
+    wants_procs = wants_procs or st.procs ~= nil
+  end
+
+  ---Watches the app's processes from now on.
+  ---@return string|nil skip, string|nil failure
+  local function watch_app()
+    local pw = require("testing.sheet.proc_watch")
+    local argv, skip = opts.proc_watch_argv, nil
+    if not argv then
+      argv, skip = pw.find()
+    end
+    if not argv then
+      return skip, nil
+    end
+    if not (app and app.pid) then
+      return nil, "a procs step needs an app this harness starts (its process)"
+    end
+    local w, err = pw.start(argv, app.pid, { cancelled = ctx.cancelled })
+    if not w then
+      return nil, err
+    end
+    watch = w
+    return nil, nil
+  end
+
   local D = {}
 
   ---@param size { rows: integer, cols: integer }
@@ -142,6 +172,16 @@ function M.new(s, opts, ctx, how)
         return { failure = ("%s: the app %s did not start: %s"):format(tag, s.app, tostring(aerr)) }
       end
       app = started
+      -- from the app's start on, before the driver acts in its window
+      if wants_procs then
+        local skip_why, fail_why = watch_app()
+        if skip_why then
+          return { skip = skip_why }
+        end
+        if fail_why then
+          return { failure = ("%s: %s"):format(tag, fail_why) }
+        end
+      end
     end
     local answer, why = request({
       cmd = "open",
@@ -169,6 +209,16 @@ function M.new(s, opts, ctx, how)
   ---@param n integer
   ---@return { reason?: string, shot?: string }
   function D.run(step, n)
+    if step.procs then
+      if not watch then
+        return { reason = "no watch of the app's processes runs" }
+      end
+      local reason, err = watch.verdict()
+      watch = nil
+      -- a later procs step judges from here on
+      local _, again = watch_app()
+      return { reason = err or reason or again }
+    end
     if app then
       local expanded, eerr = require("testing.sheet.app").expand_step(step, app.vars)
       if not expanded then
@@ -215,6 +265,10 @@ function M.new(s, opts, ctx, how)
       end
       stop()
       proc = nil
+    end
+    if watch then
+      watch.stop()
+      watch = nil
     end
     if app then
       app.stop()

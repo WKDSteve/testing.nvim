@@ -83,6 +83,7 @@ M.ACTIONS = {
   "toggle",
   "set",
   "close",
+  "procs",
   "ask",
   "restart",
   "hl",
@@ -144,6 +145,8 @@ M.ENGINE_ACTIONS = {
     shot = true,
     -- the one window of another program, by a part of its title (WindowPattern.Close, never a kill)
     close = true,
+    -- the verdict of app-proc-watch on the app's process tree up to here (`testing.sheet.proc_watch`)
+    procs = true,
     ask = true,
   },
 }
@@ -179,6 +182,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field toggle? string
 ---@field set? string
 ---@field close? string A part of the title of the one window of another program to close (desktop).
+---@field procs? "clean" No shell and no console window of the app up to this step, by app-proc-watch (desktop).
 ---@field value? number What a `set` step sets.
 ---@field ask? string A question to a person: asked in a stepped run, a `judge` criterion in any other.
 ---@field masks? (string|table)[]
@@ -261,6 +265,7 @@ local STEP_KEYS = {
   toggle = "string",
   set = "string",
   close = "string",
+  procs = "string",
   value = "number",
   ask = "string",
   masks = "table",
@@ -569,6 +574,9 @@ local function check_step(step, i, engine)
     if not (step.drag.from and step.drag.to) then
       return at .. ".drag: from and to, each a CSS selector"
     end
+  end
+  if action == "procs" and step.procs ~= "clean" then
+    return at .. '.procs: "clean" (no shell, no console window of the app up to here)'
   end
   if action == "scheme" and step.scheme ~= "light" and step.scheme ~= "dark" then
     return at .. '.scheme: "light" or "dark"'

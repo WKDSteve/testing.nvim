@@ -27,7 +27,8 @@ return {
   -- Specs that start the runner on fixture projects of their own (`scripts/testing.lua <tmp>`) inherit the trust
   -- decision of `scripts/test.sh` (`TESTING_TRUST=1`); on CI the built-in `CI` does the same (docs/CONFIG.md).
   -- FILETREE_NVIM_DIR, UI_NVIM_DIR: where the tree drive spec finds filetree.nvim and what it needs.
-  env_allow = { "TESTING_TRUST", "FILETREE_NVIM_DIR", "UI_NVIM_DIR" },
+  -- TESTING_PROC_WATCH: app-proc-watch for the real part of sheet_procs_spec (a note where it is not named).
+  env_allow = { "TESTING_TRUST", "FILETREE_NVIM_DIR", "UI_NVIM_DIR", "TESTING_PROC_WATCH" },
   -- The cache folder is named after this key, not after the absolute path of the checkout, so a cache restored
   -- on a CI runner with another checkout path is found (docs/CI-CACHE.md). It is a name only: every entry still
   -- carries its full spec key.

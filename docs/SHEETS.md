@@ -681,6 +681,7 @@ return {
 | `click = name` | invokes a button or selects a tab | it can do neither |
 | `set = name`, `value = n` | sets a slider | it has no settable range |
 | `shot = name` | a picture of the window, `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` | never |
+| `procs = "clean"` | asks app-proc-watch about the app's process tree up to here: no shell (cmd, powershell, ...) as a descendant, no console window; a later `procs` judges from this step on | it found one: the line names the program, its PID and command line, or the window |
 | `close = part of a title` (`timeout` ms, default 2000) | asks the one window of another program with that part in its title to close, as its close button does, and waits until it is gone | no such window in time, two of them, or it is still open 5 s later (it asks something) |
 
 * A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
@@ -695,6 +696,12 @@ return {
   or keys, and never touches the app's own window. A program that asks before it closes (unsaved work) stays open and
   the step is red. Whether the file opened in the *right* program is the machine's default program: the sheet sees only
   that a window with that title came (`{ wait = { name = ..., window = "clip.mkv" } }` or the `close` itself).
+* A sheet with a `procs` step runs its app under app-proc-watch, a PowerShell 7 tool named by `$TESTING_PROC_WATCH`
+  (the path of `app-proc-watch.ps1`; the author's tasks-vault, `TOOLS/scripts/app-proc-watch/`), in attach mode from
+  the app's start on, before the driver acts in its window. Without the tool, pwsh or Windows, and on the
+  workstation (`NVIM_MACHINE_ROLE=workstation`: process snapshots there can read as an attack), the sheet is a
+  reported skip. Attach mode polls every 10 ms: a child that starts and ends between two scans is not seen; what the
+  app opens through the shell (Explorer, a player) is not its descendant and does not count.
 * The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH (`cargo install --path crates/sheet-driver` in appkit). Without one, the sheet is a reported skip.
 * `ended_early` in the app's entry is the text of a skip for a program that ends at once with success, like a second
   instance that hands over to a running one. Without it that is a failure.
