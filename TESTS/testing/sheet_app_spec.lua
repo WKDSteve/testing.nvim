@@ -231,11 +231,25 @@ f:close()
       { { run = { "a" }, start = "shell" }, 'start must be "link"' },
       { { run = { "a" }, window_ms = 0 }, "window_ms must be" },
       { { run = { "a" }, window_ms = "60s" }, "window_ms must be" },
+      { { run = { "a" }, window_ms = 1.5 }, "window_ms must be a whole number" },
       { { run = { "a" }, start = "link", ready = { stdout = "x" } }, "takes no ready" },
     }) do
       has(app.check(c[1]), c[2], "refused: " .. vim.inspect(c[1]))
     end
     eq(app.expand("a${x}b", { x = "%1" }), "a%1b", "a value is text, not a pattern")
+    -- another copy of testing.nvim first on the runtimepath (a plugin manager's) does not lend its starter
+    local other_copy = root .. "/other-copy"
+    vim.fn.mkdir(other_copy .. "/lua/testing/sheet", "p")
+    vim.fn.writefile({ "-- another version" }, other_copy .. "/lua/testing/sheet/link_start.lua")
+    local saved_rtp = vim.o.runtimepath
+    vim.opt.runtimepath:prepend(other_copy)
+    local starter = app.starter()
+    vim.o.runtimepath = saved_rtp
+    eq(
+      vim.fs.normalize(starter),
+      vim.fs.normalize(repo .. "/lua/testing/sheet/link_start.lua"),
+      "the starter of start = link is the one beside the module, not another copy on the runtimepath"
+    )
     local none, why = app.expand("${y}", {})
     ok(none == nil, "an unknown name is no empty string")
     has(why, "unknown ${y}", "... it is named")

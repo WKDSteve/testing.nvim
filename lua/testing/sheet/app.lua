@@ -158,9 +158,14 @@ function M.check(spec)
   end
   if
     spec.window_ms ~= nil
-    and (type(spec.window_ms) ~= "number" or spec.window_ms < 1 or spec.window_ms > M.BUILD_MS)
+    and (
+      type(spec.window_ms) ~= "number"
+      or spec.window_ms % 1 ~= 0
+      or spec.window_ms < 1
+      or spec.window_ms > M.BUILD_MS
+    )
   then
-    return "window_ms must be a number of milliseconds"
+    return "window_ms must be a whole number of milliseconds"
   end
   if spec.ended_early ~= nil and (type(spec.ended_early) ~= "string" or spec.ended_early == "") then
     return "ended_early must be a text"
@@ -312,6 +317,17 @@ local function run_prepare(steps, root, vars, label, ms)
   return nil
 end
 
+---The starter script of `start = "link"`: the one beside this file, so that it is of the same version (another
+---copy of testing.nvim on the runtimepath may be older or newer); the runtimepath only when that one is not there.
+---@return string
+function M.starter()
+  local here = vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)) .. "/link_start.lua"
+  if vim.uv.fs_stat(here) then
+    return here
+  end
+  return vim.api.nvim_get_runtime_file("lua/testing/sheet/link_start.lua", false)[1] or here
+end
+
 ---The argv that starts `argv` the way a link does (`start = "link"`, Windows): the starter script in an editor of
 ---its own, which says the pid of the program on its stdout. Elsewhere the program itself.
 ---@param argv string[]
@@ -320,8 +336,7 @@ local function link_argv(argv)
   if not require("testing.platform").is_windows() then
     return argv, false
   end
-  local starter = vim.api.nvim_get_runtime_file("lua/testing/sheet/link_start.lua", false)[1]
-    or (vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)) .. "/link_start.lua")
+  local starter = M.starter()
   local out = { vim.v.progpath, "--clean", "-l", starter }
   vim.list_extend(out, argv)
   return out, true
