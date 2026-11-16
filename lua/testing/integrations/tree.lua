@@ -683,6 +683,8 @@ function M.register(opts)
   removers[#removers + 1] = registry.source({
     name = M.SOURCE,
     title = "Tests",
+    -- the tab of the view in the bar of the own tree of filetree.nvim (a Nerd Font glyph: a flask)
+    icon = "\u{f0c3}",
     mutable = false,
     root = M.root_node,
     severity = nodes.SEVERITY,
