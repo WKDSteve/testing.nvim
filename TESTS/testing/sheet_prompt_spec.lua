@@ -122,6 +122,22 @@ return function(H)
     eq(res.status, "pass", "confirm and more are answered: " .. vim.inspect(res.failures))
   end
 
+  -- 3b. a confirm from Lua reaches the prompt too: a sheet child does not answer vim.fn.confirm/input "cancelled" --------
+  do
+    local _, res = stepped({
+      id = "p.lua-confirm",
+      title = "lua confirm",
+      sizes = size,
+      steps = {
+        { input = [[:lua vim.g.answer = vim.fn.confirm("Delete?", "&Yes\n&No")<CR>]] },
+        { prompt = "confirm", timeout = 5000 },
+        { input = "y" },
+        { wait = "vim.g.answer == 1" },
+      },
+    })
+    eq(res.status, "pass", "vim.fn.confirm from Lua is answered: " .. vim.inspect(res.failures))
+  end
+
   -- 4. a prompt that does not come, and the wrong one -------------------------------------------------------------------
   do
     local answers, res = stepped({
