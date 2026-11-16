@@ -261,6 +261,15 @@ return function(H)
     if windows then
       eq(nh.registered(NAME), nil, "no key of the run is left")
     end
+    -- an extension without a key has no fixed id for the host's manifest: the sheet's mistake, red and not a skip
+    vim.fn.mkdir(root .. "/nokey", "p")
+    local m = vim.json.decode(table.concat(vim.fn.readfile(root .. "/ext/manifest.json"), "\n"))
+    m.key = nil
+    vim.fn.writefile({ vim.json.encode(m) }, root .. "/nokey/manifest.json")
+    local nokey = assert(sheet.validate(sheet_of({ extension = "nokey", steps = real_steps })))
+    local red_key = sheet.run(nokey, { root = root, playwright_dir = pw_dir })
+    eq(red_key.status, "fail", "a host for an extension without a key: red, not a skip")
+    has(red_key.failures[1], 'needs a "key"', "... says why")
     -- without the field there is no host: the page says so
     local without = vim.deepcopy(real)
     without.native_host = nil

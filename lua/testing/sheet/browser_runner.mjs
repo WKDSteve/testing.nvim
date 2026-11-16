@@ -164,8 +164,18 @@ async function launchWithExtension(chromium, headless, channel, extension, nativ
   const profile = mkdtempSync(join(tmpdir(), 'testing-sheet-profile-'));
   let context;
   let unregister = () => {};
+  if (nativeHost) {
+    // what goes wrong with the sheet's host (no key in the extension, a foreign key, an env that cannot be filled in)
+    // is the sheet's fault: a red run, never a skip that hides it
+    try {
+      unregister = registerHost(nativeHost, extension, profile);
+    } catch (e) {
+      dropProfile(profile);
+      e.sheetFailure = true;
+      throw e;
+    }
+  }
   try {
-    if (nativeHost) unregister = registerHost(nativeHost, extension, profile);
     context = await chromium.launchPersistentContext(profile, {
       headless,
       channel: channel || 'chromium',
@@ -233,6 +243,10 @@ async function wholePlan(planPath) {
   try {
     browser = await launch(plan.playwright_dir, true, plan.channel, plan.extension, plan.native_host);
   } catch (e) {
+    if (e.sheetFailure) {
+      console.log(JSON.stringify({ failures: [String(e.message).split('\n')[0]], shots: [] }));
+      return;
+    }
     console.log(`SKIP: ${e.message}`);
     process.exit(SKIP);
   }
@@ -303,7 +317,7 @@ function driver() {
             cmd.options.native_host,
           );
         } catch (e) {
-          answer({ ok: false, skip: e.message });
+          answer(e.sheetFailure ? { ok: false, error: e.message } : { ok: false, skip: e.message });
           return;
         }
         // stdin ended while the browser was starting
