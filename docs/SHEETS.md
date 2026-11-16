@@ -860,6 +860,10 @@ the run (`build` of an app, or by hand); a missing program is red. `env = { NAME
 Chromium starts with, and so the host's (its values may use the sheet's app, `${temp}`, as steps do): a host that finds
 its app through a variable (a folder of the run) never reaches the app the person has installed.
 
+* Without `native_host`, an extension sheet that asks for a host still finds one: Chromium falls back to the hosts of
+  `Software\Google\Chrome` on Windows, where an installed app registers its own. Such a host then runs with the
+  person's settings; a sheet that pairs or talks to a host names it with `native_host` (and its `env`).
+
 * From a packaged app on Windows (the Claude desktop app is an MSIX package), what it installs under `%LOCALAPPDATA%`
   lands in the package's copy, and Windows cannot start Chromium from there ("side-by-side configuration is
   invalid"): install Playwright's browsers outside it and name the folder with `PLAYWRIGHT_BROWSERS_PATH`.
