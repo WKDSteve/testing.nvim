@@ -467,16 +467,24 @@ function M.check_args(list, at)
 end
 
 ---What a desktop `wait` or `expect` asks of an element; `window` looks into another program's window (read only).
+---`contains` names a text by a part of its name instead of `name` (a message whose wording holds paths of the run).
 ---@param v table
 ---@param at string
 ---@return string|nil err
 local function check_want(v, at)
   for k in pairs(v) do
-    if k ~= "name" and k ~= "state" and k ~= "value" and k ~= "window" then
+    if k ~= "name" and k ~= "contains" and k ~= "state" and k ~= "value" and k ~= "window" then
       return ("%s: unknown field %s"):format(at, tostring(k))
     end
   end
-  if type(v.name) ~= "string" or v.name == "" then
+  if v.contains ~= nil then
+    if v.name ~= nil then
+      return at .. " names an element by name or by contains, not both"
+    end
+    if type(v.contains) ~= "string" or v.contains == "" then
+      return at .. ".contains must be a part of a text, a non-empty string"
+    end
+  elseif type(v.name) ~= "string" or v.name == "" then
     return at .. ".name must be a non-empty string"
   end
   if v.state ~= nil and v.state ~= "on" and v.state ~= "off" then
@@ -1092,7 +1100,7 @@ function M.value_text(v)
     -- a `drag` step: where from, where to
     return ("%s -> %s"):format(tostring(v.from), tostring(v.to))
   end
-  if v.name == nil and (v.text ~= nil or v.row ~= nil) then
+  if v.name == nil and v.contains == nil and (v.text ~= nil or v.row ~= nil) then
     -- an `hl` step: the place, then what must hold, in a fixed order
     local parts = {
       v.text and ("%q"):format(v.text) or ("%d,%d"):format(v.row, v.col or 1),
@@ -1112,7 +1120,7 @@ function M.value_text(v)
     end
     return table.concat(parts, " ")
   end
-  local parts = { tostring(v.name) }
+  local parts = { v.contains ~= nil and ("contains %q"):format(v.contains) or tostring(v.name) }
   if v.state ~= nil then
     parts[#parts + 1] = "state=" .. tostring(v.state)
   end

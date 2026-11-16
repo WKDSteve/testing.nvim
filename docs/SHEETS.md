@@ -682,7 +682,7 @@ return {
 
 | Step | Does | Fails when |
 |---|---|---|
-| `wait = name` or `{ name, state, value }` (`timeout` ms, default 2000) | waits until the element is there and holds what is asked; `state` is `on` or `off` | it does not in time |
+| `wait = name` or `{ name, state, value }` (`timeout` ms, default 2000) | waits until the element is there and holds what is asked; `state` is `on` or `off`; `contains` in place of `name` names a text by a part of it | it does not in time |
 | `expect = ...` | the same, for 1 s: a window draws a change in a later frame | it does not |
 | `toggle = name` | switches a toggle | the element has no toggle |
 | `click = name` | invokes a button or selects a tab | it can do neither |
@@ -692,6 +692,11 @@ return {
 | `close = part of a title` (`timeout` ms, default 2000) | asks the one window of another program with that part in its title to close, as its close button does, and waits until it is gone | no such window in time, two of them, or it is still open 5 s later (it asks something) |
 
 * A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
+* `contains` in a `wait` or `expect` (`{ contains = "EOF while parsing" }`) in place of `name` finds the one text
+  (UI Automation control type Text) whose name holds that part: the wording of a message holds paths of the run, so its
+  whole name is not known before. No such text, or two of them, fails the step as a name does; the failure line says
+  `no text contains "..."`. It needs a driver that knows it (appkit's `sheet-driver` from `91a6d66` on); an older one
+  says it names no element.
 * `window` in a `wait` or `expect` (`{ name = "report.txt", window = "Downloads" }`) looks into the window of another
   program instead: the one visible window of another process (never the app's own) whose title contains that part,
   opened by what the app did

@@ -111,6 +111,8 @@ end
       { wait = "mute" },
       { expect = { name = "gain" } },
       { wait = { name = "report.txt", window = "Downloads" }, timeout = 100 },
+      { wait = { contains = "EOF while parsing" }, timeout = 100 },
+      { expect = { contains = "hub.log", window = "Error" } },
       { toggle = "mute" },
       { click = "Matrix" },
       { set = "gain", value = -12 },
@@ -128,6 +130,9 @@ end
       { { wait = { name = "a", role = "x" } }, "unknown field role" },
       { { wait = { name = "a", window = "" } }, "window must be a part of a title" },
       { { expect = { name = "a", window = 1 } }, "window must be a part of a title" },
+      { { wait = { name = "a", contains = "b" } }, "by name or by contains, not both" },
+      { { wait = { contains = "" } }, "contains must be a part of a text" },
+      { { expect = { contains = 1 } }, "contains must be a part of a text" },
       { { toggle = "" }, "must not be empty" },
       { { set = "", value = 1 }, "must not be empty" },
       { { set = "gain" }, "takes a value" },
@@ -171,6 +176,11 @@ end
       sheet._describe({ expect = { name = "report.txt", window = "Downloads" } }),
       'expect report.txt in "Downloads"',
       "... and the window of another program it looked in"
+    )
+    eq(
+      sheet._describe({ wait = { contains = "EOF while parsing", window = "Error" } }),
+      'wait contains "EOF while parsing" in "Error"',
+      "... and the part of a text it looked for"
     )
     eq(
       sheet._describe({ close = "clip.mkv" }),
