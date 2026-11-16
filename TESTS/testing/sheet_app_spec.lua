@@ -255,6 +255,18 @@ f:close()
       has(app.check(c[1]), c[2], "refused: " .. vim.inspect(c[1]))
     end
     eq(app.expand("a${x}b", { x = "%1" }), "a%1b", "a value is text, not a pattern")
+    -- the timer of `wait` may fire a hair before the caller's clock says the limit: still the limit
+    ok(
+      app.timed_out({ code = 124 }, 499.7, 500),
+      "exit 124 at the limit, measured a little short, is the limit"
+    )
+    ok(app.timed_out({ code = 124 }, 512, 500), "... and after it")
+    ok(
+      not app.timed_out({ code = 124 }, 120, 500),
+      "exit 124 well before the limit is the step's own"
+    )
+    ok(not app.timed_out({ code = 1 }, 600, 500), "another exit code is never the limit")
+    ok(app.timed_out(nil, 1000, 500), "no result: the killed step did not end in time either")
     -- another copy of testing.nvim first on the runtimepath (a plugin manager's) does not lend its starter
     local other_copy = root .. "/other-copy"
     vim.fn.mkdir(other_copy .. "/lua/testing/sheet", "p")

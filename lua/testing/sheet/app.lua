@@ -33,6 +33,8 @@ local M = {}
 M.BUILD_MS = 600000
 ---The longest a build may be given with `build_timeout_ms` (a release build of a Tauri app takes minutes).
 M.BUILD_MAX_MS = 3600000
+---How much earlier than its limit a step that ended with exit 124 still counts as ended by the limit.
+M.TIMEOUT_SLACK_MS = 50
 M.READY_MS = 30000
 M.STOP_MS = 2000
 ---How long a program with a window is watched for ending at once (a second instance that hands over).
@@ -102,6 +104,18 @@ local function build_steps(build)
     return build
   end
   return { build }
+end
+
+---Did `obj:wait(limit)` end the step? `wait` kills a step past its limit and says exit 124; a step that exits 124 by
+---itself does so well before. The timer of `wait` may fire a little before the clock of the caller says `limit`, so
+---the last `TIMEOUT_SLACK_MS` count as reached. No result at all: the killed step did not even end within a second
+---wait of `limit` (a busy machine), which is the limit too.
+---@param done vim.SystemCompleted|nil What `wait` returned.
+---@param elapsed_ms number
+---@param limit integer
+---@return boolean
+function M.timed_out(done, elapsed_ms, limit)
+  return done == nil or (done.code == 124 and elapsed_ms + M.TIMEOUT_SLACK_MS >= limit)
 end
 
 ---What is wrong with the description of an app.
@@ -324,7 +338,12 @@ local function run_prepare(steps, root, vars, label, ms)
     if not ok then
       return ("its %s did not start: %s"):format(which, tostring(obj))
     end
-    local done = obj:wait(ms or M.BUILD_MS)
+    local limit = ms or M.BUILD_MS
+    local began = vim.uv.hrtime()
+    local done = obj:wait(limit)
+    if M.timed_out(done, (vim.uv.hrtime() - began) / 1e6, limit) then
+      return ("its %s did not finish in %s s"):format(which, tostring(limit / 1000))
+    end
     if done.code ~= 0 then
       local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
       return ("its %s failed (exit %d): %s"):format(which, done.code, why)
@@ -426,7 +445,7 @@ function M.start(name, root, opts)
       local began = vim.uv.hrtime()
       local done = obj:wait(limit)
       -- `wait` ends a build that runs too long with exit 124; a build that says 124 itself returns before the limit
-      if done.code == 124 and (vim.uv.hrtime() - began) / 1e6 >= limit then
+      if M.timed_out(done, (vim.uv.hrtime() - began) / 1e6, limit) then
         return nil,
           ("its build%s did not finish in %s s (sheets.apps[%q].build_timeout_ms, default %d)"):format(
             which,
