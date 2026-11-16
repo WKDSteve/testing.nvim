@@ -115,6 +115,7 @@ end
       { click = "Matrix" },
       { set = "gain", value = -12 },
       { shot = "desk" },
+      { close = "clip.mkv - Media Player", timeout = 3000 },
     })
     eq(s.sizes, { { rows = 700, cols = 1000 } }, "its default size is a window in pixels")
     for _, c in ipairs({
@@ -131,6 +132,9 @@ end
       { { set = "", value = 1 }, "must not be empty" },
       { { set = "gain" }, "takes a value" },
       { { toggle = "a", value = 1 }, "takes a value" },
+      { { close = "" }, "must not be empty" },
+      { { close = { window = "a" } }, "close must be a string" },
+      { { click = "a", timeout = 10 }, "timeout belongs to a wait, prompt or close step" },
     }) do
       local none, why = sheet.validate({
         id = "x",
@@ -165,6 +169,14 @@ end
       'expect report.txt in "Downloads"',
       "... and the window of another program it looked in"
     )
+    eq(
+      sheet._describe({ close = "clip.mkv" }),
+      "close clip.mkv",
+      "a close names the part of the title"
+    )
+    local _, e_rpc_close =
+      sheet.validate({ id = "x", title = "T", steps = { { close = "Player" } } })
+    has(e_rpc_close, "close is not a step of a rpc sheet", "close is for a desktop sheet only")
   end
 
   -- 2. the driver --------------------------------------------------------------------------------------------------------
@@ -175,6 +187,7 @@ end
       { toggle = "mute" },
       { set = "gain", value = -12 },
       { shot = "desk" },
+      { close = "clip.mkv", timeout = 3000 },
       { toggle = "nope", note = "fails" },
       { click = "never" },
     })
@@ -182,7 +195,7 @@ end
     eq(res.status, "fail", "sheet.run of a desktop sheet goes through the driver")
     eq(
       res.failures,
-      { "1000x700 step 5, fails (toggle nope): no element is called nope" },
+      { "1000x700 step 6, fails (toggle nope): no element is called nope" },
       "the line"
     )
     eq(res.snapshots, { "screenshot out/x.png" }, "the picture")
@@ -201,6 +214,7 @@ end
     eq(cmds[1].size, { rows = 700, cols = 1000 }, "... and the size")
     eq(cmds[2].step.wait, { name = "mute", state = "off" }, "a step goes as it stands")
     eq(cmds[4].step, { set = "gain", value = -12 }, "... a set with its value")
+    eq(cmds[6].step, { close = "clip.mkv", timeout = 3000 }, "... a close with its timeout")
     eq(cmds[#cmds].cmd, "close", "at the end it closes")
     ok(gone(cmds[1].options.pid), "the app is gone with the sheet")
 

@@ -681,6 +681,7 @@ return {
 | `click = name` | invokes a button or selects a tab | it can do neither |
 | `set = name`, `value = n` | sets a slider | it has no settable range |
 | `shot = name` | a picture of the window, `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` | never |
+| `close = part of a title` (`timeout` ms, default 2000) | asks the one window of another program with that part in its title to close, as its close button does, and waits until it is gone | no such window in time, two of them, or it is still open 5 s later (it asks something) |
 
 * A name that is not there fails the step, and so does a name that is there twice: a guess would act on the wrong control.
 * `window` in a `wait` or `expect` (`{ name = "report.txt", window = "Downloads" }`) looks into the window of another
@@ -689,6 +690,11 @@ return {
   (Explorer, a browser, a mail program). The driver only reads there: it neither sizes nor focuses that window, and
   `toggle`, `click`, `set` and `shot` stay in the app's own window. No such window yet, or two of them for a moment,
   keeps a `wait` waiting; at its deadline (and in an `expect`) two of them fail the step, as two elements do. The failure line says `in "Downloads"`.
+* `close` is the one thing the driver does to another program's window: what a sheet opened there ("Open result" in the
+  default player) does not stay open after the run. It goes through UI Automation (`WindowPattern.Close`), never a kill
+  or keys, and never touches the app's own window. A program that asks before it closes (unsaved work) stays open and
+  the step is red. Whether the file opened in the *right* program is the machine's default program: the sheet sees only
+  that a window with that title came (`{ wait = { name = ..., window = "clip.mkv" } }` or the `close` itself).
 * The driver is `$TESTING_DESKTOP_DRIVER`, else `sheet-driver` on the PATH (`cargo install --path crates/sheet-driver` in appkit). Without one, the sheet is a reported skip.
 * `ended_early` in the app's entry is the text of a skip for a program that ends at once with success, like a second
   instance that hands over to a running one. Without it that is a failure.

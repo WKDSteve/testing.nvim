@@ -82,6 +82,7 @@ M.ACTIONS = {
   "shot",
   "toggle",
   "set",
+  "close",
   "ask",
   "restart",
   "hl",
@@ -141,6 +142,8 @@ M.ENGINE_ACTIONS = {
     click = true,
     set = true,
     shot = true,
+    -- the one window of another program, by a part of its title (WindowPattern.Close, never a kill)
+    close = true,
     ask = true,
   },
 }
@@ -161,7 +164,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field lua? string
 ---@field settle? integer
 ---@field wait? string
----@field timeout? integer Milliseconds of a `wait`.
+---@field timeout? integer Milliseconds of a `wait`, or how long a `close` waits for its window.
 ---@field expect? string
 ---@field screen? string
 ---@field open? string
@@ -175,6 +178,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field shot? string
 ---@field toggle? string
 ---@field set? string
+---@field close? string A part of the title of the one window of another program to close (desktop).
 ---@field value? number What a `set` step sets.
 ---@field ask? string A question to a person: asked in a stepped run, a `judge` criterion in any other.
 ---@field masks? (string|table)[]
@@ -256,6 +260,7 @@ local STEP_KEYS = {
   shot = "string",
   toggle = "string",
   set = "string",
+  close = "string",
   value = "number",
   ask = "string",
   masks = "table",
@@ -508,8 +513,8 @@ local function check_step(step, i, engine)
   if step.ignore_errmsg ~= nil and action ~= "keys" then
     return at .. ": ignore_errmsg belongs to a keys step"
   end
-  if step.timeout and action ~= "wait" and action ~= "prompt" then
-    return at .. ": timeout belongs to a wait or prompt step"
+  if step.timeout and action ~= "wait" and action ~= "prompt" and action ~= "close" then
+    return at .. ": timeout belongs to a wait, prompt or close step"
   end
   if action == "prompt" and not M.PROMPT_NAMES[step.prompt] then
     return at .. '.prompt: "hit-enter", "more" or "confirm"'
@@ -546,6 +551,7 @@ local function check_step(step, i, engine)
       or action == "focus"
       or action == "toggle"
       or action == "set"
+      or action == "close"
       or action == "ask"
     ) and step[action] == ""
   then
