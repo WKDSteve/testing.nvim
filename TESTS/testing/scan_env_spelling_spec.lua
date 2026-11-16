@@ -77,6 +77,13 @@ return function(H)
       { "vim.fn.getenv tab", "return vim.fn.getenv\t('MYAPP_HOME')" },
       { "vim.env space", "return vim.env ['MYAPP_HOME']" },
       { "vim.env dot", "return vim.env.MYAPP_HOME" },
+      -- a reader handed in as a parameter (`priority.decide(args, getenv)`): its literal name joins the key, as if it
+      -- were `os.getenv`, instead of making the whole module a computed read
+      { "a parameter getenv", "local function f(getenv) return getenv('MYAPP_HOME') end" },
+      {
+        "a parameter getenv, double quotes",
+        'return function(getenv) return getenv("MYAPP_HOME"), 1 end',
+      },
     }
     for _, c in ipairs(named) do
       local r = read_of(c[2])
@@ -111,6 +118,18 @@ return function(H)
       { "exists", "return vim.fn.exists('$' .. name)" },
       { "nvim_eval", "return vim.api.nvim_eval('$' .. name)" },
       { "vim.cmd", "vim.cmd('edit $' .. name)" },
+      { "os.getenv", "return os.getenv(name)" },
+      { "uv.os_getenv", "return vim.uv.os_getenv(name)" },
+      { "vim.fn.getenv", "return vim.fn.getenv(name)" },
+      { "a parameter getenv", "local function f(getenv) return getenv(name) end" },
+      { "a member getenv", "return seam.getenv('MYAPP_HOME')" },
+      { "a method getenv", "return self:getenv('MYAPP_HOME')" },
+      -- the reader under another name: the reference to it is the read
+      { "an alias", "local getenv = os.getenv\nreturn getenv('CI')" },
+      {
+        "a fallback",
+        "local function f(getenv)\n  getenv = getenv or os.getenv\n  return getenv('CI')\nend",
+      },
     }
     for _, c in ipairs(computed) do
       local r = read_of(c[2])

@@ -298,7 +298,9 @@ key unless the file declares what it can reach. In an ex command only `${NAME}` 
 (`1,$d`, `s/x$/y/` and `normal! $a` are no variables). A string that merely MENTIONS `os.getenv("X")` is no call: its
 name is collected (more variables in the key, never fewer), but it cannot hide a computed read in the same file. The
 string has to be an argument of such a call; a literal that is first kept in a variable
-(`local p = "$NAME/x"; vim.fn.expand(p)`) is not followed.
+(`local p = "$NAME/x"; vim.fn.expand(p)`) is not followed. A reader handed in under the name `getenv` (a parameter
+or a local: `function(getenv) return getenv("CI") end`) counts like `os.getenv`: a literal name joins the key, a built
+one blocks it; the code that hands in `os.getenv` holds a reference to the reader and is a read itself.
 
 ### Line endings
 

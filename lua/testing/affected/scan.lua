@@ -750,6 +750,15 @@ local function scan_markers(code, text)
       literal_hit(at --[[@as integer]], name, after --[[@as integer]])
     end
   end
+  -- a bare `getenv("X")`: a reader handed in as a parameter or a local (`function(getenv) return getenv("CI") end`).
+  -- Every `getenv(` is a read below, so the literal one must be counted here, or the module is a computed read.
+  -- Not a member (`seam.getenv("X")`, `self:getenv("X")`) nor part of a longer name (`os.getenv`, `os_getenv`).
+  for at, name, after in text:gmatch("()getenv%s*%(%s*[\"']([^\"']+)[\"']%s*[%),]()") do
+    local prev = at > 1 and text:sub(at - 1, at - 1) or ""
+    if not prev:find("[%w_%.:]") then
+      literal_hit(at --[[@as integer]], name, after --[[@as integer]])
+    end
+  end
   -- `os.getenv"HOME"` (call without parentheses) and `pcall(os.getenv, "HOME")` (the function handed on with its
   -- name): the literal name is known
   for _, pat in ipairs({
