@@ -170,8 +170,15 @@ function M.run(s, opts)
   local host
   if s.native_host then
     local herr
-    host, herr =
-      require("testing.sheet.native_host").prepare(root, s.native_host, opts.native_host_opts)
+    local nh = require("testing.sheet.native_host")
+    host, herr = nh.prepare(root, s.native_host, opts.native_host_opts)
+    if host then
+      local prepared = host
+      host, herr = nh.with_env(host, s.native_host, app and app.vars)
+      if not host then
+        nh.cleanup(prepared, opts.native_host_opts)
+      end
+    end
     if not host then
       if app then
         app.stop()
@@ -265,13 +272,20 @@ function M.driver(s, opts, ctx)
       end
       return { node, runner_path(), "--driver" }, nil
     end,
-    options = function()
+    options = function(app)
+      local with_env = host
+      if host then
+        local filled, eerr =
+          require("testing.sheet.native_host").with_env(host, s.native_host, app and app.vars)
+        -- an env that cannot be filled in leaves the host without it, and says so where the run ends up
+        with_env = filled or vim.tbl_extend("force", host, { env_error = eerr })
+      end
       return {
         headed = opts.headed == true,
         playwright_dir = pw,
         channel = M.channel_for(s, opts),
         extension = M.extension_dir(ctx.root, s),
-        native_host = host,
+        native_host = with_env,
       }
     end,
     cleanup = function()

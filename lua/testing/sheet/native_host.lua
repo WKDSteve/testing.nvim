@@ -41,8 +41,23 @@ function M.check(v)
     return "native_host must be a table { name = ..., path = ... }"
   end
   for k in pairs(v) do
-    if k ~= "name" and k ~= "path" then
-      return ("native_host: unknown field %s (name and path)"):format(tostring(k))
+    if k ~= "name" and k ~= "path" and k ~= "env" then
+      return ("native_host: unknown field %s (name, path and env)"):format(tostring(k))
+    end
+  end
+  if v.env ~= nil then
+    if type(v.env) ~= "table" then
+      return "native_host.env must be a table { NAME = value }"
+    end
+    for k, val in pairs(v.env) do
+      if type(k) ~= "string" or not k:match("^[%a_][%w_]*$") or k:upper():match("^NVIM") then
+        return ("native_host.env: %s is no variable name (letters, digits, _; not NVIM*)"):format(
+          tostring(k)
+        )
+      end
+      if type(val) ~= "string" or val:find("%c") then
+        return ("native_host.env.%s must be text without control characters"):format(k)
+      end
     end
   end
   if not M.valid_name(v.name) then
@@ -103,6 +118,33 @@ end
 ---@field name string
 ---@field path string The host program, absolute.
 ---@field dir string This run's folder for the manifest.
+---@field env? table<string, string> Variables Chromium starts with, and so the host it starts (`${...}` filled in).
+
+---The host with its `env` filled in from the sheet's app (`${temp}`, ...), as a step is.
+---@param host Testing.Sheet.NativeHost
+---@param spec { env?: table<string, string> }
+---@param vars? table<string, string> The app's (`testing.sheet.app`), nil without an app.
+---@return Testing.Sheet.NativeHost|nil host, string|nil err
+function M.with_env(host, spec, vars)
+  if not spec.env then
+    return host, nil
+  end
+  local env = {}
+  for k, v in pairs(spec.env) do
+    if vars then
+      local filled, err = require("testing.sheet.app").expand(v, vars)
+      if not filled then
+        return nil, ("native_host.env.%s: %s"):format(k, tostring(err))
+      end
+      env[k] = filled
+    elseif v:find("${", 1, true) then
+      return nil, ("native_host.env.%s: ${...} needs the sheet's app"):format(k)
+    else
+      env[k] = v
+    end
+  end
+  return vim.tbl_extend("force", host, { env = env }), nil
+end
 
 ---Before the run: the host of the sheet, ready for the runner. Nil and the reason of a failure.
 ---@param root string

@@ -856,7 +856,9 @@ extension's id, so its manifest needs a `key`) and registers it before Chromium 
 touched; on Linux and macOS in the run's profile folder (`NativeMessagingHosts/`), no registry. After the run, however
 it ended, the key goes when it still points into the run's folder. A key of that name under Chromium's key that is not
 of an earlier run refuses the run (red, left alone); the leftover of a crashed run goes. The host must be built before
-the run (`build` of an app, or by hand); a missing program is red.
+the run (`build` of an app, or by hand); a missing program is red. `env = { NAME = "value" }` in it is the environment
+Chromium starts with, and so the host's (its values may use the sheet's app, `${temp}`, as steps do): a host that finds
+its app through a variable (a folder of the run) never reaches the app the person has installed.
 
 * From a packaged app on Windows (the Claude desktop app is an MSIX package), what it installs under `%LOCALAPPDATA%`
   lands in the package's copy, and Windows cannot start Chromium from there ("side-by-side configuration is

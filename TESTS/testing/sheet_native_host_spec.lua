@@ -75,6 +75,21 @@ return function(H)
     "another field"
   )
   refused({ native_host = "io.x" }, "native_host must be a table", "not a table")
+  refused(
+    { native_host = { name = "io.x", path = "h", env = { ["A-B"] = "x" } } },
+    "no variable name",
+    "an env name with a dash"
+  )
+  refused(
+    { native_host = { name = "io.x", path = "h", env = { NVIM_LOG = "x" } } },
+    "no variable name",
+    "an NVIM variable"
+  )
+  refused(
+    { native_host = { name = "io.x", path = "h", env = { A = 1 } } },
+    "native_host.env.A must be text",
+    "a value that is no text"
+  )
   local no_ext = sheet_of({})
   no_ext.extension = nil
   local s_no_ext, e_no_ext = sheet.validate(no_ext)
@@ -160,6 +175,23 @@ return function(H)
   eq(store[key], nil, "... its key is removed")
   nh.cleanup(host, hopts)
 
+  -- env: filled in from the sheet's app as a step is; ${...} without an app is an error
+  local base = { name = NAME, path = "x", dir = "d" }
+  local filled = nh.with_env(
+    base,
+    { env = { STREAMTAP_APP_DIR = "${temp}/app", PLAIN = "p" } },
+    { temp = "T" }
+  )
+  eq(
+    filled and filled.env,
+    { STREAMTAP_APP_DIR = "T/app", PLAIN = "p" },
+    "env takes the app's ${temp}"
+  )
+  local _, enoapp = nh.with_env(base, { env = { A = "${temp}" } }, nil)
+  has(enoapp, "needs the sheet's app", "${...} without an app")
+  local _, eunknown = nh.with_env(base, { env = { A = "${nope}" } }, { temp = "T" })
+  has(eunknown, "native_host.env.A", "an unknown ${...} names the variable")
+
   local missing, merr = nh.prepare(root, { name = NAME, path = "ext/nope.exe" }, hopts)
   eq(missing, nil, "a host that is not built: no run")
   has(merr, "build the host first", "... says so")
@@ -209,12 +241,23 @@ return function(H)
     { expect = "document.title === 'reply host'" },
   }
   local real = assert(sheet.validate(sheet_of({ steps = real_steps })))
+  -- the host's environment comes through Chromium: the host answers with it
+  local real_env = assert(sheet.validate(sheet_of({
+    native_host = { name = NAME, path = HOST, env = { SHEET_HOST_SAYS = "env" } },
+    steps = {
+      real_steps[1],
+      real_steps[2],
+      { expect = "document.title === 'reply env'" },
+    },
+  })))
   local pw_dir = browser.playwright_dir(repo)
   local got = sheet.run(real, { root = root, playwright_dir = pw_dir })
   if got.status == "skip" then
     print("n/a  " .. tostring(got.skipped) .. ": the real host is skipped")
   else
     ok(got.ok, "Chromium started the host of the run: " .. table.concat(got.failures, "; "))
+    local with_env = sheet.run(real_env, { root = root, playwright_dir = pw_dir })
+    ok(with_env.ok, "the host got native_host.env: " .. table.concat(with_env.failures, "; "))
     if windows then
       eq(nh.registered(NAME), nil, "no key of the run is left")
     end

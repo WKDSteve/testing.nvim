@@ -126,6 +126,7 @@ const CHROMIUM_HOSTS = 'HKCU\\Software\\Chromium\\NativeMessagingHosts';
 // Registers the sheet's native messaging host for this run (testing.sheet.native_host prepared it and removes what is
 // left afterwards). Answers the function that takes it away again.
 function registerHost(host, extension, profile) {
+  if (host.env_error) throw new Error(host.env_error);
   const manifest = JSON.stringify({
     name: host.name,
     description: 'native messaging host of a testing.nvim sheet run',
@@ -169,6 +170,8 @@ async function launchWithExtension(chromium, headless, channel, extension, nativ
       headless,
       channel: channel || 'chromium',
       args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+      // Chromium hands its environment to the host it starts: the sheet's `native_host.env` reaches the host this way
+      ...(nativeHost && nativeHost.env ? { env: { ...process.env, ...nativeHost.env } } : {}),
     });
   } catch (e) {
     unregister();
