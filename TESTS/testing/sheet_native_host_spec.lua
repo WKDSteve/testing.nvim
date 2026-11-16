@@ -192,6 +192,16 @@ return function(H)
   local _, eunknown = nh.with_env(base, { env = { A = "${nope}" } }, { temp = "T" })
   has(eunknown, "native_host.env.A", "an unknown ${...} names the variable")
 
+  -- ${exe}: the program's suffix of the system, so one sheet names a host built for Windows and for Linux
+  local _, ewin = nh.prepare(root, { name = NAME, path = "ext/nohost${exe}" }, hopts)
+  has(ewin, "ext/nohost.exe is no file", "${exe} is .exe on Windows")
+  local _, eother = nh.prepare(
+    root,
+    { name = NAME, path = "ext/nohost${exe}" },
+    { run = fake, windows = false }
+  )
+  has(eother, "ext/nohost is no file", "... and nothing elsewhere")
+
   local missing, merr = nh.prepare(root, { name = NAME, path = "ext/nope.exe" }, hopts)
   eq(missing, nil, "a host that is not built: no run")
   has(merr, "build the host first", "... says so")

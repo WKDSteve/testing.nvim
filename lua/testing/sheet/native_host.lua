@@ -159,9 +159,11 @@ function M.prepare(root, spec, opts)
   if windows == nil then
     windows = require("testing.platform").is_windows()
   end
-  local path = vim.fs.normalize(root .. "/" .. spec.path)
+  -- `${exe}` is the suffix of a program on this system: one sheet names a host built for Windows and for Linux
+  local rel = spec.path:gsub("%${exe}", windows and ".exe" or "")
+  local path = vim.fs.normalize(root .. "/" .. rel)
   if vim.fn.filereadable(path) ~= 1 then
-    return nil, ("native_host.path %s is no file (build the host first)"):format(spec.path)
+    return nil, ("native_host.path %s is no file (build the host first)"):format(rel)
   end
   if windows then
     local key = M.KEY .. "\\" .. spec.name

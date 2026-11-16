@@ -847,8 +847,9 @@ Playwright's full Chromium (the new headless mode; the project's `channel` does 
 extensions, and branded Chrome refuses `--load-extension` (`ERR_BLOCKED_BY_CLIENT`). Where that Chromium cannot start
 the sheet is a reported skip.
 
-**Its native messaging host** (`native_host = { name = "io.example.app", path = "target/debug/app-host.exe" }`, with an
-`extension`; `path` relative to the project root, `name` by Chromium's rule): the extension talks to a host of this
+**Its native messaging host** (`native_host = { name = "io.example.app", path = "target/debug/app-host${exe}" }`, with an
+`extension`; `path` relative to the project root, `${exe}` is `.exe` on Windows and nothing elsewhere, `name` by
+Chromium's rule): the extension talks to a host of this
 build for the run, without an installed app. The runner writes the host's manifest (`allowed_origins` is the
 extension's id, so its manifest needs a `key`) and registers it before Chromium starts: on Windows under
 `HKCU\Software\Chromium\NativeMessagingHosts\<name>`, which Playwright's Chromium reads before
