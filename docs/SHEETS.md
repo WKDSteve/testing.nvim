@@ -37,9 +37,9 @@ return {
 |---|---|---|
 | `keys = s` | typed through `child.feed` (mappings apply, returns when the typeahead is empty) | the keys left an error message (`v:errmsg`, e.g. `E492`); `ignore_errmsg = true` for keys that run `silent! cmd` on purpose (it still sets `v:errmsg`) |
 | `input = s` | queued through `child.input` (returns at once); the way into insert mode (`input = "A"`, then a `wait` for the mode): `keys` feeds with `x`, which ends insert mode again | never |
-| `lua = s` | runs in the child | it raises |
+| `lua = s` (`timeout` ms, default the RPC limit of 10 s) | runs in the child; `timeout` is the limit of this one call, for a command that computes before it returns (`:checkhealth`) | it raises, or does not return in time |
 | `settle = ms` | waits until the child is idle | it is not idle in time |
-| `wait = expr` (`timeout` ms, default 2000) | polls a Lua expression in the child | it is not truthy in time |
+| `wait = expr` (`timeout` ms, default 2000) | polls a Lua expression in the child; one poll may wait as long as the step (a child still busy with the command before answers it only then) | it is not truthy in time |
 | `expect = expr` | evaluates a Lua expression in the child now | it is not truthy |
 | `screen = name` (`masks`, `cursor`, `mode`, `groups`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24`; `groups = true` keeps the highlight group of every attribute letter in it | the snapshot differs (or is missing on CI) |
 | `hl = { ... }` | how a place is drawn: `text = "..."` (its first appearance on the screen, every cell of it) or `row`, `col` (`cols` wide), and what must hold: `group` (by its name, or the group a link ends in: `group = "FileopsConflict"` holds for a cell drawn with `DiffText` when it links there), `fg`, `bg`, `sp` (`#rrggbb` as drawn), `bold`, `italic`, `underline`, `undercurl`, `strikethrough`, `reverse` (`false` = must not be) | a cell is drawn otherwise (the line names it, what it has and what was expected), the text is not on the screen, or the group is not defined |
@@ -751,8 +751,9 @@ return {
 
 ## Pitfalls when writing a sheet
 
-* A command that computes for a long time (`:Bindings check`) goes in as `input`: `keys` waits for an empty typeahead and
-  runs into the RPC timeout.
+* A command that computes for a long time (`:Bindings check`, `:checkhealth`) goes in as `input`, or as a `lua` step
+  with a `timeout` of its own: `keys` waits for an empty typeahead and runs into the RPC timeout (10 s, less under load
+  than it looks: `:checkhealth testing` takes 7 s on a quiet machine).
 * Without a message plugin (noice) a message of several lines becomes a hit-enter prompt: the editor holds every call
   back until it is answered. A step that runs into one fails at once with `the child shows a hit-enter prompt; answer
   it with { input = "<CR>" } ...` (the child lives on); a `screen` while it is up is read from what the UI was told,

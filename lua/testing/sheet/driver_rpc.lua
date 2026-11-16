@@ -63,7 +63,9 @@ local function run_step(child, step, ctx)
   elseif step.input then
     child.input(step.input)
   elseif step.lua then
-    child.lua(step.lua)
+    -- `timeout` is the RPC limit of this one call: a command that computes in the child (`:checkhealth`) answers
+    -- only when it is done, and under load that is past the default limit
+    child.request("nvim_exec_lua", { step.lua, {} }, step.timeout)
   elseif step.settle then
     local idle, why = child.settle(step.settle)
     if not idle then
@@ -98,8 +100,11 @@ local function run_step(child, step, ctx)
     local timeout = step.timeout or require("testing.sheet").DEFAULT_WAIT_MS
     local deadline = vim.uv.hrtime() + timeout * 1e6
     local last
+    -- one poll may wait as long as the step: a child busy with the command before it answers the poll only then
+    local poll_ms = math.max(child.call_timeout_ms or 0, timeout)
+    local expr = "return (" .. step.wait .. ")"
     while true do
-      last = child.lua_get(step.wait)
+      last = child.request("nvim_exec_lua", { expr, {} }, poll_ms)
       if last then
         break
       end

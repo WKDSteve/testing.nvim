@@ -112,7 +112,8 @@ return {
     },
     { lua = [[_G.mark(); vim.cmd("Testing budget")]], note = ":Testing budget" },
     { wait = [[_G.ended("budget")]], timeout = 120000, note = "the budget run ends" },
-    { lua = [[_G.mark(); vim.cmd("Testing health")]], note = ":Testing health" },
+    -- :checkhealth computes before the call returns: 7 s alone, past the RPC limit of 10 s under load
+    { lua = [[_G.mark(); vim.cmd("Testing health")]], timeout = 60000, note = ":Testing health" },
     {
       wait = [[vim.bo.filetype == "checkhealth"]],
       timeout = 30000,

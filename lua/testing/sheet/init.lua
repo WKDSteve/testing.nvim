@@ -29,7 +29,7 @@
 ---                 an error message the keys cause (`v:errmsg`) fails the step, unless
 ---                 `ignore_errmsg = true` (a mapping that runs `silent! cmd` on purpose still sets it)
 ---   input = s     queued through `child.input` (returns at once)
----   lua = s       run in the child (`child.lua`)
+---   lua = s       run in the child (`child.lua`; `timeout` ms raises the RPC limit of this call)
 ---   settle = ms   wait until the child is idle (`child.settle`; not idle is a failure)
 ---   wait = expr   poll a Lua expression in the child until it is truthy (`timeout` ms, default 2000)
 ---   expect = expr a Lua expression in the child must be truthy now
@@ -167,7 +167,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field lua? string
 ---@field settle? integer
 ---@field wait? string
----@field timeout? integer Milliseconds of a `wait`, or how long a `close` waits for its window.
+---@field timeout? integer Milliseconds of a `wait` (one poll may take as long), the RPC limit of a `lua` step, or how long a `close` waits for its window.
 ---@field expect? string
 ---@field screen? string
 ---@field open? string
@@ -521,8 +521,14 @@ local function check_step(step, i, engine)
   if step.ignore_errmsg ~= nil and action ~= "keys" then
     return at .. ": ignore_errmsg belongs to a keys step"
   end
-  if step.timeout and action ~= "wait" and action ~= "prompt" and action ~= "close" then
-    return at .. ": timeout belongs to a wait, prompt or close step"
+  if
+    step.timeout
+    and action ~= "wait"
+    and action ~= "prompt"
+    and action ~= "close"
+    and action ~= "lua"
+  then
+    return at .. ": timeout belongs to a wait, prompt, close or lua step"
   end
   if action == "prompt" and not M.PROMPT_NAMES[step.prompt] then
     return at .. '.prompt: "hit-enter", "more" or "confirm"'
