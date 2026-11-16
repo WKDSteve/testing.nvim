@@ -149,6 +149,14 @@ find-principals` and `-Y verify` (namespace `git`) against the registry, over th
 for it. It does not use GitHub's "Verified": GitHub signs its own web merges (also of a foreign pull request), and
 that signature is verified too. The job runs only when every commit of the range is signed by a registered key; the
 commit then goes on the list (note `signed: <principal>`), so the next job of the run and the next push start from it.
+
+The jobs of one run start together (one per system and job) and would each ask the same comparison, which empties the
+API rate limit when a few runs come at once. So the first job of a run (`GITHUB_RUN_ID` and `GITHUB_SHA`) takes the
+lock `<runners>/_answers/<run id>-<sha>.lock`, asks, and keeps its answer beside it (`.json`); the others wait for that
+answer (at most two minutes, then they ask themselves) and come to the same verdict. A lock older than that belongs to
+a job that died and is taken over; answers of runs older than two days are removed. Without a run id every job asks
+for itself.
+
 It refuses when:
 
 - a commit is unsigned, GPG-signed (GitHub's web merges) or signed by a key that is not in the registry;

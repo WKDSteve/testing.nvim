@@ -504,6 +504,88 @@ function M.signed_release(repo, sha, entry, signers, ctx)
   return true, table.concat(names, ", "):gsub("%c", " "):sub(1, 120)
 end
 
+-- --------------------------------------------------------------------------------------------------- one answer per run
+
+M.SHARE_WAIT_MS = 120000 -- how long a job waits for the job of its run that asks GitHub (3 bases, 30 s each, slack)
+M.SHARE_POLL_MS = 200
+M.SHARE_KEEP_S = 2 * 86400 -- answers of older runs are removed
+
+---Remove the answers and locks of runs older than `M.SHARE_KEEP_S` (best effort).
+---@param dir string
+local function prune_answers(dir)
+  local now = os.time()
+  for name, kind in vim.fs.dir(dir) do
+    local path = dir .. "/" .. name
+    local st = kind == "file" and uv.fs_stat(path) or nil
+    if st and now - st.mtime.sec > M.SHARE_KEEP_S then
+      os.remove(path)
+    end
+  end
+end
+
+---Rule 6 once per run: the jobs of one run (`GITHUB_RUN_ID`, `GITHUB_SHA`) start at the same time and would each ask
+---GitHub the same comparison (six jobs of a run, three sessions beside them: the rate limit ran dry on 2026-11-14 and
+---every job was refused). The first job takes `<root>/_answers/<run>-<sha>.lock` and asks, then writes the answer
+---next to it; the others wait for that answer (at most `M.SHARE_WAIT_MS`, then they ask themselves). A lock older than
+---the wait is a job that died: it is taken over. The answer is read as untrusted data like the list (whoever can
+---write the runner folder can write the list too). Without a run id each job asks for itself.
+---@param repo string
+---@param sha string
+---@param entry Testing.RunnerGuard.Entry|nil
+---@param signers string
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param root string
+---@return boolean ok
+---@return string why
+---@return boolean|nil failed
+function M.shared_release(repo, sha, entry, signers, ctx, root)
+  local run_id = read_var(ctx, "GITHUB_RUN_ID")
+  if not (run_id and #run_id <= 20 and run_id:match("^%d+$")) then
+    return M.signed_release(repo, sha, entry, signers, ctx)
+  end
+  local dir = root .. "/_answers"
+  vim.fn.mkdir(dir, "p")
+  local base = ("%s/%s-%s"):format(dir, run_id, sha)
+  local answer_path, lock_path = base .. ".json", base .. ".lock"
+  local function read_answer()
+    local f = io.open(answer_path, "rb")
+    if not f then
+      return nil
+    end
+    local text = f:read(4096)
+    f:close()
+    local ok, d = pcall(vim.json.decode, text or "")
+    if ok and type(d) == "table" and type(d.good) == "boolean" and type(d.why) == "string" then
+      return d.good, (d.why:gsub("%c", " "):sub(1, 400)), d.failed == true or nil
+    end
+  end
+  local deadline = uv.hrtime() + M.SHARE_WAIT_MS * 1e6
+  while true do
+    local good, why, failed = read_answer()
+    if good ~= nil then
+      return good, why, failed
+    end
+    local fd = uv.fs_open(lock_path, "wx", 420)
+    if fd then
+      uv.fs_close(fd)
+      good, why, failed = M.signed_release(repo, sha, entry, signers, ctx)
+      local text = vim.json.encode({ good = good, why = why, failed = failed == true })
+      require("lib.nvim.fs.write.atomic")(answer_path, text, { mkdirp = true })
+      os.remove(lock_path)
+      pcall(prune_answers, dir)
+      return good, why, failed
+    end
+    local st = uv.fs_stat(lock_path)
+    if st and os.time() - st.mtime.sec > M.SHARE_WAIT_MS / 1000 then
+      os.remove(lock_path) -- its job died while it asked: take the lock over
+    elseif uv.hrtime() >= deadline then
+      return M.signed_release(repo, sha, entry, signers, ctx)
+    else
+      uv.sleep(M.SHARE_POLL_MS)
+    end
+  end
+end
+
 ---@type fun(ctx?: Testing.RunnerGuard.Ctx): string, string
 local tools
 
@@ -547,7 +629,7 @@ local function check(sv, ctx)
     if signers then
       local sha = facts.sha:lower()
       local good, who
-      good, who, query_failed = M.signed_release(facts.repo, sha, facts.entry, signers, ctx)
+      good, who, query_failed = M.shared_release(facts.repo, sha, facts.entry, signers, ctx, root)
       if good then
         local done, err = update(M.store_path(root), function(rs)
           local e = rs[key] or { mode = "auto", shas = {} }
