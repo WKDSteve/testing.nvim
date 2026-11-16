@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 
 const SKIP = 77;
 const DRIVER_SCHEMA = 'testing-sheet-driver/1';
-const ACTIONS = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'scheme', 'wait', 'expect', 'shot'];
+const ACTIONS = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'frame', 'scheme', 'wait', 'expect', 'shot'];
 
 function describe(step) {
   for (const a of ACTIONS) {
@@ -50,25 +50,39 @@ async function waitFor(page, expression, timeout) {
   }
 }
 
-// Throws when the step fails; a `shot` answers with its file.
+// Throws when the step fails; a `shot` answers with its file. `where.frame`, once a `frame` step chose one, is the
+// iframe the element and script steps act in (a Playwright Frame answers as a page does); keys and pictures stay with
+// the page.
 async function runStep(page, step, where) {
+  const scope = where.frame ?? page;
   if (step.open !== undefined) {
+    where.frame = undefined;
     await page.goto(target(step.open, where.root), step.timeout ? { timeout: step.timeout } : {});
+  } else if (step.frame !== undefined) {
+    if (step.frame === false) {
+      where.frame = undefined;
+    } else {
+      // in the frame the steps act in now: a frame inside a frame is two steps
+      const element = await scope.waitForSelector(step.frame, { timeout: 5000 });
+      const frame = await element.contentFrame();
+      if (!frame) throw new Error(`${step.frame} is no iframe`);
+      where.frame = frame;
+    }
   } else if (step.press !== undefined) {
     await page.keyboard.press(step.press);
   } else if (step.click !== undefined) {
-    await page.click(step.click, { timeout: 5000 });
+    await scope.click(step.click, { timeout: 5000 });
   } else if (step.hover !== undefined) {
     // the pointer stays over the element: a later `shot` shows its :hover state (JS cannot trigger :hover)
-    await page.hover(step.hover, { timeout: 5000 });
+    await scope.hover(step.hover, { timeout: 5000 });
   } else if (step.drag !== undefined) {
     // pointer down on `from`, moved onto `to`, released there: HTML5 drag and drop and pointer handlers both see it
-    await page.dragAndDrop(step.drag.from, step.drag.to, { timeout: 5000 });
+    await scope.dragAndDrop(step.drag.from, step.drag.to, { timeout: 5000 });
   } else if (step.focus !== undefined) {
-    await page.focus(step.focus, { timeout: 5000 });
+    await scope.focus(step.focus, { timeout: 5000 });
   } else if (step.blur !== undefined) {
     // the keyboard focus leaves whatever has it; a handler that gives it to another element is a failure of the step
-    const holder = await page.evaluate(() => {
+    const holder = await scope.evaluate(() => {
       document.activeElement?.blur();
       const now = document.activeElement;
       return !now || now === document.body || now === document.documentElement ? '' : now.outerHTML.slice(0, 80);
@@ -78,16 +92,16 @@ async function runStep(page, step, where) {
     // prefers-color-scheme for the page from now on (light or dark), without reloading it
     await page.emulateMedia({ colorScheme: step.scheme });
   } else if (step.wait !== undefined) {
-    await waitFor(page, step.wait, step.timeout ?? 2000);
+    await waitFor(scope, step.wait, step.timeout ?? 2000);
   } else if (step.expect !== undefined) {
-    const value = await page.evaluate(step.expect);
+    const value = await scope.evaluate(step.expect);
     if (!value) throw new Error(`got ${JSON.stringify(value)}`);
   } else if (step.shot !== undefined) {
     if (!existsSync(where.out_dir)) mkdirSync(where.out_dir, { recursive: true });
     const file = resolve(where.out_dir, `${where.id}.${step.shot}.${where.tag}.png`);
     // `element`: only that element (the grid of an rpc sheet's screen, `testing.sheet.shot`), else the viewport
     if (step.element !== undefined) {
-      await page.locator(step.element).screenshot({ path: file, timeout: step.timeout ?? 5000 });
+      await scope.locator(step.element).screenshot({ path: file, timeout: step.timeout ?? 5000 });
     } else {
       await page.screenshot({ path: file });
     }

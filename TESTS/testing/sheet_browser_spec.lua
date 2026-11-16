@@ -61,6 +61,9 @@ return function(H)
     { drag = { from = "#a", to = "" } },
     { drag = { from = "#a", to = 3 } },
     { drag = { from = "#a", to = "#b", via = "#c" } },
+    { frame = "" },
+    { frame = true },
+    { frame = 3 },
   }) do
     local _, why = sheet.validate({ id = "x", title = "x", engine = "browser", steps = { bad } })
     ok(why ~= nil, "a step with an unusable value is refused at load: " .. vim.inspect(bad))
@@ -300,6 +303,55 @@ return function(H)
     "a drag onto an element that is not there is red and names both: "
       .. table.concat(missed.failures, "; ")
   )
+
+  -- 8. frame: the steps after it act in the iframe, `frame = false` is the window again ------------------------------
+  local framed = assert(io.open(root .. "/frame.html", "wb"))
+  framed:write(table.concat({
+    '<!doctype html><p id="outer">outer</p>',
+    "<iframe id=\"f\" srcdoc=\"<button id='in' onclick='this.dataset.hit=1'>in</button>\"></iframe>",
+  }, "\n"))
+  framed:close()
+  local in_frame = sheet.run(
+    assert(sheet.validate({
+      id = "page.frame",
+      title = "Frame",
+      engine = "browser",
+      steps = {
+        { open = "frame.html" },
+        { frame = "#f" },
+        { click = "#in", note = "a button only the frame has" },
+        {
+          expect = "document.getElementById('in').dataset.hit === '1'",
+          note = "clicked, read in the frame",
+        },
+        { frame = false },
+        {
+          expect = "document.getElementById('in') === null && document.getElementById('outer') !== null",
+        },
+      },
+    })),
+    { root = root, playwright_dir = pw_dir }
+  )
+  if in_frame.status ~= "skip" then
+    ok(
+      in_frame.ok,
+      "frame: steps act in the iframe, then in the window: "
+        .. table.concat(in_frame.failures, "; ")
+    )
+    local not_frame = sheet.run(
+      assert(sheet.validate({
+        id = "page.no-frame",
+        title = "No frame",
+        engine = "browser",
+        steps = { { open = "frame.html" }, { frame = "#outer" } },
+      })),
+      { root = root, playwright_dir = pw_dir }
+    )
+    ok(
+      (not_frame.failures[1] or ""):find("#outer is no iframe", 1, true) ~= nil,
+      "frame on an element that is no iframe is red: " .. table.concat(not_frame.failures, "; ")
+    )
+  end
 
   -- 7. the size of a browser sheet is pixels: a tall page is fine, the size of a terminal grid stays small ------------
   local tall = {

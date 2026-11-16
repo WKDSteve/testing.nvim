@@ -80,6 +80,7 @@ M.ACTIONS = {
   "drag",
   "focus",
   "blur",
+  "frame",
   "scheme",
   "shot",
   "toggle",
@@ -119,6 +120,7 @@ M.ENGINE_ACTIONS = {
     drag = true,
     focus = true,
     blur = true,
+    frame = true,
     scheme = true,
     wait = true,
     expect = true,
@@ -133,6 +135,7 @@ M.ENGINE_ACTIONS = {
     hover = true,
     focus = true,
     blur = true,
+    frame = true,
     wait = true,
     expect = true,
     shot = true,
@@ -180,6 +183,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field hover? string A CSS selector the pointer moves over (browser): a later `shot` shows the `:hover` state.
 ---@field drag? { from: string, to: string } Drags the element `from` onto the element `to` (browser, CSS selectors).
 ---@field focus? string A CSS selector that gets the keyboard focus (browser).
+---@field frame? string|false Later steps act in the iframe this CSS selector names (in the frame they act in now); `false` goes back to the window (browser, webview).
 ---@field blur? boolean Takes the keyboard focus from whatever has it (browser); red when something but the page itself holds it afterwards.
 ---@field scheme? "light"|"dark" The page's `prefers-color-scheme` from now on (browser).
 ---@field shot? string
@@ -267,6 +271,7 @@ local STEP_KEYS = {
   drag = "table",
   focus = "string",
   blur = "boolean",
+  frame = "string",
   scheme = "string",
   shot = "string",
   toggle = "string",
@@ -500,6 +505,10 @@ local function check_step(step, i, engine)
       local werr = check_want(v, ("%s.%s"):format(at, k))
       if werr then
         return werr
+      end
+    elseif k == "frame" then
+      if v ~= false and (type(v) ~= "string" or v == "") then
+        return at .. ".frame must be a CSS selector of an iframe, or false (back to the window)"
       end
     elseif type(v) ~= want then
       return ("%s.%s must be a %s"):format(at, k, want)

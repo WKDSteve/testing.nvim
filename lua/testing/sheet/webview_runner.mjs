@@ -195,7 +195,12 @@ function driver() {
 
   // Throws when the step fails; a `shot` answers with its file.
   const runStep = async (step) => {
-    if (step.press !== undefined) {
+    if (step.frame !== undefined) {
+      // WebDriver's Switch To Frame: the element and script steps after it act in that iframe (a frame inside it is
+      // found from there), `false` is the top of the window again
+      const id = step.frame === false ? null : ref(await element(step.frame));
+      await session('POST', '/frame', { id });
+    } else if (step.press !== undefined) {
       await session('POST', '/actions', { actions: [{ type: 'key', id: 'keyboard', actions: keyActions(step.press) }] });
       await session('DELETE', '/actions');
     } else if (step.click !== undefined) {

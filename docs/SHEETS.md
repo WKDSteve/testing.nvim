@@ -737,7 +737,9 @@ return {
 }
 ```
 
-* The steps are `press`, `click`, `hover`, `focus`, `blur`, `wait`, `expect`, `shot` and `ask`, as in a browser sheet.
+* The steps are `press`, `click`, `hover`, `focus`, `blur`, `frame`, `wait`, `expect`, `shot` and `ask`, as in a browser
+  sheet (`frame` is WebDriver's Switch To Frame: an iframe of another origin, such as a page the app serves from
+  `http://127.0.0.1:<port>`, is reached the same way).
   There is no `open` (the app shows its own page), no `scheme` and no `drag`: WebDriver has neither the media
   emulation nor HTML5 drag and drop.
 * `wait` and `expect` are JavaScript expressions, run as the body of a function (no `eval`, which the app's
@@ -827,6 +829,7 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `drag = { from = selector, to = selector }` | presses the pointer on `from`, moves it onto `to` and lets go there: HTML5 drag and drop (`draggable`, `drop` events) and pointer handlers both see it | either does not match in 5 s |
 | `focus = selector` | gives the element the keyboard focus (`:focus`, the focus ring) | none matches in 5 s |
 | `blur = true` | takes the keyboard focus from whatever has it (the next key goes to the page): the way back from a `focus`, without an `expect` that does it on the side | something but the page itself holds the focus afterwards (a handler gave it to another element) |
+| `frame = selector` or `false` | the steps after it (`click`, `hover`, `drag`, `focus`, `blur`, `wait`, `expect`, `shot` of an `element`) act in the iframe the selector names, also one of another origin; a frame inside it is a second `frame` step; `false` goes back to the window. `press` and a whole `shot` stay with the page, an `open` starts in the window again | none matches in 5 s, or it is no iframe |
 | `scheme = "light"\|"dark"` | the page's `prefers-color-scheme` from now on, without a reload | never |
 | `wait = js` (`timeout` ms, default 2000) | waits until the expression is truthy | it is not truthy in time |
 | `expect = js` | evaluates the expression now | it is not truthy |

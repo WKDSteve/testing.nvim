@@ -216,6 +216,8 @@ createServer((req, res) => {
       { focus = "#a" },
       { blur = true },
       { shot = "panel" },
+      { frame = "#f", note = "into the iframe" },
+      { frame = false, note = "back to the window" },
       { expect = "FALSY", note = "fails" },
       { click = "#never" },
     },
@@ -235,7 +237,7 @@ createServer((req, res) => {
   eq(res.status, "fail", "sheet.run of a webview sheet goes through the runner")
   eq(
     res.failures,
-    { "900x600 step 8, fails (expect FALSY): got false" },
+    { "900x600 step 10, fails (expect FALSY): got false" },
     "the line of the failed step"
   )
   eq(
@@ -295,9 +297,22 @@ createServer((req, res) => {
     "POST /execute/sync",
     "POST /execute/sync", -- blur
     "GET /screenshot",
+    "POST /element", -- frame "#f"
+    "POST /frame",
+    "POST /frame", -- frame = false
     "POST /execute/sync", -- expect, red: the steps after it do not run
     "DELETE ",
   }, "every step is the WebDriver call it should be, and the session ends")
+  local frames = vim.tbl_filter(function(c)
+    return c.path == "/session/s1/frame"
+  end, calls)
+  eq(
+    vim.tbl_map(function(c)
+      return c.body
+    end, frames),
+    { { id = { ["element-6066-11e4-a52e-4f735466cecf"] = "e1" } }, { id = vim.NIL } },
+    "frame: Switch To Frame with the element of the selector, then with null (the window)"
+  )
   local press = calls[5] and calls[5].body.actions[1].actions or {}
   eq(#press, 4, "Control+k: two keys down, two up")
   eq(press[1] and press[1].value, string.char(0xEE, 0x80, 0x89), "... Control as its key point")
