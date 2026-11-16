@@ -221,6 +221,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field extension? string An unpacked browser extension (folder with `manifest.json`, relative to the root) Chromium loads: browser only.
 ---@field native_host? { name: string, path: string } The extension's native messaging host for the run: a program of
 ---the project, registered before Chromium starts and removed after (`testing.sheet.native_host`).
+---@field prompts? "cancel"|"real" rpc: `confirm()`, `input()`, `inputlist()` from Lua answer "cancelled" at once (default) or show their prompt (`"real"`, for a `prompt` step).
 ---@field fakes? string[] Programs the child finds first on its `PATH` as recording stand-ins (`testing.fake_programs`): rpc only.
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
@@ -317,6 +318,7 @@ local SHEET_KEYS = {
   fakes = "table",
   extension = "string",
   native_host = "table",
+  prompts = "string",
 }
 
 ---@param v any
@@ -724,6 +726,11 @@ function M.validate(s)
   s.engine = s.engine or "rpc"
   if not M.ENGINES[s.engine] then
     return nil, "engine must be rpc, browser, desktop, webview or manual"
+  end
+  if
+    s.prompts ~= nil and ((s.prompts ~= "cancel" and s.prompts ~= "real") or s.engine ~= "rpc")
+  then
+    return nil, 'prompts is "cancel" or "real", for an rpc sheet'
   end
   s.steps = s.steps or {}
   if not is_list(s.steps) then

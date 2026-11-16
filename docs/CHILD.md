@@ -50,7 +50,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `boot_timeout_ms` | 20000 | start plus the project's minit |
 | `kill_on_timeout` | `true` | a call that times out kills the child (see Timeouts) |
 | `watch_prompts` | `false` | a call held back by a prompt of the child (hit-enter, more, `confirm()`) fails at once with `testing.rpc: the child shows a <name> prompt (mode <m>): ...` instead of running into its timeout, and `screen()` reads a prompt from the UI; the child lives on (test sheets set it) |
-| `prompts` | `"cancel"` | `input()`, `confirm()`, ... answer "cancelled" (`"real"`: left alone; test sheets set it) |
+| `prompts` | `"cancel"` | `input()`, `confirm()`, ... answer "cancelled" (`"real"`: left alone; a test sheet with `prompts = "real"` sets it) |
 | `notify_passthrough` | `true` | `vim.notify` is captured AND passed on |
 | `track_schedule` | `true` | count scheduled callbacks (for `settle`) |
 | `guard` | `{ repo = root }` | config for `testing.guard.install`; `false` installs no guard |

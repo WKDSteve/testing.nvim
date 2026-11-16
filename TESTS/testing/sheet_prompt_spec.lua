@@ -122,11 +122,12 @@ return function(H)
     eq(res.status, "pass", "confirm and more are answered: " .. vim.inspect(res.failures))
   end
 
-  -- 3b. a confirm from Lua reaches the prompt too: a sheet child does not answer vim.fn.confirm/input "cancelled" --------
+  -- 3b. with prompts = "real" a confirm from Lua reaches the prompt too (by default it answers "cancelled" at once) -----
   do
     local _, res = stepped({
       id = "p.lua-confirm",
       title = "lua confirm",
+      prompts = "real",
       sizes = size,
       steps = {
         { input = [[:lua vim.g.answer = vim.fn.confirm("Delete?", "&Yes\n&No")<CR>]] },
@@ -136,6 +137,12 @@ return function(H)
       },
     })
     eq(res.status, "pass", "vim.fn.confirm from Lua is answered: " .. vim.inspect(res.failures))
+    local _, bad =
+      sheet.validate({ id = "x", title = "T", prompts = "yes", steps = { { lua = "x()" } } })
+    ok(
+      tostring(bad):find('prompts is "cancel" or "real"', 1, true) ~= nil,
+      "prompts: " .. tostring(bad)
+    )
   end
 
   -- 4. a prompt that does not come, and the wrong one -------------------------------------------------------------------

@@ -336,9 +336,9 @@ function M.new(s, opts, ctx)
       extra_env = env,
       -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
       watch_prompts = true,
-      -- confirm(), input() and inputlist() from Lua show their prompt as from Vimscript: a `prompt` step waits for it,
-      -- where the default of a spec's child ("cancel") answers them at once and nothing shows
-      prompts = "real",
+      -- confirm(), input() and inputlist() from Lua answer "cancelled" at once (a lua step that calls input() would
+      -- otherwise hang to the RPC timeout); `prompts = "real"` lets them show their prompt for a `prompt` step
+      prompts = s.prompts == "real" and "real" or "cancel",
       args = M.command_line(s.args, size),
     }, opts.spawn or {})
     -- a spawn that raises is a failure of this size, not an error out of `run` (expect hands the

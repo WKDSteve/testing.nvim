@@ -77,22 +77,19 @@ os.exit(code)
     os.remove(log)
     local procs = {}
     for i = 1, n do
-      procs[i] = vim.system(
-        {
-          vim.v.progpath,
-          "-n",
-          "-i",
-          "NONE",
-          "--headless",
-          "-u",
-          "NONE",
-          "-l",
-          script,
-          run_id,
-          attempt or "1",
-        },
-        { text = true }
-      )
+      procs[i] = vim.system({
+        vim.v.progpath,
+        "-n",
+        "-i",
+        "NONE",
+        "--headless",
+        "-u",
+        "NONE",
+        "-l",
+        script,
+        run_id,
+        attempt or "1",
+      }, { text = true })
     end
     local codes, outs = {}, {}
     for i, p in ipairs(procs) do
