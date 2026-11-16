@@ -26,7 +26,7 @@ M.MAX_SECONDS = 3600
 ---@return string|nil skip
 function M.find(getenv)
   getenv = getenv or vim.uv.os_getenv
-  if vim.fn.has("win32") ~= 1 then
+  if not require("testing.platform").is_windows() then
     return nil, "app-proc-watch measures on Windows only"
   end
   local workstation = require("testing.machine").is_workstation(getenv)

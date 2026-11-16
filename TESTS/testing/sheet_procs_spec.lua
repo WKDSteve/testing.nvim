@@ -157,7 +157,7 @@ put(a["-OutDir"] .. "/procs.json", "\239\187\191" .. vim.json.encode({ verdict =
     local function getenv(k)
       return env[k]
     end
-    if vim.fn.has("win32") == 1 then
+    if require("testing.platform").is_windows() then
       local argv, skip = pw.find(getenv)
       eq(argv, nil, "no watch on the workstation")
       has(skip, "workstation", "... says so")
