@@ -173,9 +173,17 @@ return function(H)
     -- the project never ran: its result directory does not exist yet; the first run has to show anyway
     ok(vim.uv.fs_stat(state.dir(root, opts)) == nil, "no result directory before the first run")
     local before = loads
+    -- the watch sits on the nearest existing folder above the result directory and is not recursive: what each round
+    -- makes anew is the topmost missing folder, its direct child. Remaking only the leaf (two levels below `sdir`)
+    -- was never seen once FSEvents had missed the first round (macOS, run 43903379070)
+    local top = state.dir(root, opts)
+    while not vim.uv.fs_stat(vim.fs.dirname(top)) do
+      top = vim.fs.dirname(top)
+    end
+    eq(top, sdir, "the topmost missing folder is the state dir of the spec")
     -- made again while not seen: the watch may not be armed yet right after subscribe (FSEvents on macOS)
     W.until_seen(function()
-      vim.fn.delete(state.dir(root, opts), "d")
+      vim.fn.delete(top, "rf")
       vim.fn.mkdir(state.dir(root, opts), "p")
     end, function()
       return loads > before
