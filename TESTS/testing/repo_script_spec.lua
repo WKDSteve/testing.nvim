@@ -128,7 +128,8 @@ return function(H)
         'export PATH="$bin:$PATH"',
         'bash "$1" --file x >/dev/null 2>&1 &',
         "b=$!",
-        'for _ in $(seq 1 150); do [ -s "$FAKE_DIR/pid" ] && break; sleep 0.1; done',
+        -- up to 60 s: the green path ends at once, and under load (four sessions) the start took more than 15 s
+        'for _ in $(seq 1 600); do [ -s "$FAKE_DIR/pid" ] && break; sleep 0.1; done',
         '[ -s "$FAKE_DIR/pid" ] || { echo no-start; kill -KILL "$b"; exit 0; }',
         'p=$(cat "$FAKE_DIR/pid")',
         'kill -TERM "$b"',
@@ -139,7 +140,7 @@ return function(H)
     )
     local res = vim
       .system({ bash, dir .. "/probe.sh", script }, { cwd = repo, env = { FAKE_DIR = dir }, text = true })
-      :wait(60000)
+      :wait(90000)
     eq(
       vim.trim(res.stdout or ""),
       "gone",

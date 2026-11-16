@@ -188,7 +188,11 @@ return function(H)
         marker_lua
       )
     )
+    local plain_t0 = vim.uv.hrtime()
     local code_text = report()
+    -- what one report takes on this machine right now: the bound below scales with it (four sessions at once made the
+    -- loop take 47 s, against the fixed 20 s it had)
+    local plain_ms = (vim.uv.hrtime() - plain_t0) / 1e6
     ok(vim.uv.fs_stat(marker) == nil, "the sandbox must not let .testing.lua write a file")
     has(code_text, "was not evaluated here", "a file that needs io is not evaluated")
     has(code_text, "testing doctor", "the report names the command that does evaluate it")
@@ -200,7 +204,13 @@ return function(H)
     local loop_text = report()
     local took_ms = (vim.uv.hrtime() - t0) / 1e6
     has(loop_text, "instruction budget", "an endless loop stops at the budget")
-    ok(took_ms < 20000, ("an endless loop must end quickly (took %d ms)"):format(took_ms))
+    ok(
+      took_ms < math.max(20000, 4 * plain_ms),
+      ("an endless loop must end quickly (took %d ms, a plain report %d ms)"):format(
+        took_ms,
+        plain_ms
+      )
+    )
 
     -- 6. Dependency resolution: an override that points nowhere is a warning, never silent --------
     with_config(nil)

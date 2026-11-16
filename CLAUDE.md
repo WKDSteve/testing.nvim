@@ -15,7 +15,8 @@ scripts/test.sh                       # die ganze Suite (Dogfood), Einzelnes: sc
   werden).
 - Während ein Lauf geht, keine Datei des Repos bearbeiten: der Datei-Wächter meldet es als Fehler der laufenden Specs.
 - Mehrere Sitzungen teilen den Rechner: eine Suite unter Last kann Timeouts und die bekannten Lastflakes zeigen
-  (`child_run_spec`, `sheet_spec`); erst bei Ruhe wiederholen, bevor ein Fehler gesucht wird.
+  (`child_run_spec`, `sheet_spec`, `sheet_session_spec` (Haltepunkte), `scaffold_spec` (Datei über `file_ms`, allein
+  unter 35 s), `ci_on_spec` (echter Container-Lauf)); erst bei Ruhe wiederholen, bevor ein Fehler gesucht wird.
 - Fremde uncommittete Änderungen nie committen oder zurücksetzen; nur eigene Dateien mit Pfad stagen.
 - Auf einen sauberen Baum wird nicht gewartet: die Pipeline läuft auf einem Schnappschuss, ohne Arbeitsbaum und ohne die
   Änderungen anderer Sitzungen. Vor dem Commit: `scripts/test.sh ci --snapshot --profile=<p> --with=<meine,pfade>`

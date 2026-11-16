@@ -110,7 +110,8 @@ return function(H)
   if not s then
     return
   end
-  local seen = s:wait_for("hello", 8000)
+  -- 30 s: a wait that ends as soon as the text is there; tmux in WSL under load took more than 8 s to show it
+  local seen = s:wait_for("hello", 30000)
   ok(seen, "the program's text reaches the screen")
   ok(s:screen():find("world", 1, true) ~= nil, "... the whole line")
   ok(
