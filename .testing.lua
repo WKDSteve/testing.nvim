@@ -28,7 +28,15 @@ return {
   -- decision of `scripts/test.sh` (`TESTING_TRUST=1`); on CI the built-in `CI` does the same (docs/CONFIG.md).
   -- FILETREE_NVIM_DIR, UI_NVIM_DIR: where the tree drive spec finds filetree.nvim and what it needs.
   -- TESTING_PROC_WATCH: app-proc-watch for the real part of sheet_procs_spec (a note where it is not named).
-  env_allow = { "TESTING_TRUST", "FILETREE_NVIM_DIR", "UI_NVIM_DIR", "TESTING_PROC_WATCH" },
+  -- PLAYWRIGHT_BROWSERS_PATH: where Playwright's browsers are, when not in its default folder (a run from a packaged
+  -- app such as the Claude desktop app, whose %LOCALAPPDATA% is a copy Windows cannot start Chromium from).
+  env_allow = {
+    "TESTING_TRUST",
+    "FILETREE_NVIM_DIR",
+    "UI_NVIM_DIR",
+    "TESTING_PROC_WATCH",
+    "PLAYWRIGHT_BROWSERS_PATH",
+  },
   -- The cache folder is named after this key, not after the absolute path of the checkout, so a cache restored
   -- on a CI runner with another checkout path is found (docs/CI-CACHE.md). It is a name only: every entry still
   -- carries its full spec key.
@@ -71,6 +79,9 @@ return {
         "xdg-open",
         -- sheet_app_spec: a batch file of its own on the PATH, to see that a bare name finds it (Windows)
         "shim-tool",
+        -- sheet_native_host_spec: the real run registers its fixture host under HKCU\Software\Chromium and the
+        -- check afterwards asks whether its key is gone (Windows)
+        "reg",
       },
     },
   },

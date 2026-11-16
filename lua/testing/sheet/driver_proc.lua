@@ -9,7 +9,9 @@ local M = {}
 
 ---@class Testing.Sheet.DriverHow
 ---@field label string What the messages call it: `browser driver`.
----@field prepare fun(): string[]|nil, string|nil The argv of the driver, or nil and the reason of a skip.
+---@field prepare fun(): string[]|nil, string|nil, string|nil The argv of the driver, or nil and the reason of a
+---skip, or nil, nil and the reason of a failure.
+---@field cleanup? fun() What the engine set up for the run goes, after the driver ended.
 ---@field options fun(app: Testing.Sheet.App|nil): table The `options` of an `open` command.
 ---@field driver_starts_app? boolean The driver starts the app itself (webview): it is built and filled in, not started.
 
@@ -58,9 +60,9 @@ function M.new(s, opts, ctx, how)
   local function start()
     local argv = opts.driver_argv
     if not argv then
-      local prepared, skip_why = how.prepare()
+      local prepared, skip_why, fail_why = how.prepare()
       if not prepared then
-        return skip_why
+        return skip_why, fail_why
       end
       argv = prepared
     end
@@ -265,6 +267,9 @@ function M.new(s, opts, ctx, how)
       end
       stop()
       proc = nil
+    end
+    if how.cleanup then
+      how.cleanup()
     end
     if watch then
       watch.stop()

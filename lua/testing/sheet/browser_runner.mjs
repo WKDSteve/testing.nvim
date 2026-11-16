@@ -3,7 +3,9 @@
 //                                         failed steps); exit 77 = a prerequisite is missing. The suite's way.
 //   node browser_runner.mjs --driver      one JSON line per command on stdin, one answer per line on stdout
 //                                         (testing-sheet-driver/1): open, step, close. stdin at its end closes too.
-import { mkdirSync, existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { resolve, isAbsolute, join } from 'node:path';
@@ -107,19 +109,69 @@ function dropProfile(profile) {
   }
 }
 
-async function launchWithExtension(chromium, headless, channel, extension) {
+// The id Chromium gives an unpacked extension with a `key` in its manifest: the first 128 bits of the SHA-256 of the
+// public key, each hex digit written as a letter a..p.
+function extensionId(extension) {
+  const manifest = JSON.parse(readFileSync(join(extension, 'manifest.json'), 'utf8'));
+  if (typeof manifest.key !== 'string' || manifest.key === '') {
+    throw new Error('native_host needs a "key" in the manifest.json of the extension (a fixed extension id)');
+  }
+  const hex = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32);
+  return [...hex].map((c) => String.fromCharCode(97 + Number.parseInt(c, 16))).join('');
+}
+
+// Where Playwright's Chromium looks for a host of the user on Windows, before Software\Google\Chrome (measured).
+const CHROMIUM_HOSTS = 'HKCU\\Software\\Chromium\\NativeMessagingHosts';
+
+// Registers the sheet's native messaging host for this run (testing.sheet.native_host prepared it and removes what is
+// left afterwards). Answers the function that takes it away again.
+function registerHost(host, extension, profile) {
+  const manifest = JSON.stringify({
+    name: host.name,
+    description: 'native messaging host of a testing.nvim sheet run',
+    path: host.path,
+    type: 'stdio',
+    allowed_origins: [`chrome-extension://${extensionId(extension)}/`],
+  });
+  if (process.platform !== 'win32') {
+    // Linux and macOS read the hosts of a profile from its folder: nothing outside the run's profile changes
+    const dir = join(profile, 'NativeMessagingHosts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${host.name}.json`), manifest);
+    return () => {};
+  }
+  const file = join(host.dir, `${host.name}.json`);
+  writeFileSync(file, manifest);
+  const key = `${CHROMIUM_HOSTS}\\${host.name}`;
+  // the Lua side checked this before the run; a key that came since is somebody else's
+  if (spawnSync('reg', ['query', key]).status === 0) {
+    throw new Error(`a native messaging host ${host.name} is registered for Chromium already (${key})`);
+  }
+  const add = spawnSync('reg', ['add', key, '/ve', '/t', 'REG_SZ', '/d', file, '/f'], { encoding: 'utf8' });
+  if (add.status !== 0) {
+    throw new Error(`the native messaging host cannot be registered: ${String(add.stderr).trim()}`);
+  }
+  return () => {
+    spawnSync('reg', ['delete', key, '/f']);
+  };
+}
+
+async function launchWithExtension(chromium, headless, channel, extension, nativeHost) {
   if (!existsSync(join(extension, 'manifest.json'))) {
     throw new Error(`the extension ${extension} has no manifest.json`);
   }
   const profile = mkdtempSync(join(tmpdir(), 'testing-sheet-profile-'));
   let context;
+  let unregister = () => {};
   try {
+    if (nativeHost) unregister = registerHost(nativeHost, extension, profile);
     context = await chromium.launchPersistentContext(profile, {
       headless,
       channel: channel || 'chromium',
       args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
     });
   } catch (e) {
+    unregister();
     dropProfile(profile);
     throw new Error(`chromium with the extension cannot be started (${String(e.message).split('\n')[0]})`);
   }
@@ -131,20 +183,21 @@ async function launchWithExtension(chromium, headless, channel, extension) {
     },
     close: async () => {
       await context.close().catch(() => {});
+      unregister();
       dropProfile(profile);
     },
   };
 }
 
 // Answers with the browser, or throws an Error whose message is the reason for the skip.
-async function launch(playwrightDir, headless, channel, extension) {
+async function launch(playwrightDir, headless, channel, extension, nativeHost) {
   let chromium;
   try {
     ({ chromium } = createRequire(resolve(playwrightDir, 'package.json'))('playwright-core'));
   } catch {
     throw new Error('playwright-core cannot be loaded');
   }
-  if (extension) return launchWithExtension(chromium, headless, channel, extension);
+  if (extension) return launchWithExtension(chromium, headless, channel, extension, nativeHost);
   // the project asked for this browser (sheets.browser of .testing.lua): nothing else proves what it wants proved
   if (channel) {
     try {
@@ -175,7 +228,7 @@ async function wholePlan(planPath) {
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
   let browser;
   try {
-    browser = await launch(plan.playwright_dir, true, plan.channel, plan.extension);
+    browser = await launch(plan.playwright_dir, true, plan.channel, plan.extension, plan.native_host);
   } catch (e) {
     console.log(`SKIP: ${e.message}`);
     process.exit(SKIP);
@@ -244,6 +297,7 @@ function driver() {
             !cmd.options.headed,
             cmd.options.channel,
             cmd.options.extension,
+            cmd.options.native_host,
           );
         } catch (e) {
           answer({ ok: false, skip: e.message });

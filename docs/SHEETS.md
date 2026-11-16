@@ -846,3 +846,18 @@ extension's own pages (`open = "chrome-extension://<id>/page.html"`; a `key` in 
 Playwright's full Chromium (the new headless mode; the project's `channel` does not apply): the headless shell cannot load
 extensions, and branded Chrome refuses `--load-extension` (`ERR_BLOCKED_BY_CLIENT`). Where that Chromium cannot start
 the sheet is a reported skip.
+
+**Its native messaging host** (`native_host = { name = "io.example.app", path = "target/debug/app-host.exe" }`, with an
+`extension`; `path` relative to the project root, `name` by Chromium's rule): the extension talks to a host of this
+build for the run, without an installed app. The runner writes the host's manifest (`allowed_origins` is the
+extension's id, so its manifest needs a `key`) and registers it before Chromium starts: on Windows under
+`HKCU\Software\Chromium\NativeMessagingHosts\<name>`, which Playwright's Chromium reads before
+`Software\Google\Chrome` (measured with Chromium 156), so an installed app's host under Chrome's key is neither used nor
+touched; on Linux and macOS in the run's profile folder (`NativeMessagingHosts/`), no registry. After the run, however
+it ended, the key goes when it still points into the run's folder. A key of that name under Chromium's key that is not
+of an earlier run refuses the run (red, left alone); the leftover of a crashed run goes. The host must be built before
+the run (`build` of an app, or by hand); a missing program is red.
+
+* From a packaged app on Windows (the Claude desktop app is an MSIX package), what it installs under `%LOCALAPPDATA%`
+  lands in the package's copy, and Windows cannot start Chromium from there ("side-by-side configuration is
+  invalid"): install Playwright's browsers outside it and name the folder with `PLAYWRIGHT_BROWSERS_PATH`.

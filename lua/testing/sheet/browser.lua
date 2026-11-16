@@ -166,6 +166,22 @@ function M.run(s, opts)
     end
   end
 
+  -- the extension's native messaging host for this run only (`testing.sheet.native_host`)
+  local host
+  if s.native_host then
+    local herr
+    host, herr =
+      require("testing.sheet.native_host").prepare(root, s.native_host, opts.native_host_opts)
+    if not host then
+      if app then
+        app.stop()
+      end
+      result.ok, result.status = false, "fail"
+      result.failures[1] = tostring(herr)
+      return result
+    end
+  end
+
   local plan_path = vim.fn.tempname() .. ".plan.json"
   local f = assert(io.open(plan_path, "wb"))
   f:write(vim.json.encode({
@@ -175,6 +191,7 @@ function M.run(s, opts)
     playwright_dir = pw,
     channel = M.channel_for(s, opts),
     extension = M.extension_dir(root, s),
+    native_host = host,
     sizes = s.sizes,
     steps = steps,
   }))
@@ -190,6 +207,9 @@ function M.run(s, opts)
     return { code = done.code, stdout = done.stdout or "", stderr = done.stderr or "" }
   end)
   os.remove(plan_path)
+  if host then
+    require("testing.sheet.native_host").cleanup(host, opts.native_host_opts)
+  end
   if app then
     app.stop()
   end
@@ -223,7 +243,7 @@ end
 ---@return table driver See `testing.sheet.driver_rpc`.
 function M.driver(s, opts, ctx)
   opts = with_config(ctx.root, opts)
-  local pw
+  local pw, host
   return require("testing.sheet.driver_proc").new(s, opts, ctx, {
     label = "browser driver",
     prepare = function()
@@ -232,6 +252,17 @@ function M.driver(s, opts, ctx)
         return nil, dir
       end
       pw = dir
+      if s.native_host and not host then
+        local herr
+        host, herr = require("testing.sheet.native_host").prepare(
+          ctx.root,
+          s.native_host,
+          opts.native_host_opts
+        )
+        if not host then
+          return nil, nil, herr
+        end
+      end
       return { node, runner_path(), "--driver" }, nil
     end,
     options = function()
@@ -240,7 +271,14 @@ function M.driver(s, opts, ctx)
         playwright_dir = pw,
         channel = M.channel_for(s, opts),
         extension = M.extension_dir(ctx.root, s),
+        native_host = host,
       }
+    end,
+    cleanup = function()
+      if host then
+        require("testing.sheet.native_host").cleanup(host, opts.native_host_opts)
+        host = nil
+      end
     end,
   })
 end

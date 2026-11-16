@@ -211,6 +211,8 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field config? "user" The child runs the user's installed config, read only, instead of the minit (rpc only).
 ---@field live? Testing.Sheet.Live Real keys and network, only with `testing sheets run --live` (`testing.sheet.live`).
 ---@field extension? string An unpacked browser extension (folder with `manifest.json`, relative to the root) Chromium loads: browser only.
+---@field native_host? { name: string, path: string } The extension's native messaging host for the run: a program of
+---the project, registered before Chromium starts and removed after (`testing.sheet.native_host`).
 ---@field fakes? string[] Programs the child finds first on its `PATH` as recording stand-ins (`testing.fake_programs`): rpc only.
 ---@field args? string[] The child's command line after its own (`+cmd`, `-c cmd`, `--cmd cmd`, a file): rpc only.
 ---@field sizes { rows: integer, cols: integer }[]
@@ -304,6 +306,7 @@ local SHEET_KEYS = {
   live = "table",
   fakes = "table",
   extension = "string",
+  native_host = "table",
 }
 
 ---@param v any
@@ -777,6 +780,15 @@ function M.validate(s)
     local aerr = M.check_args(s.args, "args")
     if aerr then
       return nil, aerr
+    end
+  end
+  if s.native_host ~= nil then
+    if s.extension == nil then
+      return nil, "native_host belongs to a browser sheet with an extension"
+    end
+    local herr = require("testing.sheet.native_host").check(s.native_host)
+    if herr then
+      return nil, herr
     end
   end
   if s.extension ~= nil then
