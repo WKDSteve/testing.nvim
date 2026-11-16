@@ -147,6 +147,12 @@ and only the bare name (`powershell`) reaches it, so a sheet that runs on both l
 system does with it: keep one `manual` line for the real effect. Known limit on Windows: an empty argument ends the
 argument list of a `.cmd` stand-in.
 
+### The environment of the child
+
+The child of an rpc sheet gets the environment of a spec child: the built-in safe names, the `*_DIR` of the
+dependencies, and the names in `env_allow` of the project's `.testing.lua` (`{ "MAGICK_*" }` for an ImageMagick that
+finds its modules through `MAGICK_HOME`). Secrets and `NVIM*` never; `fakes`, `live` and `config = "user"` add theirs.
+
 ### The user's installed config (`config = "user"`)
 
 `config = "user"` (rpc sheets, no `minit`) starts the child on the **installed config** instead of the project's

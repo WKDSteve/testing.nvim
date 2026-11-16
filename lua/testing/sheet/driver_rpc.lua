@@ -273,6 +273,13 @@ function M.new(s, opts, ctx)
   if not minit:match("^%a:[/\\]") and not minit:match("^[/\\]") then
     minit = ctx.root .. "/" .. minit
   end
+  -- the child inherits what the project lets its spec children inherit (`env_allow` of `.testing.lua`, MAGICK_* for
+  -- an ImageMagick that finds its modules through it); never secrets or NVIM*, `testing.child.env` sees to that
+  local env_allow = vim.list_extend({}, opts.env_allow or {})
+  local loaded = require("testing.config.project").load(ctx.root)
+  if not loaded.error and type(loaded.config.env_allow) == "table" then
+    vim.list_extend(env_allow, loaded.config.env_allow)
+  end
   local D = {}
   local child, size
   ---@type Testing.FakePrograms|nil
@@ -334,6 +341,7 @@ function M.new(s, opts, ctx)
       -- a live child: its network guard lets it reach the named hosts only
       guard = live_guard or false,
       extra_env = env,
+      env_allow = #env_allow > 0 and env_allow or nil,
       -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
       watch_prompts = true,
       -- confirm(), input() and inputlist() from Lua answer "cancelled" at once (a lua step that calls input() would
