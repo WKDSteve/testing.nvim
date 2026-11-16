@@ -151,8 +151,9 @@ that signature is verified too. The job runs only when every commit of the range
 commit then goes on the list (note `signed: <principal>`), so the next job of the run and the next push start from it.
 
 The jobs of one run start together (one per system and job) and would each ask the same comparison, which empties the
-API rate limit when a few runs come at once. So the first job of a run (`GITHUB_RUN_ID` and `GITHUB_SHA`) takes the
-lock `<runners>/_answers/<run id>-<sha>.lock`, asks, and keeps its answer beside it (`.json`); the others wait for that
+API rate limit when a few runs come at once. So the first job of a run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
+`GITHUB_SHA`) takes the lock `<runners>/_answers/<run id>-<attempt>-<sha>.lock`, asks, and keeps its answer beside it
+(`.json`); a re-run is a new attempt and asks again. The others wait for that
 answer (at most two minutes, then they ask themselves) and come to the same verdict. A lock older than that belongs to
 a job that died and is taken over; answers of runs older than two days are removed. Without a run id every job asks
 for itself.

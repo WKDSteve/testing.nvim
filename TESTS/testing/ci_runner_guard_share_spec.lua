@@ -40,7 +40,7 @@ return function(H)
   write(
     script,
     ([[
-local repo, lib, root, log, run_id = %q, %q, %q, %q, arg[1]
+local repo, lib, root, log, run_id, attempt = %q, %q, %q, %q, arg[1], arg[2]
 vim.opt.rtp:prepend(lib)
 vim.opt.rtp:prepend(repo)
 local guard = require("testing.ci.runner_guard")
@@ -50,7 +50,7 @@ local code = guard.main({ "check" }, sv, {
   env = {
     GITHUB_EVENT_NAME = "push", GITHUB_ACTOR = "WKDSteve", GITHUB_TRIGGERING_ACTOR = "WKDSteve",
     GITHUB_REPOSITORY = "WKDSteve/tasks.nvim", GITHUB_REPOSITORY_OWNER = "WKDSteve",
-    GITHUB_SHA = %q, GITHUB_RUN_ID = run_id ~= "" and run_id or nil,
+    GITHUB_SHA = %q, GITHUB_RUN_ID = run_id ~= "" and run_id or nil, GITHUB_RUN_ATTEMPT = attempt,
   },
   root = root, now = 5, nvim = "/x/nvim", script = "/x/scripts/testing.lua", ssh_keygen = vim.v.progpath,
   gh = function(args)
@@ -73,12 +73,24 @@ os.exit(code)
   )
 
   ---Start `n` hook processes at once; their exit codes and outputs, and how many comparisons GitHub saw.
-  local function jobs(n, run_id)
+  local function jobs(n, run_id, attempt)
     os.remove(log)
     local procs = {}
     for i = 1, n do
       procs[i] = vim.system(
-        { vim.v.progpath, "-n", "-i", "NONE", "--headless", "-u", "NONE", "-l", script, run_id },
+        {
+          vim.v.progpath,
+          "-n",
+          "-i",
+          "NONE",
+          "--headless",
+          "-u",
+          "NONE",
+          "-l",
+          script,
+          run_id,
+          attempt or "1",
+        },
         { text = true }
       )
     end
@@ -108,11 +120,14 @@ os.exit(code)
       ("job %d gives the same reason: %s"):format(i, o)
     )
   end
-  ok(vim.uv.fs_stat(root .. "/_answers/777-" .. SHA .. ".lock") == nil, "no lock is left behind")
+  ok(vim.uv.fs_stat(root .. "/_answers/777-1-" .. SHA .. ".lock") == nil, "no lock is left behind")
 
   -- 2. a later job of the same run reads the answer, a new run asks again -------------------------------------------
   codes, _, asked = jobs(1, "777")
   eq({ codes[1], asked }, { 1, 0 }, "a later job of the run reads the kept answer")
+  -- a re-run (`gh run rerun --failed`, the advice after a failed query) keeps the run id: a new attempt asks again
+  codes, _, asked = jobs(1, "777", "2")
+  eq({ codes[1], asked }, { 1, 1 }, "a re-run of the run (attempt 2) asks again")
   codes, _, asked = jobs(2, "778")
   eq({ codes[1], codes[2], asked }, { 1, 1, 1 }, "another run asks once more")
 

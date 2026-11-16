@@ -81,6 +81,7 @@ local function real_env()
     GITHUB_REPOSITORY_OWNER = os.getenv("GITHUB_REPOSITORY_OWNER"),
     GITHUB_SHA = os.getenv("GITHUB_SHA"),
     GITHUB_RUN_ID = os.getenv("GITHUB_RUN_ID"),
+    GITHUB_RUN_ATTEMPT = os.getenv("GITHUB_RUN_ATTEMPT"),
     TESTING_RUNNER_ROOT = os.getenv("TESTING_RUNNER_ROOT"),
     TESTING_ALLOWED_SIGNERS = os.getenv("TESTING_ALLOWED_SIGNERS"),
     USERPROFILE = os.getenv("USERPROFILE"),
@@ -525,10 +526,12 @@ end
 
 ---Rule 6 once per run: the jobs of one run (`GITHUB_RUN_ID`, `GITHUB_SHA`) start at the same time and would each ask
 ---GitHub the same comparison (six jobs of a run, three sessions beside them: the rate limit ran dry on 2026-11-14 and
----every job was refused). The first job takes `<root>/_answers/<run>-<sha>.lock` and asks, then writes the answer
+---every job was refused). The first job takes `<root>/_answers/<run>-<attempt>-<sha>.lock` and asks, then writes the answer
 ---next to it; the others wait for that answer (at most `M.SHARE_WAIT_MS`, then they ask themselves). A lock older than
 ---the wait is a job that died: it is taken over. The answer is read as untrusted data like the list (whoever can
----write the runner folder can write the list too). Without a run id each job asks for itself.
+---write the runner folder can write the list too). Without a run id each job asks for itself. The attempt
+---(`GITHUB_RUN_ATTEMPT`) is part of the key: a re-run (`gh run rerun --failed`, the advice after a failed query)
+---keeps the run id and must ask again, not read the refusal of the attempt before.
 ---@param repo string
 ---@param sha string
 ---@param entry Testing.RunnerGuard.Entry|nil
@@ -543,9 +546,11 @@ function M.shared_release(repo, sha, entry, signers, ctx, root)
   if not (run_id and #run_id <= 20 and run_id:match("^%d+$")) then
     return M.signed_release(repo, sha, entry, signers, ctx)
   end
+  local attempt = read_var(ctx, "GITHUB_RUN_ATTEMPT")
+  attempt = (attempt and #attempt <= 10 and attempt:match("^%d+$")) and attempt or "1"
   local dir = root .. "/_answers"
   vim.fn.mkdir(dir, "p")
-  local base = ("%s/%s-%s"):format(dir, run_id, sha)
+  local base = ("%s/%s-%s-%s"):format(dir, run_id, attempt, sha)
   local answer_path, lock_path = base .. ".json", base .. ".lock"
   local function read_answer()
     local f = io.open(answer_path, "rb")
