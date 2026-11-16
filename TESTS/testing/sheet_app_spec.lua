@@ -533,6 +533,24 @@ f:close()
     eq(run_cli.main({ "--sheet", "a.nope", "--root", other }, sv, deps), 2, "an unknown sheet")
     has(table.concat(errs, "\n"), "no sheet a.nope", "... is named")
     eq(ran, {}, "... and nothing ran")
+    -- a sheet that does not load has no id: the name is not found, and the load error is said with file and line
+    sw(
+      "TESTS/sheets/views.sheet.lua",
+      "local n = 0\nfor _ in ipairs({}) do n = n + 1 end\nreturn nope()\n"
+    )
+    errs = {}
+    eq(
+      run_cli.main({ "--sheet", "a.views", "--root", other }, sv, deps),
+      2,
+      "a sheet that does not load"
+    )
+    local said = table.concat(errs, "\n")
+    has(said, "no sheet a.views", "... is not found")
+    has(said, "views.sheet.lua", "... and the file that does not load is named")
+    has(said, "views.sheet.lua:2:", "... with the line of its error")
+    has(said, "ipairs", "... and the error (ipairs is not in the sandbox of a sheet)")
+    vim.fn.delete(other .. "/TESTS/sheets/views.sheet.lua")
+    eq(ran, {}, "... and nothing ran")
     errs = {}
     eq(
       run_cli.main({ "--sheet", "a.green", "--task", "x/y", "--root", other }, sv, deps),

@@ -415,8 +415,11 @@ function M.main(argv, sv, deps)
   end
 
   local report = require("testing.sheet.report")
-  local mine, found = {}, {}
+  local mine, found, unloadable = {}, {}, {}
   for _, e in ipairs(report.collect(roots, { cases = {} })) do
+    if not e.sheet and e.error then
+      unloadable[#unloadable + 1] = ("  %s: %s"):format(tostring(e.rel), tostring(e.error))
+    end
     local id = e.sheet and e.sheet.task or (not e.sheet and tasks.task_of_unloadable(e))
     -- a sheet that does not load has no engine and stays in: it is red in every job
     local engine_fits = not o.engine or not e.sheet or e.sheet.engine == o.engine
@@ -430,10 +433,18 @@ function M.main(argv, sv, deps)
   end
   for _, name in ipairs(wanted_list) do
     if not found[name] then
+      -- a sheet that does not load has no id: the one that was meant may be among them, so its error is said
+      local hint = #unloadable > 0
+          and ("\nsheets that do not load (one may be %s):\n%s"):format(
+            name,
+            table.concat(unloadable, "\n")
+          )
+        or ""
       sv.err(
-        ("testing sheets: no sheet %s (id or file name) in %s"):format(
+        ("testing sheets: no sheet %s (id or file name) in %s%s"):format(
           name,
-          table.concat(roots, ", ")
+          table.concat(roots, ", "),
+          hint
         )
       )
       return 2
