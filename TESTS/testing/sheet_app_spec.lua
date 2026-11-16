@@ -145,6 +145,13 @@ vim.wait(120000)
     prepfail = app_entry("good", {
       prepare = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "broken" },
     }),
+    slowbuild = app_entry("good", {
+      build = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "slow" },
+      build_timeout_ms = 500,
+    }),
+    own124 = app_entry("good", {
+      build = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "own124" },
+    }),
     linked = {
       run = { nvim, "--headless", "-u", "NONE", "-l", "fake_link.lua", "stay", link_log },
       start = "link",
@@ -165,6 +172,14 @@ vim.wait(120000)
 if _G.arg[1] == "broken" then
   io.stderr:write("error: a Rust thing\n")
   os.exit(101)
+end
+if _G.arg[1] == "slow" then
+  vim.uv.sleep(30000)
+  return
+end
+if _G.arg[1] == "own124" then
+  io.stderr:write("gave up by itself\n")
+  os.exit(124)
 end
 if _G.arg[1] == "into" then
   local f = assert(io.open(_G.arg[2] .. "/prepared", "wb"))
@@ -232,6 +247,9 @@ f:close()
       { { run = { "a" }, window_ms = 0 }, "window_ms must be" },
       { { run = { "a" }, window_ms = "60s" }, "window_ms must be" },
       { { run = { "a" }, window_ms = 1.5 }, "window_ms must be a whole number" },
+      { { run = { "a" }, build_timeout_ms = 0 }, "build_timeout_ms must be" },
+      { { run = { "a" }, build_timeout_ms = 1.5 }, "build_timeout_ms must be a whole number" },
+      { { run = { "a" }, build_timeout_ms = 3600001 }, "at most 3600000" },
       { { run = { "a" }, start = "link", ready = { stdout = "x" } }, "takes no ready" },
     }) do
       has(app.check(c[1]), c[2], "refused: " .. vim.inspect(c[1]))
@@ -307,6 +325,16 @@ f:close()
     local _, e6 = app.start("unbuilt", root)
     has(e6, "build failed (exit 101)", "a build that fails")
     has(e6, "a Rust thing", "... with what it said")
+    -- a build that runs past its limit says so, with the limit and the setting, not as the exit 124 of `wait`
+    local _, e8 = app.start("slowbuild", root)
+    has(e8, "build did not finish in 0.5 s", "a build past its limit")
+    has(e8, 'sheets.apps["slowbuild"].build_timeout_ms', "... names the setting")
+    local _, e9 = app.start("own124", root)
+    has(
+      e9,
+      "build failed (exit 124): gave up by itself",
+      "a build that exits 124 itself is a failed build"
+    )
     -- a runner that cannot start is red, and the app of the sheet does not stay behind
     local raised = sheet.run(
       assert(sheet.validate({

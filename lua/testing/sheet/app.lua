@@ -31,6 +31,8 @@
 local M = {}
 
 M.BUILD_MS = 600000
+---The longest a build may be given with `build_timeout_ms` (a release build of a Tauri app takes minutes).
+M.BUILD_MAX_MS = 3600000
 M.READY_MS = 30000
 M.STOP_MS = 2000
 ---How long a program with a window is watched for ending at once (a second instance that hands over).
@@ -121,6 +123,7 @@ function M.check(spec)
       and k ~= "cleanup"
       and k ~= "start"
       and k ~= "window_ms"
+      and k ~= "build_timeout_ms"
     then
       return "unknown field " .. tostring(k)
     end
@@ -166,6 +169,19 @@ function M.check(spec)
     )
   then
     return "window_ms must be a whole number of milliseconds"
+  end
+  if
+    spec.build_timeout_ms ~= nil
+    and (
+      type(spec.build_timeout_ms) ~= "number"
+      or spec.build_timeout_ms % 1 ~= 0
+      or spec.build_timeout_ms < 1
+      or spec.build_timeout_ms > M.BUILD_MAX_MS
+    )
+  then
+    return ("build_timeout_ms must be a whole number of milliseconds, at most %d"):format(
+      M.BUILD_MAX_MS
+    )
   end
   if spec.ended_early ~= nil and (type(spec.ended_early) ~= "string" or spec.ended_early == "") then
     return "ended_early must be a text"
@@ -406,7 +422,19 @@ function M.start(name, root, opts)
       if not ok then
         return nil, ("its build%s did not start: %s"):format(which, tostring(obj))
       end
-      local done = obj:wait(M.BUILD_MS)
+      local limit = spec.build_timeout_ms or M.BUILD_MS
+      local began = vim.uv.hrtime()
+      local done = obj:wait(limit)
+      -- `wait` ends a build that runs too long with exit 124; a build that says 124 itself returns before the limit
+      if done.code == 124 and (vim.uv.hrtime() - began) / 1e6 >= limit then
+        return nil,
+          ("its build%s did not finish in %s s (sheets.apps[%q].build_timeout_ms, default %d)"):format(
+            which,
+            tostring(limit / 1000),
+            name,
+            M.BUILD_MS
+          )
+      end
       if done.code ~= 0 then
         local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
         return nil, ("its build%s failed (exit %d): %s"):format(which, done.code, why)

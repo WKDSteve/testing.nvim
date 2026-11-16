@@ -631,6 +631,9 @@ return {
   window (a real link would show one). On other systems the program starts as usual.
 * One app for the whole sheet, all sizes. At the end its stdin is closed, then the whole process tree is ended.
 * An app that does not build, does not start or does not get ready fails the sheet, with what it said.
+* Each step of `build` may take 10 minutes; `build_timeout_ms` (a whole number, at most an hour) gives the app another
+  limit, for a release build that takes longer when the machine is busy. A step past it fails the sheet with
+  `its build did not finish in N s (sheets.apps["<name>"].build_timeout_ms, default 600000)`, not with an exit code.
 * `sheets.browser`: `playwright_dir` is the folder (relative to the root) whose `node_modules` holds `playwright-core`;
   `channel` runs an installed browser (`chrome`, `msedge`) instead of Playwright's Chromium, and without it the sheet is
   a skip, not a run in another browser. A sheet with an `extension` leaves `channel` aside and always runs in
