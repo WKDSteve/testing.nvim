@@ -128,7 +128,19 @@ os.exit(code)
   codes, _, asked = jobs(2, "778")
   eq({ codes[1], codes[2], asked }, { 1, 1, 1 }, "another run asks once more")
 
-  -- 3. without a run id each job asks for itself ------------------------------------------------------------------
+  -- 3. a folder for the answers that cannot be made (here: a file in its place; on macOS mkdir() also raised E739
+  -- when another hook made it in the same moment) is no crash of the hook: the job asks for itself
+  vim.fn.delete(root .. "/_answers", "rf")
+  write(root .. "/_answers", "not a folder")
+  local codes3, outs3, asked3 = jobs(1, "779")
+  eq({ codes3[1], asked3 }, { 1, 1 }, "no answer folder: the job asks GitHub itself")
+  ok(
+    outs3[1]:find("none of the last 1 reviewed commits", 1, true) ~= nil,
+    "... and gives its verdict: " .. outs3[1]
+  )
+  os.remove(root .. "/_answers")
+
+  -- 4. without a run id each job asks for itself ------------------------------------------------------------------
   _, _, asked = jobs(2, "")
   eq(asked, 2, "no run id: no sharing")
 

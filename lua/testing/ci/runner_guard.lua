@@ -549,7 +549,14 @@ function M.shared_release(repo, sha, entry, signers, ctx, root)
   local attempt = read_var(ctx, "GITHUB_RUN_ATTEMPT")
   attempt = (attempt and #attempt <= 10 and attempt:match("^%d+$")) and attempt or "1"
   local dir = root .. "/_answers"
-  vim.fn.mkdir(dir, "p")
+  -- the jobs of a run start together: another hook may make the folder in the same moment, which `mkdir()` reports as
+  -- E739 on macOS. Made or there is all that counts; else each job asks for itself.
+  pcall(vim.fn.mkdir, root, "p")
+  uv.fs_mkdir(dir, 448)
+  local made = uv.fs_stat(dir)
+  if not (made and made.type == "directory") then
+    return M.signed_release(repo, sha, entry, signers, ctx)
+  end
   local base = ("%s/%s-%s-%s"):format(dir, run_id, attempt, sha)
   local answer_path, lock_path = base .. ".json", base .. ".lock"
   local function read_answer()
