@@ -66,6 +66,29 @@ vim.wait(120000)
   )
   local nvim = vim.v.progpath:gsub("\\", "/")
   local log = root .. "/app.log"
+  local link_log = root .. "/link.log"
+  -- the program of `start = "link"`: writes its pid, the kind of each standard handle (GetFileType: 3 is a pipe) and
+  -- the folder of the run it found in its environment
+  write(
+    "fake_link.lua",
+    [[
+local kinds = {}
+if jit.os == "Windows" then
+  local ffi = require("ffi")
+  ffi.cdef("void *GetStdHandle(uint32_t which); uint32_t GetFileType(void *h);")
+  for i, which in ipairs({ -10, -11, -12 }) do
+    kinds[i] = tostring(ffi.C.GetFileType(ffi.C.GetStdHandle(which)))
+  end
+end
+local out = assert(io.open(_G.arg[2], "ab"))
+out:write(tostring(vim.fn.getpid()), " ", table.concat(kinds, ","), " ", tostring(os.getenv("LINK_SEEN")), "\n")
+out:close()
+if _G.arg[1] == "early" then
+  os.exit(0)
+end
+vim.wait(120000)
+]]
+  )
   local function app_entry(mode, extra)
     return vim.tbl_extend("force", {
       run = {
@@ -110,6 +133,29 @@ vim.wait(120000)
     }),
     shim = app_entry("good", { build = { "shim-tool" } }),
     shimbad = app_entry("good", { build = { "shim-tool", "a&b" } }),
+    prepared = app_entry("good", {
+      prepare = {
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "into", "${temp}" },
+        { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "check", "${temp}" },
+      },
+    }),
+    cleaned = app_entry("good", {
+      cleanup = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "cleanup", "${temp}" },
+    }),
+    prepfail = app_entry("good", {
+      prepare = { nvim, "--headless", "-u", "NONE", "-l", "fake_build.lua", "broken" },
+    }),
+    linked = {
+      run = { nvim, "--headless", "-u", "NONE", "-l", "fake_link.lua", "stay", link_log },
+      start = "link",
+      env = { LINK_SEEN = "${temp}" },
+    },
+    linkearly = {
+      run = { nvim, "--headless", "-u", "NONE", "-l", "fake_link.lua", "early", link_log },
+      start = "link",
+      window = "never",
+      ended_early = "handed over to another",
+    },
     nameless = { run = { "${nope}" } },
     bad = { run = "a string" },
   }) .. " } }\n")
@@ -119,6 +165,26 @@ vim.wait(120000)
 if _G.arg[1] == "broken" then
   io.stderr:write("error: a Rust thing\n")
   os.exit(101)
+end
+if _G.arg[1] == "into" then
+  local f = assert(io.open(_G.arg[2] .. "/prepared", "wb"))
+  f:write("settings")
+  f:close()
+  return
+end
+if _G.arg[1] == "cleanup" then
+  local seen = vim.uv.fs_stat(_G.arg[2]) ~= nil
+  local f = assert(io.open("cleaned.txt", "wb"))
+  f:write(_G.arg[2], string.char(10), tostring(seen))
+  f:close()
+  return
+end
+if _G.arg[1] == "check" then
+  local f = assert(io.open(_G.arg[2] .. "/prepared", "rb"))
+  f:close()
+  local g = assert(io.open(_G.arg[2] .. "/checked", "wb"))
+  g:close()
+  return
 end
 local f = assert(io.open(_G.arg[1] == "second" and "built2.txt" or "built.txt", "wb"))
 f:write("yes")
@@ -136,6 +202,12 @@ f:close()
     eq(app.check({ run = { "a" } }), nil, "a run is enough")
     eq(app.check({ run = { "a" }, build = { "b", "c" } }), nil, "a build is one argv")
     eq(app.check({ run = { "a" }, build = { { "b" }, { "c", "d" } } }), nil, "or a list of them")
+    eq(
+      app.check({ run = { "a" }, prepare = { { "b", "${temp}" } } }),
+      nil,
+      "a prepare is like a build"
+    )
+    eq(app.check({ run = { "a" }, start = "link", window = "w" }), nil, "a start as by a link")
     for _, c in ipairs({
       { "x", "must be a table" },
       { {}, "run must be" },
@@ -153,6 +225,13 @@ f:close()
       { { run = { "a" }, ready = { stdout = "x", as = "a b" } }, "ready.as" },
       { { run = { "a" }, ready = { stdout = "x", timeout_ms = -1 } }, "timeout_ms" },
       { { run = { "a" }, ready = { stdout = "[" } }, "not a Lua pattern" },
+      { { run = { "a" }, prepare = "node prep.mjs" }, "prepare must be" },
+      { { run = { "a" }, prepare = {} }, "prepare must be" },
+      { { run = { "a" }, cleanup = "close it" }, "cleanup must be" },
+      { { run = { "a" }, start = "shell" }, 'start must be "link"' },
+      { { run = { "a" }, window_ms = 0 }, "window_ms must be" },
+      { { run = { "a" }, window_ms = "60s" }, "window_ms must be" },
+      { { run = { "a" }, start = "link", ready = { stdout = "x" } }, "takes no ready" },
     }) do
       has(app.check(c[1]), c[2], "refused: " .. vim.inspect(c[1]))
     end
@@ -284,6 +363,59 @@ f:close()
         "a bare name finds shim-tool.cmd through PATHEXT"
       )
       has(shim, "cmd.exe would read", "an argument with an ampersand for a batch file is refused")
+    end
+  end
+
+  -- 2b. prepare, and the start as by a link ---------------------------------------------------------------------------
+  do
+    -- prepare runs after the folder of the run exists, ${temp} filled in, its steps one after the other
+    local prepared = assert(app.start("prepared", root))
+    local temp = prepared.vars.temp
+    ok(vim.uv.fs_stat(temp .. "/prepared") ~= nil, "prepare wrote into the folder of the run")
+    ok(vim.uv.fs_stat(temp .. "/checked") ~= nil, "... and its second step saw it")
+    prepared.stop()
+    ok(vim.uv.fs_stat(temp) == nil, "the folder goes with the stop")
+    local before = #vim.fn.readfile(log)
+    local _, perr = app.start("prepfail", root)
+    has(perr, "its prepare failed (exit 101)", "a prepare that fails")
+    has(perr, "a Rust thing", "... with what it said")
+    eq(#vim.fn.readfile(log), before, "... and the app does not start")
+    -- cleanup runs at the stop, after the app, while the folder of the run is still there
+    local cleaned = assert(app.start("cleaned", root))
+    local cpid = last_pid()
+    ok(vim.uv.fs_stat(root .. "/cleaned.txt") == nil, "cleanup does not run at the start")
+    cleaned.stop()
+    eq(
+      vim.fn.readfile(root .. "/cleaned.txt"),
+      { cleaned.vars.temp, "true" },
+      "cleanup ran at the stop, ${temp} filled in, the folder still there"
+    )
+    ok(vim.uv.kill(cpid, 0) ~= 0, "... after the app ended")
+    ok(vim.uv.fs_stat(cleaned.vars.temp) == nil, "... and the folder goes afterwards")
+
+    if vim.fn.has("win32") == 1 then
+      local linked, lerr = app.start("linked", root)
+      ok(linked ~= nil, "a start as by a link: " .. tostring(lerr))
+      local line = ""
+      vim.wait(15000, function()
+        line = vim.uv.fs_stat(link_log) and vim.fn.readfile(link_log)[1] or ""
+        return line ~= ""
+      end, 50)
+      local pid, kinds, seen = line:match("^(%d+) ([%d,]+) (.*)$")
+      eq(tonumber(pid), linked.pid, "the pid is the program's, not the starter's")
+      ok(kinds ~= nil and not kinds:find("3", 1, true), "no stream of the run is a pipe: " .. line)
+      eq(seen, linked.vars.temp, "the environment of the app reaches the program")
+      ok(vim.uv.kill(linked.pid, 0) == 0, "it runs")
+      linked.stop()
+      vim.wait(5000, function()
+        return vim.uv.kill(linked.pid, 0) ~= 0
+      end, 50)
+      ok(vim.uv.kill(linked.pid, 0) ~= 0, "stop ends the program behind the starter")
+
+      local none, eerr, skip = app.start("linkearly", root)
+      ok(none == nil, "a program that ends at once")
+      has(eerr, "exit 0", "... with its own exit code")
+      eq(skip, "handed over to another", "... is the skip of ended_early")
     end
   end
 

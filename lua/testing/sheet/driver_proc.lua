@@ -152,7 +152,7 @@ function M.new(s, opts, ctx, how)
       },
       size = size,
       options = how.options(app),
-    }, margin)
+    }, margin + (app and app.window_ms or 0))
     if not answer then
       return { failure = ("%s: %s"):format(tag, why) }
     end

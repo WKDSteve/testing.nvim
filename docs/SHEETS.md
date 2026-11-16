@@ -605,18 +605,33 @@ return {
   "build" } }`); the first one that fails ends it and the failure names its number. A batch file (`.cmd`, `.bat`) is run by
   `cmd.exe`, which reads its arguments again: one with a quote, `%`, `&`, `|`, `<`, `>`, `^` or a line break is
   refused, not quoted.
-* `${temp}` is a folder of this run, removed afterwards: the user's real settings stay untouched. It can be used in `run`
+* `${temp}` is a folder of this run, removed afterwards: the user's real settings stay untouched. It can be used in `prepare`, `cleanup`, `run`
   and `env`.
 * `ready` waits (`timeout_ms`, default 30 s) for a line on the app's stdout that matches the Lua pattern `stdout`; `as`
   makes the trimmed line available in the `open` steps of the sheet. Only fixed names are filled in, an unknown one
   fails the step, no Lua runs.
+* `prepare` (an argv or a list of them, like `build`) runs in the project root after the folder of the run exists and
+  before the app starts, with `${temp}` filled in: what the app should find there, such as a settings file or a
+  recording (`prepare = { "node", "tools/sheet-prepare.mjs", "${temp}" }`). A step that fails ends the start, with what
+  it said.
+* `cleanup` (the same form) runs after the app and its tree have ended and before the folder of the run is removed,
+  `${temp}` filled in: for what the app left outside its tree, such as an Explorer window the shell opened on a folder of
+  the run. Best effort: a step that fails is no failure of the sheet.
+* `start = "link"` starts the program the way a link or a double click does on Windows: no standard handles, and a
+  parent without a console. A window program of appkit then has nobody to write to and shows an error in a message
+  box, which a desktop sheet can read. A small starter stands between (`lua/testing/sheet/link_start.lua`, an editor
+  of its own, detached); it says the pid of the program, so the sheet works in the program's window, and ends with
+  the program's exit code. There is no stdout, so it takes no `ready`. A console program gets a console without a
+  window (a real link would show one). On other systems the program starts as usual.
 * One app for the whole sheet, all sizes. At the end its stdin is closed, then the whole process tree is ended.
 * An app that does not build, does not start or does not get ready fails the sheet, with what it said.
 * `sheets.browser`: `playwright_dir` is the folder (relative to the root) whose `node_modules` holds `playwright-core`;
   `channel` runs an installed browser (`chrome`, `msedge`) instead of Playwright's Chromium, and without it the sheet is
   a skip, not a run in another browser. A sheet with an `extension` leaves `channel` aside and always runs in
   Playwright's Chromium: branded Chrome refuses an unpacked extension.
-* `window` is a part of the title of the app's window, for a desktop sheet; `ended_early` see [Desktop sheets](#desktop-sheets-enginedesktop).
+* `window` is a part of the title of the app's window, for a desktop sheet, and `window_ms` how long the sheet waits for
+  that window to appear (default 30 s; a program that shows its first window late, such as a message box after a start
+  that gave up); `ended_early` see [Desktop sheets](#desktop-sheets-enginedesktop).
 
 A repository without a Lua spec needs no suite for its sheets:
 

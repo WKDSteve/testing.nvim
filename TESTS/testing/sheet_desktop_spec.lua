@@ -52,7 +52,7 @@ vim.wait(120000)
     }, extra or {})
   end
   write(".testing.lua", "return { sheets = { apps = " .. vim.inspect({
-    window = app_entry("stay"),
+    window = app_entry("stay", { window_ms = 45000 }),
     second = app_entry("handover", { ended_early = "it runs already" }),
     second_silent = app_entry("handover"),
     crashes = app_entry("crash", { ended_early = "it runs already" }),
@@ -196,6 +196,7 @@ end
     end
     eq(cmds[1].cmd, "open", "first it opens")
     eq(cmds[1].options.window, "demo", "... with the part of the title")
+    eq(cmds[1].options.window_ms, 45000, "... and how long to wait for it (window_ms)")
     ok(type(cmds[1].options.pid) == "number" and cmds[1].options.pid > 0, "... and the process")
     eq(cmds[1].size, { rows = 700, cols = 1000 }, "... and the size")
     eq(cmds[2].step.wait, { name = "mute", state = "off" }, "a step goes as it stands")

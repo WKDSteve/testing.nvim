@@ -20,6 +20,13 @@
 --- gone afterwards, so the user's real settings stay untouched. `ready` waits for a line on the app's stdout that
 --- matches the Lua pattern; `as` makes that line available to the sheet as `${link}` in an `open` step. That is all a
 --- sheet can do with it: it fills in fixed names, it runs no Lua.
+---
+--- `prepare` (an argv or a list of them, like `build`) runs after the folder of the run exists and before the app
+--- starts, with `${temp}` filled in: what the app should find there (a settings file, a recording). `start = "link"`
+--- starts the program the way a link or a double click does on Windows: no standard handles and a parent without a
+--- console (`testing/sheet/link_start.lua`), so a window program shows its errors in a message box. There is no
+--- stdout then, so it takes no `ready`. `cleanup` (like `prepare`) runs after the app has ended and before its folder
+--- is removed: for what it left outside its process tree, such as a window another program opened for it.
 
 local M = {}
 
@@ -28,6 +35,10 @@ M.READY_MS = 30000
 M.STOP_MS = 2000
 ---How long a program with a window is watched for ending at once (a second instance that hands over).
 M.EARLY_MS = 1500
+---How long the steps of `cleanup` may take together.
+M.CLEANUP_MS = 60000
+---How long the starter of `start = "link"` may take to say the pid of the program.
+M.LINK_MS = 15000
 
 ---Fill in `${name}`; an unknown name is an error, not an empty string.
 ---@param text string
@@ -106,6 +117,10 @@ function M.check(spec)
       and k ~= "ready"
       and k ~= "window"
       and k ~= "ended_early"
+      and k ~= "prepare"
+      and k ~= "cleanup"
+      and k ~= "start"
+      and k ~= "window_ms"
     then
       return "unknown field " .. tostring(k)
     end
@@ -115,6 +130,18 @@ function M.check(spec)
   end
   if spec.build ~= nil and not is_build(spec.build) then
     return "build must be a list of strings (an argv, no shell) or a list of such lists"
+  end
+  if spec.prepare ~= nil and not is_build(spec.prepare) then
+    return "prepare must be a list of strings (an argv, no shell) or a list of such lists"
+  end
+  if spec.cleanup ~= nil and not is_build(spec.cleanup) then
+    return "cleanup must be a list of strings (an argv, no shell) or a list of such lists"
+  end
+  if spec.start ~= nil and spec.start ~= "link" then
+    return 'start must be "link" (or left out)'
+  end
+  if spec.start == "link" and spec.ready ~= nil then
+    return 'start = "link" gives the program no stdout: it takes no ready'
   end
   if spec.env ~= nil then
     if type(spec.env) ~= "table" then
@@ -128,6 +155,12 @@ function M.check(spec)
   end
   if spec.window ~= nil and (type(spec.window) ~= "string" or spec.window == "") then
     return "window must be a part of the title"
+  end
+  if
+    spec.window_ms ~= nil
+    and (type(spec.window_ms) ~= "number" or spec.window_ms < 1 or spec.window_ms > M.BUILD_MS)
+  then
+    return "window_ms must be a number of milliseconds"
   end
   if spec.ended_early ~= nil and (type(spec.ended_early) ~= "string" or spec.ended_early == "") then
     return "ended_early must be a text"
@@ -246,10 +279,79 @@ local function expand_all(argv, vars)
   return out, nil
 end
 
+---Run the steps of `prepare` or `cleanup` in the project root, `${temp}` filled in; the first that fails ends it.
+---@param steps string[]|string[][]
+---@param root string
+---@param vars table<string, string>
+---@param label? string `prepare` (default) or `cleanup`.
+---@param ms? integer How long each step may take.
+---@return string|nil err
+local function run_prepare(steps, root, vars, label, ms)
+  label = label or "prepare"
+  for n, step in ipairs(build_steps(steps)) do
+    local which = label .. (type(steps[1]) == "table" and (" (step %d)"):format(n) or "")
+    local argv, xerr = expand_all(step, vars)
+    if not argv then
+      return ("its %s: %s"):format(which, xerr)
+    end
+    argv[1] = resolve(argv[1], root)
+    local berr = batch_args_ok(argv)
+    if berr then
+      return ("its %s was not started: %s"):format(which, berr)
+    end
+    local ok, obj = pcall(vim.system, argv, { cwd = root, text = true })
+    if not ok then
+      return ("its %s did not start: %s"):format(which, tostring(obj))
+    end
+    local done = obj:wait(ms or M.BUILD_MS)
+    if done.code ~= 0 then
+      local why = vim.trim(done.stderr ~= "" and done.stderr or done.stdout or ""):sub(-300)
+      return ("its %s failed (exit %d): %s"):format(which, done.code, why)
+    end
+  end
+  return nil
+end
+
+---The argv that starts `argv` the way a link does (`start = "link"`, Windows): the starter script in an editor of
+---its own, which says the pid of the program on its stdout. Elsewhere the program itself.
+---@param argv string[]
+---@return string[] argv, boolean through Whether the starter stands between.
+local function link_argv(argv)
+  if not require("testing.platform").is_windows() then
+    return argv, false
+  end
+  local starter = vim.api.nvim_get_runtime_file("lua/testing/sheet/link_start.lua", false)[1]
+    or (vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)) .. "/link_start.lua")
+  local out = { vim.v.progpath, "--clean", "-l", starter }
+  vim.list_extend(out, argv)
+  return out, true
+end
+
+---End an app with everything it started. On Windows the process table is walked from the root down
+---(`testing.child.winproc`); `testing.child.kill_tree` takes a handle of its own children only (it needs their libuv
+---handle), so for the process of an app it found no root and ended nothing below it. While the root is not ended its
+---handle stays open, so its pid cannot go to another process in between.
+---@param proc vim.SystemObj|table
+local function kill_app_tree(proc)
+  local function kill_root()
+    return (pcall(proc.kill, proc, 9))
+  end
+  if require("testing.platform").is_windows() then
+    local winproc = require("testing.child.winproc")
+    local w = winproc.load()
+    if w and winproc.kill_trees(w, { { pid = proc.pid, kill = kill_root } }) then
+      return
+    end
+  end
+  require("testing.child").kill_tree({ pid = proc.pid })
+  kill_root()
+end
+
 ---@class Testing.Sheet.App
 ---@field vars table<string, string> What a sheet may fill in: `temp`, and the name of `ready.as`.
 ---@field pid? integer Not with `prepare_only`.
 ---@field window? string A part of the title of its window.
+---@field window_ms? integer How long the desktop engine waits for that window (its driver's default: 30 s).
 ---@field stop fun() The whole process tree and the folder go away. Safe to call twice.
 ---@field argv? string[] With `prepare_only`: the program and its arguments, filled in, the program resolved.
 ---@field env? table<string, string> With `prepare_only`: its environment, filled in.
@@ -300,6 +402,13 @@ function M.start(name, root, opts)
   local temp = vim.fs.normalize(vim.fn.tempname()) .. "-app"
   vim.fn.mkdir(temp, "p")
   local vars = { temp = temp }
+  if spec.prepare then
+    local perr = run_prepare(spec.prepare, root, vars)
+    if perr then
+      pcall(vim.fn.delete, temp, "rf")
+      return nil, perr
+    end
+  end
   local proc
   local exit_code
   local stopped = false
@@ -316,9 +425,12 @@ function M.start(name, root, opts)
         return exit_code ~= nil
       end, 20)
       if exit_code == nil then
-        require("testing.child").kill_tree({ pid = proc.pid })
-        pcall(proc.kill, proc, 9)
+        kill_app_tree(proc)
       end
+    end
+    -- what the app left outside its tree (a window another program opened for it): best effort, never a failure
+    if spec.cleanup then
+      pcall(run_prepare, spec.cleanup, root, vars, "cleanup", M.CLEANUP_MS)
     end
     pcall(vim.fn.delete, temp, "rf")
   end
@@ -339,13 +451,28 @@ function M.start(name, root, opts)
     env[k] = e
   end
   if opts.prepare_only then
-    return { vars = vars, stop = stop, argv = argv, env = env, window = spec.window }, nil
+    return {
+      vars = vars,
+      stop = stop,
+      argv = argv,
+      env = env,
+      window = spec.window,
+      window_ms = spec.window_ms,
+    },
+      nil
+  end
+
+  -- `start = "link"`: the starter stands between, detached so that the program finds no console of a parent
+  local through = false
+  if spec.start == "link" then
+    argv, through = link_argv(argv)
   end
 
   local lines, partial, stderr = {}, "", {}
   local ok, obj = pcall(vim.system, argv, {
     cwd = root,
     env = env,
+    detach = through or nil,
     stdin = true,
     text = false,
     stdout = function(_, data)
@@ -370,6 +497,26 @@ function M.start(name, root, opts)
     return nil, "it did not start: " .. tostring(obj)
   end
   proc = obj
+  local pid = proc.pid
+
+  if through then
+    local said
+    vim.wait(M.LINK_MS, function()
+      for _, line in ipairs(lines) do
+        said = said or tonumber(line:match("^pid (%d+)%s*$"))
+      end
+      return said ~= nil or exit_code ~= nil
+    end, 20)
+    if not said then
+      stop()
+      return nil,
+        ("its starter (start = link) said no pid%s: %s"):format(
+          exit_code and (" (exit %d)"):format(exit_code) or "",
+          vim.trim(table.concat(stderr)):sub(1, 300)
+        )
+    end
+    pid = said
+  end
 
   -- a program that hands over to one already running ends at once with success: `ended_early` says what that means
   local function ended_early()
@@ -426,7 +573,8 @@ function M.start(name, root, opts)
       vars[spec.ready.as] = matched
     end
   end
-  return { vars = vars, stop = stop, pid = proc.pid, window = spec.window }, nil
+  return { vars = vars, stop = stop, pid = pid, window = spec.window, window_ms = spec.window_ms },
+    nil
 end
 
 ---The steps with the `${names}` of the app filled in. Only `open` takes them.

@@ -31,7 +31,11 @@ function M.driver(s, opts, ctx)
       return { exe }, nil
     end,
     options = function(app)
-      return { pid = app and app.pid, window = app and app.window }
+      return {
+        pid = app and app.pid,
+        window = app and app.window,
+        window_ms = app and app.window_ms,
+      }
     end,
   })
 end
