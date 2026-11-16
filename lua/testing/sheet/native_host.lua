@@ -109,7 +109,8 @@ end
 ---@return boolean
 local function under(a, b)
   local function norm(p)
-    return (vim.fs.normalize(p):gsub("/+$", ""):lower())
+    -- a registry value has backslashes; normalize keeps them off Windows
+    return (vim.fs.normalize((p:gsub("\\", "/"))):gsub("/+$", ""):lower())
   end
   local na, nb = norm(a), norm(b)
   return na == nb or na:sub(1, #nb + 1) == nb .. "/"
