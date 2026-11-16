@@ -86,15 +86,15 @@ end
 
 ---The priority to set, or nil and why not.
 ---@param args string[]
----@param getenv fun(name: string): string|nil
+---@param lookup fun(name: string): string|nil
 ---@return integer|nil priority
 ---@return string|nil why_not
-function M.decide(args, getenv)
-  local ci = getenv("CI")
+function M.decide(args, lookup)
+  local ci = lookup("CI")
   if ci and ci ~= "" and ci ~= "false" and ci ~= "0" then
     return nil, "CI"
   end
-  local want = (getenv(M.ENV) or ""):lower()
+  local want = (lookup("TESTING_PRIORITY") or ""):lower()
   if want == "normal" or want == "off" then
     return nil, M.ENV
   end
@@ -106,12 +106,13 @@ end
 
 ---Lower this process when `decide` says so; never raises, never raises the priority.
 ---@param args string[]
----@param getenv? fun(name: string): string|nil
+---@param lookup fun(name: string): string|nil the entry hands in `os.getenv`; this module never reads the
+--- environment itself, so a spec whose closure reaches it keeps its cache key (testing.cache: `env_dynamic`)
 ---@param uv? table `vim.uv` (a fake in the specs)
 ---@return boolean lowered
-function M.apply(args, getenv, uv)
+function M.apply(args, lookup, uv)
   uv = uv or vim.uv
-  local prio = M.decide(args, getenv or os.getenv)
+  local prio = M.decide(args, lookup)
   if not prio then
     return false
   end
