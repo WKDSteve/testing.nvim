@@ -69,6 +69,13 @@ return function(H)
   )
   eq(p.env.LIB_NVIM_DIR, nil, "and only when it was asked for")
 
+  -- raw_env (a live sheet's keys and URLs) arrives exactly as given: on Windows `native` turned
+  -- `http://127.0.0.1:11434` into `http:\\127.0.0.1:11434`, and the network guard blocked the URL
+  local praw =
+    plan({ raw_env = { AI_OLLAMA_HOST = "http://127.0.0.1:11434", A_KEY = "sk/ab+cd/ef" } })
+  eq(praw.env.AI_OLLAMA_HOST, "http://127.0.0.1:11434", "raw_env: a URL keeps its slashes")
+  eq(praw.env.A_KEY, "sk/ab+cd/ef", "raw_env: a key with a slash is unchanged")
+
   -- the working directory is the project root (SEC-02)
   eq(p.cwd:gsub("\\", "/"), root, "cwd is the project root")
 

@@ -317,7 +317,8 @@ function M.new(s, opts, ctx)
         return { skip = why }
       end
     end
-    local env = live_env
+    -- a live sheet's values are keys and URLs, not paths: passed as they are (`raw_env`)
+    local env = nil
     if s.fakes then
       -- stand-ins first on the child's PATH, a fresh log per size; a step reads it with
       -- `require("testing.fake_programs").read(vim.env.TESTING_FAKES)`
@@ -342,6 +343,7 @@ function M.new(s, opts, ctx)
       guard = live_guard or false,
       extra_env = env,
       env_allow = #env_allow > 0 and env_allow or nil,
+      raw_env = live_env,
       -- a call behind a prompt fails at once and says so, `screen` reads the prompt from the UI
       watch_prompts = true,
       -- confirm(), input() and inputlist() from Lua answer "cancelled" at once (a lua step that calls input() would

@@ -819,7 +819,8 @@ return {
   `testing sheets step`, never where `CI` is set (not even with `--live`). Otherwise, and when one of its variables is
   not set, it is a **reported skip** with the reason, never a green run. Before it runs, the command says on stderr which
   keys, which hosts and what it costs (`live sheet <id>: real keys (...) and network (...); cost: ...`).
-* Its child gets exactly the named variables, and a network guard (`testing.guard.process_net`, mode error, the other
+* Its child gets exactly the named variables, their values as they are (not rewritten as paths: a URL keeps its
+  `//` on Windows too), and a network guard (`testing.guard.process_net`, mode error, the other
   guards off) that lets it reach the named hosts only: a Lua connection to another host is blocked, `curl` goes through
   only when every URL of its arguments names one of them, any other program is blocked. A blocked attempt fails the
   step: `the live sheet reached what it does not name (live.hosts): ...`. A safety net, not a sandbox: what a started

@@ -101,7 +101,8 @@ end
 ---@field rtp_prepend? string[] Directories put first on the child's runtimepath (default: this checkout and lib.nvim).
 ---@field rtp? string[] Directories appended to the child's runtimepath.
 ---@field env_allow? string[] Extra environment names (see `testing.child.env`).
----@field extra_env? table<string, string> Variables set by the driver (default adds `TESTING_NVIM_DIR`, `LIB_NVIM_DIR`).
+---@field extra_env? table<string, string> Variables set by the driver (default adds `TESTING_NVIM_DIR`, `LIB_NVIM_DIR`); paths, written with native separators on Windows.
+---@field raw_env? table<string, string> Variables passed exactly as given (a live sheet's keys and URLs, which are not paths).
 ---@field parent_env? table<string, string> Replaces `vim.fn.environ()` (specs).
 ---@field nvim? string Executable (default `vim.v.progpath`).
 ---@field base? string Directory below which the sandbox is created.
@@ -642,6 +643,7 @@ local function start(S, async_cb)
     -- the user's config reads the user's environment (`REPOS_DIR`, ...): all of it but `NVIM*`
     pass_env = opts.user_config ~= nil,
     extra_env = extra_env,
+    raw_env = opts.raw_env,
     deterministic = opts.deterministic,
     isolate_home = opts.isolate_home,
     -- a restart that keeps the sandbox starts in the same directory (`child.restart({ keep_sandbox = true })`)

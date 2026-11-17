@@ -169,7 +169,7 @@ end
 ---The sandbox directory, the sanitized environment, the determinism variables and the sandbox
 ---variables of a child (shared by the per-file child and the RPC driver `testing.rpc`). Pure apart
 ---from reading the environment and a counter: nothing is created.
----@param spec { parent_env?: table<string, string>, env_allow?: string[], extra_env?: table<string, string>, deterministic?: boolean, isolate_home?: boolean, base?: string, name?: string }
+---@param spec { parent_env?: table<string, string>, env_allow?: string[], extra_env?: table<string, string>, raw_env?: table<string, string>, deterministic?: boolean, isolate_home?: boolean, base?: string, name?: string }
 ---@return Testing.Child.Environment
 function M.environment(spec)
   seq = seq + 1
@@ -218,6 +218,10 @@ function M.environment(spec)
 
   for key, value in pairs(spec.extra_env or {}) do
     env[key] = native(value)
+  end
+  -- values that are not paths (a live sheet's key or URL): `native` would turn `http://host` into `http:\\host`
+  for key, value in pairs(spec.raw_env or {}) do
+    env[key] = value
   end
   return { env = env, dropped_env = clean.dropped, sandbox = sandbox, dirs = dirs }
 end
