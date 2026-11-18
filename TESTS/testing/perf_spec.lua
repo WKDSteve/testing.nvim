@@ -329,6 +329,84 @@ return function(H)
     )
     eq(#reached.covered, 1, "a reach record (an in-process LSP client) counts too")
     eq(scan.relative("D:/other/x.lua:3", root), nil, "a place outside the root")
+    -- round 3 (findings of the second wave)
+    eq(
+      scan.match('error("vim.system() is missing")'),
+      nil,
+      "a primitive inside a string is no call"
+    )
+    eq(
+      scan.strip_strings('a("x(") .. b'),
+      'a("  ") .. b',
+      "string contents are blanked, the quotes stay"
+    )
+    eq(
+      scan.match("local ok, r = xpcall(vim.system, debug.traceback, argv)"),
+      "pcall(system)",
+      "xpcall too"
+    )
+    eq(
+      { scan.alias_of('local ok, git = pcall(require, "lib.nvim.git")') },
+      { "git", "lib.nvim.git" },
+      "pcall(require)"
+    )
+    ok(
+      not scan.is_tail("  return vim.system(argv, opts):wait()"),
+      "a chained method is the tail call, not the site"
+    )
+    ok(scan.is_tail("  return git.status(dir)"), "a plain return of a call is one")
+    local root3 = tmp .. "/plug3.nvim"
+    write("plug3.nvim/lua/plug3/init.lua", {
+      'local ok, git = pcall(require, "lib.nvim.git")',
+      "local status = git.status",
+      "local M = {}",
+      "M.request = git.status",
+      "local function inner()",
+      "  return git.status('.')",
+      "end",
+      "function M.open()",
+      "  return git.status('x')",
+      "end",
+      "function M.a() return status('.') end",
+      "function M.b() return M.request('.') end",
+      "function M.c() return inner() end",
+      "return M",
+    })
+    local s3 = scan.sites(root3, spawning)
+    eq(
+      vim.tbl_map(function(s)
+        return ("%d %s %s %s"):format(s.line, s.what, tostring(s.tail_fn), tostring(s.tail_local))
+      end, s3),
+      {
+        "6 lib.nvim.git.status inner true",
+        "9 lib.nvim.git.status open nil",
+        "11 lib.nvim.git.status a nil",
+        "12 lib.nvim.git.status b nil",
+      },
+      "a pcall(require) alias, a function alias and a field alias are sites; the tail kind is kept"
+    )
+    write(
+      "plug3.nvim/lua/plug3/other.lua",
+      { "local function inner() end", "return function() inner() vim.ui.open('x') end" }
+    )
+    local t3 = scan.coverage(s3, {
+      { site = "x", stack = { root3 .. "/lua/plug3/other.lua:2" } },
+    }, root3, false)
+    eq(
+      #t3.covered,
+      0,
+      "an unqualified call in another file is not the local function; open( unqualified is no field call"
+    )
+    local t4 = scan.coverage(s3, {
+      { site = "x", stack = { root3 .. "/lua/plug3/init.lua:13" } },
+    }, root3, false)
+    eq(
+      vim.tbl_map(function(s)
+        return s.line
+      end, t4.covered),
+      { 6 },
+      "inner() in its own file reaches the local function's tail call"
+    )
     -- a linked worktree: its main checkout from the .git file
     write("wt/.git", { "gitdir: E:/repos/plug.nvim/.git/worktrees/x1" })
     eq(

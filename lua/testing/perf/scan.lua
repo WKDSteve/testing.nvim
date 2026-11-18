@@ -21,6 +21,7 @@ local M = {}
 ---@field what string the name that matched
 ---@field text string the line, trimmed and cut
 ---@field span? integer lines the site covers (2 for a call wrapped onto the next line)
+---@field tail_local? boolean the tail call's function is local: only an unqualified call in its own file reaches it
 ---@field tail_fn? string a tail call (`return f(...)`): the name of the function around it; its frame is gone at run
 ---time, so the site counts as reached when a caller of that function is on a start's stack
 
@@ -37,13 +38,13 @@ M.PATTERNS = {
   { "os%.execute%s*%(", "os.execute" },
   { "vim%.lsp%.start%s*%(", "vim.lsp.start" },
   -- a primitive handed to pcall as a value: `pcall(vim.system, argv)`, `pcall(fn.jobstart, cmd, opts)`
-  { "pcall%s*%(%s*[%w_.]*%.system%s*[,%)]", "pcall(system)" },
-  { "pcall%s*%(%s*[%w_.]*%.systemlist%s*[,%)]", "pcall(systemlist)" },
-  { "pcall%s*%(%s*[%w_.]*jobstart%s*[,%)]", "pcall(jobstart)" },
-  { "pcall%s*%(%s*[%w_.]*termopen%s*[,%)]", "pcall(termopen)" },
-  { "pcall%s*%(%s*[%w_.]*%f[%w_]uv%.spawn%s*[,%)]", "pcall(uv.spawn)" },
-  { "pcall%s*%(%s*io%.popen%s*[,%)]", "pcall(io.popen)" },
-  { "pcall%s*%(%s*os%.execute%s*[,%)]", "pcall(os.execute)" },
+  { "x?pcall%s*%(%s*[%w_.]*%.system%s*[,%)]", "pcall(system)" },
+  { "x?pcall%s*%(%s*[%w_.]*%.systemlist%s*[,%)]", "pcall(systemlist)" },
+  { "x?pcall%s*%(%s*[%w_.]*jobstart%s*[,%)]", "pcall(jobstart)" },
+  { "x?pcall%s*%(%s*[%w_.]*termopen%s*[,%)]", "pcall(termopen)" },
+  { "x?pcall%s*%(%s*[%w_.]*%f[%w_]uv%.spawn%s*[,%)]", "pcall(uv.spawn)" },
+  { "x?pcall%s*%(%s*io%.popen%s*[,%)]", "pcall(io.popen)" },
+  { "x?pcall%s*%(%s*os%.execute%s*[,%)]", "pcall(os.execute)" },
 }
 
 M.DIRS = { "lua", "plugin" }
@@ -79,10 +80,53 @@ function M.code_of(line)
   return line
 end
 
+---A line with the contents of its string literals blanked (the quotes stay): `"vim.system() failed"` in a message is
+---no call.
+---@param code string
+---@return string
+function M.strip_strings(code)
+  local out, quote, i = {}, nil, 1
+  while i <= #code do
+    local c = code:sub(i, i)
+    if quote then
+      if c == "\\" then
+        out[#out + 1] = "  "
+        i = i + 1
+      elseif c == quote then
+        quote = nil
+        out[#out + 1] = c
+      else
+        out[#out + 1] = " "
+      end
+    else
+      if c == '"' or c == "'" then
+        quote = c
+      end
+      out[#out + 1] = c
+    end
+    i = i + 1
+  end
+  return table.concat(out)
+end
+
+---The alias a line binds to a module: `local git = require("m")` or `local ok, git = pcall(require, "m")`.
+---@param code string
+---@return string|nil alias, string|nil module
+function M.alias_of(code)
+  local alias, name =
+    code:match("local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*$")
+  if alias then
+    return alias, name
+  end
+  return code:match(
+    "local%s+[%w_]+%s*,%s*([%w_]+)%s*=%s*pcall%s*%(%s*require%s*,%s*[\"']([%w_%.@%-]+)[\"']"
+  )
+end
+
 ---What a line starts, or nil: a primitive, a call on an alias of a spawning module (`git.run_async(`), a call on
 ---such a module required in place (`require("lib.nvim.git").run_async(`).
 ---@param line string
----@param ctx? { aliases?: table<string, string>, spawning?: table<string, table<string, boolean>> }
+---@param ctx? { aliases?: table<string, string>, spawning?: table<string, table<string, boolean>>, funcs?: table<string, string>, fields?: table<string, string> }
 ---@return string|nil what
 function M.match(line, ctx)
   local code = M.code_of(line)
@@ -92,13 +136,26 @@ function M.match(line, ctx)
   -- a definition (`function M.spawn(`, `local function jobstart(`) is no call: its signature is left out
   code =
     code:gsub("^%s*local%s+function%s+[%w_]+%s*%b()", ""):gsub("^%s*function%s+[%w_.:]+%s*%b()", "")
+  local bare = M.strip_strings(code)
   for _, p in ipairs(M.PATTERNS) do
-    if code:find(p[1]) then
+    if bare:find(p[1]) then
       return p[2]
     end
   end
   if not ctx then
     return nil
+  end
+  -- a spawning function bound to a name of the plugin: `local resolve = path.resolve` -> `resolve(`, a field
+  -- `M.request = helper.request` -> `.request(` / `:request(`
+  for name, what in pairs(ctx.funcs or {}) do
+    if bare:find("%f[%w_]" .. name .. "%s*%(") and not bare:find("[%.:]" .. name .. "%s*%(") then
+      return what
+    end
+  end
+  for name, what in pairs(ctx.fields or {}) do
+    if bare:find("[%.:]" .. name .. "%s*%(") then
+      return what
+    end
   end
   local spawning = ctx.spawning or {}
   for name, rest in code:gmatch("require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*([%.%(:][^%)]*)") do
@@ -138,7 +195,13 @@ function M.is_tail(line)
   end
   code =
     code:gsub("^%s*local%s+function%s+[%w_]+%s*%b()", ""):gsub("^%s*function%s+[%w_.:]+%s*%b()", "")
-  return code:match("^%s*return%s") ~= nil
+  if not code:match("^%s*return%s") then
+    return false
+  end
+  -- `return vim.system(...):wait()`: the tail call is the chained method; the site's call keeps its frame
+  -- (a `require("m").f(` is the call itself, not a chain)
+  local plain = code:gsub("require%s*%(?%s*[\"'][^\"']*[\"']%s*%)?", "require_m")
+  return not M.strip_strings(plain):find("%)%s*[%.:][%w_]+%s*%(")
 end
 
 ---The module name of a file below `lua/`: `lua/lib/nvim/git/init.lua` -> `lib.nvim.git`.
@@ -184,8 +247,7 @@ local function analyse(lines)
   for _, line in ipairs(lines) do
     local code = M.code_of(line)
     if code then
-      local alias, name =
-        code:match("local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*$")
+      local alias, name = M.alias_of(code)
       if alias then
         aliases[alias] = name
       end
@@ -389,26 +451,51 @@ function M.sites(root, spawning)
       end
       f:close()
       -- first the aliases of the file: `local git = require("lib.nvim.git")`
-      local aliases = {}
+      local aliases, funcs, fields = {}, {}, {}
       for _, line in ipairs(lines) do
         local code = M.code_of(line)
         if code then
-          local alias, name =
-            code:match("local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*$")
+          local alias, name = M.alias_of(code)
           if alias and spawning and spawning[name] then
             aliases[alias] = name
           end
         end
       end
-      local ctx = { aliases = aliases, spawning = spawning or {} }
-      local fn_name -- the function the current line is in (the nearest definition above)
+      -- a spawning function bound to a name: `local x = git.status`, `M.x = git.status`,
+      -- `local x = require("m").f` (no call on that line)
+      for _, line in ipairs(lines) do
+        local code = M.code_of(line)
+        if code and spawning then
+          local lhs, mod, fn = code:match("^%s*local%s+([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+          local field
+          if not lhs then
+            field, mod, fn = code:match("^%s*[%w_]+%.([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+          end
+          local target = mod and aliases[mod]
+          if not lhs and not field then
+            lhs, target, fn = code:match(
+              "^%s*local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%.([%w_]+)%s*$"
+            )
+          end
+          if target and fn and spawning[target] and spawning[target][fn] then
+            if lhs then
+              funcs[lhs] = target .. "." .. fn
+            elseif field then
+              fields[field] = target .. "." .. fn
+            end
+          end
+        end
+      end
+      local ctx = { aliases = aliases, spawning = spawning or {}, funcs = funcs, fields = fields }
+      local fn_name, fn_local -- the function the current line is in (the nearest definition above), and its kind
       for n, line in ipairs(lines) do
-        local def = line:match("^%s*local%s+function%s+([%w_]+)%s*%(")
-          or line:match("^%s*function%s+[%w_.:]-([%w_]+)%s*%(")
+        local loc = line:match("^%s*local%s+function%s+([%w_]+)%s*%(")
           or line:match("^%s*local%s+([%w_]+)%s*=%s*function%s*%(")
+        local def = loc
+          or line:match("^%s*function%s+[%w_.:]-([%w_]+)%s*%(")
           or line:match("^%s*[%w_.]-([%w_]+)%s*=%s*function%s*%(")
         if def then
-          fn_name = def
+          fn_name, fn_local = def, loc ~= nil
         end
         local what = M.match(line, ctx)
         local wrapped = false
@@ -428,6 +515,7 @@ function M.sites(root, spawning)
             -- a wrapped call may be reported on its next line at run time
             span = wrapped and 2 or nil,
             tail_fn = M.is_tail(line) and fn_name or nil,
+            tail_local = M.is_tail(line) and fn_name and fn_local or nil,
           }
         end
       end
@@ -503,17 +591,74 @@ function M.coverage(sites, spawns, root, ci, reaches)
       take(place)
     end
   end
-  -- the names called on the lines of the frames: what a tail-call site needs
-  local called, cache = {}, {}
+  -- the calls on the lines of the frames: what a tail-call site needs. An unqualified call (`f(`) reaches a local
+  -- function of its own file; a qualified one (`x.f(`, `x:f(`) a field function of the module `x` stands for: an alias
+  -- `local x = require("<module>")` of the caller's file, the module table of the caller's own file, or
+  -- `require("<module>").f(` in place. `vim.ui.open(` is no call of a plugin's `M.open`.
+  local qualified, plain, cache, file_aliases = {}, {}, {}, {}
+  local base = vim.fs.normalize(root):gsub("/+$", "")
+  local function aliases_of(file)
+    if not file_aliases[file] then
+      local t = {}
+      line_at(cache, base, file, 1)
+      for _, l in ipairs(cache[file] or {}) do
+        local c = M.code_of(l)
+        if c then
+          local a, m = M.alias_of(c)
+          if a then
+            t[a] = m
+          end
+        end
+      end
+      local own = M.module_of(file)
+      if own then
+        -- the module table of the file itself (`M.f(` inside it), whatever it is called
+        for i = #(cache[file] or {}), 1, -1 do
+          local r = cache[file][i]:match("^return%s+([%w_]+)%s*$")
+          if r then
+            t[r] = own
+            break
+          end
+        end
+        t.M = t.M or own
+      end
+      file_aliases[file] = t
+    end
+    return file_aliases[file]
+  end
   for _, fr in ipairs(frames) do
-    local text = line_at(cache, vim.fs.normalize(root):gsub("/+$", ""), fr.file, fr.line)
-    for name in (text and (M.code_of(text) or "") or ""):gmatch("([%w_]+)%s*%(") do
-      called[name] = true
+    local text = line_at(cache, base, fr.file, fr.line)
+    local code = text and M.code_of(text) or ""
+    for mod, name in
+      code:gmatch("require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*[%.:]([%w_]+)%s*%(")
+    do
+      qualified[mod .. "\0" .. name] = true
+    end
+    local bare = M.strip_strings(code)
+    local al = aliases_of(fr.file)
+    for q, name in bare:gmatch("([%w_]+)[%.:]([%w_]+)%s*%(") do
+      if al[q] then
+        qualified[al[q] .. "\0" .. name] = true
+      end
+    end
+    for at, name in bare:gmatch("()%f[%w_]([%w_]+)%s*%(") do
+      local before = at > 1 and bare:sub(at - 1, at - 1) or ""
+      if before ~= "." and before ~= ":" then
+        plain[fr.file .. "\0" .. name] = true
+      end
     end
   end
   local covered, missing = {}, {}
   for _, site in ipairs(sites) do
-    local reached = site.tail_fn ~= nil and called[site.tail_fn] == true
+    local reached = false
+    if site.tail_fn then
+      if site.tail_local then
+        reached = plain[site.file .. "\0" .. site.tail_fn] == true
+      else
+        local mod = M.module_of(site.file)
+        reached = mod ~= nil and qualified[mod .. "\0" .. site.tail_fn] == true
+      end
+    end
     for line = site.line, site.line + (site.span or 1) - 1 do
       local key = ("%s:%d"):format(site.file, line)
       reached = reached or hit[ci and key:lower() or key] == true

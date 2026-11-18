@@ -311,6 +311,15 @@ function M.run_root(root, o)
       (not want_sheet or want_sheet[s.id]) and (not want_feature or want_feature[s.feature or ""])
     then
       local r = run_sheet(o, root, s, rel, tree)
+      if main then
+        -- the trace names a source by its folder: in a worktree that is the worktree's, not the repository's
+        local folder = vim.fs.basename(root)
+        for _, sp in ipairs(r.spawns) do
+          if sp.plugin == folder then
+            sp.plugin = repo
+          end
+        end
+      end
       out.sheets[#out.sheets + 1] = r
       vim.list_extend(all_spawns, r.spawns)
       vim.list_extend(all_reaches, r.reaches or {})

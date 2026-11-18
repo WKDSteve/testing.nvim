@@ -77,13 +77,17 @@ The same call in a loop is one line with a count (grouped by kind, program and c
 `(` or `vim`), or a function of lib.nvim that starts a process. Which functions of lib.nvim those are is computed from
 lib.nvim itself, **per function**: a top-level function (stylua's layout: the definition and its `end` at column 0)
 whose body calls a primitive, or a spawning function of its own module or of a module it requires (a fixpoint). So
-`git.run_async(...)` on `local git = require("lib.nvim.git")` is a site, `autocmd.create(...)` is not, and
-`require("m").f` without a call (a field read) is not either.
+`git.run_async(...)` on `local git = require("lib.nvim.git")` (or `local ok, git = pcall(require, "lib.nvim.git")`) is
+a site, `autocmd.create(...)` is not, and `require("m").f` without a call (a field read) is not either; a spawning
+function bound to a name of the plugin (`local status = git.status`, `M.request = helper.request`) makes its calls
+sites. A primitive inside a string literal (an error message) is no site; `xpcall` counts like `pcall`.
 
 A site is **reached** when any frame of a start's stack lies on it: the start's `site`, its `origin` and every
 caller up to 16 frames (a call into the plugin's own wrapper counts). A wrapped call counts on its next line too.
 A **tail call** (`return git.refs(...)`) loses its frame at run time; it counts as reached when a frame on a stack
-calls the function it is in (by name). A `vim.lsp.start` is recorded as a *reach* even when it starts no process (an
+calls the function it is in: a local function by an unqualified call in its own file, a module function by a call
+through an alias of that module (`require`d in the caller's file, or the file's own module table). `return
+vim.system(...):wait()` is no tail call of the site (the chained method is). A `vim.lsp.start` is recorded as a *reach* even when it starts no process (an
 in-process server whose `cmd` is a function). It is a heuristic on purpose: it finds the candidates, the run proves which
 were reached; an unreached site is a functionality without a sheet, a sheet that does not go far enough, or a case for
 `perf` below.
