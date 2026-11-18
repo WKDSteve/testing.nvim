@@ -45,6 +45,8 @@ local REQUIRED_LIB = {
   { "lib.nvim.fs.create_exclusive", "the lock of the queue of heavy runs" },
   { "lib.nvim.fs.normkey", "comparing paths" },
   { "lib.nvim.fs.watch", "the watch loop" },
+  { "lib.nvim.fs.fast", "the watch loop on Linux through the file helper" },
+  { "lib.nvim.fs.helper", "whether the file helper is there for the watch" },
   { "lib.nvim.fs.project_key", "stable project key of a run" },
   { "lib.nvim.fs.write.atomic", "atomic write of the JSON IR and the reports" },
   { "lib.nvim.fs.write.append", "appending to the history files" },
