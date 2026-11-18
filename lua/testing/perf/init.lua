@@ -34,6 +34,9 @@ function M.parse(argv)
   while i <= #argv do
     local a = argv[i]
     local flag, inline = a:match("^(%-%-[%w%-]+)=(.*)$")
+    if flag == "--keep-traces" then
+      return nil, "--keep-traces takes no value"
+    end
     if flag then
       -- `--real=all` is `--real all`
       table.insert(argv, i + 1, inline)

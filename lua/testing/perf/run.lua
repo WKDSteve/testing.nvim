@@ -77,30 +77,35 @@ function M.split_fakes(fakes, real)
   return #kept > 0 and kept or nil, made
 end
 
----The step a moment belongs to.
+---The step a moment belongs to, and the size it ran at. Every size has its own child: a moment before the first step
+---of a size is that child's `start` (its editor and the plugin's setup), one after the last step of the sheet `after`.
 ---@param steps Testing.Perf.Step[]
 ---@param us integer
----@return integer|string
+---@return integer|string step, string|nil size
 function M.step_of(steps, us)
-  if #steps == 0 or us < steps[1].t0 then
-    return "start"
+  if #steps == 0 then
+    return "start", nil
   end
+  local prev, nxt
   for _, st in ipairs(steps) do
     if us >= st.t0 and us <= st.t1 then
-      return st.n
+      return st.n, st.size
+    end
+    if st.t1 < us then
+      prev = st
+    elseif not nxt and st.t0 > us then
+      nxt = st
     end
   end
-  -- between two steps (the driver's own calls): the step that just ended
-  local last
-  for _, st in ipairs(steps) do
-    if st.t1 <= us then
-      last = st
-    end
+  if nxt and (not prev or nxt.n == 1) then
+    -- before the first step of a size: its child booting
+    return "start", nxt.size
   end
-  if last and last == steps[#steps] then
-    return "after"
+  if not nxt then
+    return "after", prev and prev.size or nil
   end
-  return last and last.n or "start"
+  -- between two steps of one size (the driver's own calls): the step that just ended
+  return prev.n, prev.size
 end
 
 ---Replace the sandbox path of the user's config by the real one in a trace place.
@@ -195,6 +200,9 @@ local function run_sheet(o, root, s, rel, tree)
   end
   local mark1 = tree:count()
   session:close()
+  local samples = tree:between(mark0, mark1)
+  -- what this sheet saw is taken: the samples before go, so a long run never fills the bound of the tree
+  tree:forget(mark1)
   local result = session:result()
   res.ms = math.floor((now_us() - t_start) / 1000)
   res.status = result.status
@@ -210,7 +218,6 @@ local function run_sheet(o, root, s, rel, tree)
   end
   local spawns = require("testing.perf.trace").fold(records)
   local config_to = s.config == "user" and o.user_config_dir or nil
-  local samples = tree:between(mark0, mark1)
   local per = require("testing.perf.tree").per_process(samples)
   local last = samples[#samples]
   local alive = {}
@@ -218,7 +225,7 @@ local function run_sheet(o, root, s, rel, tree)
     alive[p.pid] = true
   end
   for _, sp in ipairs(spawns) do
-    sp.step = M.step_of(res.steps, sp.us)
+    sp.step, sp.size = M.step_of(res.steps, sp.us)
     if config_to then
       sp.site = map_config(sp.site, config_from, config_to)
       sp.origin = map_config(sp.origin, config_from, config_to)

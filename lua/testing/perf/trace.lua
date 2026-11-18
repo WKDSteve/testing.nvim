@@ -40,6 +40,7 @@ end
 ---@field fd file*
 ---@field lines integer
 ---@field next_id integer
+---@field jobs table<integer, integer> job id -> trace id (for `jobwait`)
 ---@field outer? { kind: string, id: integer }
 ---@field orig table<string, any>
 ---@field config_dir? string
@@ -100,7 +101,11 @@ local function is_runtime(src)
     or p:find("/runtime/lua/vim/", 1, true) ~= nil
     or p:find("/share/nvim/runtime/", 1, true) ~= nil
     or p:find("testing/perf/trace.lua", 1, true) ~= nil
+    -- a live sheet's guard is installed after the trace and wraps it: its frames are no caller either
+    or p:find("/lua/testing/guard/", 1, true) ~= nil
 end
+
+M._is_runtime = is_runtime
 
 ---@param p string
 local function is_lib(p)
@@ -173,6 +178,10 @@ local function argv_text(cmd)
     text = type(cmd) == "table" and table.concat(vim.tbl_map(tostring, cmd), " ") or tostring(cmd)
   end
   text = text:gsub("[%c]", " ")
+  -- cut first: the placeholder loop below must not run over an argv of megabytes
+  if #text > M.MAX_ARGV * 4 then
+    text = text:sub(1, M.MAX_ARGV * 4)
+  end
   -- the child's temporary folders (its sandbox) differ on every run: one placeholder keeps lines comparable
   for _, dir in ipairs({
     os.getenv("TMPDIR") or "",
@@ -262,6 +271,7 @@ function M.install(opts)
     fd = fd,
     lines = 0,
     next_id = 0,
+    jobs = {},
     orig = {},
     config_dir = config_dir and (config_dir:gsub("\\", "/"):gsub("/+$", "")) or nil,
   }
@@ -273,7 +283,12 @@ function M.install(opts)
     if not S then
       return O.system(cmd, sopts, on_exit)
     end
-    local id = start("vim.system", cmd, { sync = on_exit == nil and nil or false })
+    local extra = nil
+    if on_exit ~= nil then
+      -- with a callback nobody waits; without one, a wait() decides (the `wait` record)
+      extra = { sync = false }
+    end
+    local id = start("vim.system", cmd, extra)
     S.outer = { kind = "vim.system", id = id }
     local ok, obj = pcall(O.system, cmd, sopts, on_exit)
     S.outer = nil
@@ -319,13 +334,13 @@ function M.install(opts)
       or function(code)
         finish(id, t0, code)
       end
-    local handle, pid = O.spawn(path, sopts, wrapped)
+    local handle, pid, errname = O.spawn(path, sopts, wrapped)
     if type(pid) == "number" then
       write({ ev = "pid", id = id, pid = pid })
     else
       finish(id, t0, -1)
     end
-    return handle, pid
+    return handle, pid, errname
   end
 
   O.fn_system = vim.fn.system
@@ -353,6 +368,7 @@ function M.install(opts)
         end
         local job = orig(cmd, jopts)
         if type(job) == "number" and job > 0 then
+          S.jobs[job] = id
           local ok, pid = pcall(vim.fn.jobpid, job)
           if ok then
             write({ ev = "pid", id = id, pid = pid })
@@ -365,13 +381,40 @@ function M.install(opts)
     end
   end
 
+  O.jobwait = vim.fn.jobwait
+  vim.fn.jobwait = function(jobs, ...)
+    if not S then
+      return O.jobwait(jobs, ...)
+    end
+    local t0 = now_us()
+    local r = { O.jobwait(jobs, ...) }
+    local ms = (now_us() - t0) / 1000
+    -- the editor waited for these jobs: each is a synchronous start now
+    for _, job in ipairs(type(jobs) == "table" and jobs or { jobs }) do
+      local id = S and S.jobs[job]
+      if id then
+        write({ ev = "wait", id = id, us = now_us(), ms = ms })
+      end
+    end
+    return unpack(r, 1, table.maxn(r))
+  end
+
   O.popen = io_lib.popen
   set(io_lib, "popen", function(cmd, mode)
     if not S then
       return O.popen(cmd, mode)
     end
-    start("io.popen", cmd, { sync = true })
-    return O.popen(cmd, mode)
+    local id = start("io.popen", cmd, { sync = true })
+    local t0 = now_us()
+    local fh, perr = O.popen(cmd, mode)
+    if not fh then
+      finish(id, t0, -1)
+      return fh, perr
+    end
+    -- the editor blocks from here until the handle is read and closed: the close is the end
+    return M.popen_proxy(fh, function(code)
+      finish(id, t0, code)
+    end)
   end)
   O.execute = os_lib.execute
   set(os_lib, "execute", function(cmd)
@@ -381,10 +424,47 @@ function M.install(opts)
     local id = start("os.execute", cmd, { sync = true })
     local t0 = now_us()
     local r = { O.execute(cmd) }
-    finish(id, t0, type(r[1]) == "number" and r[1] or nil)
+    local code = type(r[1]) == "number" and r[1] or nil
+    if code and code > 255 then
+      code = math.floor(code / 256) -- LuaJIT on POSIX returns the raw wait status
+    end
+    finish(id, t0, code)
     return unpack(r, 1, table.maxn(r))
   end)
   return true, nil
+end
+
+---A stand-in for the file of `io.popen` that reports its close (once): every method is the file's, called on the file.
+---@param fh file*
+---@param on_close fun(code: integer|nil)
+---@return table
+function M.popen_proxy(fh, on_close)
+  local closed = false
+  local proxy = {}
+  return setmetatable(proxy, {
+    __index = function(_, key)
+      local v = fh[key]
+      if type(v) ~= "function" then
+        return v
+      end
+      if key == "close" then
+        return function()
+          local r = { fh:close() }
+          if not closed then
+            closed = true
+            on_close(type(r[3]) == "number" and r[3] or nil)
+          end
+          return unpack(r, 1, table.maxn(r))
+        end
+      end
+      return function(self, ...)
+        if self == proxy then
+          self = fh
+        end
+        return v(self, ...)
+      end
+    end,
+  })
 end
 
 ---Put every primitive back and close the file. Safe to call twice.
@@ -402,6 +482,7 @@ function M.uninstall()
       vim.fn[name] = O[name]
     end
   end
+  vim.fn.jobwait = O.jobwait
   set(io_lib, "popen", O.popen)
   set(os_lib, "execute", O.execute)
   pcall(S.fd.close, S.fd)
@@ -455,7 +536,10 @@ function M.fold(records)
   ---@field alive_at_end? boolean
   local by_id, list = {}, {}
   for _, r in ipairs(records) do
-    if r.ev == "start" and r.id then
+    if r.ev == "install" then
+      -- a new child (the next size, a restart) counts its ids from 1 again: a late end of the old one is not its
+      by_id = {}
+    elseif r.ev == "start" and r.id then
       local s = {
         id = r.id,
         us = r.us,

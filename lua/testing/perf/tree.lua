@@ -35,6 +35,7 @@ end
 ---@param procs table[]
 local function add(T, procs)
   if #T.list >= M.MAX_SAMPLES then
+    T.error = T.error or ("more than %d samples kept: later ones are dropped"):format(M.MAX_SAMPLES)
     return
   end
   for _, p in ipairs(procs) do
@@ -137,7 +138,8 @@ local function slurp(path)
   return s
 end
 
----Every process of /proc with its parent, name, rss, peak and CPU seconds.
+---Every process of /proc with its parent, name, rss and CPU seconds (`stat` only); `enrich` adds the peak and the
+---command line of the ones a sample keeps.
 ---@param proc_dir? string
 ---@return table<integer, table>
 function M.read_proc(proc_dir)
@@ -163,23 +165,35 @@ function M.read_proc(proc_dir)
         if rest then
           local f = vim.split(rest, " ", { plain = true })
           -- rest[1] is field 3 (state): ppid 4, utime 14, stime 15, rss 24
-          local status = slurp(("%s/%d/status"):format(proc_dir, pid)) or ""
-          local hwm = tonumber(status:match("VmHWM:%s*(%d+)")) or 0
-          local cmd = (slurp(("%s/%d/cmdline"):format(proc_dir, pid)) or ""):gsub("%z", " ")
           out[pid] = {
             pid = pid,
             ppid = tonumber(f[2]) or 0,
             name = comm,
             ws = (tonumber(f[22]) or 0) * page,
-            peak = hwm * 1024,
+            peak = 0,
             cpu = ((tonumber(f[12]) or 0) + (tonumber(f[13]) or 0)) / ticks,
-            cmd = vim.trim(cmd):sub(1, 300),
+            cmd = "",
           }
         end
       end
     end
   end
   return out
+end
+
+---The peak and the command line of the processes a sample keeps (two more files each: only for these).
+---@param procs table[]
+---@param proc_dir? string
+---@return table[] procs
+function M.enrich(procs, proc_dir)
+  proc_dir = proc_dir or "/proc"
+  for _, p in ipairs(procs) do
+    local status = slurp(("%s/%d/status"):format(proc_dir, p.pid)) or ""
+    p.peak = (tonumber(status:match("VmHWM:%s*(%d+)")) or 0) * 1024
+    local cmd = (slurp(("%s/%d/cmdline"):format(proc_dir, p.pid)) or ""):gsub("%z", " ")
+    p.cmd = vim.trim(cmd):sub(1, 300)
+  end
+  return procs
 end
 
 ---The descendants of `root` in a process table.
@@ -218,7 +232,7 @@ local function start_proc(T, root, interval)
   end
   T.timer = timer
   local function tick()
-    add(T, M.descendants(M.read_proc(), root))
+    add(T, M.enrich(M.descendants(M.read_proc(), root)))
   end
   tick()
   timer:start(interval, interval, vim.schedule_wrap(tick))
@@ -227,6 +241,7 @@ end
 
 ---@class Testing.Perf.Tree
 ---@field list { us: integer, procs: table[] }[]
+---@field base integer samples forgotten before `list[1]` (marks count from the start)
 ---@field done? boolean
 ---@field error? string why there are no samples
 local Tree = {}
@@ -236,7 +251,7 @@ Tree.__index = Tree
 ---@return Testing.Perf.Tree
 function M.start(opts)
   opts = opts or {}
-  local T = setmetatable({ list = {} }, Tree)
+  local T = setmetatable({ list = {}, base = 0 }, Tree)
   local root = opts.root or uv.os_getpid()
   local interval = opts.interval_ms or M.DEFAULT_INTERVAL_MS
   local platform = opts.platform
@@ -255,14 +270,24 @@ function M.start(opts)
   return T
 end
 
----How many samples there are now (a mark for `between`).
+---How many samples there have been (a mark for `between`; forgotten ones count).
 function Tree:count()
-  return #self.list
+  return self.base + #self.list
 end
 
----Samples from mark `a` (exclusive) to mark `b` (inclusive).
+---Samples from mark `a` (exclusive) to mark `b` (inclusive); forgotten ones are not there any more.
 function Tree:between(a, b)
-  return vim.list_slice(self.list, a + 1, b)
+  return vim.list_slice(self.list, math.max(a - self.base, 0) + 1, b - self.base)
+end
+
+---Drop the samples up to mark `m`: a run that has taken what it needs keeps the memory flat.
+function Tree:forget(m)
+  local n = math.min(m - self.base, #self.list)
+  if n <= 0 then
+    return
+  end
+  self.list = vim.list_slice(self.list, n + 1)
+  self.base = self.base + n
 end
 
 ---Stop sampling. Safe to call twice.
@@ -315,5 +340,7 @@ function M.per_process(samples)
   end
   return out
 end
+
+M._Tree = Tree
 
 return M

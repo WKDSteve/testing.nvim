@@ -15,13 +15,15 @@ while ($true) {
   }
   $out = New-Object System.Collections.ArrayList
   $queue = New-Object System.Collections.Queue
+  $seen = @{ $Root = $true }
   $queue.Enqueue($Root)
   while ($queue.Count -gt 0) {
     $parent = [int]$queue.Dequeue()
     if (-not $kids.ContainsKey($parent)) { continue }
     foreach ($c in $kids[$parent]) {
       $cpid = [int]$c.ProcessId
-      if ($cpid -eq $PID -or $cpid -eq $parent) { continue }
+      if ($cpid -eq $PID -or $seen.ContainsKey($cpid)) { continue }
+      $seen[$cpid] = $true
       $cmd = [string]$c.CommandLine
       if ($cmd.Length -gt 300) { $cmd = $cmd.Substring(0, 300) }
       [void]$out.Add([ordered]@{

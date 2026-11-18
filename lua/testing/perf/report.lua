@@ -176,7 +176,7 @@ function M.findings(repo, sh, t)
         end
       end
       if type(sp.step) == "number" then
-        local key = sp.step .. "\0" .. (sp.plugin or "?")
+        local key = sp.step .. "\0" .. (sp.size or "") .. "\0" .. (sp.plugin or "?")
         per_step[key] = per_step[key] or { n = 0, sp = sp }
         per_step[key].n = per_step[key].n + 1
       end

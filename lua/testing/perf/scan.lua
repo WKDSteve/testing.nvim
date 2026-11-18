@@ -9,7 +9,7 @@
 --- It is a heuristic on purpose: it finds the candidates, the run proves which were reached. A site is **covered**
 --- when a start of the run has it as its `site` or `origin` (`testing.perf.trace`), compared as `file:line` relative
 --- to the root. A helper whose call spans lines is reached on the line the call starts, which is the line this scan
---- sees. A site that is a definition, not a call (the plugin's own wrapper), is covered when the wrapper runs.
+--- sees. A definition (`function M.spawn(...)`) is no site: the call inside the wrapper is.
 
 local M = {}
 
@@ -89,6 +89,9 @@ function M.match(line, ctx)
   if not code then
     return nil
   end
+  -- a definition (`function M.spawn(`, `local function jobstart(`) is no call: its signature is left out
+  code =
+    code:gsub("^%s*local%s+function%s+[%w_]+%s*%b()", ""):gsub("^%s*function%s+[%w_.:]+%s*%b()", "")
   for _, p in ipairs(M.PATTERNS) do
     if code:find(p[1]) then
       return p[2]

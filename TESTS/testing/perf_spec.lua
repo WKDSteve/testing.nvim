@@ -97,6 +97,41 @@ return function(H)
     -- nothing after the uninstall
     vim.fn.system({ exe, "--version" })
     eq(#trace.fold(trace.read(out)), 3, "no start after the uninstall")
+    -- io.popen ends when its handle closes, jobwait makes a job synchronous
+    local out2 = tmp .. "/trace2.jsonl"
+    assert(trace.install({ out = out2 }))
+    local fh = assert(io.popen(('"%s" --version'):format(exe)))
+    has(fh:read("*a"), "NVIM", "the proxy reads like the file")
+    fh:close()
+    local job2 = vim.fn.jobstart({ exe, "--version" })
+    vim.fn.jobwait({ job2 }, 20000)
+    vim.system({ exe, "--version" }, {}, function() end)
+    trace.uninstall()
+    local s2 = trace.fold(trace.read(out2))
+    eq(s2[1].kind, "io.popen", "the popen")
+    ok(
+      s2[1].ms ~= nil and s2[1].blocked_ms ~= nil,
+      "its close is its end, the editor waited until then"
+    )
+    ok(s2[2].sync == true and s2[2].blocked_ms ~= nil, "a jobwait makes the job synchronous")
+    eq(s2[3].sync, false, "vim.system with a callback is asynchronous")
+    ok(
+      trace._is_runtime("@E:/repos/testing.nvim/lua/testing/guard/process_net.lua"),
+      "the guard is no caller"
+    )
+    ok(not trace._is_runtime("@E:/repos/foo.nvim/lua/foo/init.lua"), "a plugin is")
+    local refolded = trace.fold({
+      { ev = "install" },
+      { ev = "start", id = 1, us = 1, kind = "a", argv = "a" },
+      { ev = "install" },
+      { ev = "start", id = 1, us = 5, kind = "b", argv = "b" },
+      { ev = "end", id = 1, us = 9, ms = 4 },
+    })
+    eq(
+      { refolded[1].ms, refolded[2].ms },
+      { nil, 4 },
+      "a new child's ids start again: the end is the new one's"
+    )
     eq(trace.repo_of("E:/repos/foo.nvim/lua/foo/init.lua"), "foo.nvim", "repo of a source")
     eq(
       trace.repo_of("C:/x/nvim-data/lazy/gitsigns.nvim/lua/gitsigns/a.lua"),
@@ -121,6 +156,13 @@ return function(H)
       "systemlist before system"
     )
     eq(scan.match("-- vim.fn.jobstart(cmd)"), nil, "not in a comment")
+    eq(scan.match("function M.spawn(cmd, opts)"), nil, "a definition is no call")
+    eq(scan.match("local function jobstart(cmd)"), nil, "a local definition neither")
+    eq(
+      scan.match("function M.go(a) return vim.system(a) end"),
+      "vim.system",
+      "the call inside it is"
+    )
     local lib = tmp .. "/lib.nvim"
     write(
       "lib.nvim/lua/lib/nvim/run/init.lua",
@@ -254,6 +296,16 @@ return function(H)
     eq(#by.left, 1, "left running: not the language server")
     eq(by["repeat"][1].count, 1, "a repeat within 2 s, not the one 15 min later")
     eq(by.burst[1].value, 9, "nine starts of the plugin in one step")
+    local sized = { id = "s", steps = { { n = 1, action = "keys" } }, spawns = {} }
+    for _, size in ipairs({ "80x24", "120x40" }) do
+      for i = 1, 3 do
+        table.insert(
+          sized.spawns,
+          { plugin = "p", step = 1, size = size, argv = "x" .. size .. i, us = i }
+        )
+      end
+    end
+    eq(#report.findings("p", sized), 0, "three starts at each of two sizes are no burst")
     eq(f[1].kind, "freeze", "a freeze comes first")
     local rr = {
       repo = "p.nvim",
@@ -314,6 +366,20 @@ return function(H)
     eq(run.step_of(steps, 220), 1, "between two: the one that ended")
     eq(run.step_of(steps, 400), "after", "after the last")
     eq(run.step_of({}, 1), "start", "no steps")
+    local two = {
+      { n = 1, size = "80x24", t0 = 100, t1 = 200 },
+      { n = 2, size = "80x24", t0 = 250, t1 = 300 },
+      { n = 1, size = "120x40", t0 = 500, t1 = 600 },
+      { n = 2, size = "120x40", t0 = 650, t1 = 700 },
+    }
+    eq(
+      { run.step_of(two, 400) },
+      { "start", "120x40" },
+      "before the first step of the second size: its start"
+    )
+    eq({ run.step_of(two, 620) }, { 1, "120x40" }, "between steps of a size")
+    eq({ run.step_of(two, 680) }, { 2, "120x40" }, "inside a step, with its size")
+    eq({ run.step_of(two, 800) }, { "after", "120x40" }, "after the last")
   end
 
   -- ── the catalog's perf field ──────────────────────────────────────────
@@ -362,6 +428,11 @@ return function(H)
     )
     eq({ perf.parse({ "--json" }) }, { nil, "--json needs a value" }, "a flag without its value")
     eq({ perf.parse({ "--what" }) }, { nil, "unknown option --what" }, "an unknown flag")
+    eq(
+      { perf.parse({ "--keep-traces=x" }) },
+      { nil, "--keep-traces takes no value" },
+      "no value for a switch"
+    )
     local lines = {}
     local sv = {
       out = function(s)
@@ -412,9 +483,25 @@ return function(H)
       { 1, 2, 30, 30, 2 },
       "per process"
     )
+    local T = setmetatable({ list = {}, base = 0 }, { __index = tree._Tree })
+    for i = 1, 5 do
+      T.list[i] = { us = i, procs = {} }
+    end
+    T:forget(3)
+    eq({ T:count(), #T.list, T.base }, { 5, 2, 3 }, "forgotten samples still count for the marks")
+    eq(
+      vim.tbl_map(function(x)
+        return x.us
+      end, T:between(3, 5)),
+      { 4, 5 },
+      "a window after the forgotten ones"
+    )
+    eq(#T:between(1, 4), 1, "a window that starts in the forgotten part keeps what is left")
     if vim.uv.fs_stat("/proc/self/stat") then
       local procs = tree.read_proc()
       ok(procs[vim.uv.os_getpid()] ~= nil, "/proc has this editor")
+      local mine = tree.enrich({ procs[vim.uv.os_getpid()] })
+      ok(mine[1].peak > 0 and mine[1].cmd ~= "", "enrich adds the peak and the command line")
     end
   end
 

@@ -102,6 +102,7 @@ return function(H)
         between = function()
           return {}
         end,
+        forget = function() end,
         error = "no tree in this spec",
       }
       local rr = require("testing.perf.run").run_root(root, {

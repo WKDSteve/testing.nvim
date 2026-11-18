@@ -40,13 +40,15 @@ snapshot is a failure and is never written. On top of that:
   `preload` of the RPC child, `testing.child.rpc_init`), so the starts of a plugin's `setup()` are seen too. It wraps
   `vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `vim.uv.spawn`, `io.popen` and `os.execute` and
   writes per start: when (monotonic clock), the kind, the redacted argv (temporary folders as `<TMP>`), whether the
-  editor waited for it (`sync`, a `wait()`) and how long, how long the process ran, its pid, and the caller:
+  editor waited for it (`sync`, a `wait()`, a `jobwait()`, an `io.popen` until its handle is closed) and how long,
+  how long the process ran, its pid, and the caller:
   * `site`: the first frame outside Neovim's runtime (maybe inside lib.nvim),
   * `origin`: the first frame outside lib.nvim too (the plugin's own line), `plugin`: its repository.
   * A start asked for by a sheet step itself (an RPC chunk, `<nvim>`, before any plugin frame) or by a file below
     `TESTS/` is the sheet's **preparation** (`plugin = "sheet"`): counted apart, never a finding.
-* **The steps**: their bounds are taken in the parent; every start falls into a step (`start` before the first:
-  the editor and the setup; `after` after the last).
+* **The steps**: their bounds are taken in the parent; every start falls into a step and the size it ran at (`start`
+  before the first step of a size: that size's child booting with the plugin's setup; `after` after the last).
+  A `burst` counts per step and size. A live sheet's guard wraps the trace; its frames are not taken for the caller.
 * **The process tree** (`testing.perf.tree`): every descendant of the running editor (the child and what it starts),
   sampled every `--interval` ms. On Windows one long-lived PowerShell (`lua/testing/perf/tree.ps1`, a CIM query per
   sample); on Linux `/proc`. It adds the largest working set and the CPU seconds to the starts it saw, and which
