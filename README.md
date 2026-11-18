@@ -115,6 +115,10 @@ Pre-alpha, milestone M1 ("a runner that never lies"). What exists and works:
   (a hint from docmap.nvim, never part of what runs). `--retry-failed <n>` runs a red case again; one that
   passes is **flaky**, the run stays red (`--allow-flaky` is the explicit exception: exit 0, but the verdict is
   `green-partial` and there is no sentinel) and a flaky file is never cached. `--order slowest-first` starts the longest files first with `--jobs`.
+- **Processes of a plugin** ([docs/PERF.md](docs/PERF.md)): `testing perf` runs the feature sheets with every process
+  start traced (step, caller, sync or not, duration) and the process tree sampled (memory, CPU, what keeps running),
+  and reports findings and how much of the plugin's process code the sheets reached; `--all <dir>` for a fleet,
+  `--baseline` to compare with the last run.
 - **Conformance and surface** ([docs/CONFORMANCE.md](docs/CONFORMANCE.md),
   [docs/SURFACE.md](docs/SURFACE.md)): `testing conformance` runs the checks K1 to K16 of the gates on a
   plugin (report only until a repository opts into `conformance.gate`), `testing surface` lists a plugin's
@@ -446,6 +450,7 @@ Every key and its type: [docs/CONFIG.md](docs/CONFIG.md).
 - [docs/HOOKS.md](docs/HOOKS.md): pre-push, pre-commit and Claude Code `Stop` hook recipes.
 - [docs/CONFORMANCE.md](docs/CONFORMANCE.md): the checks K1 to K16 and how a repository adopts them.
 - [docs/SURFACE.md](docs/SURFACE.md): the surface of a plugin and the binding coverage.
+- [docs/PERF.md](docs/PERF.md): `testing perf`, the processes a plugin starts and what they cost.
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md): `--profile`, `testing budget`, the worker pool, measured numbers.
 - [docs/CONFIG.md](docs/CONFIG.md): `.testing.lua` keys with types, dependency resolution, `setup()` options.
 - [docs/ISOLATION.md](docs/ISOLATION.md): the isolation modes (`none`, `soft`, `file`, `case`), the guard

@@ -97,6 +97,8 @@ end
 ---@field root? string Working directory and base of `<REPO>` (default: the current directory).
 ---@field args? string[] Arguments after the editor's own (`+cmd`, a file): the command line of the child, no shell.
 ---@field minit? string Absolute path of the project's minimal init (run as the `-u` init).
+---@field preload? { module: string, opts?: table }[] `require(module).install(opts)` in the child before the minit
+---(`testing.child.rpc_init`); `testing perf` installs its spawn trace this way.
 ---@field user_config? Testing.UserConfig The user's installed config instead of `minit`, read only (`testing.child.user_config`).
 ---@field rtp_prepend? string[] Directories put first on the child's runtimepath (default: this checkout and lib.nvim).
 ---@field rtp? string[] Directories appended to the child's runtimepath.
@@ -681,6 +683,7 @@ local function start(S, async_cb)
     rtp_prepend = prepend,
     rtp = opts.rtp or {},
     minit = minit,
+    preload = opts.preload,
     disable_first_run = opts.disable_first_run ~= false,
     defer_plugins = opts.defer_plugins == true,
     error_file = e.sandbox .. "/boot-error.txt",

@@ -10,6 +10,10 @@
 ---
 --- `id` has the form of a sheet id and is unique, `title` is a non-empty line, `surface` (optional) lists the entries
 --- of the surface it rests on (`command:Hover show`, `binding:Y`), `docs` (optional) names where it is described.
+--- `perf` (optional) tells `testing perf` (docs/PERF.md) why the functionality is not measured by its own sheets:
+--- `"user"` (only with the installed config: a sheet of the config measures it), `"manual:<why>"` (a hand run, a GUI,
+--- an account, a container), `"skip:<why>"` (not worth measuring, or not allowed); a report lists it instead of
+--- counting it as a gap.
 --- A sheet names its functionality with `feature = "<id>"`; `testing sheets report` says which functionality has no
 --- sheet, K16 warns about a `feature` the catalog does not know. A repository without the file has no catalog: there
 --- is nothing to compare with, and nothing is said.
@@ -26,15 +30,30 @@ M.MAX_TITLE = 300
 ---@field title string
 ---@field surface? string[]
 ---@field docs? string
+---@field perf? string `user`, `manual:<why>` or `skip:<why>` (`testing perf`)
 
-local KEYS = { id = "string", title = "string", surface = "table", docs = "string" }
+local KEYS =
+  { id = "string", title = "string", surface = "table", docs = "string", perf = "string" }
+
+---Whether a `perf` value is one of the forms; the reason of a `manual:`/`skip:` must not be empty.
+---@param v string
+---@return boolean
+function M.valid_perf(v)
+  if v == "user" then
+    return true
+  end
+  local kind, why = v:match("^(%a+):(.*)$")
+  return (kind == "manual" or kind == "skip")
+    and vim.trim(why or "") ~= ""
+    and not why:find("[\r\n]")
+end
 
 ---Check the shape of a catalog; the message names the entry and the field.
 ---@param list any
 ---@return Testing.Sheet.Feature[]|nil catalog, string|nil err
 function M.validate(list)
   if type(list) ~= "table" then
-    return nil, "the catalog returns a list of { id, title, surface?, docs? }"
+    return nil, "the catalog returns a list of { id, title, surface?, docs?, perf? }"
   end
   local n = 0
   for k in pairs(list) do
@@ -88,6 +107,9 @@ function M.validate(list)
     end
     if f.docs ~= nil and (f.docs == "" or f.docs:find("[\r\n]")) then
       return nil, ("[%d].docs must be a path on one line"):format(i)
+    end
+    if f.perf ~= nil and not M.valid_perf(f.perf) then
+      return nil, ('[%d].perf is "user", "manual:<why>" or "skip:<why>"'):format(i)
     end
   end
   return list, nil

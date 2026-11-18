@@ -260,7 +260,7 @@ finding lib.nvim while the editor works), an info is something not checked.
 8. Command-line runner                                                *testing-cli*
 
 >sh
-    nvim -n -i NONE --headless -u NONE -l scripts/testing.lua [run|fast|list|doctor|budget|conformance|surface|explain|stamp|verify] [{root}] [options]
+    nvim -n -i NONE --headless -u NONE -l scripts/testing.lua [run|fast|list|doctor|budget|conformance|surface|perf|explain|stamp|verify] [{root}] [options]
     nvim -n -i NONE --headless -u NONE -l scripts/testing.lua migrate [dry-run|apply] [{path}] [options]
 <
 Run it from {root}: specs that look at "this repository" read the working
@@ -277,6 +277,8 @@ configuration and dependency report), `migrate` (plan or write the move of a
 repository to testing.nvim, see |testing-migrating|), `budget` (measure the hot
 paths of a run against a baseline), `conformance` (the checks K1..K16) and
 `surface` (the plugin's keymaps, commands, ... and what the specs exercised);
+`perf` (the processes the plugin's sheets start, their cost and findings,
+docs/PERF.md);
 those two have their own arguments and exit codes (docs/CONFORMANCE.md,
 docs/SURFACE.md). `explain` says why a spec file is selected, taken from the
 cache, run or left out, and what its cache key is made of (see "Explain and

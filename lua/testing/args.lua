@@ -948,6 +948,7 @@ function M.usage()
     "  doctor   print the resolved configuration and the dependency report",
     "  budget   measure the performance budgets and compare them with the baseline (exit 1 when one is exceeded)",
     "  conformance  run the conformance checks K1..K16 on <root> (own options: conformance --help)",
+    "  perf     run the feature sheets with every process start traced and the process tree sampled, report findings and coverage: perf [<root>...] [--all <dir>] [--real <prog,...|all>] (docs/PERF.md)",
     "  surface  list the plugin's surface (keymaps, commands, ...) and how much the specs exercised (surface --help)",
     "  ci       run the pipeline of the ci section of .testing.lua (ci --help)",
     "  lint     run the lint checks of the pipeline (stylua, luacheck, luals) on the changed files (lint --help)",

@@ -7,6 +7,8 @@
 ---   rtp_prepend / rtp   directories for the runtimepath (`rtp_prepend`: the first entry wins)
 ---   disable_first_run   set lib.nvim's one-time "missing tools" float opt-out before the minit
 ---   minit               absolute path of the project's minimal init, `dofile`d here
+---   preload             `{ { module, opts } }`: `require(module).install(opts)` before the minit (`testing perf`: the
+---                       spawn trace must see the starts of a plugin's setup); a failure ends the child like a minit's
 ---   error_file          where the reason of a failed start is written (stderr does not reach the parent)
 ---
 --- `--clean` alone would leave a project's `-u TESTS/minimal_init.lua` without the checkout on the
@@ -90,6 +92,18 @@ end
 
 if job.disable_first_run ~= false and vim.g.lib_nvim_deps_disable_first_run == nil then
   vim.g.lib_nvim_deps_disable_first_run = true
+end
+
+for i, pre in ipairs(type(job.preload) == "table" and job.preload or {}) do
+  local pok, perr = pcall(function()
+    local done, why = require(pre.module).install(pre.opts)
+    if done == false then
+      error(why, 0)
+    end
+  end)
+  if not pok then
+    die(("preload %d (%s) failed: %s"):format(i, tostring(pre.module), tostring(perr)))
+  end
 end
 
 if type(job.minit) == "string" and job.minit ~= "" then

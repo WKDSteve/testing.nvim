@@ -103,7 +103,8 @@ return {
 ```
 
 `id` is unique and has the form of a sheet id, `title` is one line (at most 300 characters); a mistake is refused with
-the entry and the field named (`[2].title is required`). A repository without the file has no catalog and nothing is said
+the entry and the field named (`[2].title is required`). `perf` (optional) says why `testing perf` does not measure the
+functionality through its own sheets: `"user"`, `"manual:<why>"` or `"skip:<why>"` ([PERF.md](PERF.md)). A repository without the file has no catalog and nothing is said
 about features. What uses it: the section "Features" of the report (below), `testing sheets new --feature`, and K16 (a
 `feature` the catalog does not know is a warning).
 

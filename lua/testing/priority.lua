@@ -33,6 +33,7 @@ local DISPATCHED = {
   "export",
   "history",
   "lint",
+  "perf",
   "sheets",
   "stamp",
   "state",
@@ -61,7 +62,7 @@ function M.command(args)
   return "run", nil
 end
 
----Whether `args` is a heavy run: a suite (`run`), `ci` (with `ci commit`) or `sheets run`.
+---Whether `args` is a heavy run: a suite (`run`), `ci` (with `ci commit`), `sheets run` or `perf` (not `perf scan`).
 ---@param args string[]
 ---@return boolean
 function M.heavy(args)
@@ -71,6 +72,9 @@ function M.heavy(args)
   end
   if cmd == "sheets" then
     return sub == "run"
+  end
+  if cmd == "perf" then
+    return sub ~= "scan" and sub ~= "--help" and sub ~= "-h"
   end
   if cmd ~= "run" then
     return false
