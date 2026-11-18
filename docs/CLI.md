@@ -569,7 +569,10 @@ snapshot diff (path, mtime, size), so a burst of saves is one run with every cha
 content change runs nothing. If a watcher cannot be started (`ENOENT`, `ENOSPC` = inotify watches exhausted,
 `EMFILE`) the watch **polls** every `watch.poll_ms` (1000) and says so; `--watch-poll` asks for that up front
 (network drives, containers). On Linux libuv cannot watch a tree recursively, so there is one handle per
-directory, refreshed after every run; on Windows and macOS one recursive handle watches each root. Closing a
+directory, refreshed after every run; when the file helper of filetree.nvim is installed (`lib.nvim.fs.helper`),
+each root is one helper watch instead (`lib.nvim.fs.fast.watch`), which also leaves out what `.gitignore` names:
+measured in WSL on a tree with an ignored `gen/` of 3 300 folders, 32 inotify watches instead of 3 333. On
+Windows and macOS one recursive handle watches each root. Closing a
 handle is asynchronous in libuv (Windows keeps the directory until it ran), so the watcher closes the handles
 first and lets the loop turn once before it returns.
 

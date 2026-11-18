@@ -76,6 +76,7 @@ M.EXIT_NO_RUN = 3
 ---@field stop fun()
 ---@field mode "events"|"poll"
 ---@field resync? fun() Re-read the directory set (non-recursive platforms).
+---@field helper? boolean The trees are watched by the file helper (`lib.nvim.fs.fast.watch`).
 
 ---@class Testing.Watch.Opts
 ---@field root string Absolute project root (no trailing slash).
@@ -576,9 +577,22 @@ function M.dirs_below(dir)
   return out
 end
 
----The real source: `lib.nvim.fs.watch` handles on the given directories.
+---The file helper's watch for a whole tree (`lib.nvim.fs.fast.watch`), when there is a helper to
+---give it: one watch per root instead of one inotify handle per folder. Nil: per-folder handles.
+---@return table|nil fast  `lib.nvim.fs.fast`
+function M.helper_watch()
+  local ok, helper = pcall(require, "lib.nvim.fs.helper")
+  if ok and type(helper.available) == "function" and helper.available() then
+    return (require("lib.nvim.fs.fast"))
+  end
+  return nil
+end
+
+---The real source: `lib.nvim.fs.watch` handles on the given directories. Where libuv has no recursive
+---handle (Linux) and the file helper is there, each tree is one helper watch (`lib.nvim.fs.fast.watch`)
+---instead of a handle per folder; the helper leaves out what `.gitignore` names.
 ---@param on_event fun()
----@param opts { dirs: string[], flat_dirs?: string[], watch?: table, recursive?: boolean, resolve_dirs?: fun(dir: string): string[] } `flat_dirs` are watched without their subtrees (the project root: `.testing.lua`).
+---@param opts { dirs: string[], flat_dirs?: string[], watch?: table, recursive?: boolean, resolve_dirs?: (fun(dir: string): string[]), fast?: table|false } `flat_dirs` are watched without their subtrees (the project root: `.testing.lua`); `fast`: the tree watcher (default `helper_watch()`, `false` never).
 ---@return Testing.Watch.Source|nil source
 ---@return string|nil err
 function M.fs_source(on_event, opts)
@@ -587,13 +601,27 @@ function M.fs_source(on_event, opts)
   if recursive == nil then
     recursive = M.recursive_native()
   end
+  local fast = nil ---@type table|nil
+  if not recursive and opts.fast ~= false then
+    if opts.fast ~= nil then
+      fast = opts.fast --[[@as table]]
+    else
+      fast = M.helper_watch()
+    end
+  end
   ---@type table<string, { stop: fun() }>
   local handles = {}
+  ---@type table<string, { stop: fun() }>  one helper watch per tree
+  local trees = {}
 
   local function stop_all()
     for path, h in pairs(handles) do
       pcall(h.stop)
       handles[path] = nil
+    end
+    for dir, w in pairs(trees) do
+      pcall(w.stop)
+      trees[dir] = nil
     end
   end
 
@@ -617,7 +645,8 @@ function M.fs_source(on_event, opts)
 
   local function wanted()
     local list = {}
-    for _, dir in ipairs(opts.dirs or {}) do
+    -- with the helper every tree is its watch: no handle of our own
+    for _, dir in ipairs(fast and {} or opts.dirs or {}) do
       if recursive then
         list[#list + 1] = dir
       else
@@ -627,6 +656,13 @@ function M.fs_source(on_event, opts)
     return list
   end
 
+  if fast then
+    for _, dir in ipairs(opts.dirs or {}) do
+      trees[dir] = fast.watch(dir, { debounce_ms = 10 }, function()
+        on_event()
+      end)
+    end
+  end
   for _, path in ipairs(wanted()) do
     local err = add(path)
     if err then
@@ -645,8 +681,10 @@ function M.fs_source(on_event, opts)
   return {
     mode = "events",
     stop = stop_all,
+    helper = fast ~= nil,
     resync = function()
-      if recursive then
+      -- a recursive handle and the helper's watch both see new folders themselves
+      if recursive or fast then
         return
       end
       local want = {}

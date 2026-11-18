@@ -167,6 +167,7 @@ return function(H)
     dirs = { "/r/TESTS" },
     watch = fake,
     recursive = false,
+    fast = false,
     resolve_dirs = function(dir)
       return { dir, dir .. "/x", dir .. "/y" }
     end,
@@ -174,6 +175,75 @@ return function(H)
   eq(#started, 3, "inotify-style platforms: one handle per directory")
   eq(started[2].recursive, false, "and they are not recursive")
   assert(s2).stop()
+
+  -- with the file helper (lib.nvim.fs.fast.watch) a tree is ONE watch, no handle per folder; the
+  -- project root stays a flat handle of its own
+  started = {}
+  local trees, tree_stops, helper_events = {}, 0, 0
+  local stub_fast = {
+    watch = function(dir, wopts, on_change)
+      trees[#trees + 1] = { dir = dir, on_change = on_change, debounce_ms = wopts.debounce_ms }
+      return {
+        stop = function()
+          tree_stops = tree_stops + 1
+        end,
+      }
+    end,
+  }
+  local s_helper = assert(watch.fs_source(function()
+    helper_events = helper_events + 1
+  end, {
+    dirs = { "/r/TESTS", "/r/lua" },
+    flat_dirs = { "/r" },
+    watch = fake,
+    recursive = false,
+    fast = stub_fast,
+    resolve_dirs = function()
+      error("no folder walk with the helper")
+    end,
+  }))
+  eq(#trees, 2, "helper: one watch per tree")
+  eq(started, { { path = "/r", recursive = false } }, "helper: only the flat root is a handle")
+  eq(s_helper.helper, true, "helper: the source says so")
+  trees[1].on_change({ "/r/TESTS/new/deep" })
+  eq(helper_events, 1, "helper: a change in a new, deep folder reaches the loop")
+  assert(s_helper.resync)()
+  eq(#started, 1, "helper: resync opens no handle")
+  s_helper.stop()
+  eq(tree_stops, 2, "helper: stop ends every tree watch")
+
+  -- the same through lib.nvim.fs.fast.watch on a real tree (its libuv tier): a folder made after the
+  -- start, two levels down, reports its change
+  local live_root = vim.fs.normalize(vim.fn.tempname())
+  vim.fn.mkdir(live_root .. "/TESTS", "p")
+  local live_events = 0
+  local live = assert(watch.fs_source(function()
+    live_events = live_events + 1
+  end, {
+    dirs = { live_root .. "/TESTS" },
+    recursive = false,
+    fast = {
+      watch = function(dir, wopts, on_change)
+        return require("lib.nvim.fs.fast").watch(
+          dir,
+          vim.tbl_extend("force", wopts, { tier = "libuv" }),
+          on_change
+        )
+      end,
+    },
+  }))
+  vim.fn.mkdir(live_root .. "/TESTS/new/deep", "p")
+  local tick = 0
+  vim.wait(8000, function()
+    tick = tick + 1
+    if tick % 20 == 1 then
+      write(live_root .. "/TESTS/new/deep/c_spec.lua", "return " .. tick .. "\n")
+    end
+    return live_events > 0
+  end, 25)
+  ok(live_events > 0, "fast.watch: a change in a folder made after the start arrives")
+  live.stop()
+  vim.fn.delete(live_root, "rf")
   -- a start failure of any handle closes the ones already started
   local stops = 0
   local failing = {
