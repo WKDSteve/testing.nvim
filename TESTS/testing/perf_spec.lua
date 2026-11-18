@@ -94,20 +94,35 @@ return function(H)
     )
     has(sys.argv, "--version", "the argv")
     has(sys.site or "", "perf_spec.lua", "the site is the line that asked")
+    ok(
+      type(sys.stack) == "table" and (sys.stack[1] or ""):find("perf_spec.lua", 1, true),
+      "the stack of the start"
+    )
     -- nothing after the uninstall
     vim.fn.system({ exe, "--version" })
     eq(#trace.fold(trace.read(out)), 3, "no start after the uninstall")
     -- io.popen ends when its handle closes, jobwait makes a job synchronous
+    -- vim.lsp.start: an in-process client (cmd is a function) starts no process; its line is a reach
+    local real_lsp_start = vim.lsp.start
+    vim.lsp.start = function()
+      return 1
+    end
     local out2 = tmp .. "/trace2.jsonl"
     assert(trace.install({ out = out2 }))
     local fh = assert(io.popen(('"%s" --version'):format(exe)))
     has(fh:read("*a"), "NVIM", "the proxy reads like the file")
     fh:close()
+    vim.lsp.start({ name = "inproc", cmd = function() end })
     local job2 = vim.fn.jobstart({ exe, "--version" })
     vim.fn.jobwait({ job2 }, 20000)
     vim.system({ exe, "--version" }, {}, function() end)
     trace.uninstall()
+    ok(vim.lsp.start ~= real_lsp_start, "the stub is back, not the original")
+    vim.lsp.start = real_lsp_start
     local s2 = trace.fold(trace.read(out2))
+    local reach = trace.reaches(trace.read(out2))
+    eq(reach[1] and reach[1].kind, "lsp.start(in-process)", "the in-process LSP client is a reach")
+    ok((reach[1].stack[1] or ""):find("perf_spec.lua", 1, true), "with the line that asked")
     eq(s2[1].kind, "io.popen", "the popen")
     ok(
       s2[1].ms ~= nil and s2[1].blocked_ms ~= nil,
@@ -163,20 +178,66 @@ return function(H)
       "vim.system",
       "the call inside it is"
     )
+    -- the primitives in the forms the fleet writes them (terminal.nvim, 2026-11-18)
+    eq(
+      scan.match("local ok, res = pcall(fn.jobstart, cmd, job_opts)"),
+      "pcall(jobstart)",
+      "pcall(fn.jobstart"
+    )
+    eq(scan.match("local ok, p = pcall(vim.system, argv, {})"), "pcall(system)", "pcall(vim.system")
+    eq(scan.match("local h = b.spawn(spec)"), nil, "a method named spawn is no uv.spawn")
+    eq(scan.match("local h = uv.spawn(path, opts, cb)"), "uv.spawn", "uv.spawn is")
+    eq(scan.match("local h = vim.uv.spawn(path, opts, cb)"), "uv.spawn", "vim.uv.spawn too")
+    eq(
+      scan.joined({ "  local ok, s = pcall(", "    vim.system,", "  )" }, 1),
+      "  local ok, s = pcall(vim.system,",
+      "a call wrapped after ( is joined"
+    )
+    eq(
+      scan.joined({ "  return vim", "    .system(argv)" }, 1),
+      "  return vim.system(argv)",
+      "and after vim"
+    )
     local lib = tmp .. "/lib.nvim"
-    write(
-      "lib.nvim/lua/lib/nvim/run/init.lua",
-      { "local M = {}", "function M.go(a) return vim.system(a) end", "return M" }
-    )
-    write(
-      "lib.nvim/lua/lib/nvim/git/init.lua",
-      { 'local run = require("lib.nvim.run")', "return {}" }
-    )
-    write("lib.nvim/lua/lib/nvim/text/init.lua", { "return { upper = string.upper }" })
+    write("lib.nvim/lua/lib/nvim/run/init.lua", {
+      "local M = {}",
+      "function M.go(a) return vim.system(a) end",
+      "local function helper(a)",
+      "  return vim.fn.system(a)",
+      "end",
+      "function M.wrapped(a)",
+      "  return helper(a)",
+      "end",
+      "function M.pure(a)",
+      "  return a",
+      "end",
+      "return M",
+    })
+    write("lib.nvim/lua/lib/nvim/git/init.lua", {
+      'local run = require("lib.nvim.run")',
+      "local M = {}",
+      "function M.status(dir)",
+      "  return run.go({ 'git', '-C', dir, 'status' })",
+      "end",
+      "function M.root_of(path)",
+      "  return run.pure(path)",
+      "end",
+      "return M",
+    })
+    write("lib.nvim/lua/lib/nvim/text/init.lua", {
+      'local run = require("lib.nvim.run")',
+      "return { upper = string.upper }",
+    })
     local spawning = scan.spawning_modules(lib)
-    ok(spawning["lib.nvim.run"], "a module with a primitive spawns")
-    ok(spawning["lib.nvim.git"], "a module that requires one spawns too")
-    ok(not spawning["lib.nvim.text"], "a module without either does not")
+    ok(spawning["lib.nvim.run"].go, "a function with a primitive spawns (one line)")
+    ok(spawning["lib.nvim.run"].wrapped, "one that calls a local function that does spawns too")
+    ok(not spawning["lib.nvim.run"].pure, "one that does neither does not")
+    ok(
+      spawning["lib.nvim.git"].status,
+      "one that calls a spawning function of a required module spawns"
+    )
+    ok(not spawning["lib.nvim.git"].root_of, "one that calls a pure function of it does not")
+    eq(spawning["lib.nvim.text"], nil, "requiring a spawning module is not spawning")
     local root = tmp .. "/plug.nvim"
     write("plug.nvim/lua/plug/init.lua", {
       'local git = require("lib.nvim.git")',
@@ -187,27 +248,95 @@ return function(H)
       "function M.c() vim.fn.system({ 'ls' }) end",
       'function M.d() return require("lib.nvim.run").go({ "x" }) end',
       "-- git.status() in a comment",
+      "function M.e() return git.root_of('x') end",
+      'local resolve = require("lib.nvim.run").go',
+      "function M.f()",
+      "  local ok = pcall(",
+      "    vim.system,",
+      "    { 'x' }",
+      "  )",
+      "end",
       "return M",
     })
     local sites = scan.sites(root, spawning)
     eq(
       vim.tbl_map(function(s)
-        return ("%s:%d %s"):format(s.file, s.line, s.what)
+        return ("%s:%d %s %s %s"):format(
+          s.file,
+          s.line,
+          s.what,
+          tostring(s.tail_fn),
+          tostring(s.span)
+        )
       end, sites),
       {
-        "lua/plug/init.lua:4 lib.nvim.git",
-        "lua/plug/init.lua:6 vim.fn.system",
-        "lua/plug/init.lua:7 lib.nvim.run",
+        "lua/plug/init.lua:4 lib.nvim.git.status a nil",
+        "lua/plug/init.lua:6 vim.fn.system nil nil",
+        "lua/plug/init.lua:7 lib.nvim.run.go d nil",
+        "lua/plug/init.lua:12 pcall(system) nil 2",
       },
-      "primitives, calls on an alias of a spawning module, a call on one required in place"
+      "primitives, spawning functions by alias and in place, a wrapped pcall; not a pure function, not a field read"
     )
     local cov = scan.coverage(sites, {
-      { origin = root .. "/lua/plug/init.lua:4", site = lib .. "/lua/lib/nvim/run/init.lua:2" },
-      { site = (root .. "/lua/plug/init.lua:6"):upper(), origin = nil },
+      -- the frames of a start: the alias call is three frames up (a wrapper of the plugin in between)
+      {
+        origin = root .. "/lua/plug/wrap.lua:2",
+        site = lib .. "/lua/lib/nvim/run/init.lua:2",
+        stack = {
+          lib .. "/lua/lib/nvim/run/init.lua:2",
+          root .. "/lua/plug/wrap.lua:2",
+          (root .. "/lua/plug/init.lua:4"):upper(),
+        },
+      },
+      { site = root .. "/lua/plug/init.lua:13" }, -- the wrapped pcall, reported on its next line
     }, root, true)
-    eq(#cov.covered, 2, "origin and site count, case-insensitive on Windows")
-    eq(cov.missing[1].line, 7, "the one not reached")
+    eq(
+      #cov.covered,
+      2,
+      "a frame up the stack counts, case-insensitive on Windows; a wrapped call on its next line"
+    )
+    eq(
+      vim.tbl_map(function(s)
+        return s.line
+      end, cov.missing),
+      { 6, 7 },
+      "the ones not reached"
+    )
+    -- a tail call: its frame is gone, a caller of its function on a stack reaches it
+    write(
+      "plug.nvim/lua/plug/caller.lua",
+      { "local M = {}", "function M.x() return require('plug').d() end", "return M" }
+    )
+    local tail = scan.coverage(sites, {
+      {
+        site = lib .. "/lua/lib/nvim/run/init.lua:2",
+        stack = { root .. "/lua/plug/caller.lua:2" },
+      },
+    }, root, false)
+    eq(
+      vim.tbl_map(function(s)
+        return s.line
+      end, tail.covered),
+      { 7 },
+      "the tail call of M.d is reached through its caller"
+    )
+    local reached = scan.coverage(
+      sites,
+      {},
+      root,
+      false,
+      { { stack = { root .. "/lua/plug/init.lua:6" } } }
+    )
+    eq(#reached.covered, 1, "a reach record (an in-process LSP client) counts too")
     eq(scan.relative("D:/other/x.lua:3", root), nil, "a place outside the root")
+    -- a linked worktree: its main checkout from the .git file
+    write("wt/.git", { "gitdir: E:/repos/plug.nvim/.git/worktrees/x1" })
+    eq(
+      require("testing.perf.run").main_checkout(tmp .. "/wt"),
+      "E:/repos/plug.nvim",
+      "the main checkout of a worktree"
+    )
+    eq(require("testing.perf.run").main_checkout(root), nil, "a plain folder is none")
   end
 
   -- ── the findings and the report ────────────────────────────────────────

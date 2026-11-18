@@ -103,6 +103,8 @@ local function is_runtime(src)
     or p:find("testing/perf/trace.lua", 1, true) ~= nil
     -- a live sheet's guard is installed after the trace and wraps it: its frames are no caller either
     or p:find("/lua/testing/guard/", 1, true) ~= nil
+    -- runtime-analysis's telemetry wraps vim.system in the user's config: a wrapper, not the caller
+    or p:find("/lua/runtime-analysis/telemetry/", 1, true) ~= nil
 end
 
 M._is_runtime = is_runtime
@@ -129,9 +131,13 @@ function M.repo_of(p)
   return repo or "?"
 end
 
----@return string|nil site, string|nil origin, string plugin
+---Frames kept per start for the coverage (every caller up the stack, innermost first).
+M.MAX_STACK = 16
+
+---@return string|nil site, string|nil origin, string plugin, string[] stack
 local function callers()
   local site, origin, from_rpc
+  local stack = {}
   for level = 3, 60 do
     local info = debug.getinfo(level, "Sl")
     if not info then
@@ -147,9 +153,11 @@ local function callers()
       local p = norm_source(src)
       local here = ("%s:%d"):format(p, info.currentline or 0)
       site = site or here
+      if #stack < M.MAX_STACK then
+        stack[#stack + 1] = here
+      end
       if not is_lib(p) then
-        origin = here
-        break
+        origin = origin or here
       end
     end
   end
@@ -167,7 +175,7 @@ local function callers()
     -- only Neovim's runtime and string chunks on the stack: a sheet's `lua` step, or the runtime itself (LSP)
     plugin = "?"
   end
-  return site, origin, plugin
+  return site, origin, plugin, stack
 end
 
 ---@param cmd any
@@ -211,7 +219,7 @@ end
 local function start(kind, cmd, extra)
   S.next_id = S.next_id + 1
   local id = S.next_id
-  local site, origin, plugin = callers()
+  local site, origin, plugin, stack = callers()
   local rec = vim.tbl_extend("force", {
     ev = "start",
     id = id,
@@ -221,6 +229,7 @@ local function start(kind, cmd, extra)
     site = site,
     origin = origin,
     plugin = plugin,
+    stack = stack,
   }, extra or {})
   write(rec)
   return id
@@ -341,6 +350,25 @@ function M.install(opts)
       finish(id, t0, -1)
     end
     return handle, pid, errname
+  end
+
+  if vim.lsp and type(vim.lsp.start) == "function" then
+    O.lsp_start = vim.lsp.start
+    vim.lsp.start = function(config, ...)
+      if S then
+        local _, _, _, stack = callers()
+        local inproc = type(config) == "table" and type(config.cmd) == "function"
+        -- a reach: no process (an in-process server) or one the runtime starts through vim.system; the coverage
+        -- counts the line either way
+        write({
+          ev = "reach",
+          us = now_us(),
+          kind = inproc and "lsp.start(in-process)" or "lsp.start",
+          stack = stack,
+        })
+      end
+      return O.lsp_start(config, ...)
+    end
   end
 
   O.fn_system = vim.fn.system
@@ -467,6 +495,19 @@ function M.popen_proxy(fh, on_close)
   })
 end
 
+---The reach records of a trace (a line that ran without starting a process itself: an in-process LSP client).
+---@param records table[]
+---@return { kind: string, stack: string[] }[]
+function M.reaches(records)
+  local out = {}
+  for _, r in ipairs(records) do
+    if r.ev == "reach" and type(r.stack) == "table" then
+      out[#out + 1] = { kind = r.kind, stack = r.stack }
+    end
+  end
+  return out
+end
+
 ---Put every primitive back and close the file. Safe to call twice.
 function M.uninstall()
   if not S then
@@ -483,6 +524,9 @@ function M.uninstall()
     end
   end
   vim.fn.jobwait = O.jobwait
+  if O.lsp_start then
+    vim.lsp.start = O.lsp_start
+  end
   set(io_lib, "popen", O.popen)
   set(os_lib, "execute", O.execute)
   pcall(S.fd.close, S.fd)
@@ -534,6 +578,7 @@ function M.fold(records)
   ---@field peak? integer bytes, from the process tree
   ---@field cpu? number seconds, from the process tree
   ---@field alive_at_end? boolean
+  ---@field stack? string[] every caller up the stack (`file:line`, innermost first)
   local by_id, list = {}, {}
   for _, r in ipairs(records) do
     if r.ev == "install" then
@@ -550,6 +595,7 @@ function M.fold(records)
         site = r.site,
         origin = r.origin,
         plugin = r.plugin or "?",
+        stack = r.stack,
       }
       by_id[r.id] = s
       list[#list + 1] = s

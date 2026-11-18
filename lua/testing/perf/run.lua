@@ -48,6 +48,7 @@ end
 ---@field procs table[] the processes the tree saw while the sheet ran (`alive_at_end` for those in its last sample)
 ---@field ms integer the whole sheet
 ---@field real? string[] the programs taken out of `fakes`
+---@field reaches? { kind: string, stack: string[] }[] lines that ran without a process of their own (`vim.lsp.start`)
 
 ---Which of a list of fake programs stay stand-ins under `real`.
 ---@param fakes string[]|nil
@@ -237,6 +238,7 @@ local function run_sheet(o, root, s, rel, tree)
     end
   end
   res.spawns = spawns
+  res.reaches = require("testing.perf.trace").reaches(records)
   for _, p in pairs(per) do
     p.alive_at_end = alive[p.pid] == true
     res.procs[#res.procs + 1] = p
@@ -267,7 +269,12 @@ end
 ---@return Testing.Perf.RootRun
 function M.run_root(root, o)
   root = vim.fs.normalize(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
-  local repo = vim.fs.basename(root)
+  local main = M.main_checkout(root)
+  -- a worktree is named after its repository, and finds the dependencies its siblings would give the checkout
+  local repo = vim.fs.basename(main or root)
+  if main then
+    M.provide_deps(root, main)
+  end
   local out = { root = root, repo = repo, sheets = {}, unloadable = {}, sites = {}, coverage = {} }
   local sheet = require("testing.sheet")
   out.catalog, out.catalog_error = require("testing.sheet.features").load(root)
@@ -293,7 +300,7 @@ function M.run_root(root, o)
   end
   local own_tree = not o.tree
   local tree = o.tree or require("testing.perf.tree").start({ interval_ms = o.interval_ms })
-  local all_spawns = {}
+  local all_spawns, all_reaches = {}, {}
   for _, path in ipairs(sheet.files(root .. "/TESTS/sheets")) do
     local rel = path:sub(#root + 2)
     local s, err = sheet.load(path)
@@ -305,6 +312,7 @@ function M.run_root(root, o)
       local r = run_sheet(o, root, s, rel, tree)
       out.sheets[#out.sheets + 1] = r
       vim.list_extend(all_spawns, r.spawns)
+      vim.list_extend(all_reaches, r.reaches or {})
       if o.on_sheet then
         o.on_sheet(r)
       end
@@ -318,9 +326,50 @@ function M.run_root(root, o)
     out.sites,
     all_spawns,
     root,
-    require("testing.platform").is_windows()
+    require("testing.platform").is_windows(),
+    all_reaches
   )
   return out
+end
+
+---The main checkout of a linked Git worktree (`.git` is a file `gitdir: <main>/.git/worktrees/<name>`), else nil.
+---@param root string
+---@return string|nil
+function M.main_checkout(root)
+  local st = uv.fs_stat(root .. "/.git")
+  if not st or st.type ~= "file" then
+    return nil
+  end
+  local f = io.open(root .. "/.git", "rb")
+  if not f then
+    return nil
+  end
+  local text = f:read("*l") or ""
+  f:close()
+  local gitdir = text:match("^gitdir:%s*(.-)%s*$")
+  if not gitdir then
+    return nil
+  end
+  local main = vim.fs.normalize(gitdir):match("^(.*)/%.git/worktrees/[^/]+$")
+  return main
+end
+
+---Set `$<NAME>_DIR` for every dependency of a worktree that the main checkout resolves and nothing set yet: the
+---child editors of the sheets resolve them from there (an override wins in `testing.deps`).
+---@param root string
+---@param main string
+function M.provide_deps(root, main)
+  local deps = require("testing.deps")
+  local names = vim.list_extend({ "lib.nvim", "testing.nvim" }, deps.declared(root))
+  for _, name in ipairs(names) do
+    local var = deps.env_name(name)
+    if (vim.env[var] or "") == "" then
+      local found = deps.resolve(name, main)
+      if found then
+        vim.env[var] = found.dir
+      end
+    end
+  end
 end
 
 ---The repositories below a directory that have test sheets or a feature catalog.

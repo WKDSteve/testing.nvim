@@ -72,12 +72,24 @@ The same call in a loop is one line with a count (grouped by kind, program and c
 ### Coverage
 
 `testing.perf.scan` lists the **spawn sites** of the repository's `lua/` and `plugin/`: a line that calls a primitive
-(the list above, `vim.lsp.start`), or a call into a module of lib.nvim that starts processes. Which modules those are
-is computed from lib.nvim itself: a module whose code calls a primitive, or that requires such a module (four
-rounds), so `git.run_async(...)` on `local git = require("lib.nvim.git")` is a site. A site is **reached** when a start
-of the run has it as its `site` or `origin`. It is a heuristic on purpose: it finds the candidates, the run proves
-which were reached; an unreached site is a functionality without a sheet, a sheet that does not go far enough, or a
-case for `perf` below.
+(`vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `uv.spawn`, `io.popen`, `os.execute`,
+`vim.lsp.start`; also handed to `pcall` as a value, `pcall(vim.system, argv)`, and also wrapped onto the next line after
+`(` or `vim`), or a function of lib.nvim that starts a process. Which functions of lib.nvim those are is computed from
+lib.nvim itself, **per function**: a top-level function (stylua's layout: the definition and its `end` at column 0)
+whose body calls a primitive, or a spawning function of its own module or of a module it requires (a fixpoint). So
+`git.run_async(...)` on `local git = require("lib.nvim.git")` is a site, `autocmd.create(...)` is not, and
+`require("m").f` without a call (a field read) is not either.
+
+A site is **reached** when any frame of a start's stack lies on it: the start's `site`, its `origin` and every
+caller up to 16 frames (a call into the plugin's own wrapper counts). A wrapped call counts on its next line too.
+A **tail call** (`return git.refs(...)`) loses its frame at run time; it counts as reached when a frame on a stack
+calls the function it is in (by name). A `vim.lsp.start` is recorded as a *reach* even when it starts no process (an
+in-process server whose `cmd` is a function). It is a heuristic on purpose: it finds the candidates, the run proves which
+were reached; an unreached site is a functionality without a sheet, a sheet that does not go far enough, or a case for
+`perf` below.
+
+In a linked Git worktree the repository is named after its main checkout, and the dependencies the main checkout
+resolves are passed to the child editors (`$<NAME>_DIR`), as `ci commit` does.
 
 The report also lists the functionalities of the catalog (`TESTS/sheets/features.lua`) without a sheet.
 
