@@ -5,7 +5,10 @@
 
 return function(H)
   local ok, eq = H.ok, H.eq
-  local server = require("testing.mcp").server({ repos_root = vim.fn.tempname() })
+  -- a repositories root that exists: one that does not would refuse every call before the call itself is judged
+  local repos_root = vim.fn.tempname()
+  vim.fn.mkdir(repos_root, "p")
+  local server = require("testing.mcp").server({ repos_root = repos_root })
 
   local function send(msg)
     return vim.json.decode(server:dispatch(vim.json.encode(msg)))
@@ -46,6 +49,29 @@ return function(H)
     "with the message of testing call"
   )
 
+  -- a `dir` that looks like an option stays a directory: `--remote` must not switch on the CI adapter (network,
+  -- token), and the call of the server's own repository must not answer in its place
+  for _, sneaky in ipairs({ "--remote", "--state-dir=" .. vim.fn.tempname() }) do
+    res = send({
+      jsonrpc = "2.0",
+      id = 5,
+      method = "tools/call",
+      params = { name = "testing_repo", arguments = { dir = sneaky } },
+    })
+    ok(res.result.isError, "dir " .. sneaky .. " is not read as an option")
+    ok(
+      res.result.content[1].text:find("dir must not start with '-'", 1, true),
+      "... it is refused before testing call: " .. res.result.content[1].text
+    )
+  end
+  res = send({
+    jsonrpc = "2.0",
+    id = 6,
+    method = "tools/call",
+    params = { name = "testing_repo", arguments = { dir = 7 } },
+  })
+  ok(res.result.isError, "a dir that is no text is refused")
+
   res = send({
     jsonrpc = "2.0",
     id = 4,
@@ -53,4 +79,6 @@ return function(H)
     params = { name = "testing_findings", arguments = { fp = "../x" } },
   })
   ok(res.result.isError, "an fp that is no hex is refused before testing call")
+  ok(res.result.content[1].text:find("fp must be hex", 1, true), "... with its own message")
+  vim.fn.delete(repos_root, "rf")
 end

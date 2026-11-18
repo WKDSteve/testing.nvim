@@ -42,14 +42,24 @@ local function call(argv, env)
   return mcp_server.text(table.concat(out, "\n"))
 end
 
----A directory argument, or the server's own working directory (the project the client started the server in).
+---A directory argument (never one that starts with `-`) as an absolute path, or the server's own working directory (the project the client started
+---the server in). Absolute on purpose: the value goes into the argv of `testing call`, and a bare `--remote` or
+---`--state-dir=...` from the model would otherwise be read as an option (the CI adapter with its token, another
+---state folder) instead of as a directory.
 ---@param dir any
 ---@return string
 local function dir_or_cwd(dir)
-  if type(dir) == "string" and dir ~= "" then
-    return dir
+  if dir == nil or dir == "" then
+    return assert(vim.uv.cwd())
   end
-  return assert(vim.uv.cwd())
+  if type(dir) ~= "string" then
+    error("dir must be a text", 0)
+  end
+  -- refused, not made absolute: `fnamemodify(":p")` leaves `--state-dir=C:/x` as it is on Windows
+  if dir:sub(1, 1) == "-" then
+    error("dir must not start with '-' (it would be read as an option of testing call)", 0)
+  end
+  return vim.fs.normalize(vim.fn.fnamemodify(dir, ":p"))
 end
 
 ---The server. `opts.repos_root` is the root of `testing_fleet` and of a `repo` key (nil: `$TESTING_REPOS_ROOT`, then
