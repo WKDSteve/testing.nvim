@@ -1,4 +1,5 @@
 ---@module 'testing.perf.trace'
+-- @cache-env TESTING_PERF_REAL TMPDIR TEMP TMP
 ---@brief The spawn trace of a `testing perf` child: every process the editor starts, one JSON line each.
 ---@description
 --- Installed by the child's `-u` file before the project's minimal init (`job.preload`, `testing.child.rpc_init`), so
@@ -173,9 +174,12 @@ local function argv_text(cmd)
   end
   text = text:gsub("[%c]", " ")
   -- the child's temporary folders (its sandbox) differ on every run: one placeholder keeps lines comparable
-  for _, name in ipairs({ "TMPDIR", "TEMP", "TMP" }) do
-    local dir = os.getenv(name)
-    if dir and #dir > 3 then
+  for _, dir in ipairs({
+    os.getenv("TMPDIR") or "",
+    os.getenv("TEMP") or "",
+    os.getenv("TMP") or "",
+  }) do
+    if #dir > 3 then
       for _, form in ipairs({ dir, (dir:gsub("\\", "/")) }) do
         local at = text:find(form, 1, true)
         while at do

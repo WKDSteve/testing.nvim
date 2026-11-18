@@ -337,21 +337,19 @@ return function(H)
   -- ── the command line ──────────────────────────────────────────────────
   do
     local perf = require("testing.perf")
-    local o = assert(
-      perf.parse({
-        "a",
-        "--all",
-        "/r",
-        "--sheet",
-        "s1",
-        "--sheet=s2",
-        "--real=git, network",
-        "--interval",
-        "250",
-        "--json",
-        "x.json",
-      })
-    )
+    local o = assert(perf.parse({
+      "a",
+      "--all",
+      "/r",
+      "--sheet",
+      "s1",
+      "--sheet=s2",
+      "--real=git, network",
+      "--interval",
+      "250",
+      "--json",
+      "x.json",
+    }))
     eq(o.roots, { "a" }, "roots")
     eq(o.all, "/r", "--all")
     eq(o.sheets, { "s1", "s2" }, "--sheet twice, also with =")

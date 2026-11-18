@@ -1,4 +1,5 @@
 ---@module 'testing.perf'
+-- @cache-env NVIM_MACHINE_ROLE
 ---@brief `testing perf`: run the feature sheets of one or many repositories and report every process they start.
 ---@description
 --- The recurring performance check of a fleet of plugins (docs/PERF.md). It measures, it never gates: the exit code
