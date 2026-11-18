@@ -12,6 +12,9 @@
 ---     cost = "about 0.01 USD: one short request per model",
 ---   }
 ---
+--- A sheet that needs the network alone (a page fetched from a public host) names no variable: `env = {}`, or `env`
+--- left out. `hosts` is always named.
+---
 --- * It runs only with `testing sheets run --live`: never in the suite, never in `sheets step`, never where `CI` is
 ---   set (also with `--live`). Without `--live`, or without one of its variables, it is a reported skip.
 --- * Its child gets the named variables, and a guard (`testing.guard.process_net`, mode error) that lets the network
@@ -35,17 +38,18 @@ M.MIN_SECRET = 6
 M.HTTP_CLIENTS = { "curl" }
 
 ---@class Testing.Sheet.Live
----@field env string[]
+---@field env? string[] nil or empty: the sheet needs no key, only the network
 ---@field hosts string[]
 ---@field cost string
 
 ---@param v any
 ---@param pattern string
 ---@param what string
+---@param min integer the fewest names
 ---@return string|nil
-local function names(v, pattern, what)
-  if type(v) ~= "table" or not vim.islist(v) or #v == 0 or #v > M.MAX then
-    return ("a list of 1 to %d %s"):format(M.MAX, what)
+local function names(v, pattern, what, min)
+  if type(v) ~= "table" or not vim.islist(v) or #v < min or #v > M.MAX then
+    return ("a list of %d to %d %s"):format(min, M.MAX, what)
   end
   for _, x in ipairs(v) do
     if type(x) ~= "string" or not x:match(pattern) or #x > 200 then
@@ -69,15 +73,17 @@ function M.check(live, engine, steps)
       return "live: unknown field " .. tostring(k)
     end
   end
-  local eerr = names(live.env, "^[%a_][%w_]*$", "environment variable names")
+  -- no variable at all is a sheet that needs the network alone
+  local eerr =
+    names(live.env == nil and {} or live.env, "^[%a_][%w_]*$", "environment variable names", 0)
   if eerr then
     return "live.env: " .. eerr
   end
-  local herr = names(live.hosts, "^[%w][%w.-]*$", "host names")
+  local herr = names(live.hosts, "^[%w][%w.-]*$", "host names", 1)
   if herr then
     return "live.hosts: " .. herr
   end
-  for _, name in ipairs(live.env) do
+  for _, name in ipairs(live.env or {}) do
     if require("testing.child.env").is_denied(name) then
       return "live.env: " .. name .. " points at the editor that runs the tests"
     end
@@ -113,7 +119,7 @@ function M.gate(s, opts, getenv)
     )
   end
   local missing = {}
-  for _, name in ipairs(live.env) do
+  for _, name in ipairs(live.env or {}) do
     if (getenv(name) or "") == "" then
       missing[#missing + 1] = name
     end
@@ -130,7 +136,7 @@ end
 ---@return table<string, string>
 function M.values(s, getenv)
   local out = {}
-  for _, name in ipairs(s.live.env) do
+  for _, name in ipairs(s.live.env or {}) do
     local v = getenv(name)
     if v and v ~= "" then
       out[name] = v
@@ -235,9 +241,11 @@ end
 ---@param s Testing.Sheet
 ---@return string
 function M.notice(s)
-  return ("live sheet %s: real keys (%s) and network (%s); cost: %s"):format(
+  local env = s.live.env or {}
+  local keys = #env > 0 and ("real keys (%s)"):format(table.concat(env, ", ")) or "no keys"
+  return ("live sheet %s: %s and network (%s); cost: %s"):format(
     s.id,
-    table.concat(s.live.env, ", "),
+    keys,
     table.concat(s.live.hosts, ", "),
     s.live.cost
   )

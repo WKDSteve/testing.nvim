@@ -44,7 +44,18 @@ return function(H)
       has(err, needle, msg)
     end
     refused(base({ live = { env = { "X" }, hosts = { "h" } } }), "live.cost", "no cost")
-    refused(base({ live = { env = {}, hosts = { "h" }, cost = "c" } }), "live.env", "no variable")
+    refused(base({ live = { env = { "X" }, hosts = {}, cost = "c" } }), "live.hosts", "no host")
+    refused(base({ live = { env = { "X" }, cost = "c" } }), "live.hosts", "hosts left out")
+    local eleven = {}
+    for i = 1, 11 do
+      eleven[i] = "V" .. i
+    end
+    refused(base({ live = { env = eleven, hosts = { "h" }, cost = "c" } }), "live.env", "too many")
+    refused(
+      base({ live = { env = false, hosts = { "h" }, cost = "c" } }),
+      "live.env",
+      "env = false"
+    )
     refused(
       base({ live = { env = { "A B" }, hosts = { "h" }, cost = "c" } }),
       "live.env",
@@ -71,6 +82,38 @@ return function(H)
       "live belongs to an rpc sheet",
       "another engine"
     )
+  end
+
+  -- 1b. a live sheet that needs the network alone: no keys, `env = {}` or left out ---------------------------------------
+  do
+    local function env(t)
+      return function(name)
+        return t[name]
+      end
+    end
+    for _, form in ipairs({
+      { label = "env = {}", live = { env = {}, hosts = { "example.com" }, cost = "nothing" } },
+      { label = "env left out", live = { hosts = { "example.com" }, cost = "nothing" } },
+    }) do
+      local s, err = sheet.validate(base({ live = form.live }))
+      ok(s ~= nil, form.label .. ": a live sheet without keys loads: " .. tostring(err))
+      if s then
+        eq(live.gate(s, { live = true }, env({})), nil, form.label .. ": --live alone runs it")
+        has(
+          live.gate(s, {}, env({})),
+          "only with `testing sheets run --live`",
+          form.label .. ": still only with --live"
+        )
+        eq(live.values(s, env({ PATH = "x" })), {}, form.label .. ": no variable reaches the child")
+        local notice = live.notice(s)
+        has(notice, "no keys", form.label .. ": the notice says there are no keys")
+        ok(
+          not notice:find("real keys", 1, true),
+          form.label .. ": ... not 'real keys ()': " .. notice
+        )
+        eq(live.masker(live.values(s, env({})))("text"), "text", form.label .. ": nothing to mask")
+      end
+    end
   end
 
   -- 2. masking ----------------------------------------------------------------------------------------------------------

@@ -818,7 +818,8 @@ return {
 * It runs only with `testing sheets run --live` (with `--task`, `--sheet` or `--all`): never in the suite, never in
   `testing sheets step`, never where `CI` is set (not even with `--live`). Otherwise, and when one of its variables is
   not set, it is a **reported skip** with the reason, never a green run. Before it runs, the command says on stderr which
-  keys, which hosts and what it costs (`live sheet <id>: real keys (...) and network (...); cost: ...`).
+  keys, which hosts and what it costs (`live sheet <id>: real keys (...) and network (...); cost: ...`, `no keys` for a
+  sheet without variables).
 * Its child gets exactly the named variables, their values as they are (not rewritten as paths: a URL keeps its
   `//` on Windows too), and a network guard (`testing.guard.process_net`, mode error, the other
   guards off) that lets it reach the named hosts only: a Lua connection to another host is blocked, `curl` goes through
@@ -830,8 +831,10 @@ return {
   a piece of a value cut by the end of a row too). So they reach no task block, no note, no snapshot file. A value
   shorter than 6 bytes is not masked (it would mask ordinary text). A live sheet takes no `shot`: a picture cannot be
   masked.
-* `live` belongs to an rpc sheet. `env` names (letters, digits, `_`, never `NVIM*`) and `hosts` are lists of 1 to 10,
-  `cost` a text of up to 300 bytes.
+* `live` belongs to an rpc sheet. `env` names (letters, digits, `_`, never `NVIM*`) are a list of 0 to 10, `hosts` a
+  list of 1 to 10, `cost` a text of up to 300 bytes.
+* A sheet that needs the network alone (a page of a public host, no key) leaves `env` out or writes `env = {}`: it still
+  runs only with `--live`, its child gets no variable of the environment, and the notice says `no keys`.
 
 ## Limits
 
