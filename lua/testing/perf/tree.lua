@@ -1,4 +1,5 @@
 ---@module 'testing.perf.tree'
+-- @cache-allow outside
 ---@brief Snapshots of a process tree while `testing perf` runs a sheet: working set, peak, CPU seconds, command line.
 ---@description
 --- `start({ root = pid })` samples every descendant of `root` (default: this editor, so the sheet's child editor and
