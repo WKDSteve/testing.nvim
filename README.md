@@ -379,6 +379,21 @@ FAIL  TESTS/calc_spec.lua
 summary: 1 pass, 1 fail, 1 skip (3 case(s)) in 0.00 s
 ```
 
+### MCP server (Claude Code and other agents)
+
+`scripts/mcp.lua` serves the documents of `testing call` (`testing-export/1`) as read-only MCP tools over stdio
+(`lib.nvim.mcp.server`): `testing_hello`, `testing_repo` (the last run of a repository with its red cases; default:
+the directory the server runs in), `testing_findings` (the findings of that run) and `testing_fleet`. Like
+`testing call` it runs no suite and writes nothing; nothing that runs (`run`, `ci commit`, `ci trust`, `ci land`) is a
+tool.
+
+```sh
+claude mcp add testing -- nvim -n -i NONE --headless -u NONE -l /path/to/testing.nvim/scripts/mcp.lua
+```
+
+`--repos-root=<dir>` is the root of `testing_fleet` (default `$TESTING_REPOS_ROOT`, then `$REPOS_DIR`). Needs lib.nvim
+with `lib.nvim.mcp.server`.
+
 ### In the editor
 
 ```vim

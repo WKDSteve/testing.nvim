@@ -63,6 +63,7 @@ local REQUIRED_LIB = {
   { "lib.nvim.contract.doc", "head, digest and size limit of the testing-export/1 documents" },
   { "lib.nvim.debounce", "the lint check after a save" },
   { "lib.lua.time.presets", "the --since day of testing stats" },
+  { "lib.nvim.mcp.server", "the read-only MCP server (scripts/mcp.lua; lib.nvim >= 867ed6a)" },
 }
 
 ---Kernel modules the CLI and the in-process driver need; a failure here is a defect of the plugin
