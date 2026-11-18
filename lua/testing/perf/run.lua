@@ -1,4 +1,5 @@
 ---@module 'testing.perf.run'
+-- @cache-env *_DIR
 ---@brief Run the sheets of a repository with the spawn trace and the process tree: the data of a `testing perf` report.
 ---@description
 --- Each rpc sheet of `TESTS/sheets` runs as `testing.sheet.run` would run it (one child editor per size, the steps in
