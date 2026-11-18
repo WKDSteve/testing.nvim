@@ -294,7 +294,8 @@ runs); `assertions = "warn"` keeps their verdict and the terminal lists them.
 - Neovim 0.10 or newer.
 - [lib.nvim](https://github.com/WKDSteve/lib.nvim), a hard dependency, and new enough to contain
   `lib.nvim.fs.write.atomic` (commit `6304829`) and the `lib.lua.error.safe_call` that keeps
-  non-string errors (commit `89cb912`). An older checkout fails with
+  non-string errors (commit `89cb912`), and `lib.lua.time.presets.since_utc` for `testing stats --since`
+  (commit `55b96be`). An older checkout fails with
   `module 'lib.nvim.fs.write.atomic' not found`; `:checkhealth testing` names the missing module and
   these commits.
 

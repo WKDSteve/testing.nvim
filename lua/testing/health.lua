@@ -62,6 +62,7 @@ local REQUIRED_LIB = {
   { "lib.nvim.git", "the head of a repository in testing call fleet|repo" },
   { "lib.nvim.contract.doc", "head, digest and size limit of the testing-export/1 documents" },
   { "lib.nvim.debounce", "the lint check after a save" },
+  { "lib.lua.time.presets", "the --since day of testing stats" },
 }
 
 ---Kernel modules the CLI and the in-process driver need; a failure here is a defect of the plugin
@@ -91,7 +92,7 @@ end
 local EVAL_BUDGET = 200000
 
 local LIB_HINT = "testing.nvim needs lib.nvim >= 6304829 (fs.write.atomic) and >= 89cb912 (safe_call keeps non-string errors)"
-  .. " and >= ccd30b5 (net.github, for testing ci remote)"
+  .. " and >= ccd30b5 (net.github, for testing ci remote) and >= 55b96be (time.presets.since_utc, for testing stats)"
 
 ---The surface of `vim.health` the checks report through: `error` and `warn` take an advice list, `ok` and `info` do
 ---not (LLS-29), so a hint passed to them is never shown.

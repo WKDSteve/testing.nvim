@@ -188,6 +188,13 @@ return function(H)
   local jdoc = vim.json.decode(out[1])
   eq(jdoc.schema, "testing-stats/1", "stats main --json: the document")
   eq(stats.main({ "--since=x" }, sv()), 2, "stats main: a bad --since")
+  eq(stats.main({ "--since=2026-02-30" }, sv()), 2, "stats main: --since checks the calendar")
+  eq(stats.main({ "--file=" .. m.path, "--json", "--since=7d" }, sv()), 0, "stats main --since=7d")
+  eq(
+    vim.json.decode(out[1]).since,
+    "2026-11-03",
+    "stats main: --since=7d is the UTC day 7 days back"
+  )
   eq(stats.main({ "--frob" }, sv()), 2, "stats main: an unknown argument")
 
   -- the wiring: a suite run writes one line; `testing ci` with its suite one `ci` line, no second `suite` line

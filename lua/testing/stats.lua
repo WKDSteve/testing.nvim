@@ -48,14 +48,6 @@ local function round1(x)
   return math.floor(x * 10 + 0.5) / 10
 end
 
----The UTC day `n` days before `now` (`YYYY-MM-DD`).
----@param n integer
----@param now integer
----@return string
-local function days_ago(n, now)
-  return os.date("!%Y-%m-%d", now - n * 86400) --[[@as string]]
-end
-
 ---Sum up the lines.
 ---@param entries table[] The lines of `testing.metrics.read`.
 ---@param opts? { since?: string, repo?: string }
@@ -515,15 +507,13 @@ function M.main(argv, sv)
     elseif a == "--json" then
       json = true
     elseif key == "since" then
-      local n = value:match("^(%d+)d$")
-      if n then
-        opts.since = days_ago(tonumber(n) --[[@as integer]], (sv.now or os.time)())
-      elseif value:match("^%d%d%d%d%-%d%d%-%d%d$") then
-        opts.since = value
-      else
+      -- lib.nvim's one calendar: a real day, or `<n>d` as the UTC day n days back.
+      local day = require("lib.lua.time.presets").since_utc(value, (sv.now or os.time)())
+      if not day then
         sv.err("testing stats: --since: a day (2026-11-09) or a number of days (7d)")
         return 2
       end
+      opts.since = day
     elseif key == "repo" and value ~= "" then
       opts.repo = value
     elseif key == "file" and value ~= "" then

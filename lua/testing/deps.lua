@@ -245,6 +245,11 @@ M.LIB_REQUIRED = {
     what = "fs.write.atomic (the JSON IR, the cache, the baselines)",
     commit = "6304829",
   },
+  {
+    module = "lib/lua/time/parse",
+    what = "lib.lua.time.presets.since_utc (testing stats --since)",
+    commit = "55b96be",
+  },
 }
 
 ---Is the lib.nvim checkout `dir` too old for this runner? A stale copy that comes first in the search
