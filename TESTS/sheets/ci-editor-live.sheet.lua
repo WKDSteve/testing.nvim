@@ -83,6 +83,25 @@ return {
       expect = [[(function() local t = table.concat(_G.sheet_notes, "\n") return t:find("broken", 1, true) ~= nil end)()]],
       note = "the verdict names the red step",
     },
+    {
+      lua = [[_G.since = #_G.sheet_notes; vim.cmd("Testing ci status")]],
+      note = ":Testing ci status: the recorded result again",
+    },
+    {
+      wait = [[(function() for _, b in ipairs(vim.api.nvim_list_bufs()) do local t = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), "\n") if t:find("ci full: ", 1, true) and t:find("broken", 1, true) then return true end end for i = _G.since + 1, #_G.sheet_notes do if _G.sheet_notes[i]:find("ci full: ", 1, true) and _G.sheet_notes[i]:find("broken", 1, true) then return true end end end)()]],
+      timeout = 10000,
+      note = "the status names the steps of the last run, the red one too",
+    },
+    {
+      input = "<C-w>o:Testing ci <C-a>",
+      note = "complete the profile like a person: the first <Tab> asks a child for the pipeline's profiles",
+    },
+    { input = "<C-u><Esc>", note = "leave the command line" },
+    {
+      wait = [[vim.tbl_contains(vim.fn.getcompletion("Testing ci ", "cmdline"), "full")]],
+      timeout = 20000,
+      note = "the next completion offers the profile of the fixture (full)",
+    },
   },
   judge = {
     "the live buffer opens in a sensible split and keeps the focus where you work",
