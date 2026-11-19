@@ -617,11 +617,11 @@ function M.fold(records)
   ---@field cpu? number seconds, from the process tree
   ---@field alive_at_end? boolean
   ---@field stack? string[] every caller up the stack (`file:line`, innermost first)
-  local by_id, list = {}, {}
+  local by_id, list, by_id_sync = {}, {}, {}
   for _, r in ipairs(records) do
     if r.ev == "install" then
       -- a new child (the next size, a restart) counts its ids from 1 again: a late end of the old one is not its
-      by_id = {}
+      by_id, by_id_sync = {}, {}
     elseif r.ev == "start" and r.id then
       local s = {
         id = r.id,
@@ -636,12 +636,15 @@ function M.fold(records)
         stack = r.stack,
       }
       by_id[r.id] = s
+      by_id_sync[r.id] = r.sync == true
       list[#list + 1] = s
     elseif r.id and by_id[r.id] then
       local s = by_id[r.id]
       if r.ev == "end" then
         s.ms, s.code = r.ms, r.code
-        if s.sync then
+        -- a call that is synchronous by itself (vim.fn.system, os.execute, io.popen) blocked as long as it ran; a
+        -- start a wait() or jobwait() made synchronous blocked only as long as those waited (its own record)
+        if by_id_sync[r.id] then
           s.blocked_ms = r.ms
         end
       elseif r.ev == "wait" then

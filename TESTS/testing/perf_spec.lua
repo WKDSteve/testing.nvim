@@ -168,6 +168,18 @@ return function(H)
       { nil, 4 },
       "a new child's ids start again: the end is the new one's"
     )
+    local waited = trace.fold({
+      { ev = "start", id = 1, us = 1, kind = "jobstart", argv = "cmd", sync = false },
+      { ev = "wait", id = 1, us = 2, ms = 3 },
+      { ev = "end", id = 1, us = 9, ms = 833 },
+      { ev = "start", id = 2, us = 1, kind = "fn.system", argv = "git", sync = true },
+      { ev = "end", id = 2, us = 9, ms = 120 },
+    })
+    eq(
+      { waited[1].blocked_ms, waited[1].ms, waited[2].blocked_ms },
+      { 3, 833, 120 },
+      "a job's end does not turn its short wait into its whole run; a synchronous call blocked as long as it ran"
+    )
     eq(trace.repo_of("E:/repos/foo.nvim/lua/foo/init.lua"), "foo.nvim", "repo of a source")
     eq(
       trace.repo_of("C:/x/nvim-data/lazy/gitsigns.nvim/lua/gitsigns/a.lua"),
