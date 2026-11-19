@@ -4,6 +4,7 @@ return {
   id = "testing.ci-repos-editor",
   feature = "testing.fleet",
   title = ":Testing ci repos over a folder of repositories",
+  task = "testing.nvim/performance-pruefung-luecken-schliessen-katalog-feature-shee",
   engine = "rpc",
   sizes = { { rows = 24, cols = 100 } },
   steps = {

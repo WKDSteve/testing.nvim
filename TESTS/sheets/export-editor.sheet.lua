@@ -6,6 +6,7 @@ return {
   id = "testing.export-editor",
   feature = "testing.export",
   title = ":Testing export in the editor, without GitHub",
+  task = "testing.nvim/performance-pruefung-luecken-schliessen-katalog-feature-shee",
   engine = "rpc",
   sizes = { { rows = 24, cols = 100 } },
   steps = {

@@ -5,6 +5,7 @@ return {
   id = "testing.ci-hook-editor",
   feature = "testing.pre-push",
   title = ":Testing ci hook install / verify / remove in the editor",
+  task = "testing.nvim/performance-pruefung-luecken-schliessen-katalog-feature-shee",
   engine = "rpc",
   sizes = { { rows = 24, cols = 100 } },
   steps = {

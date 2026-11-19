@@ -5,6 +5,7 @@ return {
   id = "testing.ci-commit-editor",
   feature = "testing.ci-commit",
   title = ":Testing ci commit in the editor",
+  task = "testing.nvim/performance-pruefung-luecken-schliessen-katalog-feature-shee",
   engine = "rpc",
   sizes = { { rows = 24, cols = 100 } },
   steps = {

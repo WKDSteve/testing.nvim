@@ -6,6 +6,7 @@ return {
   id = "testing.lint-editor",
   feature = "testing.lint",
   title = ":Testing lint --all in the editor",
+  task = "testing.nvim/performance-pruefung-luecken-schliessen-katalog-feature-shee",
   engine = "rpc",
   sizes = { { rows = 24, cols = 100 } },
   steps = {
