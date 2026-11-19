@@ -137,7 +137,7 @@ M.MAX_STACK = 16
 ---@return string|nil site, string|nil origin, string plugin, string[] stack
 local function callers()
   local site, origin, from_rpc
-  local stack = {}
+  local stack, nonlib = {}, 0
   for level = 3, 60 do
     local info = debug.getinfo(level, "Sl")
     if not info then
@@ -153,10 +153,13 @@ local function callers()
       local p = norm_source(src)
       local here = ("%s:%d"):format(p, info.currentline or 0)
       site = site or here
-      if #stack < M.MAX_STACK then
+      local lib = is_lib(p)
+      -- the bound counts the plugin's frames: a deep chain inside lib.nvim must not push the callers out
+      if (lib or nonlib < M.MAX_STACK) and #stack < 4 * M.MAX_STACK then
         stack[#stack + 1] = here
+        nonlib = nonlib + (lib and 0 or 1)
       end
-      if not is_lib(p) then
+      if not lib then
         origin = origin or here
       end
     end
@@ -417,11 +420,13 @@ function M.install(opts)
     local t0 = now_us()
     local r = { O.jobwait(jobs, ...) }
     local ms = (now_us() - t0) / 1000
-    -- the editor waited for these jobs: each is a synchronous start now
-    for _, job in ipairs(type(jobs) == "table" and jobs or { jobs }) do
+    -- the editor waited for the jobs that ended in it (-1: still running, a poll); the wait is counted once
+    local results = type(r[1]) == "table" and r[1] or {}
+    for i, job in ipairs(type(jobs) == "table" and jobs or { jobs }) do
       local id = S and S.jobs[job]
-      if id then
+      if id and results[i] ~= nil and results[i] ~= -1 then
         write({ ev = "wait", id = id, us = now_us(), ms = ms })
+        ms = 0
       end
     end
     return unpack(r, 1, table.maxn(r))
@@ -440,8 +445,8 @@ function M.install(opts)
       return fh, perr
     end
     -- the editor blocks from here until the handle is read and closed: the close is the end
-    return M.popen_proxy(fh, function(code)
-      finish(id, t0, code)
+    return M.popen_proxy(fh, function()
+      finish(id, t0, nil)
     end)
   end)
   O.execute = os_lib.execute
@@ -453,8 +458,8 @@ function M.install(opts)
     local t0 = now_us()
     local r = { O.execute(cmd) }
     local code = type(r[1]) == "number" and r[1] or nil
-    if code and code > 255 then
-      code = math.floor(code / 256) -- LuaJIT on POSIX returns the raw wait status
+    if code and code > 255 and package.config:sub(1, 1) ~= "\\" then
+      code = math.floor(code / 256) -- LuaJIT on POSIX returns the raw wait status; Windows the exit code
     end
     finish(id, t0, code)
     return unpack(r, 1, table.maxn(r))
@@ -462,13 +467,27 @@ function M.install(opts)
   return true, nil
 end
 
----A stand-in for the file of `io.popen` that reports its close (once): every method is the file's, called on the file.
+---A stand-in for the file of `io.popen` that reports the end of the command once: at its close, at the end of its
+---output (a `read("*a")`, a read or a `lines()` that gives nil), or when the handle is collected unclosed. Every
+---method is the file's, called on the file. (LuaJIT's close gives no exit code: the end carries none.)
 ---@param fh file*
----@param on_close fun(code: integer|nil)
+---@param on_end fun()
 ---@return table
-function M.popen_proxy(fh, on_close)
-  local closed = false
+function M.popen_proxy(fh, on_end)
+  local ended = false
+  local function done()
+    if not ended then
+      ended = true
+      on_end()
+    end
+  end
   local proxy = {}
+  -- a userdata with __gc: LuaJIT runs no __gc of a table
+  local sentinel = newproxy and newproxy(true) or nil
+  if sentinel then
+    getmetatable(sentinel).__gc = done
+  end
+  proxy.__sentinel = sentinel
   return setmetatable(proxy, {
     __index = function(_, key)
       local v = fh[key]
@@ -478,11 +497,30 @@ function M.popen_proxy(fh, on_close)
       if key == "close" then
         return function()
           local r = { fh:close() }
-          if not closed then
-            closed = true
-            on_close(type(r[3]) == "number" and r[3] or nil)
+          done()
+          return unpack(r, 1, table.maxn(r))
+        end
+      end
+      if key == "read" then
+        return function(_, ...)
+          local r = { fh:read(...) }
+          local fmt = select(1, ...)
+          if r[1] == nil or fmt == "*a" or fmt == "a" then
+            done()
           end
           return unpack(r, 1, table.maxn(r))
+        end
+      end
+      if key == "lines" then
+        return function(_, ...)
+          local it = fh:lines(...)
+          return function()
+            local l = it()
+            if l == nil then
+              done()
+            end
+            return l
+          end
         end
       end
       return function(self, ...)

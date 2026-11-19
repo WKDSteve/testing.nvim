@@ -116,6 +116,13 @@ return function(H)
     local job2 = vim.fn.jobstart({ exe, "--version" })
     vim.fn.jobwait({ job2 }, 20000)
     vim.system({ exe, "--version" }, {}, function() end)
+    -- the common form without a close: the end of the output is the end
+    has(assert(io.popen(('"%s" --version'):format(exe))):read("*a"), "NVIM", "read without close")
+    -- a poll (timeout 0) of a job still running does not make it synchronous
+    local job3 =
+      vim.fn.jobstart({ exe, "--headless", "-u", "NONE", "-c", "sleep 300m", "-c", "qa!" })
+    eq(vim.fn.jobwait({ job3 }, 0)[1], -1, "the job still runs at the poll")
+    vim.fn.jobwait({ job3 }, 20000)
     trace.uninstall()
     ok(vim.lsp.start ~= real_lsp_start, "the stub is back, not the original")
     vim.lsp.start = real_lsp_start
@@ -130,6 +137,20 @@ return function(H)
     )
     ok(s2[2].sync == true and s2[2].blocked_ms ~= nil, "a jobwait makes the job synchronous")
     eq(s2[3].sync, false, "vim.system with a callback is asynchronous")
+    eq(s2[4].kind, "io.popen", "the second popen")
+    ok(s2[4].ms ~= nil, "it ended at the end of its output, without a close")
+    eq(s2[5].kind, "jobstart", "the polled job")
+    local waits = 0
+    for _, r in ipairs(trace.read(out2)) do
+      if r.ev == "wait" and r.id == s2[5].id then
+        waits = waits + 1
+      end
+    end
+    eq(waits, 1, "one wait: the poll that found it running is none")
+    ok(
+      s2[5].blocked_ms ~= nil and s2[5].blocked_ms > 200,
+      "the blocking wait after the poll counts, the poll adds nothing"
+    )
     ok(
       trace._is_runtime("@E:/repos/testing.nvim/lua/testing/guard/process_net.lua"),
       "the guard is no caller"
@@ -407,6 +428,81 @@ return function(H)
       { 6 },
       "inner() in its own file reaches the local function's tail call"
     )
+    -- round 4 (review of rounds 2 and 3)
+    ok(
+      scan.is_tail('  return git.run_async(("log %s"):format(ref), cb)'),
+      "a method in the arguments is no chain"
+    )
+    ok(
+      not scan.is_tail("  return cmd and vim.fn.system(cmd)"),
+      "an operator before the call is no tail call"
+    )
+    ok(scan.is_tail('  return require("m").f(x)'), "require(...).f( is one callee")
+    ok(scan.is_tail("  return git.status("), "a call going on over the next lines")
+    write("lib.nvim/lua/lib/nvim/tbl/init.lua", {
+      "local function run(a)",
+      "  return vim.system(a)",
+      "end",
+      "local function open(p)",
+      "  return p",
+      "end",
+      "local function read(p)",
+      "  return io.open(p)",
+      "end",
+      "return { run = run, read = read }",
+    })
+    write("lib.nvim/lua/lib/nvim/reexp/init.lua", {
+      'local tbl = require("lib.nvim.tbl")',
+      "local M = {}",
+      'M.go = require("lib.nvim.run").go',
+      "M.run = tbl.run",
+      "return M",
+    })
+    -- a fresh cache key: a copy of the library with the two new modules
+    vim.fn.mkdir(tmp .. "/lib4.nvim", "p")
+    for _, rel in ipairs({ "run", "git", "text", "tbl", "reexp" }) do
+      local from = tmp .. "/lib.nvim/lua/lib/nvim/" .. rel .. "/init.lua"
+      write("lib4.nvim/lua/lib/nvim/" .. rel .. "/init.lua", vim.fn.readfile(from))
+    end
+    local sp4 = scan.spawning_modules(tmp .. "/lib4.nvim")
+    ok(
+      sp4["lib.nvim.tbl"] and sp4["lib.nvim.tbl"].run,
+      "a module returning a table exports its local functions"
+    )
+    ok(not (sp4["lib.nvim.tbl"] or {}).read, "io.open( is no call of a local open")
+    ok(
+      sp4["lib.nvim.reexp"] and sp4["lib.nvim.reexp"].go and sp4["lib.nvim.reexp"].run,
+      "re-exports spawn as their target"
+    )
+    local root4 = tmp .. "/plug4.nvim"
+    write("plug4.nvim/lua/plug4/init.lua", {
+      'local git = require("lib.nvim.git")',
+      "local M = {}",
+      "M.request = git.status",
+      "function M.run(c)",
+      "  local opts = {}",
+      "  opts.on_exit = function(r)",
+      "    return r",
+      "  end",
+      "  return vim.system(c, opts)",
+      "end",
+      "function M.a() return M.request('.') end",
+      "function M.b(client) return client:request('x') end",
+      'function M.c() print("git.status(") end',
+      "function M.d()",
+      "  return wrap(",
+      "    vim.system({ 'x' })",
+      "  )",
+      "end",
+      "return M",
+    })
+    eq(
+      vim.tbl_map(function(s)
+        return ("%d %s"):format(s.line, tostring(s.tail_fn))
+      end, scan.sites(root4, sp4)),
+      { "9 run", "11 a", "16 nil" },
+      "the function around a site is the top-level one; a field alias only on its table; no site in a string; no double site"
+    )
     -- a linked worktree: its main checkout from the .git file
     write("wt/.git", { "gitdir: E:/repos/plug.nvim/.git/worktrees/x1" })
     eq(
@@ -415,6 +511,17 @@ return function(H)
       "the main checkout of a worktree"
     )
     eq(require("testing.perf.run").main_checkout(root), nil, "a plain folder is none")
+    -- a relative gitdir (worktree.useRelativePaths)
+    vim.fn.mkdir(tmp .. "/main5/.git/worktrees/w", "p")
+    write("main5/wt/.git", { "gitdir: ../.git/worktrees/w" })
+    eq(
+      vim.fs.basename(require("testing.perf.run").main_checkout(tmp .. "/main5/wt") or ""),
+      "main5",
+      "a relative gitdir is resolved from the worktree"
+    )
+    vim.env.PERF_SPEC_X_DIR = "x"
+    require("testing.perf.run").restore_deps({ "PERF_SPEC_X_DIR" })
+    eq(vim.env.PERF_SPEC_X_DIR, nil, "what provide_deps set is unset again")
   end
 
   -- ── the findings and the report ────────────────────────────────────────

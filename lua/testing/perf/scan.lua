@@ -152,8 +152,10 @@ function M.match(line, ctx)
       return what
     end
   end
-  for name, what in pairs(ctx.fields or {}) do
-    if bare:find("[%.:]" .. name .. "%s*%(") then
+  for key, what in pairs(ctx.fields or {}) do
+    -- `M.request = helper.request`: a call `M.request(` / `M:request(` on that table, not `client:request(`
+    local tbl, name = key:match("^([%w_]+)%.([%w_]+)$")
+    if tbl and bare:find("%f[%w_]" .. tbl .. "[%.:]" .. name .. "%s*%(") then
       return what
     end
   end
@@ -173,12 +175,12 @@ function M.match(line, ctx)
     local fns = spawning[mod] or {}
     local a = alias:gsub("%p", "%%%0")
     -- `git.run_async(` when run_async starts a process; `open_default(` when the module is callable and does
-    for fn in code:gmatch("%f[%w_]" .. a .. "[%.:]([%w_]+)%s*%(") do
+    for fn in bare:gmatch("%f[%w_]" .. a .. "[%.:]([%w_]+)%s*%(") do
       if fns[fn] then
         return mod .. "." .. fn
       end
     end
-    if fns.__call and code:find("%f[%w_]" .. a .. "%s*%(") then
+    if fns.__call and bare:find("%f[%w_]" .. a .. "%s*%(") then
       return mod
     end
   end
@@ -195,13 +197,20 @@ function M.is_tail(line)
   end
   code =
     code:gsub("^%s*local%s+function%s+[%w_]+%s*%b()", ""):gsub("^%s*function%s+[%w_.:]+%s*%b()", "")
-  if not code:match("^%s*return%s") then
+  local rest = code:match("^%s*return%s+(.*)$")
+  if not rest then
     return false
   end
-  -- `return vim.system(...):wait()`: the tail call is the chained method; the site's call keeps its frame
-  -- (a `require("m").f(` is the call itself, not a chain)
-  local plain = code:gsub("require%s*%(?%s*[\"'][^\"']*[\"']%s*%)?", "require_m")
-  return not M.strip_strings(plain):find("%)%s*[%.:][%w_]+%s*%(")
+  -- the returned expression must be one call: `return f(args)`. A chain (`f(x):wait()`: the method is the tail call
+  -- and the site keeps its frame) or an operator (`cmd and f(cmd)`) is none. `require("m").f(` is one callee.
+  rest = M.strip_strings((rest:gsub("require%s*%(?%s*[\"'][^\"']*[\"']%s*%)?", "require_m")))
+  local callee, after = rest:match("^([%w_%.:]+)%s*%b()(.*)$")
+  if not callee then
+    -- a call whose arguments go on over the next lines: nothing after it can be seen on this one
+    return rest:match("^[%w_%.:]+%s*%(") ~= nil and not rest:find("%b()")
+  end
+  after = after:gsub("%s*end%s*$", "")
+  return after:match("^%s*;?%s*$") ~= nil
 end
 
 ---The module name of a file below `lua/`: `lua/lib/nvim/git/init.lua` -> `lib.nvim.git`.
@@ -287,8 +296,12 @@ local function analyse(lines)
             cur.direct = true
           end
         end
-        for fname in code:gmatch("%f[%w_]([%w_]+)%s*%(") do
-          cur.locals[fname] = true
+        local bare = M.strip_strings(code)
+        for at, fname in bare:gmatch("()%f[%w_]([%w_]+)%s*%(") do
+          local before = at > 1 and bare:sub(at - 1, at - 1) or ""
+          if before ~= "." and before ~= ":" then
+            cur.locals[fname] = true
+          end
         end
         for fname in code:gmatch("%f[%w_]" .. mv .. "[%.:]([%w_]+)%s*%(") do
           cur.locals["." .. fname] = true
@@ -312,6 +325,46 @@ local function analyse(lines)
     local ex, target = line:match("^" .. mv .. "%.([%w_]+)%s*=%s*([%w_]+)%s*$")
     if ex and target ~= "function" then
       exported[ex] = target
+    end
+    -- a re-export: `M.x = require("m").f`, `M.x = alias.f`
+    local rx, rmod, rfn = line:match(
+      "^" .. mv .. "%.([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%.([%w_]+)%s*$"
+    )
+    if not rx then
+      local ralias
+      rx, ralias, rfn = line:match("^" .. mv .. "%.([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+      rmod = ralias and aliases[ralias]
+    end
+    if rx and rmod then
+      fns["=" .. rx] = { direct = false, locals = {}, ext = { { mod = rmod, fn = rfn } } }
+      exported[rx] = "=" .. rx
+    end
+  end
+  -- a module that returns a table: `return { run = run, find = M.find }` (on one line or over several)
+  for i = #lines, 1, -1 do
+    if lines[i]:match("^return%s*{") then
+      local text = {}
+      for j = i, #lines do
+        text[#text + 1] = lines[j]
+        if lines[j]:match("}%s*$") then
+          break
+        end
+      end
+      for k, v in table.concat(text, " "):gmatch("([%w_]+)%s*=%s*([%w_%.]+)%s*[,}]") do
+        if v ~= "function" then
+          local tbl, f = v:match("^([%w_]+)%.([%w_]+)$")
+          if tbl == modvar then
+            exported[k] = exported[f] or ("." .. f)
+          elseif tbl and aliases[tbl] then
+            fns["=" .. k] =
+              { direct = false, locals = {}, ext = { { mod = aliases[tbl], fn = f } } }
+            exported[k] = "=" .. k
+          elseif not tbl then
+            exported[k] = v
+          end
+        end
+      end
+      break
     end
   end
   return { fns = fns, exported = exported, callable = callable }
@@ -360,7 +413,7 @@ function M.spawning_modules(lib_root)
     local key = a.exported[fname]
     return key ~= nil and spawns[mod][key] == true
   end
-  for _ = 1, 20 do
+  for _ = 1, 10000 do -- monotone: it ends when nothing grows (the bound only guards a mistake)
     local grew = false
     for mod, a in pairs(mods) do
       for key, fn in pairs(a.fns) do
@@ -469,7 +522,9 @@ function M.sites(root, spawning)
           local lhs, mod, fn = code:match("^%s*local%s+([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
           local field
           if not lhs then
-            field, mod, fn = code:match("^%s*[%w_]+%.([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+            local tbl
+            tbl, field, mod, fn = code:match("^%s*([%w_]+)%.([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+            field = field and (tbl .. "." .. field)
           end
           local target = mod and aliases[mod]
           if not lhs and not field then
@@ -489,18 +544,23 @@ function M.sites(root, spawning)
       local ctx = { aliases = aliases, spawning = spawning or {}, funcs = funcs, fields = fields }
       local fn_name, fn_local -- the function the current line is in (the nearest definition above), and its kind
       for n, line in ipairs(lines) do
-        local loc = line:match("^%s*local%s+function%s+([%w_]+)%s*%(")
-          or line:match("^%s*local%s+([%w_]+)%s*=%s*function%s*%(")
+        local loc = line:match("^local%s+function%s+([%w_]+)%s*%(")
+          or line:match("^local%s+([%w_]+)%s*=%s*function%s*%(")
         local def = loc
-          or line:match("^%s*function%s+[%w_.:]-([%w_]+)%s*%(")
-          or line:match("^%s*[%w_.]-([%w_]+)%s*=%s*function%s*%(")
+          or line:match("^function%s+[%w_.:]-([%w_]+)%s*%(")
+          or line:match("^[%w_.]-([%w_]+)%s*=%s*function%s*%(")
         if def then
           fn_name, fn_local = def, loc ~= nil
         end
         local what = M.match(line, ctx)
         local wrapped = false
         local joined = M.joined(lines, n)
-        if not what and joined ~= line and M.code_of(line) then
+        if
+          not what
+          and joined ~= line
+          and M.code_of(line)
+          and not M.match(lines[n + 1] or "", ctx)
+        then
           -- a call wrapped after `(` or `vim`: only the primitives, on the line where the call starts
           what = M.match(joined)
           wrapped = what ~= nil
@@ -569,9 +629,11 @@ end
 ---@return { covered: Testing.Perf.Site[], missing: Testing.Perf.Site[], ratio: number|nil }
 function M.coverage(sites, spawns, root, ci, reaches)
   local hit, frames = {}, {}
+  local seen = {}
   local function take(place)
     local rel = M.relative(place, root, ci)
-    if rel then
+    if rel and not seen[rel] then
+      seen[rel] = true
       hit[ci and rel:lower() or rel] = true
       local file, n = rel:match("^(.*):(%d+)$")
       if file then

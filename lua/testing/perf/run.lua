@@ -273,9 +273,7 @@ function M.run_root(root, o)
   local main = M.main_checkout(root)
   -- a worktree is named after its repository, and finds the dependencies its siblings would give the checkout
   local repo = vim.fs.basename(main or root)
-  if main then
-    M.provide_deps(root, main)
-  end
+  local provided = main and M.provide_deps(root, main, repo) or {}
   local out = { root = root, repo = repo, sheets = {}, unloadable = {}, sites = {}, coverage = {} }
   local sheet = require("testing.sheet")
   out.catalog, out.catalog_error = require("testing.sheet.features").load(root)
@@ -331,6 +329,7 @@ function M.run_root(root, o)
   if own_tree then
     tree:stop()
   end
+  M.restore_deps(provided)
   out.tree_error = tree.error
   out.coverage = require("testing.perf.scan").coverage(
     out.sites,
@@ -360,25 +359,44 @@ function M.main_checkout(root)
   if not gitdir then
     return nil
   end
+  if not gitdir:match("^%a:[/\\]") and not gitdir:match("^[/\\]") then
+    -- `worktree.useRelativePaths`: relative to the worktree
+    gitdir = uv.fs_realpath(root .. "/" .. gitdir) or (root .. "/" .. gitdir)
+  end
   local main = vim.fs.normalize(gitdir):match("^(.*)/%.git/worktrees/[^/]+$")
   return main
 end
 
 ---Set `$<NAME>_DIR` for every dependency of a worktree that the main checkout resolves and nothing set yet: the
 ---child editors of the sheets resolve them from there (an override wins in `testing.deps`).
+---The repository itself is left out (its worktree is what is measured, not the main checkout). Returns the names it
+---set, for `restore_deps` when the root is done (`--all`: the next root must not inherit them).
 ---@param root string
 ---@param main string
-function M.provide_deps(root, main)
+---@param repo string
+---@return string[] set
+function M.provide_deps(root, main, repo)
   local deps = require("testing.deps")
   local names = vim.list_extend({ "lib.nvim", "testing.nvim" }, deps.declared(root))
+  local set = {}
   for _, name in ipairs(names) do
     local var = deps.env_name(name)
-    if (vim.env[var] or "") == "" then
+    if name ~= repo and (vim.env[var] or "") == "" then
       local found = deps.resolve(name, main)
       if found then
         vim.env[var] = found.dir
+        set[#set + 1] = var
       end
     end
+  end
+  return set
+end
+
+---Unset what `provide_deps` set.
+---@param set string[]
+function M.restore_deps(set)
+  for _, var in ipairs(set or {}) do
+    vim.env[var] = nil
   end
 end
 
