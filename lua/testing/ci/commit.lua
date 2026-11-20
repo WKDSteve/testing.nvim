@@ -65,6 +65,7 @@ M.USAGE = table.concat({
   "  --include-docs    run a commit that changes only documentation too",
   "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
   "  --wsl             run the check in WSL2 (about ten times faster than on Windows); not with --repos-root",
+  "                    (--quick of one repository goes there by itself where WSL2 is; --no-wsl keeps it on Windows)",
   "  --agent           the agent report (default in an agent environment); --no-agent: the terminal report",
   "  --json=<file>     also write the testing-ci-commit/1 document there",
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
@@ -150,6 +151,8 @@ function M.parse(argv)
       args.quick = true
     elseif key == "wsl" and value == nil then
       args.wsl = true
+    elseif key == "no-wsl" and value == nil then
+      args.wsl = false
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -1342,6 +1345,42 @@ function M.repo_names(plans)
   return names
 end
 
+---Replaced by a spec: is this Windows, and is `wsl.exe` there?
+---@return boolean windows
+---@return boolean wsl
+M.wsl_probe = function()
+  local windows = require("testing.platform").is_windows()
+  return windows, windows and vim.fn.executable("wsl.exe") == 1
+end
+
+---Where a check runs. `--wsl` / `--no-wsl` decide when given. Without either, a `--quick` check of one repository goes
+---to WSL2 on Windows where there is one and no CI service runs it: quick checks each commit at once (rule CI-01), and
+---measured 2026-11-12 to 11-20 they ran almost only on Windows (725 against 1 in WSL), median 170 s, where WSL2 takes
+---about a tenth.
+---@param args Testing.Ci.Commit.Args
+---@param env? table<string, string> The environment (`sv.env`).
+---@return boolean wsl
+---@return string|nil note A line to print: why a quick check stays on Windows.
+function M.choose_wsl(args, env)
+  if args.wsl ~= nil then
+    return args.wsl
+  end
+  if not args.quick or #(args.repos_roots or {}) > 0 then
+    return false
+  end
+  if env and env.CI and env.CI ~= "" then
+    return false
+  end
+  local windows, wsl = M.wsl_probe()
+  if not windows then
+    return false
+  end
+  if not wsl then
+    return false, "ci commit --quick: no WSL2 here (wsl.exe), the check runs on Windows"
+  end
+  return true
+end
+
 ---`ci commit ... --wsl`: the same check in WSL2 (`testing.ci.wsl`), the report printed here as without it.
 ---@param argv string[] The arguments as given.
 ---@param args Testing.Ci.Commit.Args
@@ -1368,7 +1407,8 @@ function M.main_wsl(argv, args, sv)
       end
       local name, has_value = a:match("^%-%-([%w%-]+)(=?)")
       local valued = passthrough and name == "cache-dir" or not passthrough and OWN_VALUED[name]
-      local flag = not passthrough and (a == "--wsl" or a == "--agent" or a == "--no-agent")
+      local flag = not passthrough
+        and (a == "--wsl" or a == "--no-wsl" or a == "--agent" or a == "--no-agent")
       if valued then
         skip_next = has_value == ""
       elseif not flag then
@@ -1479,7 +1519,11 @@ function M.main(argv, sv)
     return M.EXIT_OK
   end
   args.state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p") or sv.state_dir
-  if args.wsl then
+  local in_wsl, wsl_note = M.choose_wsl(args, sv.env)
+  if wsl_note then
+    out(wsl_note)
+  end
+  if in_wsl then
     return M.main_wsl(argv, args, sv)
   end
   local agent = args.agent

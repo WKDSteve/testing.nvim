@@ -989,6 +989,47 @@ return function(H)
       "quick: other options pass"
     )
 
+    -- where a check runs: --quick goes to WSL2 by itself on Windows with wsl.exe, nothing else does
+    local saved_probe = commit.wsl_probe
+    local function where(argv, env, windows, wsl)
+      commit.wsl_probe = function()
+        return windows, wsl
+      end
+      local a = assert(commit.parse(argv))
+      return { commit.choose_wsl(a, env) }
+    end
+    eq(
+      where({ "HEAD", "--quick" }, {}, true, true),
+      { true },
+      "wsl: quick on Windows with WSL2 goes there"
+    )
+    eq(where({ "HEAD" }, {}, true, true), { false }, "wsl: a full check stays where it was asked")
+    eq(where({ "HEAD", "--wsl" }, {}, true, true), { true }, "wsl: --wsl as given")
+    eq(
+      where({ "HEAD", "--quick", "--no-wsl" }, {}, true, true),
+      { false },
+      "wsl: --no-wsl keeps quick on Windows"
+    )
+    eq(
+      where({ "HEAD", "--quick" }, { CI = "true" }, true, true),
+      { false },
+      "wsl: never under a CI service"
+    )
+    eq(
+      where({ "HEAD", "--quick" }, {}, false, false),
+      { false },
+      "wsl: not on Linux or macOS, silently"
+    )
+    local no_wsl = where({ "HEAD", "--quick" }, {}, true, false)
+    eq(no_wsl[1], false, "wsl: Windows without wsl.exe stays on Windows ...")
+    has(no_wsl[2], "no WSL2 here", "wsl: ... and says so")
+    eq(
+      where({ "--repos-root=x", "--since=1.day.ago", "--quick" }, {}, true, true),
+      { false },
+      "wsl: not with --repos-root"
+    )
+    commit.wsl_probe = saved_probe
+
     -- the queue (testing.queue): a commit that runs takes its turn, a kept result waits for nobody. A fresh module:
     -- the run that hosts this spec may hold the real queue in this process.
     local saved_queue = package.loaded["testing.queue"]
