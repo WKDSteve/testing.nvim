@@ -22,6 +22,9 @@
 --- anyway. The tree holds `.testing.lua` too, so the pipeline is the same; the versions of the tools are not asked again
 --- (the CI of the host is the gate that runs everything).
 ---
+--- A red, complete run answers for its tree for `RED_KEEP_S` (`<tree>-<profile>.red.json`, with what it printed), unless
+--- a red step is the suite or ran out of time (`M.keep_red`); `--force` runs anyway.
+---
 --- `--with=<a,b>` lays the named paths of the working tree over the snapshot (`testing.ci.overlay`): the commit plus YOUR
 --- changes, without what other sessions have lying uncommitted. Such a run is never a proof: nothing is kept, the document
 --- is partial, the sentinel is not printed, and the summary line says how many files came from the working tree.
@@ -41,6 +44,13 @@ M.EXIT_OK, M.EXIT_FAILED, M.EXIT_USAGE, M.EXIT_INFRA = 0, 1, 2, 3
 M.MAX_OUTPUT_LINES = 200
 
 M.PROOFS_KEEP = 24
+
+---How long a red run of a tree answers for that tree (seconds): the pre-push hooks of several sessions in a shared
+---checkout tried to push the same red tree up to nine times in five minutes (tasks-vault, 2026-11-16 to 11-19), 30 to
+---60 s each.
+M.RED_KEEP_S = 15 * 60
+---The clock of the red record (replaced by specs).
+M.now = os.time
 
 ---The tree of a commit.
 ---@param root string
@@ -149,6 +159,78 @@ function M.keep(root, state_dir, doc)
   local dir, path = proof_path(root, state_dir, doc.tree, doc.profile)
   keep_proof(dir, path, kept)
   return true
+end
+
+---Where the red record of a tree and a profile lives (beside its proof).
+---@param proof string The path of the proof.
+---@return string
+local function red_path(proof)
+  return (proof:gsub("%.json$", ".red.json"))
+end
+
+---Remember a red, complete run of a tree for `RED_KEEP_S`, with what it printed. Not when a red step is the suite or
+---ran out of time: those can be red from load alone (a flake), and a remembered flake would refuse every push of the
+---tree for a quarter of an hour. A lint, a gate or a check of files is red again on the same tree.
+---@param proof string The path of the proof of the tree.
+---@param doc table A `testing-ci/1` document.
+---@param shown string|nil What the run printed (its tail).
+---@return boolean kept
+function M.keep_red(proof, doc, shown)
+  if type(doc) ~= "table" or doc.verdict ~= "red" or doc.partial == true then
+    return false
+  end
+  local red = {}
+  for _, s in ipairs(doc.steps or {}) do
+    if s.state == "red" then
+      if
+        s.name == "suite" or (type(s.reason) == "string" and s.reason:find("timed out", 1, true))
+      then
+        return false
+      end
+      red[#red + 1] = s.name
+    end
+  end
+  if #red == 0 then
+    return false
+  end
+  local ci = require("testing.ci")
+  return require("lib.nvim.fs.write.atomic")(
+    red_path(proof),
+    require("lib.nvim.json.canonical").encode({
+      tree = doc.tree,
+      profile = doc.profile,
+      os = ci.internal.this_os(),
+      nvim = tostring(vim.version()),
+      time = M.now(),
+      red = red,
+      shown = shown,
+    }) .. "\n",
+    { mkdirp = true }
+  ) and true or false
+end
+
+---A red record of this tree that still answers: the same system and Neovim, younger than `RED_KEEP_S`.
+---@param proof string The path of the proof of the tree.
+---@param tree string
+---@return table|nil record
+function M.kept_red(proof, tree)
+  local text = require("lib.nvim.fs.read")(red_path(proof))
+  local okd, rec = pcall(vim.json.decode, text or "")
+  if not okd or type(rec) ~= "table" or type(rec.time) ~= "number" then
+    return nil
+  end
+  local age = M.now() - rec.time
+  if
+    rec.tree ~= tree
+    or rec.os ~= require("testing.ci").internal.this_os()
+    or rec.nvim ~= tostring(vim.version())
+    or age < -300
+    or age > M.RED_KEEP_S
+  then
+    return nil
+  end
+  rec.age = math.max(0, age)
+  return rec
 end
 
 ---A kept proof of ANOTHER profile that covers this one: the same pipeline (`pipeline_sha`), and every step of the
@@ -269,6 +351,25 @@ function M.main(args, root, sv)
       out(require("testing.ci").SENTINEL)
       return M.EXIT_OK
     end
+    -- a red run of this very tree a few minutes ago (a push of a shared checkout tried again): the same answer at once
+    local red = not args.force and not args.with and M.kept_red(proof, tree)
+    if red then
+      if type(red.shown) == "string" and red.shown ~= "" then
+        out(red.shown)
+      end
+      out(
+        ("ci --snapshot %s red exit 1 (profile %s, kept: tree %s was red %d s ago in %s; run it again with: testing ci --snapshot --rev=%s --profile=%s --force)"):format(
+          sha:sub(1, 7),
+          profile,
+          tree:sub(1, 8),
+          red.age,
+          table.concat(type(red.red) == "table" and red.red or {}, ", "),
+          sha:sub(1, 12),
+          profile
+        )
+      )
+      return M.EXIT_FAILED
+    end
   end
 
   pcall(snapshot.sweep, root, { state_dir = state_dir })
@@ -331,6 +432,12 @@ function M.main(args, root, sv)
     if tail ~= nil and tail ~= "" then
       err(tail)
     end
+    if code == M.EXIT_FAILED and not laid and proof then
+      pcall(M.keep_red, proof, doc, shown)
+    end
+  elseif proof and not laid then
+    -- green now (`--force` after a fix of a tool): the red record no longer answers; a run `--with` proves no tree
+    pcall(os.remove, red_path(proof))
   end
   local verdict = type(doc.verdict) == "string" and doc.verdict or "?"
   out(

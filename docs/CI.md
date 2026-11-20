@@ -680,6 +680,15 @@ nothing. The record counts when it is a snapshot run on this system and this Neo
 `ci verify` (7 days); the tree holds `.testing.lua`, so the pipeline is the same, while the versions of the tools are not
 asked again (the CI of the host runs everything). `--force` runs anyway; without `--snapshot` it is refused with exit 2.
 
+**A red run answers for its tree a while.** A red, complete run leaves `<tree>-<profile>.red.json` beside the proofs
+for 15 minutes (`RED_KEEP_S`), with what it printed: the same tree again (the pre-push hooks of several sessions in a
+shared checkout try to push the same red state; tasks-vault, 2026-11-16 to 11-19, up to nine times in five minutes, 30
+to 60 s each) gets that output and `ci --snapshot <sha> red exit 1 (profile <p>, kept: tree <t> was red <n> s ago in
+<steps>; run it again with: testing ci --snapshot --rev=<sha> --profile=<p> --force)` at once. Not kept: a red suite
+or a step that ran out of time (load alone can make them red, and a kept flake would refuse every push of the tree),
+a partial run, `--with`, an infrastructure failure. A green run of the tree (`--force`) removes the record; a kept green
+proof is asked first.
+
 A kept run also proves the **profiles it covers**: when the pipeline is the same (`pipeline_sha` of the run and of the
 working tree's `.testing.lua`) and every step of the asked profile is in the run and green, a green `full` answers for
 `fast` (`kept: tree <t> was green in profile full`). A part never proves the whole. **`testing ci commit` keeps its

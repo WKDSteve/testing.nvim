@@ -184,6 +184,71 @@ return function(H)
   r = ci("verify", unpack(with("--profile=full")))
   eq(r.code, 1, "a red snapshot run: not proven")
 
+  -- a red run of a tree answers for that tree a while (a shared checkout's sessions push it again and again)
+  do
+    local snapshot_run = require("testing.ci.snapshot_run")
+    local saved_now = snapshot_run.now
+    local clock = os.time()
+    snapshot_run.now = function()
+      return clock
+    end
+    local created = 0
+    local snap_mod = require("testing.ci.snapshot")
+    local saved_create = snap_mod.create
+    snap_mod.create = function(...)
+      created = created + 1
+      return saved_create(...)
+    end
+    r = ci(unpack(with("--snapshot", "--profile=full")))
+    eq(r.code, 1, "red kept: the same tree again is red")
+    has(r.out, "kept: tree", "red kept: ... from the record")
+    has(r.out, "was red", "red kept: ... says it was red")
+    has(r.out, "in gate", "red kept: ... names the red step")
+    has(r.out, "--force", "red kept: ... and how to run it again")
+    has(r.out, "== ", "red kept: ... with what the run printed then")
+    eq(created, 0, "red kept: no snapshot was made")
+    r = ci(unpack(with("--snapshot", "--profile=full", "--force")))
+    eq({ r.code, created }, { 1, 1 }, "red kept: --force runs again")
+    ok(not r.out:find("kept", 1, true), "red kept: --force says nothing about a kept run")
+    clock = clock + snapshot_run.RED_KEEP_S + 1
+    r = ci(unpack(with("--snapshot", "--profile=full")))
+    eq({ r.code, created }, { 1, 2 }, "red kept: an old record does not answer, the run runs")
+    -- a red suite is never kept: it can be red from load alone
+    eq(
+      snapshot_run.keep_red(S.state_dir .. "/x.json", {
+        verdict = "red",
+        tree = "ab",
+        profile = "full",
+        steps = { { name = "gate", state = "green" }, { name = "suite", state = "red" } },
+      }),
+      false,
+      "red kept: not for a red suite"
+    )
+    eq(
+      snapshot_run.keep_red(S.state_dir .. "/x.json", {
+        verdict = "red",
+        tree = "ab",
+        profile = "full",
+        steps = { { name = "gate", state = "red", reason = "timed out after 10 ms" } },
+      }),
+      false,
+      "red kept: not for a step that ran out of time"
+    )
+    eq(
+      snapshot_run.keep_red(S.state_dir .. "/x.json", {
+        verdict = "red",
+        partial = true,
+        tree = "ab",
+        profile = "full",
+        steps = { { name = "gate", state = "red" } },
+      }),
+      false,
+      "red kept: not for a partial run"
+    )
+    snap_mod.create = saved_create
+    snapshot_run.now = saved_now
+  end
+
   -- --rev: the commit that is pushed, not HEAD. HEAD is red here, its parent green, and the other way round
   local red = S.git_out(root, "rev-parse", "HEAD")
   local green = S.git_out(root, "rev-parse", "HEAD~1")
@@ -211,7 +276,8 @@ return function(H)
         "dep is missing",
         ""
     end
-    r = ci(unpack(with("--snapshot", "--profile=full")))
+    -- --force: the red record of HEAD's tree (above) would answer before the run
+    r = ci(unpack(with("--snapshot", "--profile=full", "--force")))
     commit.run_ci = saved
     eq(r.code, 3, "a run that could not start: its exit code")
     has(r.err, "dep is missing", "a run that could not start: says why")
