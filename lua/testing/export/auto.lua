@@ -1,4 +1,7 @@
 ---@module 'testing.export.auto'
+-- @cache-allow env
+-- (`from_env` takes the environment as an argument and is tested with a fake one; only the command-line entry hands
+-- it `os.getenv`, and what it arms runs after the run, so a spec never sees it)
 ---@brief After a final check (`ci commit` of a whole tree, `ci land`), write the export folder the hubs read.
 ---@description
 --- hub-desktop's monitor, testing-desktop and testing-web read a folder that `testing export --out` writes; written by
