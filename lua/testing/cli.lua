@@ -69,6 +69,7 @@ M.OWN_ARGS = { migrate = true, conformance = true, surface = true }
 ---@field cache? table Replaces `testing.cache` (specs).
 ---@field affected? table Replaces single seams of the affected selection: `affected`, `getenv`, `run`, `provider` (specs).
 ---@field watch? table Replaces single seams of the `--watch` loop (`testing.run.watch.run_cli`): `wait`, `run`, `source`, `scan`, `clock`, ...
+---@field export_after? Testing.ExportAuto The export after `ci commit` / `ci land` (`testing.export.auto`); only `scripts/testing.lua` sets it, from `TESTING_EXPORT_DIR`.
 
 ---Facts of one invocation after validation, before anything runs.
 ---@class Testing.Cli.RunPlan

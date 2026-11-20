@@ -82,12 +82,16 @@ local metrics = require("testing.metrics").from_env(os.getenv)
 pcall(function()
   require("testing.priority").apply(arg or {}, os.getenv)
 end)
+-- the export folder the hubs read, after `ci commit` (no --quick) and `ci land` (testing.export.auto: only with
+-- TESTING_EXPORT_DIR, never under CI); armed here only
+local export_after = require("testing.export.auto").from_env(os.getenv)
 local ok_run, code = pcall(cli.main, arg or {}, {
   env = env,
   script = this,
   trust = { env = trust_env, store = trust_store },
   queue = queue,
   metrics = metrics,
+  export_after = export_after,
 })
 if not ok_run then
   die("testing: internal error: " .. tostring(code))

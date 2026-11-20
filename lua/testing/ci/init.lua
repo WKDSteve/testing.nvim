@@ -1148,11 +1148,18 @@ function M.main(argv, sv)
     return require("testing.ci.verify").main(vim.list_slice(argv, 2), sv)
   end
   if argv[1] == "commit" then
-    return require("testing.ci.commit").main(vim.list_slice(argv, 2), sv)
+    local rest = vim.list_slice(argv, 2)
+    local code = require("testing.ci.commit").main(rest, sv)
+    -- the final check before a push: the export the hubs read (only when the entry armed it, TESTING_EXPORT_DIR)
+    require("testing.export.auto").after("commit", rest, sv)
+    return code
   end
   -- the hosted CI checks a commit on a branch of its own, main moves to it when green (testing.ci.land)
   if argv[1] == "land" then
-    return require("testing.ci.land").main(vim.list_slice(argv, 2), sv)
+    local rest = vim.list_slice(argv, 2)
+    local code = require("testing.ci.land").main(rest, sv)
+    require("testing.export.auto").after("land", rest, sv)
+    return code
   end
   -- before the multi-repository run: `remote --repos-root` is not `testing ci --repos-root`
   if argv[1] == "remote" then

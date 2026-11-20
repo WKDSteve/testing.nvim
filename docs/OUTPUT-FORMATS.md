@@ -503,6 +503,15 @@ nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci --repos-root=<dir> 
      [--export-remote=always|never|ask]
 ```
 
+**Written by itself after a final check.** With `TESTING_EXPORT_DIR` set, `testing ci commit` without `--quick` (the
+final check before a push, `--wsl` too) and `testing ci land` end with `testing export --out $TESTING_EXPORT_DIR
+--repos-root=<root>` (root: `TESTING_EXPORT_REPOS_ROOT`, else `REPOS_DIR`, else the folder above the repository), about
+3 s for 60 repositories, and one line `export (TESTING_EXPORT_DIR): ...`. The same code and the same data classes as by
+hand; nothing is committed or pushed. A failing export (another writer, a refused folder) is that line and nothing else:
+the verdict and the exit code of the run stand. Never under a CI service (`CI` set) and never for a library call of
+`cli.main` (only the command-line entry arms it). Point hub-desktop's `testing_export` at the same folder and its lights
+follow each push.
+
 The folder testing-web reads (and a results repository such as `testing-results` commits): the layout above, every
 document in the export form, indented by two spaces with a final line feed. The repositories are found as for
 `testing call fleet`; then **only those whose data class is `public` or `internal` are exported**
