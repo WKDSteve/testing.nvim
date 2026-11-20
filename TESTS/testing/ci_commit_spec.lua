@@ -1029,6 +1029,18 @@ return function(H)
       "wsl: not with --repos-root"
     )
     commit.wsl_probe = saved_probe
+    -- `CI` comes from the trust environment of the entry (scripts/testing.lua does not put it into sv.env)
+    eq(
+      commit.wsl_env({ env = {}, trust = { env = { CI = "true" } } }),
+      { CI = "true" },
+      "wsl: CI from the entry's trust environment"
+    )
+    eq(
+      commit.wsl_env({ env = { CI = "1" } }),
+      { CI = "1" },
+      "wsl: CI from sv.env (a caller of main)"
+    )
+    eq(commit.wsl_env({}), {}, "wsl: no environment, no CI")
 
     -- the queue (testing.queue): a commit that runs takes its turn, a kept result waits for nobody. A fresh module:
     -- the run that hosts this spec may hold the real queue in this process.

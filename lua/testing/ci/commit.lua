@@ -1353,6 +1353,17 @@ M.wsl_probe = function()
   return windows, windows and vim.fn.executable("wsl.exe") == 1
 end
 
+---The environment `choose_wsl` asks, with `CI`: the entry (`scripts/testing.lua`) hands `CI` down in the environment of
+---the workspace trust (`sv.trust.env`), not in `sv.env`.
+---@param sv table
+---@return table<string, string>
+function M.wsl_env(sv)
+  local trust_env = type(sv.trust) == "table" and type(sv.trust.env) == "table" and sv.trust.env
+    or {}
+  local env = type(sv.env) == "table" and sv.env or {}
+  return { CI = trust_env.CI or env.CI }
+end
+
 ---Where a check runs. `--wsl` / `--no-wsl` decide when given. Without either, a `--quick` check of one repository goes
 ---to WSL2 on Windows where there is one and no CI service runs it: quick checks each commit at once (rule CI-01), and
 ---measured 2026-11-12 to 11-20 they ran almost only on Windows (725 against 1 in WSL), median 170 s, where WSL2 takes
@@ -1519,7 +1530,7 @@ function M.main(argv, sv)
     return M.EXIT_OK
   end
   args.state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p") or sv.state_dir
-  local in_wsl, wsl_note = M.choose_wsl(args, sv.env)
+  local in_wsl, wsl_note = M.choose_wsl(args, M.wsl_env(sv))
   if wsl_note then
     out(wsl_note)
   end
