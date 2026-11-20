@@ -24,7 +24,8 @@
 --- either. `TESTING_QUEUE=off` turns it off by hand, `TESTING_QUEUE_FILE` names another lock file (specs).
 ---
 --- Light runs never queue: a selected suite (`--file`, `--affected`, ...), a profile without a suite step (the `fast`
---- run of the pre-push hook), `--watch`.
+--- run of the pre-push hook), `--watch`. `ci commit --quick` queues in a lane of its own (`M.lane`): it waits for
+--- another quick run, never behind a full one.
 
 local create_exclusive = require("lib.nvim.fs.create_exclusive")
 
@@ -106,6 +107,23 @@ function M.from_env(getenv)
     off = getenv(M.OFF_ENV) == "off",
     slots = slots,
   }
+end
+
+---The queue of a lane of its own beside `q`: the same rules (slots, fairness, the token of a holder), another lock
+---file (`<name>-<lane>.lock`). `ci commit --quick` runs in the lane `quick`: a quick run waits for another quick run,
+---never behind a full one (measured 2026-11-12 to 11-20: 75.6 of 98 hours of waiting were quick runs behind full ones),
+---and at most one full and one quick run go at the same time. `nil` stays `nil` (a library call has no queue).
+---@param q Testing.Queue|nil
+---@param lane string Letters, digits and `-` only.
+---@return Testing.Queue|nil
+function M.lane(q, lane)
+  if q == nil then
+    return nil
+  end
+  assert(type(lane) == "string" and lane:match("^[%w%-]+$"), "queue.lane: a plain name")
+  local copy = vim.deepcopy(q)
+  copy.path = (q.path:gsub("%.lock$", "")) .. "-" .. lane .. ".lock"
+  return copy
 end
 
 ---The lock file of slot `n` (slot 1 is `path` itself).

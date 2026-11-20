@@ -1018,6 +1018,33 @@ return function(H)
     -- the clean full result of ("d"):rep(40) above is kept: it needs no turn
     r = commit.check(tmp, ("d"):rep(40), qargs, function() end)
     eq({ r.verdict, r.reused }, { "clean", true }, "queue: a kept result waits for nobody")
+    -- `--quick` has a lane of its own: the full run holding the heavy lock does not hold it up ...
+    local q_args = commit.parse({ ("1"):rep(40), "--quick", "--", "--cached" })
+    q_args.state_dir = tmp
+    q_args.queue = { path = lock, off = false }
+    q_args.queue_say = qargs.queue_say
+    r = commit.check(tmp, ("1"):rep(40), q_args, function() end)
+    eq(r.verdict, "nothing-affected", "queue: a quick run passes a held heavy lock")
+    -- ... another quick run does
+    local quick_lock = fresh.lane(q_args.queue, "quick").path
+    eq(
+      quick_lock,
+      tmp .. "/heavy-quick.lock",
+      "queue: the quick lane is a lock file beside the heavy one"
+    )
+    local ql = assert(io.open(quick_lock, "wb"))
+    ql:write(vim.json.encode({
+      pid = vim.uv.os_getppid(),
+      token = "other-quick",
+      started = os.time(),
+      what = "another session's quick run",
+    }))
+    ql:close()
+    r = commit.check(tmp, ("2"):rep(40), q_args, function() end)
+    eq(r.verdict, "infra", "queue: a quick run waits for another quick run")
+    has(r.problems[1], "another session's quick run", "queue: ... and names it")
+    eq(fresh.lane(nil, "quick"), nil, "queue: a library call without a queue has no lane")
+    os.remove(quick_lock)
     package.loaded["testing.queue"] = saved_queue
     os.remove(lock)
 

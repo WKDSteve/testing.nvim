@@ -761,9 +761,10 @@ local function check(root, sha, args, say, snaps)
 
   -- the run itself is a heavy run (testing.queue); a kept result above needs no turn. The runs it starts at the
   -- commit and at the base carry the token and never wait for it.
+  -- `--quick` has a lane of its own: it waits for another quick run, never behind a full run of another session
   local queue = require("testing.queue")
   local queued, waited_too_long = queue.acquire(
-    args.queue,
+    args.quick and queue.lane(args.queue, "quick") or args.queue,
     ("ci commit %s in %s"):format(sha:sub(1, 7), vim.fs.basename(root)),
     args.queue_say or say
   )

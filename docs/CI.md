@@ -567,7 +567,11 @@ user on that machine:
 - heavy: a whole suite (`testing <root>`, `scripts/test.sh` without a selection), `testing ci` whose steps include the
   whole suite, `testing ci commit` (each commit that runs; a kept result waits for nobody);
 - light, never waiting: a selected suite (`--file`, `--affected`, `--changed`, `--only`, ...), a run without the suite
-  step (the `fast` profile of the pre-push hook), `--shard`, `--watch`.
+  step (the `fast` profile of the pre-push hook), `--shard`, `--watch`;
+- a lane of its own: `testing ci commit --quick` waits for another quick run (`heavy-run-<user>-quick.lock`, the same
+  slots and the same fair order), never behind a full run. At most one full and one quick run go at the same time. Measured
+  2026-11-12 to 11-20 before the lane: 75.6 of 98 hours of waiting were quick runs behind full ones, the p90 wait 17
+  minutes, which made "check each commit at once in the background" a wait.
 
 The waiting run says once what it waits for (`testing: queue: waiting for ci commit of 2 commit(s) in testing.nvim (pid
 4711, for 312 s)`) and again when its turn comes. The lock is `<temp>/testing/heavy-run-<user>.lock` (the user's temp
