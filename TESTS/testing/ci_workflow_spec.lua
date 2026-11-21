@@ -604,14 +604,10 @@ return function(H)
     has(skip_text, "Install tmux (Linux)", "packages false: apt stays")
     has(skip_text, "Install tmux (macOS)", "packages false: brew stays")
     ok(not skip_text:find("Install tmux (Windows)", 1, true), "packages false: no choco step")
-    refused(
-      {
-        name = "x",
-        packages = { { name = "t", why = "a", apt = false, brew = false, choco = false } },
-      },
-      "installs it nowhere",
-      "packages false: not on every system"
-    )
+    refused({
+      name = "x",
+      packages = { { name = "t", why = "a", apt = false, brew = false, choco = false } },
+    }, "installs it nowhere", "packages false: not on every system")
     refused(
       { name = "x", packages = { { name = "t", why = "a", apt = true } } },
       ".packages[1].apt",
