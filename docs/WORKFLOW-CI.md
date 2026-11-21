@@ -151,6 +151,7 @@ ci = {
     },
     env = { TASKS_REQUIRE_SNACKS = "1" },          -- optional: environment of the pipeline step
     packages = { { name = "ripgrep", why = "<one line: what the runs need it for>" } },   -- optional: programs of the hosted legs
+    setup = { { run = { "bash", "scripts/ci-setup.sh" }, why = "<what it prepares>" } },   -- optional: before the pipeline
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
     land = true,                                   -- optional: `testing ci land` (layouts public and hosted)
     min_nvim = { version = "0.11.4", why = "<what promises it>" },   -- optional (hosted): a leg on the minimum
@@ -188,6 +189,14 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   program that comes from npm is `{ name = "ts-ls", npm = { "typescript@5", "typescript-language-server" }, why = ...
   }`: one step `npm install -g ...` on every hosted leg, instead of the three managers (not together with `apt`, `brew`,
   `choco`; each entry `name`, `@scope/name` or `name@version`, nothing a shell would read as its own).
+- **Setup.** `setup` runs commands of the repository that prepare a hosted leg and that no package covers: grammars
+  built from source, Lua rocks, a symlink to a checkout. Each entry is `{ run = <argv>, why = <one line>, legs = "full" |
+  "hosted" }`: `run` is a list of words, never a shell string (letters, digits and `@%+=:,./_-`; the first word is the
+  program, not an option; at most 16 words, at most 4 entries), `why` the comment above the step, `legs` where it runs:
+  `full` (default) only on the hosted leg with the whole profile (ubuntu), `hosted` on every hosted leg (windows, macOS
+  and `ubuntu-min` too). Each is one bash step (Git Bash on Windows) after the tools, packages, Playwright and Node and
+  before the pipeline step, so a script may write `$GITHUB_ENV` (`DOCMAP_TS_PARSERS_DIR=...`) or `$GITHUB_PATH` for it.
+  Never on the self-hosted leg. Without `setup` the file is what it was.
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a

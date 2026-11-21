@@ -54,7 +54,7 @@ jobs:
           echo "@@LUACHECK_SUM@@  $RUNNER_TEMP/luacheck" | sha256sum -c -
           install -D -m 755 "$RUNNER_TEMP/luacheck" "$HOME/.local/bin/luacheck"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-@@PACKAGE_STEPS|raw@@@@PLAYWRIGHT_STEP|raw@@@@NODE_STEP|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
+@@PACKAGE_STEPS|raw@@@@PLAYWRIGHT_STEP|raw@@@@NODE_STEP|raw@@@@SETUP_STEPS|raw@@@@CACHE_RESTORE|raw@@      - name: @@SCRIPT|raw@@ ${{ matrix.steps }}
         env:
 @@ENV|raw@@          CI_STEPS: ${{ matrix.steps }}
           CI_REPORT: ${{ runner.temp }}/ci-report.json

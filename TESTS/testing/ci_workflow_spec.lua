@@ -681,6 +681,116 @@ return function(H)
     )
   end
 
+  -- setup: a command of the repository (an argv) that prepares a hosted leg before the pipeline; nothing without it ----
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    eq(workflow.validate({ name = "x" }).setup, {}, "setup: none by default")
+    local with = project(
+      "with-setup",
+      "{ 'suite', 'conformance' }",
+      [[{ name = "demo.nvim", layout = "hosted", setup = {
+        { run = { "bash", "scripts/ci-setup.sh", "--parsers" }, why = "builds the tree-sitter grammars of the call specs" },
+        { run = { "bash", "scripts/link.sh", "a:b", "@x" }, why = "links lib.nvim", legs = "hosted" },
+      } }]]
+    )
+    local text, problems = workflow.render(with)
+    eq(problems, {}, "setup: no problem")
+    has(
+      text,
+      "      # builds the tree-sitter grammars of the call specs\n"
+        .. "      - name: Setup 1 (ci.workflow.setup)\n"
+        .. "        if: matrix.hosted && matrix.steps == ''\n"
+        .. "        shell: bash\n"
+        .. "        run: |\n"
+        .. "          bash scripts/ci-setup.sh --parsers\n",
+      "setup: the full leg by default, the argv as one line of a block scalar"
+    )
+    has(
+      text,
+      "      - name: Setup 2 (ci.workflow.setup)\n        if: matrix.hosted\n",
+      "setup: legs = hosted runs on every hosted leg"
+    )
+    -- a word YAML would read as its own (`a:`, `@x`) stays inside the block scalar
+    has(text, "          bash scripts/link.sh a:b @x\n", "setup: the words as they are")
+    ok(
+      text:find("Setup 2 (ci.workflow.setup)", 1, true) < text:find("matrix.steps }}", 1, true),
+      "setup: before the pipeline step (a script may write $GITHUB_ENV for it)"
+    )
+    ok(
+      text:find("Setup 1 (ci.workflow.setup)", 1, true) > text:find("sha256sum -c", 1, true),
+      "setup: after the tools (luacheck is on PATH for it)"
+    )
+    local plain = workflow.render(
+      project(
+        "without-setup",
+        "{ 'suite', 'conformance' }",
+        '{ name = "demo.nvim", layout = "hosted" }'
+      )
+    )
+    ok(
+      not plain:find("ci.workflow.setup", 1, true),
+      "setup: a workflow without it has no such step"
+    )
+
+    refused({ name = "x", setup = "bash x.sh" }, ".setup: expected a list", "setup: a list")
+    refused({ name = "x", setup = {} }, ".setup: expected a list", "setup: not empty")
+    refused({ name = "x", setup = { "bash x.sh" } }, ".setup[1]: expected", "setup: tables")
+    refused(
+      { name = "x", setup = { { run = "bash x.sh", why = "a" } } },
+      ".setup[1].run: a list",
+      "setup: run is an argv, never a shell string"
+    )
+    for _, w in ipairs({
+      "a b",
+      "a;b",
+      "$(x)",
+      "`x`",
+      "a&&b",
+      "a|b",
+      "x>y",
+      "*",
+      "'a'",
+      '"a"',
+      "a\\b",
+      "",
+    }) do
+      refused(
+        { name = "x", setup = { { run = { "bash", w }, why = "a" } } },
+        ".setup[1].run[2]",
+        "setup: the word " .. vim.inspect(w) .. " is refused"
+      )
+    end
+    refused(
+      { name = "x", setup = { { run = { "-c", "x" }, why = "a" } } },
+      ".setup[1].run[1]: the program",
+      "setup: the first word is the program"
+    )
+    refused(
+      { name = "x", setup = { { run = { "bash", "x.sh" } } } },
+      ".setup[1].why",
+      "setup: a reason"
+    )
+    refused(
+      { name = "x", setup = { { run = { "bash", "x.sh" }, why = "a", legs = "all" } } },
+      ".setup[1].legs",
+      "setup: legs full or hosted"
+    )
+    refused(
+      { name = "x", setup = { { run = { "bash", "x.sh" }, why = "a", shell = "pwsh" } } },
+      "unknown key shell",
+      "setup: no other key"
+    )
+    local many = {}
+    for i = 1, workflow.MAX_SETUP + 1 do
+      many[i] = { run = { "bash", "x" .. i .. ".sh" }, why = "a" }
+    end
+    refused({ name = "x", setup = many }, ".setup: at most", "setup: at most MAX_SETUP")
+  end
+
   -- min_nvim: one more hosted ubuntu leg on the promised minimum, only the suite; nothing changes without the key ------
   do
     local function refused(wf, needle, msg)

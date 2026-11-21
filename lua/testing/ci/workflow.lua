@@ -17,6 +17,7 @@
 ---       },
 ---       env = { TASKS_REQUIRE_SNACKS = "1" },       -- optional: environment of the pipeline step
 ---       packages = { { name = "ripgrep", why = "insights.nvim scans with it" } },   -- optional: installed on the hosted legs
+---       setup = { { run = { "bash", "scripts/ci-setup.sh" }, why = "builds the grammars" } },  -- optional: an argv
 ---       publish = true,                             -- optional: the job that moves `ci-verified` (or { why = "..." })
 ---       timeout = 30,                               -- optional: minutes of a leg
 ---     },
@@ -98,6 +99,29 @@ end
 ---Most packages a workflow installs: every one is a step of every hosted leg.
 M.MAX_PACKAGES = 8
 
+---Most setup steps a workflow runs, and most words of one: a setup step calls a script of the repository, it is no
+---second pipeline.
+M.MAX_SETUP = 4
+M.MAX_SETUP_WORDS = 16
+
+---The keys of one entry of `ci.workflow.setup`.
+local SETUP_KEYS = { run = true, why = true, legs = true }
+
+---Which legs a setup step runs on: `full` the hosted leg that runs the whole profile (ubuntu), `hosted` every hosted
+---leg (also windows, macOS and ubuntu-min). Never a self-hosted one, whose machine is not the workflow's to change.
+M.SETUP_LEGS = {
+  full = "matrix.hosted && matrix.steps == ''",
+  hosted = "matrix.hosted",
+}
+
+---One word of a setup command: nothing a shell reads as its own (no blank, quote, `$`, `;`, `&`, `|`, `<`, `>`, `*`,
+---backslash, backtick), so the words can be joined into the `run:` line without quoting.
+---@param v any
+---@return boolean
+local function is_setup_word(v)
+  return type(v) == "string" and #v <= 200 and v:match("^[%w@%%+=:,./_-]+$") ~= nil
+end
+
 local KEYS = {
   name = true,
   min_nvim = true,
@@ -107,6 +131,7 @@ local KEYS = {
   playwright = true,
   checkouts = true,
   packages = true,
+  setup = true,
   env = true,
   publish = true,
   timeout = true,
@@ -124,6 +149,7 @@ local KEYS = {
 ---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ, false to go without; or npm on every leg), never on a self-hosted one.
+---@field setup { run: string[], why: string, legs: "full"|"hosted" }[] Commands of the repository (an argv, no shell text) that prepare a hosted leg before the pipeline: build grammars, install rocks, link a checkout, write `$GITHUB_ENV`.
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
@@ -175,6 +201,7 @@ function M.validate(raw)
   local cfg = {
     checkouts = {},
     packages = {},
+    setup = {},
     env = {},
     timeout = 30,
     platform = { "suite", "conformance" },
@@ -346,6 +373,70 @@ function M.validate(raw)
               choco = p.choco,
               npm = p.npm,
             }
+          end
+        end
+      end
+    end
+  end
+  if raw.setup ~= nil then
+    if not is_list(raw.setup) or #raw.setup == 0 then
+      bad(
+        '.setup: expected a list of { run = { "bash", "scripts/ci-setup.sh" }, why = "<one line>" }'
+      )
+    else
+      if #raw.setup > M.MAX_SETUP then
+        bad(".setup: at most %d", M.MAX_SETUP)
+      end
+      for i, s in ipairs(raw.setup) do
+        if type(s) ~= "table" then
+          bad(
+            '.setup[%d]: expected { run = { "bash", "scripts/ci-setup.sh" }, why = "<one line>" }',
+            i
+          )
+        else
+          local fine = true
+          for k in pairs(s) do
+            if not SETUP_KEYS[k] then
+              bad(".setup[%d]: unknown key %s", i, tostring(k))
+              fine = false
+            end
+          end
+          -- an argv, never a shell string: every word is checked, the line is the words joined by blanks
+          if not is_list(s.run) or #s.run == 0 or #s.run > M.MAX_SETUP_WORDS then
+            bad(
+              ".setup[%d].run: a list of 1 to %d words (an argv, no shell text)",
+              i,
+              M.MAX_SETUP_WORDS
+            )
+            fine = false
+          else
+            for j, w in ipairs(s.run) do
+              if not is_setup_word(w) then
+                bad(
+                  '.setup[%d].run[%d]: one word, letters, digits and "@%%+=:,./_-" (nothing a shell reads as its own)',
+                  i,
+                  j
+                )
+                fine = false
+              elseif j == 1 and w:sub(1, 1) == "-" then
+                bad(".setup[%d].run[1]: the program, not an option", i)
+                fine = false
+              end
+            end
+          end
+          if not is_text(s.why) then
+            bad(".setup[%d].why: one line of text, what the step prepares", i)
+            fine = false
+          end
+          if s.legs ~= nil and (type(s.legs) ~= "string" or not M.SETUP_LEGS[s.legs]) then
+            bad(
+              '.setup[%d].legs: "full" (the leg with the whole profile, default) or "hosted" (every hosted leg)',
+              i
+            )
+            fine = false
+          end
+          if fine then
+            cfg.setup[#cfg.setup + 1] = { run = s.run, why = s.why, legs = s.legs or "full" }
           end
         end
       end
@@ -527,6 +618,28 @@ local function package_steps(packages)
         end
       end
     end
+  end
+  return table.concat(out)
+end
+
+---The steps of `ci.workflow.setup`: one per entry, in bash (Git Bash on Windows), after the tools and packages and
+---before the pipeline step, so a script may write `$GITHUB_ENV` for it. The words are checked to need no shell
+---quoting; the line is a YAML block scalar, so no word (`a:`, `@x`) is read as YAML either. Nothing for none, so a
+---workflow without setup stays byte for byte what it was.
+---@param setup { run: string[], why: string, legs: "full"|"hosted" }[]
+---@return string
+local function setup_steps(setup)
+  local out = {}
+  for i, s in ipairs(setup) do
+    out[#out + 1] = M.wrap(s.why, "      # ")
+    out[#out + 1] = table.concat({
+      ("      - name: Setup %d (ci.workflow.setup)"):format(i),
+      "        if: " .. M.SETUP_LEGS[s.legs],
+      "        shell: bash",
+      "        run: |",
+      "          " .. table.concat(s.run, " "),
+      "",
+    }, "\n")
   end
   return table.concat(out)
 end
@@ -951,6 +1064,7 @@ function M.render_cfg(cfg, deps, opts)
     UPLOAD_ACTION = M.ACTIONS.upload,
     CHECKOUTS = (table.concat(checkouts):gsub("\n$", "")),
     PACKAGE_STEPS = package_steps(cfg.packages),
+    SETUP_STEPS = setup_steps(cfg.setup),
     NODE_STEP = cfg.node
         and ("      - uses: actions/setup-node@%s\n        if: matrix.hosted && matrix.steps == ''\n        with:\n          node-version: %s\n"):format(
           M.ACTIONS.node,
