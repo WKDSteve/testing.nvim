@@ -205,8 +205,13 @@ return function(H)
     -- a lock whose process is gone is taken over
     local _, lock = snapshot.warm_dir(root, opts)
     S.write(lock, vim.json.encode({ pid = 999999, started = 0 }))
+    -- ... but not while another run is taking it over (two runs in one tree would test each other's files)
+    S.write(lock .. ".takeover", "{}")
+    eq(snapshot.warm(root, next_sha, opts), nil, "warm: a takeover under way is left alone")
+    os.remove(lock .. ".takeover")
     local c = snapshot.warm(root, next_sha, opts)
     ok(c ~= nil, "warm: a dead holder's lock is taken over")
+    eq(vim.fn.filereadable(lock .. ".takeover"), 0, "warm: the takeover mark is gone afterwards")
     snapshot.remove(c)
   end
 

@@ -201,8 +201,27 @@ local function take_lock(lock)
   if pid and alive(pid) then
     return false
   end
-  os.remove(lock)
-  return create(lock, body) and true or false
+  -- a dead holder's lock: only the run that makes the takeover mark may remove it, so two runs that both saw the dead
+  -- lock cannot remove each other's new one (that would put two runs into one tree); the other one takes a fresh
+  -- snapshot. A mark left by a crash in these few lines is older than a minute and is removed.
+  local mark = lock .. ".takeover"
+  local st = vim.uv.fs_stat(mark)
+  if st and os.time() - st.mtime.sec > 60 then
+    os.remove(mark)
+  end
+  if not create(mark, body) then
+    return false
+  end
+  -- read again under the mark: another run may have taken it over just before
+  local okd2, doc2 = pcall(vim.json.decode, require("lib.nvim.fs.read")(lock) or "")
+  local pid2 = okd2 and type(doc2) == "table" and tonumber(doc2.pid) or nil
+  local taken = false
+  if not (pid2 and alive(pid2)) then
+    os.remove(lock)
+    taken = create(lock, body) and true or false
+  end
+  os.remove(mark)
+  return taken
 end
 
 ---Check the commit `sha` out into the WARM snapshot of `root`: one worktree per repository that stays between runs and
