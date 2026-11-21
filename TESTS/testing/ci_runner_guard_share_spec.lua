@@ -60,7 +60,7 @@ local code = guard.main({ "check" }, sv, {
       return "false\n"
     end
     if (args[2] or ""):find("/compare/", 1, true) then
-      vim.fn.mkdir(log, "p")
+      pcall(vim.fn.mkdir, log, "p")
       local f = assert(io.open(("%%s/%%d-%%d"):format(log, vim.fn.getpid(), vim.uv.hrtime()), "wb"))
       f:write(args[2] .. "\n")
       f:close()
@@ -78,6 +78,9 @@ os.exit(code)
   ---Start `n` hook processes at once; their exit codes and outputs, and how many comparisons GitHub saw.
   local function jobs(n, run_id, attempt)
     vim.fn.delete(log, "rf")
+    -- made here, before the hooks start: two of them making it at the same moment raised E739 in one (macOS, and
+    -- the hosted Windows leg), which then asked nothing and left one comparison instead of two
+    vim.fn.mkdir(log, "p")
     local procs = {}
     for i = 1, n do
       procs[i] = vim.system({
@@ -137,7 +140,9 @@ os.exit(code)
   os.remove(root .. "/_answers")
 
   -- 4. without a run id each job asks for itself ------------------------------------------------------------------
-  _, _, asked = jobs(2, "-") -- "-": no run id (an empty argument does not reach the process on Windows)
+  local codes4, outs4
+  codes4, outs4, asked = jobs(2, "-") -- "-": no run id (an empty argument does not reach the process on Windows)
+  eq(codes4, { 1, 1 }, "no run id: both jobs refuse (" .. table.concat(outs4, " | ") .. ")")
   eq(asked, 2, "no run id: no sharing")
 
   vim.fn.delete(root, "rf")
