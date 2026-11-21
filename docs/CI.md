@@ -325,8 +325,16 @@ changes are not seen), runs the ordinary `ci commit` there and prints its report
 those names would be its own refs. Options of this side never go into WSL (`--root`, `--json`, `--state-dir`, a
 `--cache-dir` of the suite: Windows paths). It takes no turn in the queue (a minute must not wait behind a Windows run
 of ten) and writes its metrics line with `os = "wsl"`; two `--wsl` checks at once wait for each other on a lock of
-the mirror (`flock`), since the second would check the dependencies out under the first one's suite. A clean result there is no proof for the pre-push hook of this
-side (it proves Linux, the hook guards Windows): the hook runs its `fast` profile, seconds.
+the mirror (`flock`), since the second would check the dependencies out under the first one's suite.
+
+**A clean result in WSL2 is the proof here too** (decided 2026-11-21), for a profile without a Windows-specific step
+(a step whose `os` names `windows` and not `linux`): a clean, whole run (not `--quick`) is kept on this side as the
+proof of its tree, marked `from_wsl` (`ci commit: N proof(s) from WSL2 kept here`), and for the commit that is `HEAD`
+also as `ci-<profile>.json`. `ci verify` then answers `verified (profile <p>, ..., proven in WSL2)`, and the
+`--snapshot` pre-push hook takes it as a kept proof. The system, the Neovim and the tool versions of such a proof are
+WSL2's and are not compared; what is Windows-specific is checked by the windows leg of the hosted CI (rule `CI-06`).
+On Linux and macOS a proof from WSL2 is never taken. A profile with a Windows-specific step still needs a run on
+Windows.
 
 **`--quick` goes to WSL2 by itself.** On Windows, a `--quick` check of one repository runs in WSL2 without `--wsl`
 when `wsl.exe` is there and no CI service runs it (`CI` unset); `--no-wsl` keeps it on Windows, and without WSL2 one line

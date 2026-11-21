@@ -393,6 +393,89 @@ return function(H)
     eq(r.code, 1, "cover: no proof of a red tree: fast runs and is red")
   end
 
+  -- a proof from WSL2 (`ci commit --wsl`) counts on Windows for a profile without a Windows-specific step
+  do
+    local snapshot_run = require("testing.ci.snapshot_run")
+    local commit = require("testing.ci.commit")
+    local internal = require("testing.ci").internal
+    local saved_os = internal.this_os
+    local wroot = S.project("wslproof", { ["gate.txt"] = "green\n" })
+    local function wci(...)
+      local argv = { ... }
+      vim.list_extend(argv, { "--root=" .. wroot, "--state-dir=" .. S.state_dir })
+      return ci(unpack(argv))
+    end
+    -- a real green run gives the document a run in WSL2 brings back; then this side forgets it
+    r = wci("--snapshot", "--profile=full")
+    eq(r.code, 0, "wsl proof: a green run to take the document from (" .. r.out .. r.err .. ")")
+    local wstate = require("testing.state").dir(wroot, { state_dir = S.state_dir })
+    local wdoc = vim.json.decode(require("lib.nvim.fs.read")(wstate .. "/ci-full.json") or "{}")
+    vim.fn.delete(wstate .. "/ci-proofs", "rf")
+    os.remove(wstate .. "/ci-full.json")
+    os.remove(wstate .. "/ci.json")
+    wdoc.os, wdoc.nvim = "linux", "v0.0.0-wsl"
+    local whead = S.git_out(wroot, "rev-parse", "HEAD")
+    internal.this_os = function()
+      return "windows"
+    end
+    eq(
+      commit.keep_wsl_proofs(wroot, S.state_dir, {
+        { sha = whead, verdict = "clean", quick = true, head = wdoc },
+        { sha = whead, verdict = "regression", head = wdoc },
+      }, whead),
+      0,
+      "wsl proof: a quick or a red run is not kept"
+    )
+    r = wci("verify", "--profile=full")
+    eq(r.code, 1, "wsl proof: nothing kept, not proven")
+    eq(
+      commit.keep_wsl_proofs(
+        wroot,
+        S.state_dir,
+        { { sha = whead, verdict = "clean", head = wdoc } },
+        whead
+      ),
+      1,
+      "wsl proof: a clean run is kept"
+    )
+    r = wci("verify", "--profile=full")
+    eq(r.code, 0, "wsl proof: ci verify takes it on Windows (" .. r.out .. r.err .. ")")
+    has(r.out, "proven in WSL2", "wsl proof: ... and says so")
+    r = wci("--snapshot", "--profile=full")
+    eq(
+      r.code,
+      0,
+      "wsl proof: the snapshot of the pre-push hook is green (" .. r.out .. r.err .. ")"
+    )
+    has(r.out, "kept: tree", "wsl proof: ... from the kept proof, not from a run")
+    internal.this_os = function()
+      return "linux"
+    end
+    r = wci("verify", "--profile=full")
+    eq(r.code, 1, "wsl proof: on Linux it is no proof (another Neovim)")
+    internal.this_os = saved_os
+    -- a Windows-specific step (its `os` names windows, not linux) cannot be proven in WSL2
+    local function pipe(os_b)
+      return { profiles = { full = { "a", "b" } }, steps = { a = {}, b = { os = os_b } } }
+    end
+    eq(snapshot_run.wsl_can_prove(pipe(nil), "full"), true, "wsl proof: steps for every system")
+    eq(
+      snapshot_run.wsl_can_prove(pipe({ windows = true }), "full"),
+      false,
+      "wsl proof: not with a Windows-only step"
+    )
+    eq(
+      snapshot_run.wsl_can_prove(pipe({ windows = true, linux = true }), "full"),
+      true,
+      "wsl proof: a step for Windows and Linux runs in WSL2 too"
+    )
+    eq(
+      snapshot_run.wsl_can_prove(pipe(nil), "nope"),
+      false,
+      "wsl proof: not for an unknown profile"
+    )
+  end
+
   -- the pre-push hook runs the profile that way when asked
   local hook = require("testing.ci.hook")
   local snap_text = hook.text({ run = "fast", driver_dir = "/opt/testing.nvim", snapshot = true })

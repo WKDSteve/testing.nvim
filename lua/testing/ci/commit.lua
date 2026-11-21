@@ -1345,6 +1345,33 @@ function M.repo_names(plans)
   return names
 end
 
+---Keep the clean, whole runs a check in WSL2 brought back as proofs on this side, marked `from_wsl`: the proof of the
+---commit's tree (`testing.ci.snapshot_run.keep`, which `ci --snapshot` and the pre-push hook ask), and for the commit
+---that is HEAD the documents `ci verify` reads. They count only for a profile without a Windows-specific step
+---(`snapshot_run.wsl_can_prove`); decided 2026-11-21. A quick run proves nothing and is not kept.
+---@param root string
+---@param state_dir string|nil
+---@param commits table[] The `commits` of the `testing-ci-commit/1` document from WSL2.
+---@param head_sha string|nil The full id of HEAD here.
+---@return integer kept
+function M.keep_wsl_proofs(root, state_dir, commits, head_sha)
+  local kept = 0
+  for _, r in ipairs(commits or {}) do
+    if r.verdict == "clean" and not r.quick and not r.reused and type(r.head) == "table" then
+      local doc = vim.deepcopy(r.head)
+      doc.from_wsl = true
+      doc.snapshot = true
+      if require("testing.ci.snapshot_run").keep(root, state_dir, doc) then
+        kept = kept + 1
+        if head_sha and r.sha == head_sha then
+          pcall(require("testing.ci").write_proof, doc, root, nil, state_dir)
+        end
+      end
+    end
+  end
+  return kept
+end
+
 ---Replaced by a spec: is this Windows, and is `wsl.exe` there?
 ---@return boolean windows
 ---@return boolean wsl
@@ -1500,6 +1527,14 @@ function M.main_wsl(argv, args, sv)
         profile = type(r.profile) == "string" and r.profile or nil,
       })
     end
+  end
+  -- a clean, whole run in WSL2 is the proof here too (for a profile without a Windows-specific step)
+  local _, head_out = git({ "rev-parse", "--verify", "--quiet", "HEAD^{commit}" }, root)
+  local wsl_kept = M.keep_wsl_proofs(root, args.state_dir, commits, vim.trim(head_out or ""))
+  if wsl_kept > 0 then
+    out(
+      ("ci commit: %d proof(s) from WSL2 kept here (ci verify, the pre-push hook)"):format(wsl_kept)
+    )
   end
   out("ran in WSL2: what is Windows-specific is checked by the windows leg of the hosted CI")
   if args.json then

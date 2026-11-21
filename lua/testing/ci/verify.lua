@@ -212,6 +212,7 @@ end
 ---@field reasons string[]
 ---@field rerun string[] The steps that must run again.
 ---@field suite? string The suite stamp's answer.
+---@field from_wsl? boolean The proof came from WSL2 (`ci commit --wsl`) and counts here.
 ---@field exit integer
 
 ---@param args Testing.Ci.Verify.Args
@@ -303,10 +304,15 @@ local function check(args, sv)
   end
 
   local rejected = {}
-  if doc.os ~= internal.this_os() then
+  -- a proof `ci commit --wsl` brought from WSL2 proves a profile without a Windows-specific step on Windows: its system,
+  -- Neovim and tool versions are WSL2's, and the windows leg of the hosted CI checks what is Windows-specific (CI-06)
+  local snapshot_run = require("testing.ci.snapshot_run")
+  local from_wsl = snapshot_run.wsl_proof(doc) and snapshot_run.wsl_can_prove(pipeline, profile)
+  res.from_wsl = from_wsl or nil
+  if not from_wsl and doc.os ~= internal.this_os() then
     rejected[#rejected + 1] = ("system: proof on %s, now %s"):format(doc.os, internal.this_os())
   end
-  if doc.nvim ~= tostring(vim.version()) then
+  if not from_wsl and doc.nvim ~= tostring(vim.version()) then
     rejected[#rejected + 1] = ("neovim: proof with %s, now %s"):format(
       tostring(doc.nvim),
       tostring(vim.version())
@@ -325,7 +331,7 @@ local function check(args, sv)
   for _, p in ipairs(planned) do
     local name = p.step.name
     local s = proven[name]
-    if not p.skip and not p.step.inprocess then
+    if not from_wsl and not p.skip and not p.step.inprocess then
       local line = internal.collect(started[name])
       line = line and vim.trim(line:match("[^\r\n]+") or "") or nil
       local was = s and s.tool_version
@@ -554,6 +560,9 @@ function M.main(argv, sv)
     head = head .. (" (profile %s"):format(res.profile)
     if res.suite then
       head = head .. ", suite stamp " .. res.suite
+    end
+    if res.from_wsl then
+      head = head .. ", proven in WSL2"
     end
     head = head .. ")"
   end

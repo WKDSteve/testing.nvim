@@ -78,11 +78,44 @@ local function proof_path(root, state_dir, tree, profile)
   return dir, ("%s/%s-%s.json"):format(dir, tree:sub(1, 20), (profile:gsub("[^%w_%-]", "_")))
 end
 
----Is there a green, complete run of this tree that is still good?
+---Can a run in WSL2 prove this profile for Windows? Yes unless a step of the profile is Windows-specific: its `os`
+---names windows and not linux, so WSL2 never ran it. Decided 2026-11-21 (`testing.nvim/entscheidung-pre-push-hook-wsl-
+---beweis`): the windows leg of the hosted CI checks what is Windows-specific (rule CI-06).
+---@param pipeline Testing.Ci.Pipeline|nil
+---@param profile string|nil
+---@return boolean
+function M.wsl_can_prove(pipeline, profile)
+  local names = pipeline and pipeline.profiles and profile and pipeline.profiles[profile]
+  if type(names) ~= "table" or not pipeline then
+    return false
+  end
+  for _, name in ipairs(names) do
+    local step = pipeline.steps and pipeline.steps[name]
+    local only = step and step.os
+    if type(only) == "table" and only.windows and not only.linux then
+      return false
+    end
+  end
+  return true
+end
+
+---Is this a proof `testing ci commit --wsl` brought from WSL2 (`from_wsl`, made on Linux), read on Windows?
+---@param doc table
+---@return boolean
+function M.wsl_proof(doc)
+  return type(doc) == "table"
+    and doc.from_wsl == true
+    and doc.os == "linux"
+    and require("testing.ci").internal.this_os() == "windows"
+end
+
+---Is there a green, complete run of this tree that is still good? A proof from WSL2 counts on Windows when
+---`accept_wsl` says the profile has no Windows-specific step; its system and Neovim are then WSL2's, not asked.
 ---@param path string
 ---@param tree string
+---@param accept_wsl? boolean
 ---@return table|nil doc
-local function kept_proof(path, tree)
+local function kept_proof(path, tree, accept_wsl)
   local text = require("lib.nvim.fs.read")(path)
   local okd, doc = pcall(vim.json.decode, text or "")
   if not okd or type(doc) ~= "table" then
@@ -92,14 +125,15 @@ local function kept_proof(path, tree)
   local verify = require("testing.ci.verify")
   local max_age = require("testing.stamp").parse_age(verify.DEFAULT_MAX_AGE) --[[@as integer]]
   local age = verify._age_of(doc.time)
+  local from_wsl = accept_wsl == true and M.wsl_proof(doc)
   if
     doc.schema ~= ci.SCHEMA
     or doc.verdict ~= "green"
     or doc.partial == true
     or doc.snapshot ~= true
     or doc.tree ~= tree
-    or doc.os ~= ci.internal.this_os()
-    or doc.nvim ~= tostring(vim.version())
+    or (not from_wsl and doc.os ~= ci.internal.this_os())
+    or (not from_wsl and doc.nvim ~= tostring(vim.version()))
     or age == nil
     or age < -300
     or age > max_age
@@ -255,7 +289,7 @@ function M.covering_proof(root, state_dir, tree, pipeline, profile)
   end
   for name, kind in iter do
     if kind == "file" and name:sub(1, #prefix) == prefix and name:match("%.json$") then
-      local doc = kept_proof(dir .. "/" .. name, tree)
+      local doc = kept_proof(dir .. "/" .. name, tree, M.wsl_can_prove(pipeline, profile))
       if doc and doc.pipeline_sha == sha then
         local green = {}
         for _, s in ipairs(doc.steps or {}) do
@@ -336,7 +370,7 @@ function M.main(args, root, sv)
     local kept = not args.force
       and not args.with
       and (
-        kept_proof(proof, tree)
+        kept_proof(proof, tree, M.wsl_can_prove(pipeline, profile))
         or (pipeline and M.covering_proof(root, state_dir, tree, pipeline, profile))
       )
     if kept then
