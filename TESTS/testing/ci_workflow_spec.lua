@@ -593,6 +593,62 @@ return function(H)
       "packages: installed before the pipeline runs"
     )
 
+    -- false: that system goes without (tmux: no choco package; the pty specs are n/a on Windows anyway)
+    local skip = project(
+      "skip-packages",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "public", packages = { { name = "tmux", choco = false, why = "the pty specs" } } }'
+    )
+    local skip_text, skip_problems = workflow.render(skip)
+    eq(skip_problems, {}, "packages false: no problem")
+    has(skip_text, "Install tmux (Linux)", "packages false: apt stays")
+    has(skip_text, "Install tmux (macOS)", "packages false: brew stays")
+    ok(not skip_text:find("Install tmux (Windows)", 1, true), "packages false: no choco step")
+    refused(
+      {
+        name = "x",
+        packages = { { name = "t", why = "a", apt = false, brew = false, choco = false } },
+      },
+      "installs it nowhere",
+      "packages false: not on every system"
+    )
+    refused(
+      { name = "x", packages = { { name = "t", why = "a", apt = true } } },
+      ".packages[1].apt",
+      "packages: true is no package name"
+    )
+    -- npm: one step on every hosted leg
+    local npm = project(
+      "npm-packages",
+      "{ 'suite', 'conformance' }",
+      '{ name = "demo.nvim", layout = "public", packages = { { name = "ts-ls", npm = { "typescript@5", "typescript-language-server", "@scope/pkg@1.2" }, why = "the live probe" } } }'
+    )
+    local npm_text, npm_problems = workflow.render(npm)
+    eq(npm_problems, {}, "packages npm: no problem")
+    has(
+      npm_text,
+      "      - name: Install ts-ls (npm)\n        if: matrix.hosted\n        run: npm install -g typescript@5 typescript-language-server @scope/pkg@1.2\n",
+      "packages npm: one npm install on every hosted leg"
+    )
+    ok(not npm_text:find("apt-get install -y ts-ls", 1, true), "packages npm: no apt step")
+    for _, bad in ipairs({ "a b", "a;b", "$(x)", "-g", "a@1 && b", "../x", "a//b" }) do
+      refused(
+        { name = "x", packages = { { name = "t", why = "a", npm = { bad } } } },
+        ".packages[1].npm[1]",
+        "packages npm: " .. vim.inspect(bad) .. " is refused"
+      )
+    end
+    refused(
+      { name = "x", packages = { { name = "t", why = "a", npm = { "x" }, apt = "x" } } },
+      "npm or apt/brew/choco",
+      "packages npm: not together with a package manager"
+    )
+    refused(
+      { name = "x", packages = { { name = "t", why = "a", npm = {} } } },
+      ".packages[1].npm",
+      "packages npm: at least one"
+    )
+
     -- a name of its own per package manager where they differ (poppler: poppler-utils on apt)
     for _, pm in ipairs({ "apt", "brew", "choco" }) do
       refused(

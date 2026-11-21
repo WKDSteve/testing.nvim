@@ -183,6 +183,11 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the
   workflow's to change. A name is a package name (letters, digits, `.`, `_`, `+`, `-`; nothing a shell would read as its
   own), `why` is one line above the steps, at most 8 packages. Without `packages` the file is what it was.
+  `apt`, `brew` or `choco` set to `false` leave that system without the program (`{ name = "tmux", choco = false, why =
+  ... }`: choco has no tmux, and the specs that need it are n/a on Windows anyway); false on all three is an error. A
+  program that comes from npm is `{ name = "ts-ls", npm = { "typescript@5", "typescript-language-server" }, why = ...
+  }`: one step `npm install -g ...` on every hosted leg, instead of the three managers (not together with `apt`, `brew`,
+  `choco`; each entry `name`, `@scope/name` or `name@version`, nothing a shell would read as its own).
 - **What is generated.** The checkouts of `deps` and `testing.nvim` from `ci-verified`, the third-party ones pinned with
   their reason, the tool versions and action SHAs of one table in testing.nvim (`testing.ci.workflow`, `TOOLS` and
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a

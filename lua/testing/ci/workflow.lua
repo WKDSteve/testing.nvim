@@ -73,13 +73,26 @@ M.LAYOUTS = { public = true, private = true, hosted = true }
 local RESERVED_ENV = { CI_STEPS = true, CI_REPORT = true, CI_IR = true }
 
 ---The keys of one entry of `ci.workflow.packages`.
-local PACKAGE_KEYS = { name = true, why = true, apt = true, brew = true, choco = true }
+local PACKAGE_KEYS = { name = true, why = true, apt = true, brew = true, choco = true, npm = true }
 
 ---One word for a package manager: nothing a shell could read as its own.
 ---@param v any
 ---@return boolean
 local function is_package_name(v)
   return type(v) == "string" and v:match("^[%w][%w._+-]*$") ~= nil and #v <= 64
+end
+
+---One package of npm (`typescript@5`, `@scope/name@1.2`): a name, an optional scope and an optional version; nothing a
+---shell could read as its own.
+---@param v any
+---@return boolean
+local function is_npm_package(v)
+  return type(v) == "string"
+    and #v <= 100
+    and (v:match("^[%w][%w._-]*$") or v:match("^@[%w][%w._-]*/[%w][%w._-]*$") or v:match(
+      "^@?[%w][%w._/-]*@[%w][%w.^~_-]*$"
+    )) ~= nil
+    and not v:find("//", 1, true)
 end
 
 ---Most packages a workflow installs: every one is a step of every hosted leg.
@@ -110,7 +123,7 @@ local KEYS = {
 ---@field node? { version: string, used_by: string }
 ---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
----@field packages { name: string, why: string, apt?: string, brew?: string, choco?: string }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ), never on a self-hosted one.
+---@field packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ, false to go without; or npm on every leg), never on a self-hosted one.
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
@@ -280,10 +293,40 @@ function M.validate(raw)
               bad(".packages[%d]: unknown key %s", i, tostring(k))
             end
           end
-          -- a name of its own per package manager where they differ (poppler-utils on apt, poppler on brew and choco)
+          -- a name of its own per package manager where they differ (poppler-utils on apt, poppler on brew and choco),
+          -- or false: that system goes without (tmux: no choco package; the pty specs are n/a on Windows anyway)
+          local skipped = 0
           for _, pm in ipairs({ "apt", "brew", "choco" }) do
-            if p[pm] ~= nil and not is_package_name(p[pm]) then
-              bad('.packages[%d].%s: a package name, letters, digits, ".", "_", "+" and "-"', i, pm)
+            if p[pm] == false then
+              skipped = skipped + 1
+            elseif p[pm] ~= nil and not is_package_name(p[pm]) then
+              bad(
+                '.packages[%d].%s: a package name, letters, digits, ".", "_", "+" and "-", or false (that system goes without)',
+                i,
+                pm
+              )
+            end
+          end
+          if skipped == 3 then
+            bad(".packages[%d]: false for apt, brew and choco installs it nowhere", i)
+          end
+          -- npm: one step `npm install -g ...` on every hosted leg, instead of the three package managers
+          if p.npm ~= nil then
+            if not is_list(p.npm) or #p.npm == 0 or #p.npm > 8 then
+              bad('.packages[%d].npm: a list of 1 to 8 npm packages ("typescript@5")', i)
+            else
+              for j, n in ipairs(p.npm) do
+                if not is_npm_package(n) then
+                  bad(
+                    '.packages[%d].npm[%d]: an npm package, "name", "@scope/name" or "name@version"',
+                    i,
+                    j
+                  )
+                end
+              end
+            end
+            if p.apt ~= nil or p.brew ~= nil or p.choco ~= nil then
+              bad(".packages[%d]: npm or apt/brew/choco, not both", i)
             end
           end
           if not is_package_name(p.name) then
@@ -295,8 +338,14 @@ function M.validate(raw)
             bad(".packages[%d].why: one line of text, why the runs need it", i)
           else
             seen[p.name] = true
-            cfg.packages[#cfg.packages + 1] =
-              { name = p.name, why = p.why, apt = p.apt, brew = p.brew, choco = p.choco }
+            cfg.packages[#cfg.packages + 1] = {
+              name = p.name,
+              why = p.why,
+              apt = p.apt,
+              brew = p.brew,
+              choco = p.choco,
+              npm = p.npm,
+            }
           end
         end
       end
@@ -443,7 +492,7 @@ end
 ---The steps that install the packages of `ci.workflow.packages` on a hosted leg, one per system (apt, brew, choco): the
 ---name is checked to be one word nobody's shell reads as its own. Nothing for none, so a workflow without packages stays
 ---byte for byte what it was; never on a self-hosted leg (`matrix.hosted`), whose machine is not the workflow's to change.
----@param packages { name: string, why: string, apt?: string, brew?: string, choco?: string }[]
+---@param packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[]
 ---@return string
 local function package_steps(packages)
   if #packages == 0 then
@@ -452,17 +501,31 @@ local function package_steps(packages)
   local out = {}
   for _, p in ipairs(packages) do
     out[#out + 1] = "      # " .. p.name .. ": " .. p.why .. "\n"
-    for _, sys in ipairs({
-      { "Linux", "sudo apt-get install -y " .. (p.apt or p.name) },
-      { "macOS", "brew install " .. (p.brew or p.name) },
-      { "Windows", "choco install " .. (p.choco or p.name) .. " -y --no-progress" },
-    }) do
+    if p.npm then
       out[#out + 1] = table.concat({
-        "      - name: Install " .. p.name .. " (" .. sys[1] .. ")",
-        "        if: matrix.hosted && runner.os == '" .. sys[1] .. "'",
-        "        run: " .. sys[2],
+        "      - name: Install " .. p.name .. " (npm)",
+        "        if: matrix.hosted",
+        "        run: npm install -g " .. table.concat(p.npm, " "),
         "",
       }, "\n")
+    else
+      for _, sys in ipairs({
+        { "Linux", p.apt ~= false and ("sudo apt-get install -y " .. (p.apt or p.name)) },
+        { "macOS", p.brew ~= false and ("brew install " .. (p.brew or p.name)) },
+        {
+          "Windows",
+          p.choco ~= false and ("choco install " .. (p.choco or p.name) .. " -y --no-progress"),
+        },
+      }) do
+        if sys[2] then
+          out[#out + 1] = table.concat({
+            "      - name: Install " .. p.name .. " (" .. sys[1] .. ")",
+            "        if: matrix.hosted && runner.os == '" .. sys[1] .. "'",
+            "        run: " .. sys[2],
+            "",
+          }, "\n")
+        end
+      end
     end
   end
   return table.concat(out)
