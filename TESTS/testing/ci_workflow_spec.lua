@@ -577,6 +577,15 @@ return function(H)
       "if: matrix.hosted && runner.os == 'Windows'\n        run: choco install ripgrep -y --no-progress",
       "packages: choco"
     )
+    -- one apt-get update per leg, before the first install (a stale index of the image fails a package it lacks)
+    local update =
+      "      - name: Update the apt index\n        if: matrix.hosted && runner.os == 'Linux'\n        run: sudo apt-get update -q\n"
+    has(text, update, "packages: the apt index is updated")
+    ok(
+      (text:find(update, 1, true) or math.huge)
+        < text:find("sudo apt-get install -y ripgrep", 1, true),
+      "packages: the update comes before the install"
+    )
     local before = project(
       "without-packages",
       "{ 'suite', 'conformance' }",
@@ -587,6 +596,7 @@ return function(H)
       not plain:find("Install ripgrep", 1, true),
       "packages: a workflow without them has no such step"
     )
+    ok(not plain:find("apt-get update", 1, true), "packages: no apt index update without packages")
     -- the step comes before the pipeline step that needs the program, and only that
     ok(
       text:find("Install ripgrep (Windows)", 1, true) < text:find("matrix.steps }}", 1, true),
@@ -627,6 +637,7 @@ return function(H)
       "packages npm: one npm install on every hosted leg"
     )
     ok(not npm_text:find("apt-get install -y ts-ls", 1, true), "packages npm: no apt step")
+    ok(not npm_text:find("apt-get update", 1, true), "packages npm: no apt index update either")
     for _, bad in ipairs({ "a b", "a;b", "$(x)", "-g", "a@1 && b", "../x", "a//b" }) do
       refused(
         { name = "x", packages = { { name = "t", why = "a", npm = { bad } } } },

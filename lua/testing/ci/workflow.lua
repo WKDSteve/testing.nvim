@@ -590,6 +590,19 @@ local function package_steps(packages)
     return ""
   end
   local out = {}
+  -- the package index of a runner image can be older than its mirrors: a package that is not in the image would then
+  -- fail with a 404 depending on the image's age. One update per leg, before the first apt install.
+  for _, p in ipairs(packages) do
+    if not p.npm and p.apt ~= false then
+      out[#out + 1] = table.concat({
+        "      - name: Update the apt index",
+        "        if: matrix.hosted && runner.os == 'Linux'",
+        "        run: sudo apt-get update -q",
+        "",
+      }, "\n")
+      break
+    end
+  end
   for _, p in ipairs(packages) do
     out[#out + 1] = "      # " .. p.name .. ": " .. p.why .. "\n"
     if p.npm then

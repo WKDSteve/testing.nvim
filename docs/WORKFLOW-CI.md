@@ -188,7 +188,9 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
   macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the
   workflow's to change. A name is a package name (letters, digits, `.`, `_`, `+`, `-`; nothing a shell would read as its
-  own), `why` is one line above the steps, at most 8 packages. Without `packages` the file is what it was.
+  own), `why` is one line above the steps, at most 8 packages. Without `packages` the file is what it was. Before the
+  first apt install a Linux leg runs `sudo apt-get update` once: the package index of a runner image can be older than
+  its mirrors, and a package the image lacks would then fail with a 404 depending on the image's age.
   `apt`, `brew` or `choco` set to `false` leave that system without the program (`{ name = "tmux", choco = false, why =
   ... }`: choco has no tmux, and the specs that need it are n/a on Windows anyway); false on all three is an error. A
   program that comes from npm is `{ name = "ts-ls", npm = { "typescript@5", "typescript-language-server" }, why = ...
