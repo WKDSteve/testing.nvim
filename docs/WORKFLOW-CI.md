@@ -175,6 +175,11 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   through its action, and luacheck as the release binary of `lunarmodules/luacheck` whose sha256 is pinned in
   `testing.ci.workflow.SHA256` (checked against the maintainer's signature, the same file `scripts/wsl-tools.sh`
   installs): no Lua and no luarocks from www.lua.org, whose download timed out. A new luacheck is a new pin there.
+- **TMPDIR on macOS.** Every macOS leg sets `TMPDIR=/tmp` (one step before the pipeline, in every layout). The runner's
+  own TMPDIR lies under `/var/folders/.../T/`, and a Unix socket below the sandbox of a child editor (its RPC server, a
+  pipe of fzf-lua) is then longer than `sun_path` (104 bytes) and fails with `ENOTSOCK`. An `env.TMPDIR` of
+  `ci.workflow` still decides, since it is the environment of the pipeline step itself; a repository no longer needs
+  one for this.
 - **Playwright.** `playwright = { version, used_by }` installs that release of `playwright-core` and its Chromium on the
   full leg, outside the checkout, and names them in `TESTING_PLAYWRIGHT_DIR` and `PLAYWRIGHT_BROWSERS_PATH`: the
   browser sheets (and an unpacked extension, which needs the full Chromium) run there instead of being a reported

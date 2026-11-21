@@ -149,6 +149,12 @@ jobs:
         if: matrix.hosted && matrix.steps == ''
         with:
           node-version: "22"
+      # macOS: the runner's TMPDIR lies under /var/folders/.../T/, and a Unix socket below the sandbox of a child editor
+      # (an RPC server, a pipe of fzf) then exceeds sun_path (104 bytes, ENOTSOCK). /tmp keeps those paths short. An
+      # `env.TMPDIR` of ci.workflow still wins: it is the environment of the pipeline step itself.
+      - if: runner.os == 'macOS'
+        shell: bash
+        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
       # The result cache (docs/CI-CACHE.md of testing.nvim). The key is only the transport: every entry carries its
       # own full spec key and is checked against it when read, so a wrong restore can lower the hit rate and never turn
       # a result green. A pull request only restores; only a push to main saves.

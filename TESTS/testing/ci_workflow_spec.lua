@@ -681,6 +681,36 @@ return function(H)
     )
   end
 
+  -- macOS: TMPDIR=/tmp on every repository's macOS leg (a socket below /var/folders/.../T/ exceeds sun_path) --------
+  do
+    local step =
+      '      - if: runner.os == \'macOS\'\n        shell: bash\n        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"\n'
+    for _, layout in ipairs({ "public", "private", "hosted" }) do
+      local text, problems = workflow.render(
+        project(
+          "tmpdir-" .. layout,
+          "{ 'suite', 'conformance' }",
+          ('{ name = "demo.nvim", layout = "%s" }'):format(layout)
+        )
+      )
+      eq(problems, {}, "tmpdir " .. layout .. ": no problem")
+      has(text, step, "tmpdir " .. layout .. ": the macOS leg gets TMPDIR=/tmp")
+      ok(
+        text:find(step, 1, true) < text:find("matrix.steps }}", 1, true),
+        "tmpdir " .. layout .. ": before the pipeline step"
+      )
+    end
+    -- an env.TMPDIR of the repository is the environment of the pipeline step itself, so it still decides
+    local own = workflow.render(
+      project(
+        "tmpdir-own",
+        "{ 'suite', 'conformance' }",
+        '{ name = "demo.nvim", layout = "hosted", env = { TMPDIR = "/private/tmp" } }'
+      )
+    )
+    has(own, '          TMPDIR: "/private/tmp"\n', "tmpdir: env.TMPDIR stays on the pipeline step")
+  end
+
   -- setup: a command of the repository (an argv) that prepares a hosted leg before the pipeline; nothing without it ----
   do
     local function refused(wf, needle, msg)
