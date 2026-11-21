@@ -254,16 +254,18 @@ return function(H)
     "head_of 'r' '/mnt/e/r' ||",
     "script: the repository itself at the Windows HEAD"
   )
-  -- scripts/test.sh hands down `--state-dir <dir>` and, for --cached, `--cache-dir <dir>`: Windows paths, never into WSL
+  -- scripts/test.sh hands down `--state-dir <dir>` and, for --cached, `--cache-dir <dir>`: Windows paths, never into WSL.
+  -- Real folders of this spec: a check in WSL2 keeps what it brought back in the state of this side.
+  local win_state, win_cache = tmp .. "/S", tmp .. "/K"
   commit.main({
     "HEAD",
     "--wsl",
     "--state-dir",
-    "C:/S",
+    win_state,
     "--",
     "--cached",
     "--cache-dir",
-    "C:/K",
+    win_cache,
     "--jobs",
     "2",
   }, {
@@ -272,10 +274,10 @@ return function(H)
   })
   local inner3 = seen:match("ci commit (.-)\n")
   ok(
-    not inner3:find("C:/S", 1, true),
+    not inner3:find(win_state, 1, true),
     "ci commit --wsl: no Windows state folder in WSL (" .. inner3 .. ")"
   )
-  ok(not inner3:find("C:/K", 1, true), "ci commit --wsl: no Windows cache folder in WSL")
+  ok(not inner3:find(win_cache, 1, true), "ci commit --wsl: no Windows cache folder in WSL")
   has(inner3, "'--cached' '--jobs' '2'", "ci commit --wsl: the other suite options stay")
   local entries = require("testing.metrics").read(mfile.path)
   eq(entries[1] and entries[1].os, "wsl", "ci commit --wsl: the metrics line says wsl")
