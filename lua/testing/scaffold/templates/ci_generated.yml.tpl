@@ -83,4 +83,4 @@ jobs:
             ${{ runner.temp }}/suite-ir.json
           if-no-files-found: ignore
           retention-days: 14
-@@PUBLISH_JOB|raw@@
+@@ARTIFACT_STEPS|raw@@@@PUBLISH_JOB|raw@@

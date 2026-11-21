@@ -13,6 +13,7 @@
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
 ---       playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
 ---       luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, pinned
+---       artifacts = { { name = "sheet-shots", path = "TESTS/sheets/out/**/*.png", why = "..." } },  -- optional: uploads
 ---       checkouts = {                               -- optional: more checkouts below .deps/ (third-party: pinned)
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
 ---       },
@@ -131,6 +132,35 @@ local function is_setup_word(v)
   return type(v) == "string" and #v <= 200 and v:match("^[%w@%%+=:,./_-]+$") ~= nil
 end
 
+---Most extra artifacts a workflow uploads (`ci.workflow.artifacts`).
+M.MAX_ARTIFACTS = 4
+
+---The keys of one entry of `ci.workflow.artifacts`.
+local ARTIFACT_KEYS = { name = true, path = true, when = true, legs = true, why = true }
+
+---When an extra artifact is uploaded: `always` also after a green run (a screenshot is the evidence a sheet leaves
+---behind), `failure` only from a red leg (as the report).
+M.ARTIFACT_WHEN = { always = "always()", failure = "failure()" }
+
+---A path of an artifact: relative to the checkout, a glob of `actions/upload-artifact` (`*`, `**`), never `..`, never an
+---absolute path, and no character YAML or an expression (`${{`) reads as its own.
+---@param v any
+---@return boolean
+local function is_artifact_path(v)
+  if type(v) ~= "string" or #v > 200 or not v:match("^[%w._/*-]+$") then
+    return false
+  end
+  if v:sub(1, 1) == "/" or v:sub(1, 1) == "-" or v:find("//", 1, true) then
+    return false
+  end
+  for part in v:gmatch("[^/]+") do
+    if part == ".." or part == "." then
+      return false
+    end
+  end
+  return true
+end
+
 local KEYS = {
   name = true,
   min_nvim = true,
@@ -139,6 +169,7 @@ local KEYS = {
   node = true,
   playwright = true,
   luals = true,
+  artifacts = true,
   checkouts = true,
   packages = true,
   setup = true,
@@ -158,6 +189,7 @@ local KEYS = {
 ---@field node? { version: string, used_by: string }
 ---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
 ---@field luals? { version: string, used_by: string } lua-language-server, the release tarball pinned by its sha256 (`M.SHA256.luals`), on the hosted full leg: a step of the profile (`scripts/luals-check.sh`) can run it there.
+---@field artifacts { name: string, path: string, when: "always"|"failure", legs: "full"|"hosted", why: string }[] More files a hosted leg uploads after the pipeline (`<name>-<leg>`, 14 days): the screenshots of the browser sheets.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ, false to go without; or npm on every leg), never on a self-hosted one.
 ---@field setup { run: string[], why: string, legs: "full"|"hosted" }[] Commands of the repository (an argv, no shell text) that prepare a hosted leg before the pipeline: build grammars, install rocks, link a checkout, write `$GITHUB_ENV`.
@@ -210,6 +242,7 @@ function M.validate(raw)
     end
   end
   local cfg = {
+    artifacts = {},
     checkouts = {},
     packages = {},
     setup = {},
@@ -311,6 +344,79 @@ function M.validate(raw)
       end
       if fine then
         cfg.luals = { version = l.version, used_by = l.used_by }
+      end
+    end
+  end
+  if raw.artifacts ~= nil then
+    local shape =
+      '{ name = "sheet-shots", path = "TESTS/sheets/out/**/*.png", why = "<one line>" } (when, legs optional)'
+    if not is_list(raw.artifacts) or #raw.artifacts == 0 then
+      bad(".artifacts: expected a list of %s", shape)
+    else
+      if #raw.artifacts > M.MAX_ARTIFACTS then
+        bad(".artifacts: at most %d", M.MAX_ARTIFACTS)
+      end
+      local seen = {}
+      for i, a in ipairs(raw.artifacts) do
+        if type(a) ~= "table" then
+          bad(".artifacts[%d]: expected %s", i, shape)
+        else
+          local fine = true
+          for k in pairs(a) do
+            if not ARTIFACT_KEYS[k] then
+              bad(".artifacts[%d]: unknown key %s", i, tostring(k))
+              fine = false
+            end
+          end
+          -- uploaded as `<name>-<leg>`; `ci-<leg>` is the report's own
+          if
+            type(a.name) ~= "string"
+            or not a.name:match("^[%w][%w._-]*$")
+            or #a.name > 64
+            or a.name == "ci"
+          then
+            bad(
+              '.artifacts[%d].name: letters, digits, ".", "_" and "-" (not "ci": the report is ci-<leg>)',
+              i
+            )
+            fine = false
+          elseif seen[a.name] then
+            bad(".artifacts[%d].name: %s twice", i, a.name)
+            fine = false
+          end
+          if not is_artifact_path(a.path) then
+            bad(
+              '.artifacts[%d].path: a path relative to the checkout, letters, digits and "._/*-" (no "..", not absolute)',
+              i
+            )
+            fine = false
+          end
+          if not is_text(a.why) then
+            bad(".artifacts[%d].why: one line of text, what the files show", i)
+            fine = false
+          end
+          if a.when ~= nil and (type(a.when) ~= "string" or not M.ARTIFACT_WHEN[a.when]) then
+            bad('.artifacts[%d].when: "always" (default, also a green run) or "failure"', i)
+            fine = false
+          end
+          if a.legs ~= nil and (type(a.legs) ~= "string" or not M.SETUP_LEGS[a.legs]) then
+            bad(
+              '.artifacts[%d].legs: "full" (the leg with the whole profile, default) or "hosted" (every hosted leg)',
+              i
+            )
+            fine = false
+          end
+          if fine then
+            seen[a.name] = true
+            cfg.artifacts[#cfg.artifacts + 1] = {
+              name = a.name,
+              path = a.path,
+              why = a.why,
+              when = a.when or "always",
+              legs = a.legs or "full",
+            }
+          end
+        end
       end
     end
   end
@@ -695,6 +801,29 @@ local function setup_steps(setup)
       "        shell: bash",
       "        run: |",
       "          " .. table.concat(s.run, " "),
+      "",
+    }, "\n")
+  end
+  return table.concat(out)
+end
+
+---The steps of `ci.workflow.artifacts`: one upload per entry after the report's, named `<name>-<leg>` (unique per leg,
+---as `ci-<leg>` is), 14 days. The path is a checked glob, always quoted (a leading `*` would be a YAML alias). Nothing
+---for none, so a workflow without artifacts stays byte for byte what it was.
+---@param artifacts { name: string, path: string, when: "always"|"failure", legs: "full"|"hosted", why: string }[]
+---@return string
+local function artifact_steps(artifacts)
+  local out = {}
+  for _, a in ipairs(artifacts) do
+    out[#out + 1] = M.wrap(a.name .. ": " .. a.why, "      # ")
+    out[#out + 1] = table.concat({
+      "      - uses: actions/upload-artifact@" .. M.ACTIONS.upload,
+      ("        if: %s && %s"):format(M.ARTIFACT_WHEN[a.when], M.SETUP_LEGS[a.legs]),
+      "        with:",
+      "          name: " .. a.name .. "-${{ matrix.name }}",
+      "          path: " .. render.yaml_quote(a.path),
+      "          if-no-files-found: ignore",
+      "          retention-days: 14",
       "",
     }, "\n")
   end
@@ -1122,6 +1251,7 @@ function M.render_cfg(cfg, deps, opts)
     CHECKOUTS = (table.concat(checkouts):gsub("\n$", "")),
     PACKAGE_STEPS = package_steps(cfg.packages),
     SETUP_STEPS = setup_steps(cfg.setup),
+    ARTIFACT_STEPS = artifact_steps(cfg.artifacts),
     NODE_STEP = cfg.node
         and ("      - uses: actions/setup-node@%s\n        if: matrix.hosted && matrix.steps == ''\n        with:\n          node-version: %s\n"):format(
           M.ACTIONS.node,

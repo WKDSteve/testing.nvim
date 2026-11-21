@@ -1022,5 +1022,89 @@ return function(H)
     eq((text:gsub(vim.pesc(step), "", 1)), plain, "luals: the step is the only difference")
   end
 
+  -- artifacts: more files a hosted leg uploads (the screenshots of the browser sheets); golden; nothing without them ---
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    local function one(a)
+      return {
+        name = "x",
+        artifacts = {
+          vim.tbl_extend("force", { name = "shots", path = "out/*.png", why = "a" }, a),
+        },
+      }
+    end
+    eq(workflow.validate({ name = "x" }).artifacts, {}, "artifacts: none by default")
+    refused({ name = "x", artifacts = "out" }, ".artifacts: expected a list", "artifacts: a list")
+    refused({ name = "x", artifacts = {} }, ".artifacts: expected a list", "artifacts: not empty")
+    for _, bad in ipairs({
+      "../secret",
+      "out/../../x",
+      "/etc/passwd",
+      "C:/x",
+      "${{ secrets.GITHUB_TOKEN }}",
+      "a b",
+      "out\n- x",
+      "-x",
+      "./out",
+      "a//b",
+      "",
+    }) do
+      refused(one({ path = bad }), ".artifacts[1].path", "artifacts: the path " .. vim.inspect(bad))
+    end
+    for _, bad in ipairs({ "ci", "a b", "-x", "", "a/b" }) do
+      refused(one({ name = bad }), ".artifacts[1].name", "artifacts: the name " .. vim.inspect(bad))
+    end
+    refused(one({ why = "line\nbreak" }), ".artifacts[1].why", "artifacts: one line of why")
+    refused(one({ when = "success" }), ".artifacts[1].when", "artifacts: always or failure")
+    refused(one({ legs = "self-hosted" }), ".artifacts[1].legs", "artifacts: full or hosted")
+    refused(one({ retention = 90 }), "unknown key retention", "artifacts: no other key")
+    refused({
+      name = "x",
+      artifacts = { { name = "a", path = "x", why = "a" }, { name = "a", path = "y", why = "b" } },
+    }, "a twice", "artifacts: a name once")
+    local many = {}
+    for i = 1, workflow.MAX_ARTIFACTS + 1 do
+      many[i] = { name = "a" .. i, path = "x", why = "a" }
+    end
+    refused({ name = "x", artifacts = many }, ".artifacts: at most", "artifacts: a limit")
+    eq(
+      workflow.validate(one({})).artifacts,
+      { { name = "shots", path = "out/*.png", why = "a", when = "always", legs = "full" } },
+      "artifacts: always and the full leg by default"
+    )
+
+    local wf = [[{ name = "shots.nvim", layout = "hosted", platform = { "suite" }, land = true,
+        artifacts = {
+          { name = "sheet-shots", path = "TESTS/sheets/out/**/*.png",
+            why = "what the page looked like is the evidence a sheet leaves behind, red or green" },
+          { name = "logs", path = "**/*.log", when = "failure", legs = "hosted", why = "the logs of a red leg" },
+        } }]]
+    local text, problems = workflow.render(project("artifacts", "{ 'suite' }", wf))
+    eq(problems, {}, "artifacts: no problem")
+    ok(text == read(golden .. "/artifacts.yml"), "artifacts: the golden workflow")
+    has(
+      text,
+      "        if: always() && matrix.hosted && matrix.steps == ''\n        with:\n          name: sheet-shots-${{ matrix.name }}\n"
+        .. '          path: "TESTS/sheets/out/**/*.png"\n',
+      "artifacts: always, on the full leg, one name per leg"
+    )
+    has(
+      text,
+      '        if: failure() && matrix.hosted\n        with:\n          name: logs-${{ matrix.name }}\n          path: "**/*.log"\n',
+      "artifacts: a leading * is quoted (no YAML alias), on a red hosted leg"
+    )
+    local plain =
+      workflow.render(project("noartifacts", "{ 'suite' }", (wf:gsub("artifacts = %b{}", ""))))
+    ok(not plain:find("sheet-shots", 1, true), "artifacts: without the key nothing of it")
+    ok(
+      select(2, plain:gsub("actions/upload%-artifact@", "")) == 1,
+      "artifacts: without the key only the report is uploaded"
+    )
+  end
+
   vim.fn.delete(tmp, "rf")
 end

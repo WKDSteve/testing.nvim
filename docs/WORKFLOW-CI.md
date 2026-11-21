@@ -146,6 +146,7 @@ ci = {
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
     playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
     luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, full leg
+    artifacts = { { name = "sheet-shots", path = "TESTS/sheets/out/**/*.png", why = "<what they show>" } },  -- optional
     checkouts = {                                  -- optional: more checkouts below .deps/, not on the specs' rtp
       { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
       { repo = "WKDSteve/hover.nvim", ref = "ci-verified", why = "<only the test sheets load it>" },
@@ -192,6 +193,15 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   without a pinned sum is refused (a bump adds the sum there first); apt has no package, brew and choco only unpinned
   ones, and windows and macOS run only the `platform` steps. A step that needs it gives `skip_exit` for a machine
   without the tool (the self-hosted runner, a local run). Without the key nothing of it is in the workflow.
+- **Artifacts.** Every leg uploads its report and suite IR when it is red (`ci-<leg>`). `artifacts` names more files a
+  hosted leg uploads after the pipeline, e.g. the screenshots of the browser sheets: `{ name = "sheet-shots", path =
+  "TESTS/sheets/out/**/*.png", why = <one line>, when = "always" | "failure", legs = "full" | "hosted" }`. `when`
+  `always` (default) uploads after a green run too (what the page looked like is the evidence a sheet leaves behind),
+  `failure` only from a red leg; `legs` as for `setup` (`full`, the default, is the leg with the whole profile). Each is
+  one `actions/upload-artifact` step named `<name>-<leg>`, kept 14 days, no error when nothing matches. `path` is one
+  glob relative to the checkout (letters, digits and `._/*-`; no `..`, not absolute, no expression), `name` letters,
+  digits, `.`, `_`, `-` and not `ci`; at most 4 entries. Never on the self-hosted leg. Without the key the file is what
+  it was.
 - **Packages.** `packages` names programs the specs or test sheets need and a runner image lacks (`ripgrep`, for a sheet
   that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
   macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the
