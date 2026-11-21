@@ -145,6 +145,7 @@ ci = {
     platform = { "suite", "conformance" },        -- the steps the hosted windows and macOS legs run
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
     playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
+    luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, full leg
     checkouts = {                                  -- optional: more checkouts below .deps/, not on the specs' rtp
       { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
       { repo = "WKDSteve/hover.nvim", ref = "ci-verified", why = "<only the test sheets load it>" },
@@ -184,6 +185,13 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   full leg, outside the checkout, and names them in `TESTING_PLAYWRIGHT_DIR` and `PLAYWRIGHT_BROWSERS_PATH`: the
   browser sheets (and an unpacked extension, which needs the full Chromium) run there instead of being a reported
   skip. Without the key nothing of it is in the workflow.
+- **LuaLS.** `luals = { version, used_by }` installs lua-language-server on the hosted leg with the whole profile
+  (ubuntu), so a step of the profile (`scripts/luals-check.sh`, the preset `luals`) runs there: the release tarball
+  `lua-language-server-<version>-linux-x64.tar.gz` of LuaLS, checked against the sha256 that
+  `testing.ci.workflow.SHA256.luals` pins for that version before it is unpacked, its `bin/` on the `PATH`. A version
+  without a pinned sum is refused (a bump adds the sum there first); apt has no package, brew and choco only unpinned
+  ones, and windows and macOS run only the `platform` steps. A step that needs it gives `skip_exit` for a machine
+  without the tool (the self-hosted runner, a local run). Without the key nothing of it is in the workflow.
 - **Packages.** `packages` names programs the specs or test sheets need and a runner image lacks (`ripgrep`, for a sheet
   that scans with it): each is installed by one step per system on every hosted leg, with `apt-get` on Linux, `brew` on
   macOS and `choco` on Windows (one name for all three; where the managers name it differently, `apt`, `brew` or `choco` give a name of their own, e.g. `{ name = "poppler", apt = "poppler-utils", why = ... }`), and never on the self-hosted leg, whose machine is not the

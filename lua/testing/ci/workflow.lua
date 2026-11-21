@@ -12,6 +12,7 @@
 ---       platform = { "suite", "conformance" },     -- the steps that depend on the platform (hosted windows, macOS)
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
 ---       playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
+---       luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, pinned
 ---       checkouts = {                               -- optional: more checkouts below .deps/ (third-party: pinned)
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
 ---       },
@@ -52,7 +53,15 @@ M.TOOLS = { nvim = "0.12.2", stylua = "2.5.2", luacheck = "1.2.0" }
 
 ---The sha256 of the release files the hosted legs download (the same as scripts/wsl-tools.sh). luacheck: the Linux binary
 ---of lunarmodules/luacheck v1.2.0, checked on 2026-11-12 against its signature (Caleb Maclennan, 63CC496475267693).
-M.SHA256 = { luacheck = "d68da17fca0697d9e2fb04201f3884abd259fa558b3a449bccaed47f1390defc" }
+---`luals`: per version, the sum of `lua-language-server-<version>-linux-x64.tar.gz` of LuaLS/lua-language-server (the
+---digest GitHub lists for the release asset; 3.18.2 as terminal.nvim's hand-written job had it). `ci.workflow.luals`
+---takes only a version listed here: a bump adds its sum, no download goes unpinned.
+M.SHA256 = {
+  luacheck = "d68da17fca0697d9e2fb04201f3884abd259fa558b3a449bccaed47f1390defc",
+  luals = {
+    ["3.18.2"] = "ca71415dd19f19e30aaa35a4915aefca9fdb5fec31b98331cc3d77f778d539c5",
+  },
+}
 
 ---The actions, pinned by commit (third-party code runs on the self-hosted runner too). Bump on purpose.
 M.ACTIONS = {
@@ -129,6 +138,7 @@ local KEYS = {
   platform = true,
   node = true,
   playwright = true,
+  luals = true,
   checkouts = true,
   packages = true,
   setup = true,
@@ -147,6 +157,7 @@ local KEYS = {
 ---@field platform string[]
 ---@field node? { version: string, used_by: string }
 ---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
+---@field luals? { version: string, used_by: string } lua-language-server, the release tarball pinned by its sha256 (`M.SHA256.luals`), on the hosted full leg: a step of the profile (`scripts/luals-check.sh`) can run it there.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ, false to go without; or npm on every leg), never on a self-hosted one.
 ---@field setup { run: string[], why: string, legs: "full"|"hosted" }[] Commands of the repository (an argv, no shell text) that prepare a hosted leg before the pipeline: build grammars, install rocks, link a checkout, write `$GITHUB_ENV`.
@@ -268,6 +279,39 @@ function M.validate(raw)
         end
       end
       cfg.playwright = { version = p.version, used_by = p.used_by }
+    end
+  end
+  if raw.luals ~= nil then
+    local l = raw.luals
+    if
+      type(l) ~= "table"
+      or type(l.version) ~= "string"
+      or not l.version:match("^%d+%.%d+%.%d+$")
+      or not is_text(l.used_by)
+    then
+      bad('.luals: expected { version = "3.18.2", used_by = "<what needs it, for a comment>" }')
+    else
+      local fine = true
+      for k in pairs(l) do
+        if k ~= "version" and k ~= "used_by" then
+          bad(".luals: unknown key %s", tostring(k))
+          fine = false
+        end
+      end
+      -- only a version whose sum testing.nvim lists: the tarball is checked before it is unpacked
+      if not M.SHA256.luals[l.version] then
+        local known = vim.tbl_keys(M.SHA256.luals)
+        table.sort(known)
+        bad(
+          ".luals.version: %s has no pinned sha256 in testing.ci.workflow.SHA256.luals (known: %s)",
+          l.version,
+          table.concat(known, ", ")
+        )
+        fine = false
+      end
+      if fine then
+        cfg.luals = { version = l.version, used_by = l.used_by }
+      end
     end
   end
   if raw.checkouts ~= nil then
@@ -1102,6 +1146,32 @@ function M.render_cfg(cfg, deps, opts)
           '          "$RUNNER_TEMP/pw/node_modules/.bin/playwright-core" install --with-deps chromium',
           '          echo "TESTING_PLAYWRIGHT_DIR=$RUNNER_TEMP/pw" >> "$GITHUB_ENV"',
           '          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"',
+          "",
+        }, "\n")
+      or "",
+    -- a version listed in M.SHA256.luals (checked above): the tarball is checked before it is unpacked
+    LUALS_STEP = cfg.luals
+        and table.concat({
+          M.wrap(
+            ("%s: lua-language-server %s, the release tarball of LuaLS checked against its pinned sha256 (testing.ci.workflow.SHA256.luals), on the leg with the whole profile."):format(
+              cfg.luals.used_by,
+              cfg.luals.version
+            ),
+            "      # "
+          ) .. "      - if: matrix.hosted && matrix.steps == ''",
+          "        shell: bash",
+          "        run: |",
+          '          tarball="$RUNNER_TEMP/luals.tar.gz"',
+          ('          curl -fsSL -o "$tarball" "https://github.com/LuaLS/lua-language-server/releases/download/%s/lua-language-server-%s-linux-x64.tar.gz"'):format(
+            cfg.luals.version,
+            cfg.luals.version
+          ),
+          ('          echo "%s  $tarball" | sha256sum -c -'):format(
+            M.SHA256.luals[cfg.luals.version]
+          ),
+          '          mkdir -p "$RUNNER_TEMP/luals"',
+          '          tar -xzf "$tarball" -C "$RUNNER_TEMP/luals"',
+          '          echo "$RUNNER_TEMP/luals/bin" >> "$GITHUB_PATH"',
           "",
         }, "\n")
       or "",

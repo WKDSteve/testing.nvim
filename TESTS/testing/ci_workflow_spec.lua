@@ -954,5 +954,73 @@ return function(H)
     )
   end
 
+  -- luals: lua-language-server on the hosted full leg, the tarball checked against a pinned sum; nothing without it ---
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    local function with(l)
+      return { name = "x", luals = l }
+    end
+    refused(with("3.18.2"), ".luals: expected", "luals: a table")
+    refused(
+      with({ version = "latest", used_by = "a" }),
+      ".luals: expected",
+      "luals: an exact version"
+    )
+    refused(with({ version = "3.18.2" }), ".luals: expected", "luals: who needs it")
+    refused(
+      with({ version = "3.18.2", used_by = "a", sha256 = "00" }),
+      "unknown key sha256",
+      "luals: no sum of its own (the table pins it)"
+    )
+    refused(
+      with({ version = "3.17.0", used_by = "a" }),
+      "3.17.0 has no pinned sha256",
+      "luals: a version without a pinned sum is refused"
+    )
+
+    local text, problems = workflow.render(
+      project(
+        "luals",
+        "{ 'suite' }",
+        [[{ name = "luals.nvim", layout = "hosted", platform = { "suite" },
+            luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" } }]]
+      )
+    )
+    eq(problems, {}, "luals: no problem")
+    local step = table.concat({
+      "      # scripts/luals-check.sh: lua-language-server 3.18.2, the release tarball of LuaLS checked against its pinned",
+      "      # sha256 (testing.ci.workflow.SHA256.luals), on the leg with the whole profile.",
+      "      - if: matrix.hosted && matrix.steps == ''",
+      "        shell: bash",
+      "        run: |",
+      '          tarball="$RUNNER_TEMP/luals.tar.gz"',
+      '          curl -fsSL -o "$tarball" "https://github.com/LuaLS/lua-language-server/releases/download/3.18.2/lua-language-server-3.18.2-linux-x64.tar.gz"',
+      '          echo "ca71415dd19f19e30aaa35a4915aefca9fdb5fec31b98331cc3d77f778d539c5  $tarball" | sha256sum -c -',
+      '          mkdir -p "$RUNNER_TEMP/luals"',
+      '          tar -xzf "$tarball" -C "$RUNNER_TEMP/luals"',
+      '          echo "$RUNNER_TEMP/luals/bin" >> "$GITHUB_PATH"',
+      "",
+    }, "\n")
+    has(text, step, "luals: one step on the hosted full leg, checked before it is unpacked")
+    ok(
+      text:find(step, 1, true) < text:find("matrix.steps }}", 1, true),
+      "luals: installed before the pipeline step"
+    )
+    local plain = workflow.render(
+      project(
+        "noluals",
+        "{ 'suite' }",
+        [[{ name = "luals.nvim", layout = "hosted", platform = { "suite" } }]]
+      )
+    )
+    ok(not plain:find("lua-language-server", 1, true), "luals: without the key nothing of it")
+    -- the only difference the key makes is the step (the goldens above stay byte for byte without it)
+    eq((text:gsub(vim.pesc(step), "", 1)), plain, "luals: the step is the only difference")
+  end
+
   vim.fn.delete(tmp, "rf")
 end
