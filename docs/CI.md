@@ -183,7 +183,8 @@ and with the same services. The suite step is green only when its Result-IR says
 `infra` ("the suite wrote no result"), and a `--json` file left from an earlier run is not read. One exception: a
 suite whose selection (`--affected`, `--changed`, `--since`) reached no spec file ran nothing on purpose; the step is
 `skipped` with the reason `nothing affected: ...`, the run is partial (`suite: nothing affected`), and a surface gate
-after it is skipped too (there are no hits to compare). Options after `--` go to the `suite` step: `testing ci -- --jobs 4`. Without a suite step
+after it is skipped too (there are no hits to compare). A selection that does reach spec files skips the surface gate
+as well (`the suite ran a selection: its hits are not the whole surface`): its baseline is that of a whole run. Options after `--` go to the `suite` step: `testing ci -- --jobs 4`. Without a suite step
 in the run, an option that selects part of the suite is an error, one that only says how it runs (`--cached`,
 `--jobs`) is not used and said so (the base of `ci commit --quick -- --cached` runs only its red steps). An option that selects part of the suite (`--file`, `--filter`, `--tags`, `--shard`,
 `--changed`, ... the ones `testing stamp` refuses) makes the whole run **partial**: no sentinel, and the document
@@ -308,7 +309,11 @@ one rerun too, which is what turned a whole-sheet case of `gitsuite.nvim`'s `TES
 The suite at the base is not run whole either: it gets a `--file` for every spec file that is red at the commit (a
 finding of the commit is in one of them). The whole suite runs at the base when that cannot be said for sure: the
 suite options already select (`--file`, `--changed`, `--only`), the suite step is red without a finding that has a
-file, or a red file does not exist at the base (a renamed spec file). With `--cached` among the suite options
+file, or a red file does not exist at the base (a renamed spec file). A red `surface` gate takes the suite along to
+the base, whole: the gate reads its hits from the suite of the same run, so alone it would be an error there and the
+verdict `unclassified`. Under `--quick` the gate does not run at the commit either: a suite that ran a selection
+(`--affected`, `--file`, ...) exercised part of the plugin, and the gate skips itself (`the suite ran a selection`)
+instead of reading every entry the other specs reach as a regression. With `--cached` among the suite options
 (`testing ci commit <rev> -- --cached`) the commit, its base and the runs in the working tree share one cache: a
 snapshot is a `git worktree` of the repository, and the cache folder of a worktree is that of its main checkout (see
 [CACHE.md](CACHE.md)). A spec file whose inputs did not change between them does not run again.

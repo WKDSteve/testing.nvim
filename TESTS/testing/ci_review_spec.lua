@@ -474,6 +474,22 @@ return function(H)
       true,
       "nothing affected: ci commit reads it from the document"
     )
+
+    -- a selection that reaches a spec file (the `--affected` of `ci commit --quick`) exercised part of the plugin: the
+    -- surface gate would read every entry the other specs reach as lost, so it is skipped, not red
+    res = run(root, "--", "--file=TESTS/a_spec.lua")
+    doc = doc_of(root)
+    states = {}
+    for _, s in ipairs(doc.steps) do
+      states[s.name] = { s.state, tostring(s.reason) }
+    end
+    eq(states.suite[1], "green", "selected suite: the suite runs (" .. res.out .. res.err .. ")")
+    eq(
+      states.surface,
+      { "skipped", "the suite ran a selection: its hits are not the whole surface" },
+      "selected suite: the surface gate is skipped with the reason"
+    )
+    eq(doc.partial, true, "selected suite: the run is partial")
   end
 
   vim.fn.delete(tmp, "rf")

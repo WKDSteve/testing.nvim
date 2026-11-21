@@ -846,6 +846,30 @@ return function(H)
       )
     end
 
+    -- a red surface gate reads the hits of the suite of the same run: alone at the base it is an error (exit 2) and the
+    -- verdict would be unclassified, so the suite runs with it (reposcope.nvim@c443a50 under `--quick`)
+    local head_doc = { steps = { { name = "stylua" }, { name = "suite" }, { name = "surface" } } }
+    eq(
+      { commit.base_steps({ "surface" }, head_doc) },
+      { { "suite", "surface" }, true },
+      "base steps: a red surface gate brings the suite"
+    )
+    eq(
+      { commit.base_steps({ "suite", "surface" }, head_doc) },
+      { { "suite", "surface" }, true },
+      "base steps: a red suite is not added twice"
+    )
+    eq(
+      { commit.base_steps({ "stylua" }, head_doc) },
+      { { "stylua" }, false },
+      "base steps: without the surface gate only the red steps"
+    )
+    eq(
+      { commit.base_steps({ "surface" }, { steps = { { name = "surface" } } }) },
+      { { "surface" }, true },
+      "base steps: a pipeline without a suite step adds none"
+    )
+
     -- through `check`: the commit runs everything, the base only the red file; the cache folder is not passed (the
     -- snapshots are worktrees and share the main checkout's, `cache_repo_key_spec`)
     local tmp = tree .. "-state"

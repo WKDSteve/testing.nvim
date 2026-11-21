@@ -735,6 +735,17 @@ local function run_inprocess(planned, root, suite_args, sv, o)
         reason = M.NOTHING_AFFECTED .. ": the suite ran no spec file, there are no hits to compare",
       }
     end
+    -- a selected suite (`--affected`, `--file`, ...) exercised part of the plugin: every entry its specs did not reach
+    -- would read as a regression against the baseline of a whole run
+    if o.suite_ir and o.selects then
+      return {
+        name = step.name,
+        state = "skipped",
+        ms = 0,
+        errors = {},
+        reason = "the suite ran a selection: its hits are not the whole surface",
+      }
+    end
     if not o.suite_ir then
       return {
         name = step.name,

@@ -50,6 +50,9 @@ M.MAX_COMMITS = 50
 ---The deadline of one child run (the pipeline of a whole repository).
 M.TIMEOUT_MS = 60 * 60 * 1000
 
+---The preset names of the suite step and of the surface gate that reads the suite's hits (`testing.ci.presets`).
+M.SUITE_STEP, M.SURFACE_STEP = "suite", "surface"
+
 M.USAGE = table.concat({
   "usage: testing ci commit <rev>... | --range=<a>..<b> | --since=<time> [options] [-- <suite options>]",
   "       testing ci commit --repos-root=<dir> --since=<time> [options] [-- <suite options>]",
@@ -627,6 +630,26 @@ function M.selects(suite_args)
   return false
 end
 
+---The steps of the run at the base: those red at the commit, plus the suite when one of them is the surface gate (it
+---reads its hits from the suite of the same run: alone it is an error, exit 2, and the base would not run at all).
+---@param red_steps string[] The steps red at the commit, in run order.
+---@param head_doc table The `testing-ci/1` document of the commit's run.
+---@return string[] steps
+---@return boolean reads_suite True when a red step is the surface gate.
+function M.base_steps(red_steps, head_doc)
+  local steps = vim.deepcopy(red_steps)
+  if not vim.tbl_contains(steps, M.SURFACE_STEP) or vim.tbl_contains(steps, M.SUITE_STEP) then
+    return steps, vim.tbl_contains(steps, M.SURFACE_STEP)
+  end
+  for _, s in ipairs(type(head_doc.steps) == "table" and head_doc.steps or {}) do
+    if s.name == M.SUITE_STEP then
+      table.insert(steps, 1, M.SUITE_STEP)
+      break
+    end
+  end
+  return steps, true
+end
+
 ---The suite options without the `--affected` of `--quick`: at the base the diff to itself is empty, so the base takes
 ---the red files of the commit (`base_suite_args`), or the whole suite when those cannot be named.
 ---@param suite_args string[]
@@ -886,13 +909,16 @@ run_check = function(root, sha, args, say, snaps, r, base, mem)
       r.problems[#r.problems + 1] = problem
     else
       snaps[#snaps + 1] = base_snap
-      local steps = vim.deepcopy(cls0.red_steps)
+      local steps, reads_suite = M.base_steps(cls0.red_steps, head_doc)
       -- the base runs the profile the commit ran (its default may differ)
       local profile = type(r.profile) == "string" and { "--profile=" .. r.profile } or {}
       local base_code
-      -- only the spec files that are red at the commit run at the base (a run of the whole suite takes minutes)
-      local base_suite_args, narrowed =
-        M.base_suite_args(cls0.new, M.without_affected(suite_args), base_snap.tree)
+      -- only the spec files that are red at the commit run at the base (a run of the whole suite takes minutes); a
+      -- surface gate compares the hits of the whole suite, so it never runs after a narrowed one
+      local base_suite_args, narrowed = M.without_affected(suite_args), false
+      if not reads_suite then
+        base_suite_args, narrowed = M.base_suite_args(cls0.new, base_suite_args, base_snap.tree)
+      end
       if narrowed then
         say(
           ("ci commit %s: the suite at the base runs only the red spec files"):format(sha:sub(1, 7))
