@@ -336,6 +336,16 @@ WSL2's and are not compared; what is Windows-specific is checked by the windows 
 On Linux and macOS a proof from WSL2 is never taken. A profile with a Windows-specific step still needs a run on
 Windows.
 
+**What is kept about a commit, without a run: `--recall`.** `testing ci commit <rev>... --recall [--json=<file>]`
+runs nothing and takes no turn in the queue: it reads every kept result of the commits (quick and full, any base, also
+those a check in WSL2 brought back, marked `from_wsl` and `system = "linux"`) and the proofs of their trees
+(`ci-proofs/`, from `ci --snapshot`, a clean `ci commit` or WSL2). One line each (`ci commit abc1234 CLEAN (kept,
+quick, wsl, linux)`, `... proof: tree ... green in profile full on linux (from WSL2)`), and `none (nothing kept; not
+checked)` for a commit nothing is known about; exit 0 in every case, 2 without a commit or with `--range`, `--since`,
+`--repos-root`, 3 for a revision git does not know. `--json` writes `testing-ci-commit/1` with `recall = true`, the
+kept results in `commits`, `unknown` (the ids nothing is kept about) and `proofs` (`sha`, `tree`, `profile`,
+`system`, `from_wsl`, `time`). A reader such as the review of ai-desktop asks this per commit instead of a run.
+
 **`--quick` goes to WSL2 by itself.** On Windows, a `--quick` check of one repository runs in WSL2 without `--wsl`
 when `wsl.exe` is there and no CI service runs it (`CI` unset); `--no-wsl` keeps it on Windows, and without WSL2 one line
 says that it stays there. Measured 2026-11-12 to 11-20 before this: 725 quick checks on Windows (median 170 s) against

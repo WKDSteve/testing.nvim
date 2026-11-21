@@ -64,6 +64,7 @@ M.USAGE = table.concat({
   "  --keep            leave the snapshots (git worktrees) in place and name them",
   "  --include-docs    run a commit that changes only documentation too",
   "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
+  "  --recall          run nothing: what is kept about the commits (verdicts of earlier checks, proofs of their tree)",
   "  --wsl             run the check in WSL2 (about ten times faster than on Windows); not with --repos-root",
   "                    (--quick of one repository goes there by itself where WSL2 is; --no-wsl keeps it on Windows)",
   "  --agent           the agent report (default in an agent environment); --no-agent: the terminal report",
@@ -89,6 +90,7 @@ M.USAGE = table.concat({
 ---@field include_docs boolean
 ---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
 ---@field wsl? boolean `--wsl`: the check runs in WSL2 (`testing.ci.wsl`), the report and the exit code come back.
+---@field recall? boolean `--recall`: only what is kept about the commits (`M.recall`); never a run, never the queue.
 ---@field queue? Testing.Queue The entry's queue (`testing.queue`): a commit that runs takes its turn.
 ---@field queue_say? fun(s: string) Where the queue says that it waits.
 ---@field metrics? Testing.Metrics The entry's metrics (`testing.metrics`): one line per commit that ran.
@@ -153,6 +155,8 @@ function M.parse(argv)
       args.wsl = true
     elseif key == "no-wsl" and value == nil then
       args.wsl = false
+    elseif key == "recall" and value == nil then
+      args.recall = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
       args.agent = key == "agent"
     elseif key and VALUED[key] then
@@ -1345,6 +1349,186 @@ function M.repo_names(plans)
   return names
 end
 
+---What is kept about these commits, without running anything: every kept result of `ci commit` (quick and full, any
+---base, also those a check in WSL2 brought back) and the proofs of their trees (`ci-proofs/`, from `ci --snapshot`, a
+---clean `ci commit` or WSL2). A reader such as ai-desktop's review asks this instead of a run, which would take minutes
+---and a turn in the queue. The document is `testing-ci-commit/1` with `recall = true`: `commits` holds the kept
+---results (`recalled = true`, `system`, `from_wsl`), `unknown` the commits nothing is kept about, `proofs` the trees.
+---@param root string
+---@param shas string[] Full commit ids.
+---@param state_dir string|nil
+---@return table doc
+function M.recall(root, shas, state_dir)
+  local dir = memory_dir(root, state_dir)
+  local names = {}
+  local ok_dir, iter = pcall(vim.fs.dir, dir)
+  if ok_dir then
+    for name, kind in iter do
+      if kind == "file" and name:match("%.json$") then
+        names[#names + 1] = name
+      end
+    end
+  end
+  table.sort(names)
+  local doc = {
+    schema = M.SCHEMA,
+    repo = vim.fs.basename(root),
+    exit = M.EXIT_OK,
+    tally = {},
+    time = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    recall = true,
+    commits = {},
+    unknown = {},
+    proofs = {},
+  }
+  local proofs_dir = require("testing.state").dir(root, { state_dir = state_dir }) .. "/ci-proofs"
+  for _, sha in ipairs(shas) do
+    local found = false
+    for _, name in ipairs(names) do
+      if name:sub(1, #sha + 1) == sha .. "-" then
+        local text = require("lib.nvim.fs.read")(dir .. "/" .. name)
+        local okd, r = pcall(vim.json.decode, text or "", { luanil = { object = true } })
+        if okd and type(r) == "table" and r.sha == sha and KEPT[r.verdict] then
+          r.recalled, r.reused, r.snapshots = true, true, {}
+          r.system = r.system
+            or (r.from_wsl and "linux" or require("testing.ci").internal.this_os())
+          doc.commits[#doc.commits + 1] = r
+          doc.tally[r.verdict] = (doc.tally[r.verdict] or 0) + 1
+          found = true
+        end
+      end
+    end
+    local code, tree = git({ "rev-parse", "--verify", "--quiet", sha .. "^{tree}" }, root)
+    tree = code == 0 and vim.trim(tree or "") or ""
+    local ok_p, piter = pcall(vim.fs.dir, proofs_dir)
+    if tree:match("^%x+$") and ok_p then
+      local prefix = tree:sub(1, 20) .. "-"
+      for name, kind in piter do
+        if kind == "file" and name:sub(1, #prefix) == prefix and not name:match("%.red%.json$") then
+          local okd, p = pcall(
+            vim.json.decode,
+            require("lib.nvim.fs.read")(proofs_dir .. "/" .. name) or "",
+            { luanil = { object = true } }
+          )
+          if okd and type(p) == "table" and p.verdict == "green" and p.tree == tree then
+            doc.proofs[#doc.proofs + 1] = {
+              sha = sha,
+              tree = tree,
+              profile = p.profile,
+              system = p.os,
+              from_wsl = p.from_wsl == true,
+              time = p.time,
+            }
+            found = true
+          end
+        end
+      end
+    end
+    if not found then
+      doc.unknown[#doc.unknown + 1] = sha
+    end
+  end
+  return doc
+end
+
+---`ci commit <rev>... --recall [--json=<file>]`: one line per kept result and proof, `none` for a commit nothing is
+---kept about. Exit 0 (also when nothing is kept: that is an answer), 2 usage, 3 a revision git does not know.
+---@param args Testing.Ci.Commit.Args
+---@param sv table
+---@return integer
+function M.main_recall(args, sv)
+  local out, err = sv.out, sv.err
+  if #args.repos_roots > 0 or args.range or args.since then
+    err(
+      "testing ci commit --recall: name the commits (<rev>...), not --range, --since or --repos-root"
+    )
+    return M.EXIT_USAGE
+  end
+  if #args.revs == 0 then
+    err("testing ci commit --recall: name at least one commit")
+    return M.EXIT_USAGE
+  end
+  local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
+  local shas = {}
+  for _, rev in ipairs(args.revs) do
+    local sha, problem = snapshot.resolve(root, rev)
+    if not sha then
+      err("testing ci commit --recall: " .. tostring(problem))
+      return M.EXIT_INFRA
+    end
+    shas[#shas + 1] = sha
+  end
+  local doc = M.recall(root, shas, args.state_dir)
+  for _, r in ipairs(doc.commits) do
+    local tags = { "kept" }
+    if r.quick then
+      tags[#tags + 1] = "quick"
+    end
+    if r.from_wsl then
+      tags[#tags + 1] = "wsl"
+    end
+    tags[#tags + 1] = r.system
+    out(
+      ("ci commit %s %s (%s)"):format(r.sha:sub(1, 7), r.verdict:upper(), table.concat(tags, ", "))
+    )
+  end
+  for _, p in ipairs(doc.proofs) do
+    out(
+      ("ci commit %s proof: tree %s green in profile %s on %s%s"):format(
+        p.sha:sub(1, 7),
+        p.tree:sub(1, 8),
+        tostring(p.profile),
+        tostring(p.system),
+        p.from_wsl and " (from WSL2)" or ""
+      )
+    )
+  end
+  for _, sha in ipairs(doc.unknown) do
+    out(("ci commit %s none (nothing kept; not checked)"):format(sha:sub(1, 7)))
+  end
+  if args.json then
+    pcall(
+      require("lib.nvim.fs.write.atomic"),
+      vim.fn.fnamemodify(args.json, ":p"),
+      require("lib.nvim.json.canonical").encode(doc) .. "\n",
+      { mkdirp = true }
+    )
+  end
+  return M.EXIT_OK
+end
+
+---Keep what a check in WSL2 brought back as kept results on this side, for `--recall` (marked `from_wsl`,
+---`system = "linux"`; a reuse check never takes them: their name is not a memory key of this side).
+---@param root string
+---@param state_dir string|nil
+---@param commits table[]
+---@return integer kept
+function M.keep_wsl_results(root, state_dir, commits)
+  local kept = 0
+  for _, r in ipairs(commits or {}) do
+    if type(r) == "table" and type(r.sha) == "string" and KEPT[r.verdict] and not r.reused then
+      local copy = vim.deepcopy(r)
+      copy.from_wsl, copy.system, copy.snapshots = true, "linux", {}
+      local key = require("testing.cache.hash").sha256(table.concat({
+        tostring(r.base),
+        tostring(r.profile),
+        r.quick and "quick" or "-",
+      }, "\n"))
+      local path = ("%s/%s-wsl%s.json"):format(memory_dir(root, state_dir), r.sha, key:sub(1, 11))
+      if
+        require("lib.nvim.fs.write.atomic")(
+          path,
+          require("lib.nvim.json.canonical").encode(copy) .. "\n",
+          { mkdirp = true }
+        )
+      then
+        kept = kept + 1
+      end
+    end
+  end
+  return kept
+end
+
 ---Keep the clean, whole runs a check in WSL2 brought back as proofs on this side, marked `from_wsl`: the proof of the
 ---commit's tree (`testing.ci.snapshot_run.keep`, which `ci --snapshot` and the pre-push hook ask), and for the commit
 ---that is HEAD the documents `ci verify` reads. They count only for a profile without a Windows-specific step
@@ -1531,6 +1715,8 @@ function M.main_wsl(argv, args, sv)
   -- a clean, whole run in WSL2 is the proof here too (for a profile without a Windows-specific step)
   local _, head_out = git({ "rev-parse", "--verify", "--quiet", "HEAD^{commit}" }, root)
   local wsl_kept = M.keep_wsl_proofs(root, args.state_dir, commits, vim.trim(head_out or ""))
+  -- every result, for `--recall` (ai-desktop's review asks it per commit)
+  pcall(M.keep_wsl_results, root, args.state_dir, commits)
   if wsl_kept > 0 then
     out(
       ("ci commit: %d proof(s) from WSL2 kept here (ci verify, the pre-push hook)"):format(wsl_kept)
@@ -1565,6 +1751,9 @@ function M.main(argv, sv)
     return M.EXIT_OK
   end
   args.state_dir = args.state_dir and vim.fn.fnamemodify(args.state_dir, ":p") or sv.state_dir
+  if args.recall then
+    return M.main_recall(args, sv)
+  end
   local in_wsl, wsl_note = M.choose_wsl(args, M.wsl_env(sv))
   if wsl_note then
     out(wsl_note)

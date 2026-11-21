@@ -454,6 +454,71 @@ return function(H)
     r = wci("verify", "--profile=full")
     eq(r.code, 1, "wsl proof: on Linux it is no proof (another Neovim)")
     internal.this_os = saved_os
+
+    -- --recall: what is kept about commits, never a run
+    do
+      local saved_run = commit.run_ci
+      commit.run_ci = function()
+        error("--recall must not run anything")
+      end
+      eq(
+        commit.keep_wsl_results(wroot, S.state_dir, {
+          {
+            sha = whead,
+            verdict = "clean",
+            quick = true,
+            base = "b",
+            profile = "full",
+            exact = true,
+            new = {},
+            known = {},
+            fixed = {},
+            problems = {},
+            rerun = {},
+          },
+          { sha = whead, verdict = "infra", problems = { "x" } },
+        }),
+        1,
+        "recall: a kept verdict from WSL2 is kept here, an infrastructure failure is not"
+      )
+      local rdoc = commit.recall(wroot, { whead }, S.state_dir)
+      eq(rdoc.recall, true, "recall: the document says so")
+      eq(rdoc.schema, "testing-ci-commit/1", "recall: the document of ci commit")
+      eq(
+        { #rdoc.commits, rdoc.commits[1].verdict, rdoc.commits[1].quick, rdoc.commits[1].from_wsl },
+        { 1, "clean", true, true },
+        "recall: the kept quick result from WSL2"
+      )
+      eq(rdoc.commits[1].system, "linux", "recall: ... names its system")
+      eq(
+        { #rdoc.proofs, rdoc.proofs[1] and rdoc.proofs[1].from_wsl },
+        { 1, true },
+        "recall: and the proof of the tree"
+      )
+      S.commit(wroot, { ["lua/proj/r.lua"] = "return 3\n" }, "a commit nothing is kept about")
+      local other = S.git_out(wroot, "rev-parse", "HEAD")
+      rdoc = commit.recall(wroot, { other }, S.state_dir)
+      eq(rdoc.unknown, { other }, "recall: a commit nothing is kept about is unknown")
+      local jfile = S.state_dir .. "/recall.json"
+      r = ci(
+        "commit",
+        whead,
+        other,
+        "--recall",
+        "--json=" .. jfile,
+        "--root=" .. wroot,
+        "--state-dir=" .. S.state_dir
+      )
+      eq(r.code, 0, "recall: exit 0, also for an unknown commit (" .. r.out .. r.err .. ")")
+      has(r.out, "CLEAN (kept, quick, wsl, linux)", "recall: one line per kept result")
+      has(r.out, "(from WSL2)", "recall: ... and per proof")
+      has(r.out, other:sub(1, 7) .. " none", "recall: ... and none for the unknown one")
+      local jdoc = vim.json.decode(require("lib.nvim.fs.read")(jfile) or "{}")
+      eq({ jdoc.recall, #jdoc.unknown }, { true, 1 }, "recall: --json writes the document")
+      r = ci("commit", "--recall", "--root=" .. wroot)
+      eq(r.code, 2, "recall: without a commit it is a usage error")
+      commit.run_ci = saved_run
+    end
     -- a Windows-specific step (its `os` names windows, not linux) cannot be proven in WSL2
     local function pipe(os_b)
       return { profiles = { full = { "a", "b" } }, steps = { a = {}, b = { os = os_b } } }

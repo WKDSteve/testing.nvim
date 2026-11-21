@@ -14,6 +14,23 @@ export interface TestingCiCommit {
   commits: CommitResult[];
   /** Only with `--repos-root`: one entry per repository, also one that could not be checked. */
   repos?: RepoResult[];
+  /** Only with `--recall`: nothing ran; `commits` holds the kept results. */
+  recall?: boolean;
+  /** Only with `--recall`: the commit ids nothing is kept about (not checked). */
+  unknown?: string[];
+  /** Only with `--recall`: the kept proofs of the commits' trees. */
+  proofs?: RecalledProof[];
+}
+
+/** A kept proof of a commit's tree (`ci --snapshot`, a clean `ci commit`, a check in WSL2). */
+export interface RecalledProof {
+  sha: string;
+  tree: string;
+  profile?: string | null;
+  system?: string | null;
+  /** The proof came from a check in WSL2 (`ci commit --wsl`). */
+  from_wsl?: boolean;
+  time?: string | null;
 }
 
 export interface RepoResult {
@@ -52,6 +69,12 @@ export interface CommitResult {
   suite_args?: string[];
   /** True when the result was kept from an earlier call (nothing ran). */
   reused?: boolean;
+  /** Only with `--recall`: a kept result, read, not run. */
+  recalled?: boolean;
+  /** The result came from a check in WSL2 (`ci commit --wsl`). */
+  from_wsl?: boolean;
+  /** Only with `--recall`: the system the kept result speaks for. */
+  system?: "windows" | "macos" | "linux";
   /** `--quick`: the suite ran what the diff to the base reaches; a clean quick result is no proof of the tree. */
   quick?: boolean;
   /** False when a list of findings was cut: the rest counts as new. */

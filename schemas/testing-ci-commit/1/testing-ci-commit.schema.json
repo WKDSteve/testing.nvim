@@ -34,6 +34,24 @@
           "problem": { "type": ["string", "null"] }
         }
       }
+    },
+    "recall": { "type": "boolean", "description": "Only with --recall: nothing ran; `commits` holds the kept results, `unknown` and `proofs` say the rest." },
+    "unknown": { "type": "array", "items": { "type": "string" }, "description": "Only with --recall: the commit ids nothing is kept about (not checked)." },
+    "proofs": {
+      "description": "Only with --recall: the kept proofs of the commits' trees (ci --snapshot, a clean ci commit, a check in WSL2).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sha", "tree"],
+        "properties": {
+          "sha": { "type": "string" },
+          "tree": { "type": "string" },
+          "profile": { "type": ["string", "null"] },
+          "system": { "type": ["string", "null"] },
+          "from_wsl": { "type": "boolean" },
+          "time": { "type": ["string", "null"] }
+        }
+      }
     }
   },
   "$defs": {
@@ -77,6 +95,9 @@
         "profile": { "type": ["string", "null"] },
         "suite_args": { "type": "array", "items": { "type": "string" } },
         "reused": { "type": "boolean" },
+        "recalled": { "type": "boolean", "description": "Only with --recall: a kept result, read, not run." },
+        "from_wsl": { "type": "boolean", "description": "The result came from a check in WSL2 (ci commit --wsl)." },
+        "system": { "enum": ["windows", "macos", "linux"], "description": "Only with --recall: the system the kept result speaks for." },
         "quick": { "type": "boolean", "description": "--quick: the suite ran what the diff to the base reaches (--affected=<base>); a clean quick result is no proof of the tree." },
         "exact": { "type": "boolean" },
         "changed_files": { "type": "array", "items": { "type": "string" } },
