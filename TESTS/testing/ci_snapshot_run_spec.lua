@@ -48,7 +48,7 @@ return function(H)
   eq(r.code, 0, "snapshot run: green (" .. r.out .. r.err .. ")")
   has(r.out, "ci --snapshot", "snapshot run: the summary line")
   has(r.out, "TESTING_CI_OK", "snapshot run: the sentinel of a whole green profile")
-  eq(S.worktrees(root), 1, "snapshot run: no snapshot is left registered")
+  eq(S.worktrees(root), 2, "snapshot run: only the warm snapshot stays registered")
   eq(
     S.git_out(root, "status", "--porcelain"),
     "?? untracked.txt",
@@ -169,6 +169,47 @@ return function(H)
   has(r.out, "HEAD is proven by a snapshot run", "dirty tree: ... and that HEAD itself is proven")
   S.git_out(root, "checkout", "--", "README.md")
 
+  -- the warm snapshot: one worktree per repository, moved to the next commit; only changed files are written
+  do
+    local snapshot = require("testing.ci.snapshot")
+    local opts = { state_dir = S.state_dir }
+    local head = S.git_out(root, "rev-parse", "HEAD")
+    local a = assert(snapshot.warm(root, head, opts))
+    eq(a.warm, true, "warm: the snapshot says so")
+    eq(snapshot.warm(root, head, opts), nil, "warm: a second run while it is held gets none")
+    S.write(a.tree .. "/left-behind.txt", "x\n")
+    S.write(a.tree .. "/README.md", "changed by the last run\n")
+    S.write(a.state .. "/old-state.txt", "x\n")
+    local stat_before = vim.uv.fs_stat(a.tree .. "/gate.txt")
+    eq(select(1, snapshot.remove(a)), true, "warm: remove gives the lock back")
+    eq(vim.fn.isdirectory(a.tree), 1, "warm: ... and the tree stays")
+    S.commit(root, { ["lua/proj/w.lua"] = "return 2\n" }, "a commit for the warm snapshot")
+    local next_sha = S.git_out(root, "rev-parse", "HEAD")
+    local b = assert(snapshot.warm(root, next_sha, opts))
+    eq(b.tree, a.tree, "warm: the same tree again")
+    eq(S.git_out(b.tree, "rev-parse", "HEAD"), next_sha, "warm: ... moved to the next commit")
+    eq(S.git_out(b.tree, "status", "--porcelain"), "", "warm: ... exactly the commit's files")
+    eq(vim.fn.filereadable(b.tree .. "/left-behind.txt"), 0, "warm: what the last run left is gone")
+    eq(
+      require("lib.nvim.fs.read")(b.tree .. "/README.md"),
+      "# proj\n",
+      "warm: a file the last run changed is the commit's again"
+    )
+    eq(vim.fn.filereadable(b.state .. "/old-state.txt"), 0, "warm: the throwaway state is empty")
+    eq(
+      vim.uv.fs_stat(b.tree .. "/gate.txt").mtime.sec,
+      stat_before.mtime.sec,
+      "warm: an unchanged file is not written again"
+    )
+    snapshot.remove(b)
+    -- a lock whose process is gone is taken over
+    local _, lock = snapshot.warm_dir(root, opts)
+    S.write(lock, vim.json.encode({ pid = 999999, started = 0 }))
+    local c = snapshot.warm(root, next_sha, opts)
+    ok(c ~= nil, "warm: a dead holder's lock is taken over")
+    snapshot.remove(c)
+  end
+
   -- a new commit: another tree, the proof is for the old one
   S.commit(root, { ["lua/proj/x.lua"] = "return 1\n" }, "a change")
   r = ci("verify", unpack(with("--profile=full")))
@@ -194,10 +235,14 @@ return function(H)
     end
     local created = 0
     local snap_mod = require("testing.ci.snapshot")
-    local saved_create = snap_mod.create
+    local saved_create, saved_warm = snap_mod.create, snap_mod.warm
     snap_mod.create = function(...)
       created = created + 1
       return saved_create(...)
+    end
+    snap_mod.warm = function(...)
+      created = created + 1
+      return saved_warm(...)
     end
     r = ci(unpack(with("--snapshot", "--profile=full")))
     eq(r.code, 1, "red kept: the same tree again is red")
@@ -245,7 +290,7 @@ return function(H)
       false,
       "red kept: not for a partial run"
     )
-    snap_mod.create = saved_create
+    snap_mod.create, snap_mod.warm = saved_create, saved_warm
     snapshot_run.now = saved_now
   end
 
@@ -255,7 +300,7 @@ return function(H)
   r = ci(unpack(with("--snapshot", "--profile=full", "--rev=" .. green)))
   eq(r.code, 0, "--rev: a green parent under a red HEAD is green (" .. r.out .. r.err .. ")")
   has(r.out, "ci --snapshot " .. green:sub(1, 7), "--rev: names the commit it ran on")
-  eq(S.worktrees(root), 1, "--rev: no snapshot is left registered")
+  eq(S.worktrees(root), 2, "--rev: only the warm snapshot stays registered")
   r = ci("verify", unpack(with("--profile=full")))
   eq(r.code, 1, "--rev: the proof of another commit does not prove HEAD")
   r = ci(unpack(with("--snapshot", "--profile=full", "--rev=" .. red)))

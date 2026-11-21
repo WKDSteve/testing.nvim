@@ -373,7 +373,12 @@ function M.main(args, root, sv)
   end
 
   pcall(snapshot.sweep, root, { state_dir = state_dir })
-  local snap, why = snapshot.create(root, sha, { state_dir = state_dir })
+  -- the warm snapshot of the repository first (only the changed files are written); a fresh one while another run
+  -- holds it
+  local snap, why = snapshot.warm(root, sha, { state_dir = state_dir })
+  if not snap then
+    snap, why = snapshot.create(root, sha, { state_dir = state_dir })
+  end
   if not snap then
     err(("testing ci --snapshot: cannot check %s out: %s"):format(sha:sub(1, 12), tostring(why)))
     return M.EXIT_INFRA

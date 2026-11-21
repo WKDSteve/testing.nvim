@@ -24,6 +24,8 @@ M.MAX_AGE = 12 * 3600
 ---@field dir string The directory of the snapshot (holds `tree` and `state`).
 ---@field tree string The worktree: the commit's files.
 ---@field state string A throwaway state directory for the run on the snapshot.
+---@field warm? boolean The warm snapshot of the repository (`M.warm`): it stays, `remove` gives its lock back.
+---@field lock? string The lock file of a warm snapshot.
 
 ---Replaced by a spec: `vim.system`.
 ---@type function
@@ -163,11 +165,134 @@ function M.create(root, sha, opts)
   return { root = root, sha = sha, dir = dir, tree = tree, state = state }
 end
 
----Take a snapshot away: its worktree entry in the repository and its directory.
+---Seconds after which an unused warm snapshot is swept.
+M.WARM_MAX_AGE = 7 * 24 * 3600
+
+---The directory of the warm snapshot of a repository (one per repository, its key from the path).
+---@param root string
+---@param opts? { state_dir?: string }
+---@return string dir
+---@return string lock
+function M.warm_dir(root, opts)
+  local key = vim.fn.sha256(vim.fs.normalize(root)):sub(1, 12)
+  local dir = ("%s/warm-%s"):format(M.base(opts), key)
+  return dir, dir .. ".lock"
+end
+
+---Is the process alive? (Another user's process answers EPERM: alive.)
+---@param pid integer
+---@return boolean
+local function alive(pid)
+  local ok, err = vim.uv.kill(pid, 0)
+  return ok == 0 or (type(err) == "string" and err:find("EPERM", 1, true) ~= nil)
+end
+
+---Take the lock of a warm snapshot; a lock whose process is gone is taken over.
+---@param lock string
+---@return boolean
+local function take_lock(lock)
+  local create = require("lib.nvim.fs.create_exclusive")
+  local body = vim.json.encode({ pid = vim.uv.os_getpid(), started = os.time() })
+  if create(lock, body) then
+    return true
+  end
+  local okd, doc = pcall(vim.json.decode, require("lib.nvim.fs.read")(lock) or "")
+  local pid = okd and type(doc) == "table" and tonumber(doc.pid) or nil
+  if pid and alive(pid) then
+    return false
+  end
+  os.remove(lock)
+  return create(lock, body) and true or false
+end
+
+---Check the commit `sha` out into the WARM snapshot of `root`: one worktree per repository that stays between runs and
+---is moved to the next commit with `checkout --force --detach` and `clean -ffdx`, so only the files that differ are
+---written. A fresh worktree writes every file of the commit, and on Windows the first read of each new file is what costs
+---(tasks-vault, 7863 files: the gate took 24.5 s on a fresh worktree and 2.8 s on the second run; a whole run of
+---`ci --snapshot` 36 s). The content is the commit's exactly, as with `create`; the throwaway state is emptied each
+---time.
+---nil while another run holds the warm snapshot (the caller takes a fresh one) or when it cannot be made.
+---@param root string
+---@param sha string A full commit id.
+---@param opts? { state_dir?: string }
+---@return Testing.Ci.Snapshot|nil snap `warm = true`, `lock`: `remove` only gives the lock back
+---@return string|nil problem
+function M.warm(root, sha, opts)
+  if not sha:match("^%x+$") then
+    return nil, "not a commit id: " .. tostring(sha)
+  end
+  local dir, lock = M.warm_dir(root, opts)
+  if vim.fn.mkdir(M.base(opts), "p") == 0 and vim.fn.isdirectory(M.base(opts)) ~= 1 then
+    return nil, "cannot create " .. M.base(opts)
+  end
+  if not take_lock(lock) then
+    return nil, "the warm snapshot is in use"
+  end
+  local tree, state, hooks = dir .. "/tree", dir .. "/state", dir .. "/no-hooks"
+  local function fail(why)
+    os.remove(lock)
+    return nil, why
+  end
+  vim.fn.mkdir(hooks, "p")
+  local moved = false
+  if vim.fn.isdirectory(tree .. "/.git") == 1 or vim.fn.filereadable(tree .. "/.git") == 1 then
+    local c1 = git(
+      { "-c", "core.hooksPath=" .. hooks, "checkout", "--force", "--detach", "--quiet", sha },
+      tree
+    )
+    local c2 = c1 == 0 and git({ "clean", "-ffdxq" }, tree) or 1
+    moved = c1 == 0 and c2 == 0
+    if not moved then
+      -- a broken warm tree: start it again
+      git({ "worktree", "remove", "--force", tree }, root)
+      vim.fn.delete(tree, "rf")
+      git({ "worktree", "prune" }, root)
+    end
+  end
+  if not moved then
+    local code, _, err = git({
+      "-c",
+      "core.hooksPath=" .. hooks,
+      "worktree",
+      "add",
+      "--detach",
+      "--quiet",
+      "--force",
+      tree,
+      sha,
+    }, root)
+    if code ~= 0 then
+      vim.fn.delete(tree, "rf")
+      return fail(("git worktree add %s: %s"):format(sha:sub(1, 12), vim.trim(err)))
+    end
+  end
+  vim.fn.delete(state, "rf")
+  if vim.fn.mkdir(state, "p") ~= 1 then
+    return fail("cannot create " .. state)
+  end
+  -- its age for `sweep`: the directory's time is the last use
+  pcall(vim.uv.fs_utime, dir, os.time(), os.time())
+  return {
+    root = root,
+    sha = sha,
+    dir = dir,
+    tree = tree,
+    state = state,
+    warm = true,
+    lock = lock,
+  }
+end
+
+---Take a snapshot away: its worktree entry in the repository and its directory. A warm snapshot stays: only its lock
+---is given back.
 ---@param snap Testing.Ci.Snapshot
 ---@return boolean ok
 ---@return string|nil problem
 function M.remove(snap)
+  if snap.warm then
+    os.remove(snap.lock)
+    return true
+  end
   local code, _, err = git({ "worktree", "remove", "--force", snap.tree }, snap.root)
   vim.fn.delete(snap.dir, "rf")
   if code ~= 0 then
@@ -192,6 +317,14 @@ function M.sweep(root, opts)
     if kind == "directory" and name:match("^%x+%-%x+$") then
       local st = vim.uv.fs_stat(base .. "/" .. name)
       if st and now - st.mtime.sec > M.MAX_AGE then
+        vim.fn.delete(base .. "/" .. name, "rf")
+        removed = removed + 1
+      end
+    elseif kind == "directory" and name:match("^warm%-%x+$") then
+      -- a warm snapshot nobody used for a week, and that no run holds now
+      local st = vim.uv.fs_stat(base .. "/" .. name)
+      local held = vim.uv.fs_stat(base .. "/" .. name .. ".lock") ~= nil
+      if st and not held and now - st.mtime.sec > M.WARM_MAX_AGE then
         vim.fn.delete(base .. "/" .. name, "rf")
         removed = removed + 1
       end

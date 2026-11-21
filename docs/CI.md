@@ -680,6 +680,15 @@ nothing. The record counts when it is a snapshot run on this system and this Neo
 `ci verify` (7 days); the tree holds `.testing.lua`, so the pipeline is the same, while the versions of the tools are not
 asked again (the CI of the host runs everything). `--force` runs anyway; without `--snapshot` it is refused with exit 2.
 
+**A warm snapshot per repository.** `testing ci --snapshot` does not check every file of the commit out anew: each
+repository keeps one worktree (`<temp or state>/testing/snap/warm-<key>/tree`, `git worktree list` shows it) that is
+moved to the next commit with `checkout --force --detach` and `clean -ffdx`, so its content is exactly the commit's
+while only the files that differ are written. On Windows the first read of each new file is what costs: tasks-vault
+(7863 files) took 33 to 36 s per push on a fresh worktree and 3.7 to 4 s on the warm one (2026-11-21). A lock beside
+it (`warm-<key>.lock`, with the pid; a dead holder's lock is taken over) keeps it to one run; a second run at the same
+time takes a fresh snapshot as before. `sweep` removes a warm snapshot nobody used for seven days. `testing ci commit`
+still uses fresh snapshots.
+
 **A red run answers for its tree a while.** A red, complete run leaves `<tree>-<profile>.red.json` beside the proofs
 for 15 minutes (`RED_KEEP_S`), with what it printed: the same tree again (the pre-push hooks of several sessions in a
 shared checkout try to push the same red state; tasks-vault, 2026-11-16 to 11-19, up to nine times in five minutes, 30
