@@ -599,9 +599,10 @@ function M.main(argv, sv)
   local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
   if args.action == "guard" then
     -- what git hands the hook, passed on by it: `echo "$refs" | testing ci hook guard`
+    -- the names as literals: a computed name hides from the cache key what a spec loading this module reads
     local code, msg = M.guard(root, io.read("*a") or "", {
-      [M.LAND_PUSH_ENV] = vim.uv.os_getenv(M.LAND_PUSH_ENV),
-      [M.DIRECT_PUSH_ENV] = vim.uv.os_getenv(M.DIRECT_PUSH_ENV),
+      TESTING_LAND_PUSH = vim.uv.os_getenv("TESTING_LAND_PUSH"),
+      TESTING_DIRECT_PUSH = vim.uv.os_getenv("TESTING_DIRECT_PUSH"),
     }, show_workflow)
     if msg then
       sv.err(msg)
