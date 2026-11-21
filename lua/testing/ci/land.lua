@@ -52,13 +52,16 @@ local RED = { failure = true, rejected = true, cancelled = true, no_runner = tru
 M.deps = {
   ---@param dir string
   ---@param args string[]
+  ---@param env? table<string, string> Added to the environment (the push of main after green).
   ---@return integer code
   ---@return string stdout
   ---@return string stderr
-  git = function(dir, args)
+  git = function(dir, args, env)
     local ok, res = pcall(function()
       -- a push runs the pre-push hook (the fast pipeline of the commit): minutes, not seconds
-      return vim.system(vim.list_extend({ "git", "-C", dir }, args), { text = true }):wait(600000)
+      return vim
+        .system(vim.list_extend({ "git", "-C", dir }, args), { text = true, env = env })
+        :wait(600000)
     end)
     if not ok or not res then
       return 127, "", tostring(res)
@@ -377,8 +380,14 @@ function M.run(args, say, state_dir)
     drop_check()
     return M.EXIT_RED
   elseif pos == "ancestor" then
-    -- no force: a branch that moved between the fetch and this push refuses it
-    code, _, err = git("push", "--quiet", args.remote, sha .. ":refs/heads/" .. args.branch)
+    -- no force: a branch that moved between the fetch and this push refuses it. The pre-push hook refuses a direct
+    -- push of main in a land repository; this is the push after green, said so (`testing.ci.hook.guard`)
+    local hook = require("testing.ci.hook")
+    code, _, err = d.git(
+      root,
+      { "push", "--quiet", args.remote, sha .. ":refs/heads/" .. args.branch },
+      { [hook.LAND_PUSH_ENV] = "1" }
+    )
     if code ~= 0 then
       say(
         ("land: %s is green, but the push to %s failed: %s"):format(

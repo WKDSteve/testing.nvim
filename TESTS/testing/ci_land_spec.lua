@@ -29,8 +29,12 @@ return function(H)
   local function scenario(o, argv)
     local w = { pushes = {}, fetches = 0, base = o.base or BASE, looks = 0, said = {} }
     local clock = 1000
-    land.deps.git = function(_, args)
+    w.push_env = {}
+    land.deps.git = function(_, args, env)
       local cmd = args[1]
+      if cmd == "push" then
+        w.push_env[#w.push_env + 1] = env and env.TESTING_LAND_PUSH or "-"
+      end
       if cmd == "rev-parse" then
         local rev = args[#args]:gsub("%^{commit}$", "")
         if rev == "origin/main" then
@@ -90,6 +94,11 @@ return function(H)
     "push --quiet origin " .. SHA .. ":refs/heads/main",
     "push --quiet origin --delete refs/heads/" .. CHECK,
   }, "green: check branch, then main (no force), then the check branch is deleted")
+  eq(
+    w.push_env,
+    { "-", "1", "-" },
+    "green: only the push of main says it comes from land (the pre-push guard lets it through)"
+  )
   has(w.text, "landed on main", "green: says so")
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")

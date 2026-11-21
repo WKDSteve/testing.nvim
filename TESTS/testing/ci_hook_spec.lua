@@ -49,7 +49,7 @@ return function(H)
     has(why, "not a profile name", "args: ... is named")
     none, why = hook.parse({})
     eq(none, nil, "args: no action")
-    has(why, "install, remove or status", "args: ... is named")
+    has(why, "install, remove, status or guard", "args: ... is named")
     none = hook.parse({ "remove", "--frobnicate" })
     eq(none, nil, "args: an unknown argument")
   end
@@ -370,10 +370,12 @@ return function(H)
     local script = tmp .. "/snapshot-refs-hook"
     ---@param verify_code integer exit code of the stubbed `verify`
     ---@param red? string the sha the stubbed snapshot run is red on
-    local function write_hook(verify_code, red)
+    ---@param guard_code? integer exit code of the stubbed `hook guard` (default 0)
+    local function write_hook(verify_code, red, guard_code)
       local hook_text = hook.text({ run = "fast", driver_dir = driver_dir, snapshot = true })
-      local stub = ('testing_ci() { echo "$*" >> "%s"; case "$*" in verify*) return %d ;; *--rev=%s*) return 1 ;; esac; return 0; }'):format(
+      local stub = ('testing_ci() { echo "$*" >> "%s"; case "$*" in "hook guard") return %d ;; verify*) return %d ;; *--rev=%s*) return 1 ;; esac; return 0; }'):format(
         log,
+        guard_code or 0,
         verify_code,
         red or "none"
       )
@@ -387,16 +389,21 @@ return function(H)
     ---@param stdin string
     ---@return integer code
     ---@return string[] calls
+    ---@return boolean guarded The hook asked `testing ci hook guard`.
     local function push(stdin)
       os.remove(log)
       local res = vim
         .system({ snapshot_bash, script }, { cwd = root, text = true, stdin = stdin })
         :wait(30000)
-      local calls = {}
+      local calls, guarded = {}, false
       for line in (read(log) or ""):gmatch("[^\r\n]+") do
-        calls[#calls + 1] = line
+        if line == "hook guard" then
+          guarded = true
+        else
+          calls[#calls + 1] = line
+        end
       end
-      return res.code, calls
+      return res.code, calls, guarded
     end
     local function line(lref, sha, rref, rsha)
       return ("%s %s %s %s\n"):format(lref, sha, rref, rsha or zero)
@@ -439,6 +446,88 @@ return function(H)
       line("refs/heads/a", other, "refs/heads/a") .. line("refs/heads/b", other, "refs/heads/b")
     )
     eq({ code, #calls }, { 0, 1 }, "snapshot hook: one commit on two branches runs once")
+
+    -- the guard comes first: refused, no step runs
+    local guarded
+    write_hook(1, nil, 1)
+    code, calls, guarded = push(line("refs/heads/main", head, "refs/heads/main"))
+    eq(
+      { code, #calls, guarded },
+      { 1, 0, true },
+      "snapshot hook: a refusing guard blocks before any step"
+    )
+    write_hook(0)
+    code, calls, guarded = push(line("refs/heads/main", head, "refs/heads/main"))
+    eq(calls[1], "verify", "snapshot hook: after a passing guard the steps run as before")
+    eq({ code, guarded }, { 0, true }, "snapshot hook: the guard is asked on every push")
+  end
+
+  -- the guard itself: a direct push of main in a land repository (its workflow runs on ci/**) is refused
+  do
+    local LAND_WF = 'on:\n  push:\n    branches: [main, "ci/**"]\n'
+    local function show_of(body)
+      return function()
+        return body
+      end
+    end
+    local sha, zero = ("a"):rep(40), ("0"):rep(40)
+    local function refs(rref, lsha)
+      return ("refs/heads/x %s %s %s\n"):format(lsha or sha, rref, zero)
+    end
+    local code, msg = hook.guard("/r/proj", refs("refs/heads/main"), {}, show_of(LAND_WF))
+    eq(code, hook.EXIT_REFUSED, "guard: direct push of main in a land repository: refused")
+    has(msg, "testing ci land " .. sha:sub(1, 12), "guard: names land")
+    has(msg, hook.DIRECT_PUSH_ENV .. "=1", "guard: names the way around on purpose")
+    eq(
+      hook.guard(
+        "/r/proj",
+        refs("refs/heads/main"),
+        { [hook.LAND_PUSH_ENV] = "1" },
+        show_of(LAND_WF)
+      ),
+      hook.EXIT_OK,
+      "guard: the push of land after green passes"
+    )
+    eq(
+      hook.guard(
+        "/r/proj",
+        refs("refs/heads/main"),
+        { [hook.DIRECT_PUSH_ENV] = "1" },
+        show_of(LAND_WF)
+      ),
+      hook.EXIT_OK,
+      "guard: on purpose passes"
+    )
+    eq(
+      hook.guard("/r/proj", refs("refs/heads/ci/proj-aaaa"), {}, show_of(LAND_WF)),
+      hook.EXIT_OK,
+      "guard: the check branch of land passes"
+    )
+    eq(
+      hook.guard(
+        "/r/proj",
+        refs("refs/heads/main"),
+        {},
+        show_of("on:\n  push:\n    branches: [main]\n")
+      ),
+      hook.EXIT_OK,
+      "guard: a repository that does not land passes"
+    )
+    eq(
+      hook.guard("/r/proj", refs("refs/heads/main"), {}, show_of(nil)),
+      hook.EXIT_OK,
+      "guard: no workflow at the commit passes"
+    )
+    eq(
+      hook.guard("/r/proj", refs("refs/heads/main", zero), {}, show_of(LAND_WF)),
+      hook.EXIT_OK,
+      "guard: a deletion is not a push of commits"
+    )
+    eq(
+      hook.guard("/r/proj", "", {}, show_of(LAND_WF)),
+      hook.EXIT_OK,
+      "guard: nothing pushed passes"
+    )
   end
 
   -- status: the installed hook against what this version writes

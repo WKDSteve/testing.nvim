@@ -43,12 +43,67 @@ M.LEGACY_MARK = "# MyPlugins ci pre-push hook"
 
 M.DEFAULT_RUN = "fast"
 
+---The environment variable `testing ci land` sets for its own push of the default branch (after the hosted CI was green).
+M.LAND_PUSH_ENV = "TESTING_LAND_PUSH"
+---The environment variable that lets a direct push of the default branch of a land repository through on purpose.
+M.DIRECT_PUSH_ENV = "TESTING_DIRECT_PUSH"
+---The branch `testing ci land` lands on (`testing.ci.land`, `--branch` default).
+M.LAND_BRANCH = "main"
+
+---May this push go out? In a repository that lands through the hosted CI (its workflow at the pushed commit runs on
+---`ci/**`: what `testing ci land` checks too) a push of `main` comes from `testing ci land` after green, not from a
+---plain `git push`: a direct one lands unchecked commits (gitsuite, reposcope, terminal on 2026-11-21, stylua-red, and
+---every later land of those repositories red until a style commit followed). `refs` is what git hands the hook on
+---stdin (`<local ref> <local sha> <remote ref> <remote sha>` per line).
+---@param root string
+---@param refs string
+---@param env table<string, string|nil>
+---@param show fun(root: string, sha: string): string|nil The workflow file at a commit (nil when there is none).
+---@return integer code
+---@return string|nil message
+function M.guard(root, refs, env, show)
+  if env[M.LAND_PUSH_ENV] == "1" or env[M.DIRECT_PUSH_ENV] == "1" then
+    return M.EXIT_OK
+  end
+  for line in (refs or ""):gmatch("[^\r\n]+") do
+    local _, sha, remote_ref = line:match("^(%S+)%s+(%x+)%s+(%S+)")
+    if remote_ref == "refs/heads/" .. M.LAND_BRANCH and sha and sha:find("[^0]") then
+      local workflow = show(root, sha)
+      if workflow and workflow:find('"ci/**"', 1, true) then
+        return M.EXIT_REFUSED,
+          table.concat({
+            ("pre-push: %s lands through the hosted CI (ci.workflow.land): a direct push of %s is refused."):format(
+              vim.fs.basename(root),
+              M.LAND_BRANCH
+            ),
+            ("  land it: testing ci land %s --root=%s"):format(sha:sub(1, 12), root),
+            ("  on purpose (an emergency): %s=1 git push ..."):format(M.DIRECT_PUSH_ENV),
+          }, "\n")
+      end
+    end
+  end
+  return M.EXIT_OK
+end
+
+---The workflow file of the generated CI at a commit, through git.
+---@param root string
+---@param sha string
+---@return string|nil
+local function show_workflow(root, sha)
+  local res = vim
+    .system({ "git", "-C", root, "show", sha .. ":.github/workflows/ci.yml" }, { text = true })
+    :wait()
+  return res.code == 0 and res.stdout or nil
+end
+
 M.USAGE = table.concat({
   "usage: testing ci hook install [--run=<profile>] [--verify=<profile>] [--auto-trust] [--snapshot] [--root=<dir>]",
   "       testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<profile>] [--auto-trust]",
   "       testing ci hook remove [--root=<dir>]",
   "       testing ci hook status [--root=<dir>]   is the installed hook what this version writes? (changes nothing)",
   "       testing ci hook status --all --repos-root=<dir>",
+  "       testing ci hook guard [--root=<dir>]   (the hook's own first step: the pushed refs on stdin; refuses a",
+  "                           direct push of main in a land repository, TESTING_DIRECT_PUSH=1 lets it through)",
   "  --run=<profile>     the profile the hook runs when the state is not proven (default: fast)",
   "  --verify=<profile>  the profile whose proof is asked first (default: ci.default)",
   "  --auto-trust        after a green hook release the pushed commits for the runner guard when all of them",
@@ -79,12 +134,13 @@ end
 function M.text(o)
   local verify = o.verify and (" --profile=" .. o.verify) or ""
   -- git gives the hook what it pushes on stdin; read once, before a step can take it. A release never blocks a push.
-  local read_refs = {}
-  if o.auto_trust or o.snapshot then
-    read_refs[1] = 'refs="$(cat)"'
-  end
+  -- the guard first: a direct push of main in a land repository is refused before any step runs
+  local read_refs = {
+    'refs="$(cat)"',
+    'echo "$refs" | testing_ci hook guard || exit 1',
+  }
   if o.auto_trust then
-    read_refs[2] =
+    read_refs[#read_refs + 1] =
       "trust_pushed() { printf '%s\\n' \"$refs\" | testing_ci trust --pushed >&2 || true; }"
   end
   local blocked =
@@ -265,7 +321,7 @@ function M.parse(argv)
     local key, value = a:match("^%-%-([%w%-]+)=(.*)$")
     if a == "-h" or a == "--help" then
       args.help = true
-    elseif i == 1 and (a == "install" or a == "remove" or a == "status") then
+    elseif i == 1 and (a == "install" or a == "remove" or a == "status" or a == "guard") then
       args.action = a
     elseif a == "--auto-trust" then
       args.auto_trust = true
@@ -291,7 +347,7 @@ function M.parse(argv)
     end
   end
   if not args.action and not args.help then
-    return nil, "say install, remove or status"
+    return nil, "say install, remove, status or guard"
   end
   if args.all and args.action == "remove" then
     return nil, "--all goes with install or status"
@@ -541,6 +597,17 @@ function M.main(argv, sv)
     return install_all(args, sv)
   end
   local root = vim.fs.normalize(vim.fn.fnamemodify(args.root, ":p")):gsub("/$", "")
+  if args.action == "guard" then
+    -- what git hands the hook, passed on by it: `echo "$refs" | testing ci hook guard`
+    local code, msg = M.guard(root, io.read("*a") or "", {
+      [M.LAND_PUSH_ENV] = vim.uv.os_getenv(M.LAND_PUSH_ENV),
+      [M.DIRECT_PUSH_ENV] = vim.uv.os_getenv(M.DIRECT_PUSH_ENV),
+    }, show_workflow)
+    if msg then
+      sv.err(msg)
+    end
+    return code
+  end
   local hooks = vim.fn.isdirectory(root) == 1 and M.hooks_dir(root) or nil
   if not hooks then
     sv.err(("testing ci hook: %s is not a git checkout"):format(root))

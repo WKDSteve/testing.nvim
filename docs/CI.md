@@ -768,6 +768,7 @@ testing ci hook install --all --repos-root=<dir> [--run=<profile>] [--verify=<pr
 testing ci hook remove [--root=<dir>]
 testing ci hook status [--root=<dir>]
 testing ci hook status --all --repos-root=<dir>
+testing ci hook guard [--root=<dir>]     # the hook's own first step (the refs of the push on stdin)
 ```
 
 `install --all --repos-root=<dir>` (repeatable) installs the hook in every repository below the root whose `.testing.lua` has a `ci`
@@ -784,6 +785,12 @@ does not hand over is a hook that is not ours and is left alone.
 `install` writes `pre-push` into the hooks folder git uses for the repository (a worktree, `core.hooksPath`), `remove`
 deletes it. The hook computes no verdict of its own:
 
+0. `testing ci hook guard` with the refs of the push on stdin. In a repository that lands through the hosted CI (the
+   workflow at the pushed commit runs on `ci/**`, `ci.workflow.land = true`), a direct push of `main` is refused (exit
+   `1`) with the `testing ci land` line to run instead: such a push would put unchecked commits on `main`, and every
+   later `land` of the repository stays red until they are fixed. `testing ci land` says that its own push of `main`
+   (after green) is one (`TESTING_LAND_PUSH=1`); `TESTING_DIRECT_PUSH=1 git push ...` lets a direct push through on
+   purpose. Other branches, the check branches of `land`, tags and deletions pass.
 1. `testing ci verify [--profile=<verify>]`. A state that is already proven ends the hook with exit `0`, in a tenth of
    a second, without a step.
 2. Otherwise `testing ci --profile=<run> --reuse` (default `fast`). Its exit code is the hook's: a red pipeline blocks
@@ -793,7 +800,10 @@ deletes it. The hook computes no verdict of its own:
 `<repo>/.deps/testing.nvim`, `<repo>/../testing.nvim`, then the checkout `install` ran from. Both profiles must exist
 in the `ci` section, or `install` refuses (exit `2`) and writes nothing.
 
-The hook proves `HEAD`, not the refs a push names (git hands those on stdin; they are ignored, except with `--auto-trust`, which
+A hook written by an earlier version has no guard: `testing ci hook status` names it out of date and the `install` line
+that renews it.
+
+The hook proves `HEAD`, not the refs a push names (git hands those on stdin; the guard reads them, and so does `--auto-trust`, which
 releases own commits for the runner guard after a green hook: [RUNNER-GUARD.md](RUNNER-GUARD.md#releasing-your-own-pushes-pre-push)).
 
 With `--snapshot` it proves what is pushed instead, for a checkout that other sessions share: each commit the push names
