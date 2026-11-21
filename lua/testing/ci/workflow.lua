@@ -13,6 +13,7 @@
 ---       node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
 ---       playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
 ---       luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, pinned
+---       go = { version_file = "go.mod", used_by = "the relay build" },  -- optional: Go on the hosted legs
 ---       artifacts = { { name = "sheet-shots", path = "TESTS/sheets/out/**/*.png", why = "..." } },  -- optional: uploads
 ---       checkouts = {                               -- optional: more checkouts below .deps/ (third-party: pinned)
 ---         { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "the dashboard specs drive the real picker" },
@@ -70,6 +71,7 @@ M.ACTIONS = {
   setup_vim = "febef33995d6649302e9d88dda81e071b68f16a7 # v1",
   stylua = "76fd70c03e6340ceaf673366712db9b20560b402 # v5",
   node = "249970729cb0ef3589644e2896645e5dc5ba9c38 # v6",
+  go = "924ae3a1cded613372ab5595356fb5720e22ba16 # v6",
   upload = "cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7",
   cache = "0057852bfaa89a56745cba8c7296529d2fc39830 # v4",
 }
@@ -161,6 +163,14 @@ local function is_artifact_path(v)
   return true
 end
 
+---The `name:` of a workflow file (`testing ci land --also`, `ci.workflow.land.also`): what `testing ci remote` compares
+---a run's name with, without case.
+---@param v any
+---@return boolean
+function M.is_workflow_name(v)
+  return type(v) == "string" and #v <= 100 and v:match("^[%w][%w ._()-]*$") ~= nil
+end
+
 local KEYS = {
   name = true,
   min_nvim = true,
@@ -169,6 +179,7 @@ local KEYS = {
   node = true,
   playwright = true,
   luals = true,
+  go = true,
   artifacts = true,
   checkouts = true,
   packages = true,
@@ -189,6 +200,7 @@ local KEYS = {
 ---@field node? { version: string, used_by: string }
 ---@field playwright? { version: string, used_by: string } playwright-core and Chromium on the hosted full leg, outside the checkout (`TESTING_PLAYWRIGHT_DIR`, `PLAYWRIGHT_BROWSERS_PATH`): the browser sheets run instead of being a reported skip.
 ---@field luals? { version: string, used_by: string } lua-language-server, the release tarball pinned by its sha256 (`M.SHA256.luals`), on the hosted full leg: a step of the profile (`scripts/luals-check.sh`) can run it there.
+---@field go? { version_file: string, used_by: string, legs: "full"|"hosted" } Go through `actions/setup-go`, its version from a file of the repository (`go.mod`): the hosted macOS image has Go only in its tool cache.
 ---@field artifacts { name: string, path: string, when: "always"|"failure", legs: "full"|"hosted", why: string }[] More files a hosted leg uploads after the pipeline (`<name>-<leg>`, 14 days): the screenshots of the browser sheets.
 ---@field checkouts Testing.Ci.Workflow.Checkout[]
 ---@field packages { name: string, why: string, apt?: string|false, brew?: string|false, choco?: string|false, npm?: string[] }[] Installed on every hosted leg (apt, brew, choco; a name of its own per manager where they differ, false to go without; or npm on every leg), never on a self-hosted one.
@@ -196,7 +208,8 @@ local KEYS = {
 ---@field env table<string, string>
 ---@field publish? { why?: string }
 ---@field land boolean `testing ci land`: a push to `ci/**` runs the hosted legs, and a push to main of a commit that was
----green there only publishes (docs/CI.md, "Land through the hosted CI").
+---green there only publishes (docs/CI.md, "Land through the hosted CI"). `land = { also = { "native" } }` is true too.
+---@field land_also string[] Other workflows (by name) `testing ci land` waits for besides CI; the file is the same.
 ---@field timeout integer
 ---@field layout "public"|"private"|"hosted"
 ---@field name string The repository's name, for the header (never the directory's: a worktree or a clone is named
@@ -344,6 +357,36 @@ function M.validate(raw)
       end
       if fine then
         cfg.luals = { version = l.version, used_by = l.used_by }
+      end
+    end
+  end
+  if raw.go ~= nil then
+    local g = raw.go
+    if
+      type(g) ~= "table"
+      or not is_artifact_path(g.version_file)
+      or g.version_file:find("*", 1, true)
+      or not is_text(g.used_by)
+    then
+      bad(
+        '.go: expected { version_file = "go.mod", used_by = "<what needs it, for a comment>" } (a file of the repository)'
+      )
+    else
+      local fine = true
+      for k in pairs(g) do
+        if k ~= "version_file" and k ~= "used_by" and k ~= "legs" then
+          bad(".go: unknown key %s", tostring(k))
+          fine = false
+        end
+      end
+      if g.legs ~= nil and (type(g.legs) ~= "string" or not M.SETUP_LEGS[g.legs]) then
+        bad(
+          '.go.legs: "hosted" (every hosted leg, default) or "full" (the leg with the whole profile)'
+        )
+        fine = false
+      end
+      if fine then
+        cfg.go = { version_file = g.version_file, used_by = g.used_by, legs = g.legs or "hosted" }
       end
     end
   end
@@ -624,16 +667,48 @@ function M.validate(raw)
     end
   end
   cfg.land = false
-  if raw.land ~= nil then
-    if type(raw.land) ~= "boolean" then
-      bad(".land: true or false")
-    elseif raw.land and (raw.layout or "public") == "private" then
+  cfg.land_also = {}
+  local land = raw.land
+  if type(land) == "table" then
+    -- { also = { "native" } }: land, and `testing ci land` waits for these workflows of the repository too
+    local fine = true
+    for k in pairs(land) do
+      if k ~= "also" then
+        bad(".land: unknown key %s", tostring(k))
+        fine = false
+      end
+    end
+    if not is_list(land.also) or #land.also == 0 or #land.also > 8 then
+      bad(
+        '.land.also: a list of 1 to 8 workflow names ("native"), the `name:` of another workflow file'
+      )
+      fine = false
+    else
+      for i, n in ipairs(land.also) do
+        if not M.is_workflow_name(n) then
+          bad(".land.also[%d]: a workflow name, letters, digits, blanks and ._-()", i)
+          fine = false
+        elseif n:lower() == "ci" then
+          bad(".land.also[%d]: CI is the generated workflow itself, land always waits for it", i)
+          fine = false
+        end
+      end
+    end
+    land = fine and true or nil
+    if fine then
+      cfg.land_also = vim.deepcopy(raw.land.also)
+    end
+  end
+  if land ~= nil then
+    if type(land) ~= "boolean" then
+      bad('.land: true or false, or { also = { "<workflow name>" } }')
+    elseif land and (raw.layout or "public") == "private" then
       -- a private repository pays for hosted minutes: it lands with a local full run (testing ci commit), not here
       bad(
         '.land: not with layout = "private" (hosted minutes are paid there; land a private repository locally)'
       )
     else
-      cfg.land = raw.land
+      cfg.land = land
     end
   end
   if raw.min_nvim ~= nil then
@@ -1252,6 +1327,26 @@ function M.render_cfg(cfg, deps, opts)
     PACKAGE_STEPS = package_steps(cfg.packages),
     SETUP_STEPS = setup_steps(cfg.setup),
     ARTIFACT_STEPS = artifact_steps(cfg.artifacts),
+    -- the version comes from the repository's file (GOTOOLCHAIN=auto on the images would fetch it too, but the hosted
+    -- macOS image has no go on the PATH at all); no cache: a module cache keyed on go.sum is the repository's choice
+    GO_STEP = cfg.go
+        and table.concat({
+          M.wrap(
+            ("%s: Go at the version of %s (on the hosted macOS image Go is only in the tool cache, not on the PATH)."):format(
+              cfg.go.used_by,
+              cfg.go.version_file
+            ),
+            "      # "
+          )
+            .. "      - uses: actions/setup-go@"
+            .. M.ACTIONS.go,
+          "        if: " .. M.SETUP_LEGS[cfg.go.legs],
+          "        with:",
+          "          go-version-file: " .. render.yaml_quote(cfg.go.version_file),
+          "          cache: false",
+          "",
+        }, "\n")
+      or "",
     NODE_STEP = cfg.node
         and ("      - uses: actions/setup-node@%s\n        if: matrix.hosted && matrix.steps == ''\n        with:\n          node-version: %s\n"):format(
           M.ACTIONS.node,

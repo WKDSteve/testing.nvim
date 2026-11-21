@@ -57,7 +57,21 @@ return function(H)
       end
       return 1, "", "unexpected git " .. table.concat(args, " ")
     end
-    land.deps.remote = function(_, sha)
+    -- `o.also` the workflows of ci.workflow.land.also (or `o.also_err`), `o.also_states[name]` their answers
+    w.wf_looks, w.asked_wf = {}, {}
+    land.deps.also = function()
+      if o.also_err then
+        return nil, o.also_err
+      end
+      return o.also or {}
+    end
+    land.deps.remote = function(_, sha, _, wf)
+      if wf then
+        w.asked_wf[#w.asked_wf + 1] = wf
+        w.wf_looks[wf] = (w.wf_looks[wf] or 0) + 1
+        local list = assert(o.also_states and o.also_states[wf], "no states for " .. wf)
+        return list[math.min(w.wf_looks[wf], #list)]
+      end
       w.looks = w.looks + 1
       w.asked = sha
       return o.states[math.min(w.looks, #o.states)]
@@ -247,6 +261,93 @@ return function(H)
   w = scenario({ states = { { overall = "success" } } }, { "--keep" })
   eq(#w.pushes, 2, "keep: no deletion")
   has(w.text, "stays (--keep)", "keep: says so")
+
+  -- ci.workflow.land.also: main moves only when the other workflows of the commit are green too (mdview.nvim's
+  -- native.yml beside the generated ci.yml: a red native run did not hold main)
+  w = scenario({
+    also = { "native" },
+    states = { { overall = "success", run = { url = "https://x/run/ci" } } },
+    also_states = {
+      native = { { overall = "running" }, { overall = "success" } },
+    },
+  })
+  eq(w.code, 0, "also green: landed")
+  eq(w.wf_looks.native, 2, "also green: it waited for the other workflow")
+  has(w.text, "on " .. CHECK .. " (native): running", "also: the other workflow's state, named")
+  has(w.text, "https://x/run/ci", "also green: the run of CI is named")
+  eq(
+    w.pushes[2],
+    "push --quiet origin " .. SHA .. ":refs/heads/main",
+    "also green: main moves (the guard push)"
+  )
+  eq(w.push_env, { "-", "1", "-" }, "also green: only the push of main says it comes from land")
+
+  w = scenario({
+    also = { "native" },
+    states = { { overall = "success" } },
+    also_states = {
+      native = {
+        { overall = "running" },
+        {
+          overall = "failure",
+          os = { macos = { state = "failure", url = "https://x/job/7" } },
+          run = { url = "https://x/run/n" },
+        },
+      },
+    },
+  })
+  eq(w.code, 1, "also red: exit 1 although CI is green")
+  ok(not (w.pushes[2] or ""):find(":refs/heads/main", 1, true), "also red: main does not move")
+  has(w.text, "is red in the workflow native", "also red: names the workflow")
+  has(w.text, "macos    failure  https://x/job/7", "also red: names the red system")
+  eq(
+    w.said[#w.said],
+    "land: red (native: macos failure); origin/main does not move, nothing landed",
+    "also red: the last line names the workflow"
+  )
+
+  -- --also adds one; a workflow named twice is waited for once
+  w = scenario({
+    also = { "native" },
+    states = { { overall = "success" } },
+    also_states = { native = { { overall = "success" } }, release = { { overall = "success" } } },
+  }, { "--also=Native,release" })
+  eq(w.code, 0, "--also: landed")
+  eq(w.asked_wf, { "native", "release" }, "--also: each workflow once, names without case")
+
+  -- the other workflow never runs on ci/**: give up, naming it
+  w = scenario({
+    also = { "native" },
+    states = { { overall = "success" } },
+    also_states = { native = { { overall = "no_run" } } },
+  })
+  eq(w.code, 3, "also no run: exit 3")
+  has(w.text, "no run of the workflow native", "also no run: names it")
+
+  -- an unreadable .testing.lua: nothing is pushed (it must not land without the workflows it names)
+  w = scenario({ also_err = "not trusted", states = { { overall = "success" } } })
+  eq({ w.code, #w.pushes }, { 2, 0 }, "also unreadable: refused before any push")
+  has(w.text, "not trusted", "also unreadable: says why")
+
+  -- the real reader: ci.workflow.land.also of the checkout
+  do
+    local tmp = vim.fs.normalize(vim.fn.tempname()) .. "-land-also"
+    vim.fn.mkdir(tmp, "p")
+    local f = assert(io.open(tmp .. "/.testing.lua", "wb"))
+    f:write("return { ci = { workflow = { name = 'x.nvim', land = { also = { 'native' } } } } }\n")
+    f:close()
+    eq({ saved.also(tmp) }, { { "native" } }, "also: read from ci.workflow.land.also")
+    f = assert(io.open(tmp .. "/.testing.lua", "wb"))
+    f:write("return { ci = { workflow = { name = 'x.nvim', land = true } } }\n")
+    f:close()
+    eq({ saved.also(tmp) }, { {} }, "also: none with land = true")
+    vim.fn.delete(tmp, "rf")
+  end
+  do
+    local no_args, problem = land.parse({ "--also=a;b" })
+    eq(no_args, nil, "args: --also takes workflow names only")
+    has(problem, "--also", "args: ... names the option")
+  end
 
   -- the arguments
   eq(land.parse({}).rev, "HEAD", "args: HEAD by default")

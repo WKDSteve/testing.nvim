@@ -146,6 +146,7 @@ ci = {
     node = { version = "22", used_by = "the Node contract check" },   -- optional: Node on the hosted full legs
     playwright = { version = "1.64.1", used_by = "the browser sheets" },  -- optional: Chromium on the full leg
     luals = { version = "3.18.2", used_by = "scripts/luals-check.sh" },  -- optional: lua-language-server, full leg
+    go = { version_file = "go.mod", used_by = "the relay build" },   -- optional: Go on the hosted legs
     artifacts = { { name = "sheet-shots", path = "TESTS/sheets/out/**/*.png", why = "<what they show>" } },  -- optional
     checkouts = {                                  -- optional: more checkouts below .deps/, not on the specs' rtp
       { repo = "folke/snacks.nvim", ref = "<40 hex>", why = "<one line: why the specs need it>" },
@@ -155,7 +156,8 @@ ci = {
     packages = { { name = "ripgrep", why = "<one line: what the runs need it for>" } },   -- optional: programs of the hosted legs
     setup = { { run = { "bash", "scripts/ci-setup.sh" }, why = "<what it prepares>" } },   -- optional: before the pipeline
     publish = { why = "<who checks out ci-verified>" },   -- optional (or `true`): the job that moves `ci-verified`
-    land = true,                                   -- optional: `testing ci land` (layouts public and hosted)
+    land = true,                                   -- optional: `testing ci land` (layouts public and hosted);
+                                                   -- { also = { "native" } }: land waits for that workflow too
     min_nvim = { version = "0.11.4", why = "<what promises it>" },   -- optional (hosted): a leg on the minimum
     timeout = 30,                                  -- optional: minutes of a leg
   },
@@ -193,6 +195,11 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   without a pinned sum is refused (a bump adds the sum there first); apt has no package, brew and choco only unpinned
   ones, and windows and macOS run only the `platform` steps. A step that needs it gives `skip_exit` for a machine
   without the tool (the self-hosted runner, a local run). Without the key nothing of it is in the workflow.
+- **Go.** `go = { version_file = "go.mod", used_by, legs }` runs `actions/setup-go` (pinned) with the version of that
+  file of the repository, on every hosted leg (`legs = "hosted"`, default) or only the full one (`"full"`); the hosted
+  macOS image has Go only in its tool cache, not on the PATH, so a step that builds Go there needs it. No module cache.
+  `version_file` is a path relative to the checkout (no `..`, no glob). Without the key nothing of it is in the
+  workflow.
 - **Artifacts.** Every leg uploads its report and suite IR when it is red (`ci-<leg>`). `artifacts` names more files a
   hosted leg uploads after the pipeline, e.g. the screenshots of the browser sheets: `{ name = "sheet-shots", path =
   "TESTS/sheets/out/**/*.png", why = <one line>, when = "always" | "failure", legs = "full" | "hosted" }`. `when`
@@ -234,7 +241,14 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   `ci/**`, always on hosted runners (in `public` only a push to main reaches the self-hosted runner), and a first job
   `already-verified` looks for a green run of the same commit on such a branch. When `testing ci land` then moves main
   to that commit, the legs are skipped and only `publish-ci-verified` runs (when there is one): the commit is not tested twice. Without the
-  key the file is byte for byte what it was. See docs/CI.md, "Land through the hosted CI".
+  key the file is byte for byte what it was. See docs/CI.md, "Land through the hosted CI". `land = { also = { "native"
+  } }` is the same file, and `testing ci land` also waits for the named workflows of the repository (by their `name:`).
+- **Beside the generated workflow** (a release on a tag, jobs of other languages): a hand-written file of its own, e.g.
+  `.github/workflows/native.yml` with `name: native`, `on: push: branches: [main, "ci/**"]` and `tags: ["v*"]`, its
+  actions pinned by commit, `permissions: contents: read` (a release job widens it for itself). The generated `ci.yml`
+  stays without tags; with `land = { also = { "native" } }` a red native run holds main as a red CI run does. Rust needs
+  no key: rustup is on every hosted image and reads `rust-toolchain.toml` itself, a target is a `setup` step
+  (`{ run = { "rustup", "target", "add", "wasm32-unknown-unknown" }, why = ... }`).
 - **`min_nvim`** (layout `hosted`): one more hosted ubuntu leg, `ubuntu-min`, runs only the suite on the promised
   minimum Neovim (`version` without a "v"). The setup step and the cache keys then take the version of the leg
   (`matrix.nvim`), and a comment above the matrix names it (`nvim: v0.11.4`, which a spec of the repository can look

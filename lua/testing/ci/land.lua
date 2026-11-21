@@ -14,7 +14,8 @@
 --- 1. `<remote>/<branch>` (fetched) must be an ancestor of the commit: one that moved meanwhile (another session landed)
 ---    is not merged here, the commit is rebased and landed again (a new run: the rebased state is unchecked).
 --- 2. The workflow file of the commit must run on `ci/**` (else: set `land = true`, regenerate).
---- 3. Push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit. Every system green:
+--- 3. Push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit (and of every
+---    workflow of `ci.workflow.land.also` / `--also`: a red one holds `<branch>` as well). Every system green:
 ---    fetch again, push `<sha>:<branch>` (no force: a branch that moved meanwhile refuses it). Red: `<branch>` stays, the
 ---    report names the systems. The check branch is deleted either way (`--keep` leaves it).
 ---
@@ -34,12 +35,14 @@ M.TIMEOUT_MIN = 90
 M.NO_RUN_S = 300
 
 M.USAGE = table.concat({
-  "usage: testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep]",
+  "usage: testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep] [--also=<name>]",
   "  <rev>             the commit to land (default HEAD); <remote>/<branch> must be its ancestor",
   "  --branch=<name>   the branch that moves to it when the hosted CI is green (default main)",
   "  --remote=<name>   default origin",
   "  --timeout=<min>   how long to wait for the run (default 90)",
   "  --keep            leave the check branch ci/<repo>-<sha> on the remote",
+  "  --also=<name>     wait for this workflow too (its name; repeatable, comma-separated), besides",
+  "                    ci.workflow.land = { also = { ... } } of .testing.lua",
   "needs ci.workflow.land = true in .testing.lua and the regenerated workflow (docs/WORKFLOW-CI.md)",
   "exit: 0 landed, 1 red or the branch moved, 2 usage, 3 git/GitHub/timeout",
 }, "\n")
@@ -72,13 +75,34 @@ M.deps = {
   ---@param dir string
   ---@param sha string
   ---@param state_dir string
+  ---@param workflow? string Another workflow's name (`ci.workflow.land.also`); nil: the CI workflow.
   ---@return table rec
-  remote = function(dir, sha, state_dir)
+  remote = function(dir, sha, state_dir, workflow)
     local recs = require("testing.ci.remote").collect(
       { { dir = dir, from_root = false } },
-      { state_dir = state_dir, sha = sha }
+      { state_dir = state_dir, sha = sha, workflow = workflow }
     )
     return recs[1] or { overall = "unknown", note = "no record" }
+  end,
+  ---The other workflows a land waits for: `ci.workflow.land.also` of the checkout's `.testing.lua`.
+  ---@param dir string
+  ---@return string[]|nil names
+  ---@return string|nil problem
+  also = function(dir)
+    local loaded = require("testing.config.project").load(dir)
+    if loaded.error then
+      return nil, loaded.error
+    end
+    local ci = loaded.config.ci
+    local wf = type(ci) == "table" and ci.workflow or nil
+    if wf == nil then
+      return {}
+    end
+    local cfg, problems = require("testing.ci.workflow").validate(wf)
+    if not cfg then
+      return nil, table.concat(problems, "; ")
+    end
+    return cfg.land_also
   end,
   ---@param s integer
   sleep = function(s)
@@ -97,10 +121,12 @@ M.deps = {
 ---@field remote string
 ---@field timeout integer Minutes.
 ---@field keep boolean
+---@field also string[] More workflows (`--also=<name>`) besides `ci.workflow.land.also`.
 ---@field state_dir? string
 ---@field help boolean
 
-local VALUED = { root = true, branch = true, remote = true, timeout = true, ["state-dir"] = true }
+local VALUED =
+  { root = true, branch = true, remote = true, timeout = true, also = true, ["state-dir"] = true }
 
 ---@param argv string[] The arguments after `land`.
 ---@return Testing.Ci.Land.Args|nil args
@@ -114,6 +140,7 @@ function M.parse(argv)
     remote = "origin",
     timeout = M.TIMEOUT_MIN,
     keep = false,
+    also = {},
     help = false,
   }
   local revs = {}
@@ -142,6 +169,13 @@ function M.parse(argv)
         args.timeout = n
       elseif key == "state-dir" then
         args.state_dir = value
+      elseif key == "also" then
+        for name in value:gmatch("[^,]+") do
+          if not require("testing.ci.workflow").is_workflow_name(name) then
+            return nil, ("--also: %s is no workflow name"):format(name)
+          end
+          args.also[#args.also + 1] = name
+        end
       else
         args[key] = value
       end
@@ -246,6 +280,23 @@ function M.run(args, say, state_dir)
     return M.EXIT_USAGE
   end
 
+  -- the other workflows main waits for (ci.workflow.land.also, --also): read before anything is pushed, and an
+  -- unreadable .testing.lua stops here, it must not land without the workflows it names
+  local also, why_not = d.also(root)
+  if not also then
+    say(("land: cannot read ci.workflow.land of %s: %s"):format(root, tostring(why_not)))
+    return M.EXIT_USAGE
+  end
+  ---@type (string|false)[] false: the CI workflow (the default of `testing ci remote`)
+  local workflows = { false }
+  local seen = {}
+  for _, name in ipairs(vim.list_extend(vim.deepcopy(also), args.also)) do
+    if not seen[name:lower()] then
+      seen[name:lower()] = true
+      workflows[#workflows + 1] = name
+    end
+  end
+
   -- the repository's name, also from a linked worktree of it (`testing.metrics.repo_name`), not the folder's
   local repo = require("testing.metrics").repo_name(root):gsub("[^%w._-]", "-")
   local check = ("ci/%s-%s"):format(repo, sha:sub(1, 12))
@@ -270,18 +321,19 @@ function M.run(args, say, state_dir)
 
   local pushed_at = d.now()
   local deadline = pushed_at + args.timeout * 60
-  local last
-  local rec
-  while true do
-    rec = d.remote(root, sha, state_dir)
+  ---One look at the run of `wf` (false: the CI workflow) for the commit: its state and record.
+  ---@param wf string|false
+  ---@return string state
+  ---@return table rec
+  local function look(wf)
+    local rec = d.remote(root, sha, state_dir, wf or nil)
     local state = rec.overall or "unknown"
     -- a run of the same commit from before this push (an earlier land that was red) is no answer for this one: until
     -- the new run exists, the newest run of the commit is that old one (a minute of slack for the two clocks)
     local created = type(rec.run) == "table"
       and require("testing.ci.remote").epoch(rec.run.created_at)
     if created and created < pushed_at - 60 then
-      state = "no_run"
-      rec = { overall = "no_run", note = "only an older run of this commit so far" }
+      return "no_run", { overall = "no_run", note = "only an older run of this commit so far" }
     end
     -- every job created so far is green, but the run is not completed: a job that GitHub creates later (`needs:`) or
     -- the run's own conclusion could still be red, so this is no verdict yet
@@ -291,42 +343,68 @@ function M.run(args, say, state_dir)
       and rec.run.status
       and rec.run.status ~= "completed"
     then
-      state = "running"
-      rec = vim.tbl_extend(
-        "force",
-        rec,
-        { overall = "running", note = "jobs green, the run is not completed yet" }
-      )
-    end
-    if state ~= last then
-      say(
-        ("land: %s on %s: %s%s"):format(
-          short,
-          check,
-          state,
-          rec.note and ("  (" .. rec.note .. ")") or ""
+      return "running",
+        vim.tbl_extend(
+          "force",
+          rec,
+          { overall = "running", note = "jobs green, the run is not completed yet" }
         )
-      )
-      last = state
     end
-    if GREEN[state] or RED[state] then
+    return state, rec
+  end
+  ---`ci/x` for the CI workflow (as before), `ci/x (native)` for another one.
+  local function where_of(wf)
+    return wf and ("%s (%s)"):format(check, wf) or check
+  end
+  local last, recs = {}, {}
+  local red_wf
+  while true do
+    local all_green = true
+    for i, wf in ipairs(workflows) do
+      local state, rec = look(wf)
+      recs[i] = rec
+      if state ~= last[i] then
+        say(
+          ("land: %s on %s: %s%s"):format(
+            short,
+            where_of(wf),
+            state,
+            rec.note and ("  (" .. rec.note .. ")") or ""
+          )
+        )
+        last[i] = state
+      end
+      if RED[state] then
+        red_wf = i
+        break
+      end
+      if not GREEN[state] then
+        all_green = false
+      end
+      if state == "no_run" and d.now() - pushed_at >= M.NO_RUN_S then
+        say(
+          ("land: no run of %s for %s after %d s: does the pushed workflow run on ci/**?"):format(
+            wf and ("the workflow " .. wf) or "the CI workflow",
+            short,
+            M.NO_RUN_S
+          )
+        )
+        drop_check()
+        return M.EXIT_INFRA
+      end
+    end
+    if red_wf or all_green then
       break
     end
-    if state == "no_run" and d.now() - pushed_at >= M.NO_RUN_S then
-      say(
-        ("land: no run of the CI workflow for %s after %d s: does the pushed workflow run on ci/**?"):format(
-          short,
-          M.NO_RUN_S
-        )
-      )
-      drop_check()
-      return M.EXIT_INFRA
-    end
     if d.now() >= deadline then
+      local states = {}
+      for i, wf in ipairs(workflows) do
+        states[i] = wf and (wf .. " " .. tostring(last[i])) or tostring(last[i])
+      end
       say(
         ("land: no verdict within %d min (last: %s); %s does not move"):format(
           args.timeout,
-          state,
+          table.concat(states, ", "),
           upstream
         )
       )
@@ -336,14 +414,24 @@ function M.run(args, say, state_dir)
     d.sleep(M.POLL_S)
   end
 
+  local rec = recs[1]
   local url = type(rec.run) == "table" and rec.run.url or nil
-  if RED[rec.overall] then
-    say(("land: %s is red on the hosted CI; %s does not move"):format(short, upstream))
+  if red_wf then
+    local wf = workflows[red_wf]
+    rec = recs[red_wf]
+    local red_url = type(rec.run) == "table" and rec.run.url or nil
+    say(
+      ("land: %s is red %s; %s does not move"):format(
+        short,
+        wf and ("in the workflow " .. wf) or "on the hosted CI",
+        upstream
+      )
+    )
     for _, line in ipairs(cells(rec)) do
       say(line)
     end
-    if url then
-      say("  run: " .. url)
+    if red_url then
+      say("  run: " .. red_url)
     end
     -- the verdict once more as the last line: a red system ends the wait while others still run, and a reader of
     -- the tail (`windows running`, `run: ...`) took that for land giving up (m1-review, 2026-11-13)
@@ -355,7 +443,8 @@ function M.run(args, say, state_dir)
     end
     table.sort(red)
     say(
-      ("land: red (%s); %s does not move, nothing landed"):format(
+      ("land: red (%s%s); %s does not move, nothing landed"):format(
+        wf and (wf .. ": ") or "",
         #red > 0 and table.concat(red, ", ") or tostring(rec.overall),
         upstream
       )

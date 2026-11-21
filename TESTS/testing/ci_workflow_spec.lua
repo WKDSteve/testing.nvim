@@ -358,6 +358,47 @@ return function(H)
     )
     refused({ name = "x", land = "yes" }, ".land: true or false", "land: a boolean")
     eq(workflow.validate({ name = "x" }).land, false, "land: off by default")
+
+    -- land = { also = { ... } }: land waits for other workflows too; the generated file is that of land = true
+    local also = workflow.validate({ name = "x", land = { also = { "native", "Release (tags)" } } })
+    eq(
+      { also.land, also.land_also },
+      { true, { "native", "Release (tags)" } },
+      "land also: land, and the names"
+    )
+    eq(workflow.validate({ name = "x", land = true }).land_also, {}, "land also: none with true")
+    refused({ name = "x", land = { also = {} } }, ".land.also", "land also: at least one")
+    refused({ name = "x", land = { also = "native" } }, ".land.also", "land also: a list")
+    refused({ name = "x", land = { also = { "a;b" } } }, ".land.also[1]", "land also: a name")
+    refused({ name = "x", land = { also = { "CI" } } }, "CI is the generated", "land also: not CI")
+    refused(
+      { name = "x", land = { also = { "n" }, x = 1 } },
+      "unknown key x",
+      "land also: no other key"
+    )
+    refused(
+      { name = "x", layout = "private", land = { also = { "n" } } },
+      "not with layout",
+      "land also: not private"
+    )
+    local with_also = workflow.render(
+      project(
+        "land-also",
+        "{ 'suite' }",
+        [[{ name = "a.nvim", layout = "hosted", platform = { "suite" }, land = { also = { "native" } } }]]
+      )
+    )
+    local plain_land = workflow.render(
+      project(
+        "land-true",
+        "{ 'suite' }",
+        [[{ name = "a.nvim", layout = "hosted", platform = { "suite" }, land = true }]]
+      )
+    )
+    ok(
+      with_also ~= nil and with_also == plain_land,
+      "land also: the workflow is byte for byte that of land = true"
+    )
   end
 
   -- every value is checked before it reaches the template
@@ -1020,6 +1061,70 @@ return function(H)
     ok(not plain:find("lua-language-server", 1, true), "luals: without the key nothing of it")
     -- the only difference the key makes is the step (the goldens above stay byte for byte without it)
     eq((text:gsub(vim.pesc(step), "", 1)), plain, "luals: the step is the only difference")
+  end
+
+  -- go: Go through actions/setup-go at the version of go.mod, on the hosted legs (macOS has it only in its tool cache)
+  do
+    local function refused(wf, needle, msg)
+      local cfg, problems = workflow.validate(wf)
+      eq(cfg, nil, msg .. ": refused")
+      has(table.concat(problems, "\n"), needle, msg)
+    end
+    local function with(g)
+      return { name = "x", go = g }
+    end
+    refused(with("1.23"), ".go: expected", "go: a table")
+    for _, bad in ipairs({ "../go.mod", "/go.mod", "*.mod", "${{ x }}", "go mod" }) do
+      refused(with({ version_file = bad, used_by = "a" }), ".go: expected", "go: file " .. bad)
+    end
+    refused(with({ version_file = "go.mod" }), ".go: expected", "go: who needs it")
+    refused(
+      with({ version_file = "go.mod", used_by = "a", version = "1.23" }),
+      "unknown key version",
+      "go: no version of its own (the file decides)"
+    )
+    refused(
+      with({ version_file = "go.mod", used_by = "a", legs = "macos" }),
+      ".go.legs",
+      "go: full or hosted"
+    )
+    local text, problems = workflow.render(
+      project(
+        "go",
+        "{ 'suite' }",
+        [[{ name = "go.nvim", layout = "hosted", platform = { "suite" },
+            go = { version_file = "relay/go.mod", used_by = "the relay build" } }]]
+      )
+    )
+    eq(problems, {}, "go: no problem")
+    local step = table.concat({
+      "      # the relay build: Go at the version of relay/go.mod (on the hosted macOS image Go is only in the tool cache, not",
+      "      # on the PATH).",
+      "      - uses: actions/setup-go@" .. workflow.ACTIONS.go,
+      "        if: matrix.hosted",
+      "        with:",
+      '          go-version-file: "relay/go.mod"',
+      "          cache: false",
+      "",
+    }, "\n")
+    has(text, step, "go: one setup step on every hosted leg, the version from the file")
+    ok(
+      text:find(step, 1, true) < text:find("matrix.steps }}", 1, true),
+      "go: before the pipeline step"
+    )
+    local plain = workflow.render(
+      project(
+        "nogo",
+        "{ 'suite' }",
+        [[{ name = "go.nvim", layout = "hosted", platform = { "suite" } }]]
+      )
+    )
+    eq((text:gsub(vim.pesc(step), "", 1)), plain, "go: the step is the only difference")
+    eq(
+      workflow.validate(with({ version_file = "go.mod", used_by = "a", legs = "full" })).go.legs,
+      "full",
+      "go: the full leg only, when asked"
+    )
   end
 
   -- artifacts: more files a hosted leg uploads (the screenshots of the browser sheets); golden; nothing without them ---

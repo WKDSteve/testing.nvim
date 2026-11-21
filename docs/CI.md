@@ -559,7 +559,7 @@ stylua, luacheck or node): `testing ci --on=darwin-like --step=suite,conformance
 ## Land through the hosted CI: `testing ci land`
 
 ```
-testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep]
+testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep] [--also=<name>]
 ```
 
 For a public repository the hosted runners are free and check all three systems; the machine then need not run the
@@ -576,6 +576,13 @@ created later or the run's own conclusion could still be red).
 - The workflow of the commit must run on `ci/**`: `ci.workflow.land = true` in `.testing.lua`, regenerated with
   `testing init --workflow=public --force` (docs/WORKFLOW-CI.md). On main its job `already-verified` sees the green run
   of the same commit and skips the legs; only `publish-ci-verified` runs, when the workflow has one.
+- More workflows of the repository (a hand-written `native.yml` beside the generated `ci.yml`): with
+  `ci.workflow.land = { also = { "native" } }` in `.testing.lua` (the workflows' `name:`, compared without case) or
+  `--also=<name>` (repeatable, comma-separated), `<branch>` moves only when the run of each of them for the commit is
+  green too; a red one ends the wait (`is red in the workflow native`, last line `land: red (native: macos failure)
+  ...`). Each must run on `ci/**` as well (`on: push: branches: [main, "ci/**"]`), else land gives up after 5 minutes
+  naming it. `.testing.lua` is read from the checkout before anything is pushed; when it cannot be read, nothing is
+  pushed (exit 2). The generated `ci.yml` is the same as with `land = true`.
 - The check branch is deleted afterwards, green or red (`--keep` leaves it).
 - It waits up to 90 minutes, a look every 30 s; a run that does not appear within 5 minutes means the pushed workflow
   does not run on `ci/**` (exit 3). Run it in the background: the machine stays free.
