@@ -152,6 +152,21 @@ return function(H)
     ok(not dead_ok, "afterwards the child is dead")
     has(dead_err, "killed after a call timed out", "and says why")
     has(dead_err, "while true do end", "and which call it was, not the one that found it dead")
+    ok(
+      not herr:find("waiting on", 1, true),
+      "a call that only computes names no program it waits on"
+    )
+
+    -- a call that waits on a program it started (a slow `git` under load) names it: without the name a slow program
+    -- reads as a hang of the child (2026-11-21, `git diff --quiet` in a sheet of tasks.nvim)
+    local slow = S.spawn({ call_timeout_ms = 1500 })
+    local sok, serr = pcall(
+      slow.lua,
+      "vim.system({ vim.v.progpath, '--headless', '-u', 'NONE', '-i', 'NONE', '-n', '--cmd', 'sleep 30 | qa!' }):wait()"
+    )
+    ok(not sok, "a call waiting on a slow program times out")
+    has(serr, "timed out after 1500 ms", "the timeout is named")
+    has(serr, "it was waiting on nvim", "with the program the child was waiting on")
 
     -- opt out: the child is left alone (and killed by the test)
     local keep = S.spawn({ call_timeout_ms = 300, kill_on_timeout = false })

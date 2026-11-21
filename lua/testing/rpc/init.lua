@@ -311,6 +311,42 @@ local function kill_process(S, reason)
   end
 end
 
+---Names of the processes below `pid` (children, grandchildren, ...), each name once, in the order found: what a
+---child that timed out was waiting on (`git.exe`), read in the driver from the system's process list, not from the
+---busy child. A call that only computes leaves it empty. Never raises.
+---@param pid integer
+---@return string[]
+function M.descendant_names(pid)
+  local names, seen, visited = {}, {}, {}
+  local function walk(p, depth)
+    if depth > 4 or visited[p] then
+      return
+    end
+    visited[p] = true
+    local ok, kids = pcall(vim.api.nvim_get_proc_children, p)
+    if not ok or type(kids) ~= "table" then
+      return
+    end
+    for _, k in ipairs(kids) do
+      local got, info = pcall(vim.api.nvim_get_proc, k)
+      local name = got and type(info) == "table" and info.name or nil
+      -- the console host Windows attaches to a console program is not what the child waits on
+      if
+        type(name) == "string"
+        and name ~= ""
+        and name:lower() ~= "conhost.exe"
+        and not seen[name]
+      then
+        seen[name] = true
+        names[#names + 1] = name
+      end
+      walk(k, depth + 1)
+    end
+  end
+  walk(pid, 1)
+  return names
+end
+
 ---@param S Testing.Rpc.State
 local function remove_sandbox(S)
   if S.plan and S.plan.sandbox then
@@ -420,6 +456,9 @@ local function call(S, method, args, timeout_ms)
   end
   -- timed out
   S.trace:finish(tc, "timeout")
+  -- read before the kill: a step that starts many programs (git) is slow under load, not hung, and the message has to
+  -- say so; without it a slow `git diff` read as a hang of git inside the child (2026-11-21, tasks.nvim)
+  local waiting = M.descendant_names(proc.pid)
   local killed = S.opts.kill_on_timeout ~= false
   if killed then
     -- every Lua call is `nvim_exec_lua`: its code is what tells them apart
@@ -434,6 +473,12 @@ local function call(S, method, args, timeout_ms)
     proc.pid,
     killed and "was killed" or "is still running"
   )
+  if #waiting > 0 then
+    msg = msg
+      .. ("; it was waiting on %s: a program it starts was slow or hung, a `lua` step of a sheet that starts many takes `timeout`"):format(
+        table.concat(waiting, ", ")
+      )
+  end
   if path then
     msg = msg .. "\ntrace: " .. path
   end

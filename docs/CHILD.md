@@ -297,7 +297,10 @@ value snapshots (`a.snapshot`) yet.
   0, `:qa`, `close_stdin`) or `killed`. Every later call raises `child died: ...` too.
 * A call that does not answer within `call_timeout_ms`: with `kill_on_timeout` (default) the whole tree
   is killed and the call raises `RPC call nvim_exec_lua timed out after 500 ms (child pid 4711 was
-  killed)`. After a timeout the child's state is unknowable and every later call would queue behind the
+  killed)`. When the child was waiting on programs it started, the message names them, read from the system's
+  process list before the kill (`; it was waiting on git.exe: a program it starts was slow or hung ...`): under load
+  each `git` call can take seconds, and a call that starts many of them needs a longer limit, not a fix of the child.
+  After a timeout the child's state is unknowable and every later call would queue behind the
   stuck one, so it does not stay around. `kill_on_timeout = false` leaves it (and `kill()` is yours).
 * An embedded nvim forwards **no stderr** (measured on Windows and Linux): the driver reads what is
   there anyway (its pipe), the reason of a failed start (`rpc_init` writes it to a file) and the tail
