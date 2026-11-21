@@ -1,4 +1,4 @@
--- @cache-env TESTING_CONTAINER_ENGINE TESTING_CONTAINER_IMAGE
+-- @cache-env TESTING_CONTAINER_ENGINE TESTING_CONTAINER_IMAGE TESTING_OUTER_*
 ---@module 'testing.container'
 ---@brief Linux checks in a container: a one-shot `podman run` of a command, the repositories mounted read-only.
 ---@description
@@ -50,6 +50,32 @@ local function image(opts)
   return opts.image or vim.uv.os_getenv("TESTING_CONTAINER_IMAGE") or M.default_image
 end
 
+---The environment the engine runs with: inside a child of the runner the sandbox variables (`XDG_DATA_HOME`,
+---`XDG_RUNTIME_DIR`, `TMPDIR`, ...) get the values they had outside back (`TESTING_OUTER_*`, testing.child.env); an
+---empty one stays empty, which the engine reads as unset. Rootless podman keeps its images below `XDG_DATA_HOME` and its
+---runtime below `XDG_RUNTIME_DIR`: with the sandbox's, the image built before the suite is not there and the engine has
+---no runtime. nil outside a child (nothing to give back): the engine inherits the environment as it is. Every name is
+---read literally (the cache key sees each one; a read of the whole environment would leave this module without a key).
+---@param getenv? fun(name: string): string? Default `os.getenv`.
+---@return table<string, string>? env Merged into the engine's environment.
+function M.engine_env(getenv)
+  getenv = getenv or os.getenv
+  local outer = {
+    XDG_CONFIG_HOME = getenv("TESTING_OUTER_XDG_CONFIG_HOME"),
+    XDG_DATA_HOME = getenv("TESTING_OUTER_XDG_DATA_HOME"),
+    XDG_STATE_HOME = getenv("TESTING_OUTER_XDG_STATE_HOME"),
+    XDG_CACHE_HOME = getenv("TESTING_OUTER_XDG_CACHE_HOME"),
+    XDG_RUNTIME_DIR = getenv("TESTING_OUTER_XDG_RUNTIME_DIR"),
+    TEMP = getenv("TESTING_OUTER_TEMP"),
+    TMP = getenv("TESTING_OUTER_TMP"),
+    TMPDIR = getenv("TESTING_OUTER_TMPDIR"),
+  }
+  if next(outer) == nil then
+    return nil
+  end
+  return outer
+end
+
 ---@param opts Testing.Container.Opts
 ---@return fun(argv: string[]): Testing.Container.Result
 local function runner(opts)
@@ -57,7 +83,8 @@ local function runner(opts)
     return opts.run
   end
   return function(argv)
-    local ok, proc = pcall(vim.system, argv, { text = true })
+    local env = M.engine_env()
+    local ok, proc = pcall(vim.system, argv, { text = true, env = env })
     if not ok then
       return { code = 127, stdout = "", stderr = tostring(proc) }
     end
@@ -88,7 +115,14 @@ function M.available(opts)
         image(opts)
       )
   end
-  return false, engine(opts) .. " is not usable (is its machine running?)"
+  -- the engine's own words: "is its machine running?" alone hid a Linux engine that ran with the wrong environment
+  local said = vim.trim(res.stderr or ""):match("^[^\n]*") or ""
+  return false,
+    ("%s is not usable (is its machine running?): exit %d%s"):format(
+      engine(opts),
+      res.code,
+      said ~= "" and (", " .. said:sub(1, 200)) or ""
+    )
 end
 
 ---The argument vector of a one-shot run.

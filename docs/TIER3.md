@@ -58,7 +58,10 @@ user `tester`. Build it once with `podman build -t localhost/testing-linux:1 con
 | `container.argv(command, opts)` | the argument vector of that run (for specs with a fake runner) |
 
 Engine `$TESTING_CONTAINER_ENGINE` (default `podman`), image `$TESTING_CONTAINER_IMAGE`. A spec that needs it prints
-`n/a  <reason>` and returns when it is unavailable. The container shares the kernel of the podman machine (WSL2 on
+`n/a  <reason>` and returns when it is unavailable (an engine that fails names its exit code and first line). Inside
+a spec's child the engine runs with the environment outside the sandbox (`TESTING_OUTER_*`, `container.engine_env()`):
+rootless podman finds its images below the real `XDG_DATA_HOME` and its runtime below the real `XDG_RUNTIME_DIR`. The
+container shares the kernel of the podman machine (WSL2 on
 Windows): `is_wsl()` of lib.nvim reads "microsoft" from the kernel release, so container scripts stub the detection
 to `false` (the userland is plain Linux). Users: filetree.nvim (`trash_linux_container_spec`: `gio trash`, then
 `trash-put`), lib.nvim (`cross_open_default_container_spec`: `xdg-open` gets the target as one untouched argument).

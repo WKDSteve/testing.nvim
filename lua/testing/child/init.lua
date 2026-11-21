@@ -215,6 +215,19 @@ function M.environment(spec)
     end
     env[key] = native(value)
   end
+  -- what the sandbox variables were outside, for a tool whose own state lives there (testing.container); not with
+  -- `isolate_home`, where no variable may name the real home again
+  if spec.isolate_home ~= true then
+    for key, value in pairs(env_mod.outer_vars(parent, sandbox_vars)) do
+      env[key] = value
+    end
+  else
+    for existing in pairs(env) do
+      if existing:upper():sub(1, #env_mod.OUTER_PREFIX) == env_mod.OUTER_PREFIX then
+        env[existing] = nil
+      end
+    end
+  end
 
   for key, value in pairs(spec.extra_env or {}) do
     env[key] = native(value)

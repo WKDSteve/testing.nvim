@@ -97,6 +97,51 @@ return function(H)
   ok(not down and why:find("machine", 1, true) ~= nil, "any other failure = engine not usable")
   local none, absent = container.available({ run = fake(127) })
   ok(not none and absent:find("not installed", 1, true) ~= nil, "exit 127 = engine not installed")
+  local _, told = container.available({ run = fake(125, "Error: cannot set up namespace\nmore") })
+  ok(
+    told:find("exit 125, Error: cannot set up namespace", 1, true) ~= nil
+      and not told:find("more", 1, true),
+    "the reason names the exit code and the engine's first line: " .. told
+  )
+
+  -- the engine runs with the environment outside the runner's sandbox (filetree.nvim's Linux trash spec was n/a on the
+  -- hosted ubuntu leg: rootless podman looked for the image below the sandbox's XDG_DATA_HOME)
+  local function env_of(t)
+    return function(var)
+      return t[var]
+    end
+  end
+  eq(
+    container.engine_env(env_of({ PATH = "/bin", XDG_DATA_HOME = "/box/data" })),
+    nil,
+    "outside a child: nil, inherited"
+  )
+  eq(
+    container.engine_env(env_of({
+      PATH = "/bin",
+      XDG_DATA_HOME = "/box/data",
+      XDG_RUNTIME_DIR = "/box/run",
+      TMPDIR = "/box/tmp",
+      TESTING_OUTER_XDG_DATA_HOME = "/home/u/.local/share",
+      TESTING_OUTER_XDG_RUNTIME_DIR = "/run/user/1001",
+      TESTING_OUTER_TMPDIR = "",
+    })),
+    { XDG_DATA_HOME = "/home/u/.local/share", XDG_RUNTIME_DIR = "/run/user/1001", TMPDIR = "" },
+    "in a child: the outer values come back, an empty one stays empty (read as unset)"
+  )
+  -- every variable the sandbox redirects is one the engine gets back
+  local asked = {}
+  container.engine_env(function(var)
+    asked[#asked + 1] = var
+  end)
+  local _, sandbox_vars = require("testing.child.env").sandbox_env("/box")
+  local expected = {}
+  for var in pairs(sandbox_vars) do
+    expected[#expected + 1] = "TESTING_OUTER_" .. var
+  end
+  table.sort(asked)
+  table.sort(expected)
+  eq(asked, expected, "engine_env reads TESTING_OUTER_ of every sandbox variable")
 
   -- 2. a real container, where the image exists ---------------------------------------------------------------------
   local real_ok, real_reason = container.available({})

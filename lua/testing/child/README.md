@@ -91,7 +91,9 @@ Every child gets one directory below the parent's temp directory (`testing-child
 afterwards) with `config`, `data`, `state`, `cache`, `run` and `tmp`, and `XDG_CONFIG_HOME`,
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TEMP`, `TMP`, `TMPDIR` point
 into it. `stdpath('data'|'state'|'cache'|'config')` and `tempname()` of a spec therefore never touch
-the real ones. **Not redirected:** `HOME` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` (git needs the
+the real ones. What each of them was outside stays in `TESTING_OUTER_<NAME>` (empty: unset; a child of
+a child keeps the outermost value); `testing.container` gives those back to the container engine, whose
+images and runtime live there (rootless podman). **Not redirected:** `HOME` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` (git needs the
 user's identity); a spec that writes there writes there.
 
 ## Results: `result.ndjson`

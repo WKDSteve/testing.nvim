@@ -110,7 +110,7 @@ M.ALLOW = {
 
 ---Prefixes allowed as a whole (`LC_*`).
 ---@type string[]
-M.ALLOW_PREFIX = { "LC_" }
+M.ALLOW_PREFIX = { "LC_", "TESTING_OUTER_" }
 
 ---The `NVIM*` variables a child on the user's own config (`pass_env`) still does not get from the caller: they point
 ---at the calling editor (`NVIM`, `NVIM_LISTEN_ADDRESS`) or the harness sets them (`NVIM_APPNAME`, `NVIM_LOG_FILE`).
@@ -231,6 +231,29 @@ function M.apply_determinism(env)
     env[name] = value
   end
   return env
+end
+
+---Prefix of the variables that keep the parent's value of each sandbox variable (`TESTING_OUTER_XDG_DATA_HOME`; empty:
+---the parent had none). A tool with state of its own outside the sandbox gets them back (`testing.container`: rootless
+---podman keeps its images below `XDG_DATA_HOME` and its runtime below `XDG_RUNTIME_DIR`).
+M.OUTER_PREFIX = "TESTING_OUTER_"
+
+---The `TESTING_OUTER_*` variables for `sandbox_vars`: the parent's own `TESTING_OUTER_<NAME>` when it has one (a child
+---of a child keeps the outermost value), else the parent's `<NAME>` in any case, else "".
+---@param parent table<string, string>
+---@param sandbox_vars table<string, string> Upper-case names.
+---@return table<string, string>
+function M.outer_vars(parent, sandbox_vars)
+  local upper = {}
+  for name, value in pairs(parent) do
+    upper[name:upper()] = value
+  end
+  local out = {}
+  for key in pairs(sandbox_vars) do
+    local outer = M.OUTER_PREFIX .. key
+    out[outer] = upper[outer] or upper[key] or ""
+  end
+  return out
 end
 
 ---The variables `--isolate-home` takes away from the parent: set to the sandbox (`HOME`, `USERPROFILE`,

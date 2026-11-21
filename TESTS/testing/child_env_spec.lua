@@ -148,6 +148,47 @@ return function(H)
   eq(vars.TEMP, dirs.tmp, "TEMP -> tmp")
   eq(vars.TMP, dirs.tmp, "TMP -> tmp")
   eq(vars.TMPDIR, dirs.tmp, "TMPDIR -> tmp")
+  -- the values outside the sandbox stay reachable (testing.container gives them to the engine)
+  eq(
+    env.outer_vars(
+      { xdg_data_home = "/home/u/.local/share", TESTING_OUTER_TMPDIR = "/outermost" },
+      { XDG_DATA_HOME = "/box/data", XDG_RUNTIME_DIR = "/box/run", TMPDIR = "/box/tmp" }
+    ),
+    {
+      TESTING_OUTER_XDG_DATA_HOME = "/home/u/.local/share",
+      TESTING_OUTER_XDG_RUNTIME_DIR = "",
+      TESTING_OUTER_TMPDIR = "/outermost",
+    },
+    "outer_vars: the parent's value in any case, '' when it had none, the outermost one in a child of a child"
+  )
+  local built = require("testing.child").environment({
+    parent_env = { XDG_DATA_HOME = "/home/u/.local/share", PATH = "/bin" },
+    base = "/tmp/outer-spec",
+    name = "box",
+  })
+  eq(
+    { built.env.TESTING_OUTER_XDG_DATA_HOME, built.env.TESTING_OUTER_XDG_RUNTIME_DIR },
+    { "/home/u/.local/share", "" },
+    "the child's environment carries the outer values"
+  )
+  local isolated = require("testing.child").environment({
+    parent_env = {
+      XDG_DATA_HOME = "/home/u/.local/share",
+      HOME = "/home/u",
+      PATH = "/bin",
+      TESTING_OUTER_XDG_DATA_HOME = "/home/u/.local/share",
+    },
+    base = "/tmp/outer-spec",
+    name = "box",
+    isolate_home = true,
+  })
+  eq(
+    vim.tbl_filter(function(k)
+      return k:match("^TESTING_OUTER_") ~= nil
+    end, vim.tbl_keys(isolated.env)),
+    {},
+    "isolate_home: no outer value, not even one an outer child passed on (none may name the real home)"
+  )
   local distinct = {}
   for _, d in pairs(dirs) do
     distinct[d] = true

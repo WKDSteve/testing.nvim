@@ -150,7 +150,15 @@ return function(H)
     for name, value in pairs(built.env) do
       -- the sandbox variables are the driver's own, not the parent's
       local up = name:upper()
-      if not (up:match("^XDG_") or up == "TEMP" or up == "TMP" or up == "TMPDIR") then
+      if
+        not (
+          up:match("^XDG_")
+          or up == "TEMP"
+          or up == "TMP"
+          or up == "TMPDIR"
+          or up:match("^TESTING_OUTER_")
+        )
+      then
         env[name] = value
       end
     end
