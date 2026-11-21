@@ -439,6 +439,34 @@ return function(H)
       "          path: .deps/open.nvim\n          # Pinned: a commit whose own CI was green",
       "own checkouts: a pinned one of the owner is not called third-party"
     )
+    -- a dependency that checkouts names too (a third-party plugin the specs load) comes from that pinned line, never as
+    -- WKDSteve/<name>@ci-verified (cmdlog.nvim: deps lists telescope.nvim and plenary.nvim)
+    root = project(
+      "thirddep.nvim",
+      "{ 'suite' }",
+      "{ name = 'thirddep.nvim', platform = { 'suite' }, checkouts = { { repo = 'nvim-telescope/telescope.nvim', ref = '"
+        .. ("c"):rep(40)
+        .. "', why = 'the picker specs need it' } } }",
+      "{ 'lib.nvim', 'telescope.nvim' }"
+    )
+    text, problems = workflow.render(root)
+    ok(text ~= nil, "third-party dep: generated (" .. table.concat(problems or {}, "; ") .. ")")
+    text = text or ""
+    ok(
+      not text:find("repository: WKDSteve/telescope.nvim", 1, true),
+      "third-party dep: no WKDSteve/telescope.nvim"
+    )
+    has(
+      text,
+      "          repository: nvim-telescope/telescope.nvim\n          path: .deps/telescope.nvim\n",
+      "third-party dep: the checkout below .deps/"
+    )
+    has(text, "ref: " .. ("c"):rep(40), "third-party dep: ... at its pin")
+    has(
+      text,
+      "repository: WKDSteve/lib.nvim",
+      "third-party dep: the other deps stay at ci-verified"
+    )
     root = project(
       "foreign.nvim",
       "{ 'suite' }",

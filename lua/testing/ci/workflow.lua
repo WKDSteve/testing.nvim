@@ -694,6 +694,22 @@ function M.render_cfg(cfg, deps, opts)
     return nil, { "the script of a leg is scripts/ci.sh or scripts/test.sh ci" }
   end
   local name = cfg.name
+  -- a dependency that `checkouts` names too (a third-party plugin the specs need: telescope.nvim) comes from that line,
+  -- with its repository and its pin: `<owner>/<name>@ci-verified` would be a repository that does not exist
+  local in_checkouts = {}
+  for _, c in ipairs(cfg.checkouts) do
+    local base = c.repo:match("/(.+)$")
+    if base then
+      in_checkouts[base] = true
+    end
+  end
+  local listed = {}
+  for _, d in ipairs(deps) do
+    if not in_checkouts[d] then
+      listed[#listed + 1] = d
+    end
+  end
+  deps = listed
   local own = vim.list_extend(vim.deepcopy(deps), { "testing.nvim" })
   local checkouts = {}
   checkouts[1] = M.wrap(

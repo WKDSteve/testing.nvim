@@ -188,7 +188,9 @@ testing init --workflow=public --check    # compare byte for byte, print a diff,
   `ACTIONS`): a bump there is one regenerated file per repository. Every value of `ci.workflow` is checked first (a
   repository is `owner/name`, a `ref` a full commit id, or `ci-verified` for a repository of the owner of the
   dependencies (third-party code is always pinned), an env name `NAME` and none the step sets itself,
-  no text with a line break); a `platform` step that is not in the default profile is an error.
+  no text with a line break); a `platform` step that is not in the default profile is an error. A dependency that
+  `checkouts` names too (a third-party plugin in `deps`, such as `telescope.nvim`) comes from that line, with its
+  repository and pin, not as `<owner>/<name>` at `ci-verified`.
 - **`land = true`** (layouts `public` and `hosted`): the workflow also runs on a push to a check branch
   `ci/**`, always on hosted runners (in `public` only a push to main reaches the self-hosted runner), and a first job
   `already-verified` looks for a green run of the same commit on such a branch. When `testing ci land` then moves main
