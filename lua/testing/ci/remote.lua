@@ -361,10 +361,11 @@ function M.setup_failed(steps)
   if name ~= "Set up runner" then
     return false
   end
-  for i = failed + 1, #steps do
-    local c = type(steps[i]) == "table" and steps[i].conclusion or nil
-    -- "Complete job" may still run (success); anything else of the workflow was skipped
-    if c ~= "skipped" and c ~= nil and not (c == "success" and steps[i].name == "Complete job") then
+  -- Before it only "Set up job" ran. After it anything may show: a step with `if: failure()` or `always()` runs and
+  -- succeeds after the refusal (real run 45036883780: "Traces of failed browser tests"), but no step of the workflow ran
+  -- its test.
+  for i = 1, failed - 1 do
+    if steps[i].name ~= "Set up job" then
       return false
     end
   end

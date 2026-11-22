@@ -1541,11 +1541,23 @@ return function(H)
     )
     eq(
       remote.setup_failed({
+        { name = "Set up job", conclusion = "success" },
+        { name = "Run actions/checkout@abc", conclusion = "success" },
         { name = "Set up runner", conclusion = "failure" },
-        { name = "Run cargo test", conclusion = "success" },
       }),
       false,
-      "setup_failed: something ran after it"
+      "setup_failed: a step of the workflow ran before it"
+    )
+    eq(
+      remote.setup_failed({
+        { name = "Set up job", conclusion = "success" },
+        { name = "Set up runner", conclusion = "failure" },
+        { name = "Run cargo test", conclusion = "skipped" },
+        { name = "Traces of failed tests", conclusion = "success" },
+        { name = "Complete job", conclusion = "success" },
+      }),
+      true,
+      "setup_failed: a step with if: failure() runs after the refusal and does not undo it"
     )
     eq(
       remote.setup_failed({
