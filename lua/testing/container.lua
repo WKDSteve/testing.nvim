@@ -19,6 +19,7 @@ local M = {}
 ---@field engine? string `podman` (default) or `docker`.
 ---@field image? string Image tag (default `localhost/testing-linux:1`).
 ---@field run? fun(argv: string[]): Testing.Container.Result Injectable runner for specs.
+---@field run_async? fun(argv: string[], cb: fun(res: Testing.Container.Result)) Injectable async runner for `probe_async`.
 ---@field timeout_ms? integer Per call (default 120000).
 ---@field mounts? table<string, string> Host path -> container path, mounted read-only.
 ---@field writable? table<string, string> Host path -> container path, mounted read-write (an output folder).
@@ -94,15 +95,21 @@ local function runner(opts)
   end
 end
 
----Is the engine up and the image built?
----@param opts? Testing.Container.Opts
----@return boolean ok, string reason
-function M.available(opts)
-  opts = opts or {}
-  -- `image exists` is podman's; docker answers the same question with `image inspect`
+---The argument vector of the question "is the image there?" (`image exists` is podman's; docker answers the same
+---question with `image inspect`).
+---@param opts Testing.Container.Opts
+---@return string[]
+local function probe_argv(opts)
   local probe = engine(opts):match("docker[^/]*$") and { "image", "inspect" }
     or { "image", "exists" }
-  local res = runner(opts)({ engine(opts), probe[1], probe[2], image(opts) })
+  return { engine(opts), probe[1], probe[2], image(opts) }
+end
+
+---The answer of the engine to the probe, as `available` reports it.
+---@param res Testing.Container.Result
+---@param opts Testing.Container.Opts
+---@return boolean ok, string reason
+local function classify(res, opts)
   if res.code == 0 then
     return true, image(opts)
   end
@@ -123,6 +130,94 @@ function M.available(opts)
       res.code,
       said ~= "" and (", " .. said:sub(1, 200)) or ""
     )
+end
+
+---Is the engine up and the image built? Blocks until the engine answers (a CI run, a spec); an editor command must
+---use `probe_async` / `cached` instead.
+---@param opts? Testing.Container.Opts
+---@return boolean ok, string reason
+function M.available(opts)
+  opts = opts or {}
+  return classify(runner(opts)(probe_argv(opts)), opts)
+end
+
+---@type table<string, {ok: boolean, reason: string}>
+local answers = {}
+---@type table<string, boolean>
+local asking = {}
+
+---@param opts Testing.Container.Opts
+---@return string
+local function answer_key(opts)
+  return engine(opts) .. " " .. image(opts)
+end
+
+---The answer of this session for this engine and image, nil when none was asked yet. Never starts a process.
+---@param opts? Testing.Container.Opts
+---@return boolean|nil ok, string|nil reason
+function M.cached(opts)
+  local got = answers[answer_key(opts or {})]
+  if got then
+    return got.ok, got.reason
+  end
+end
+
+---Forget the answers of this session (the image was built since, or a spec).
+---@return nil
+function M.forget()
+  answers = {}
+end
+
+---Ask the engine without blocking the editor: the probe runs through `vim.system` with a callback; the answer is kept
+---for the session (`cached`) and handed to `done` on the main loop. A probe already under way is not started twice
+---(its asker gets the answer through `cached` later). `opts.run_async(argv, cb)` stands in for the process in specs.
+---@param opts? Testing.Container.Opts
+---@param done? fun(ok: boolean, reason: string)
+---@return nil
+function M.probe_async(opts, done)
+  opts = opts or {}
+  local key = answer_key(opts)
+  if answers[key] then
+    if done then
+      done(answers[key].ok, answers[key].reason)
+    end
+    return
+  end
+  if asking[key] then
+    return
+  end
+  asking[key] = true
+  local function finish(res)
+    asking[key] = nil
+    local ok, reason = classify(res, opts)
+    answers[key] = { ok = ok, reason = reason }
+    if done then
+      done(ok, reason)
+    end
+  end
+  if opts.run_async then
+    opts.run_async(probe_argv(opts), finish)
+    return
+  end
+  local started, err = pcall(
+    vim.system,
+    probe_argv(opts),
+    {
+      text = true,
+      env = M.engine_env(),
+      timeout = opts.timeout_ms or 120000,
+    },
+    vim.schedule_wrap(function(done_res)
+      finish({
+        code = done_res.code,
+        stdout = done_res.stdout or "",
+        stderr = done_res.stderr or "",
+      })
+    end)
+  )
+  if not started then
+    finish({ code = 127, stdout = "", stderr = tostring(err) })
+  end
 end
 
 ---The argument vector of a one-shot run.

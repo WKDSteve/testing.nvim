@@ -713,8 +713,10 @@ local function check_tier3(health)
   elseif tmux_applies then
     health.info("tmux (tier 2.5) not found (PATH): the PTY cases (testing.pty) are reported skips")
   end
-  local container_ok, container_why = tier3.container()
-  if container_ok then
+  local container_ok, container_why = tier3.container_cached()
+  if container_ok == nil then
+    health.info("container cases (testing.container): " .. container_why)
+  elseif container_ok then
     health.ok("container image built: " .. container_why .. " (testing.container)")
   else
     health.info(

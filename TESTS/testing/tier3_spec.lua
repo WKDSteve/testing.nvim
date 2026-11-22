@@ -121,4 +121,37 @@ return function(H)
   ok(gone:find("is not installed", 1, true), "no engine: " .. gone)
   local _, stuck = tier3.container({ run = engine_answer(124, "timeout") })
   ok(stuck:find("is not usable", 1, true), "an engine that does not answer in time: " .. stuck)
+
+  -- container_cached (what :checkhealth uses): never waits for the engine; the first call starts one background probe,
+  -- its answer is kept for the session
+  local cont = require("testing.container")
+  cont.forget()
+  local probes, pending = 0, nil
+  local function async_engine(argv, cb)
+    probes = probes + 1
+    pending = cb
+  end
+  local sync_calls = 0
+  local first, first_why = tier3.container_cached({
+    run_async = async_engine,
+    run = function()
+      sync_calls = sync_calls + 1
+      return { code = 0, stdout = "", stderr = "" }
+    end,
+  })
+  ok(
+    first == nil and first_why:find("background", 1, true),
+    "no answer yet: " .. tostring(first_why)
+  )
+  eq({ probes, sync_calls }, { 1, 0 }, "one background probe, no synchronous engine call")
+  tier3.container_cached({ run_async = async_engine })
+  eq(probes, 1, "a probe under way is not started twice")
+  pending({ code = 1, stdout = "", stderr = "" })
+  local late, late_why = tier3.container_cached({ run_async = async_engine })
+  ok(
+    late == false and late_why:find("is not built", 1, true),
+    "the answer is kept: " .. tostring(late_why)
+  )
+  eq(probes, 1, "a kept answer starts no process")
+  cont.forget()
 end

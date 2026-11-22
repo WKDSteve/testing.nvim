@@ -161,6 +161,7 @@ function M.browsers(opts)
 end
 
 ---@class Testing.Tier3.ContainerOpts
+---@field run_async? fun(argv: string[], cb: fun(res: Testing.Container.Result)) Injectable async runner for specs.
 ---@field run? fun(argv: string[]): Testing.Container.Result The engine call (specs inject it).
 ---@field timeout_ms? integer Deadline of the engine call (default 5000).
 
@@ -191,6 +192,24 @@ function M.container(opts)
     run = opts.run,
     timeout_ms = opts.timeout_ms or 5000,
   })
+end
+
+---As `container`, but without ever waiting for the engine: the answer of this session when there is one, else the
+---probe starts in the background (`testing.container.probe_async`) and nil comes back. `:checkhealth` uses it, so a
+---stopped Podman machine (a probe of hundreds of ms) never freezes the editor.
+---@param opts? Testing.Tier3.ContainerOpts
+---@return boolean|nil ok nil: not asked yet, the probe is under way.
+---@return string reason The image when ok, what is missing, or why there is no answer yet.
+function M.container_cached(opts)
+  opts = opts or {}
+  local container = require("testing.container")
+  local copts = { run_async = opts.run_async, timeout_ms = opts.timeout_ms or 5000 }
+  local ok, reason = container.cached(copts)
+  if ok ~= nil then
+    return ok, reason
+  end
+  container.probe_async(copts)
+  return nil, "the engine is being asked in the background; run :checkhealth again"
 end
 
 return M
