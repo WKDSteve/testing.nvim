@@ -48,26 +48,32 @@ local function build()
   if not has_ffi or ffi.os ~= "Windows" or not ffi.abi("64bit") then
     return nil
   end
+  -- The C declarations are one namespace per process: another plugin in this Neovim may have declared one of these
+  -- functions with types of its own (lib.nvim's cross.detached did, with its own FILETIME struct), and then a plain
+  -- second declaration fails and a call with our struct throws. So the functions get names of their own that reach
+  -- the real symbols through asm() redirection; nothing can collide either way.
   local declarations = {
     "struct testing_winproc_filetime { uint32_t lo; uint32_t hi; };",
-    "void *OpenProcess(uint32_t access, int inherit, uint32_t pid);",
-    "int GetProcessTimes(void *h, struct testing_winproc_filetime *c, struct testing_winproc_filetime *e,"
-      .. " struct testing_winproc_filetime *k, struct testing_winproc_filetime *u);",
-    "int TerminateProcess(void *h, uint32_t code);",
-    "uint32_t WaitForSingleObject(void *h, uint32_t ms);",
-    "int CloseHandle(void *h);",
+    'void *testing_winproc_OpenProcess(uint32_t access, int inherit, uint32_t pid) asm("OpenProcess");',
+    "int testing_winproc_GetProcessTimes(void *h, struct testing_winproc_filetime *c,"
+      .. " struct testing_winproc_filetime *e, struct testing_winproc_filetime *k,"
+      .. ' struct testing_winproc_filetime *u) asm("GetProcessTimes");',
+    'int testing_winproc_TerminateProcess(void *h, uint32_t code) asm("TerminateProcess");',
+    'uint32_t testing_winproc_WaitForSingleObject(void *h, uint32_t ms) asm("WaitForSingleObject");',
+    'int testing_winproc_CloseHandle(void *h) asm("CloseHandle");',
   }
   for _, d in ipairs(declarations) do
-    -- a function another plugin declared already keeps its declaration (redefining raises); its calls are checked
+    -- (a second load in the same process declares them again: that raises and is fine, the first one stands)
     pcall(ffi.cdef, d)
   end
-  local C = ffi.C
+  local K = ffi.C
+  local C = {}
   local probe = pcall(function()
-    return C.OpenProcess
-      and C.GetProcessTimes
-      and C.TerminateProcess
-      and C.WaitForSingleObject
-      and C.CloseHandle
+    C.OpenProcess = K.testing_winproc_OpenProcess
+    C.GetProcessTimes = K.testing_winproc_GetProcessTimes
+    C.TerminateProcess = K.testing_winproc_TerminateProcess
+    C.WaitForSingleObject = K.testing_winproc_WaitForSingleObject
+    C.CloseHandle = K.testing_winproc_CloseHandle
   end)
   if not probe then
     return nil
