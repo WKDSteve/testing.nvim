@@ -124,6 +124,26 @@ return {
       note = "the report has the section of testing.nvim",
     },
     {
+      expect = [[table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("container", 1, true) ~= nil]],
+      note = "the report has a container line at the first call (answer or 'asked in the background')",
+    },
+    -- the engine is asked in the background: once it has answered, a second report shows it, never the waiting line
+    {
+      wait = [[require("testing.container").cached({ timeout_ms = 5000 }) ~= nil]],
+      timeout = 30000,
+      note = "the background probe of the engine has answered",
+    },
+    {
+      lua = [[vim.cmd("bwipeout!"); vim.cmd("Testing health")]],
+      timeout = 60000,
+      note = ":Testing health a second time",
+    },
+    {
+      wait = [[vim.bo.filetype == "checkhealth" and not table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("asked in the background", 1, true)]],
+      timeout = 30000,
+      note = "the second report holds the engine's answer, not the waiting line",
+    },
+    {
       lua = [[vim.cmd("bwipeout!"); _G.mark(); vim.cmd("Testing")]],
       note = ":Testing without a subcommand",
     },
