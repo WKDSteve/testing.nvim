@@ -49,6 +49,8 @@
 ---   restart = true  quit the child as a person does (`:qall!`, `VimLeavePre` runs) and start it again in the
 ---                 same sandbox (its stdpath and temp directories stay), the UI attached again; `args = { ... }`
 ---                 on the step is the command line of this start, without it the sheet's `args`
+---   rebaseline = true  take what keeps the child busy right now (a plugin's timer that repeats for ever) as the
+---                 new quiet of `settle`; after the step that set the plugin up
 ---
 --- `args` (of the sheet and of a restart) is a list, no shell: `+cmd` and `-c cmd` (at most 10, as the editor takes),
 --- `--cmd cmd` (at most 9: the harness puts the sheet's size first, `set lines=.. columns=..`, so that what runs at
@@ -89,6 +91,7 @@ M.ACTIONS = {
   "procs",
   "ask",
   "restart",
+  "rebaseline",
   "hl",
   "prompt",
   "measure",
@@ -106,6 +109,7 @@ M.ENGINE_ACTIONS = {
     screen = true,
     ask = true,
     restart = true,
+    rebaseline = true,
     hl = true,
     prompt = true,
     measure = true,
@@ -201,6 +205,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field note? string
 ---@field ignore_errmsg? boolean
 ---@field restart? boolean Quit the child and start it again in the same sandbox.
+---@field rebaseline? boolean Take the handles that are active now as the quiet of `settle` (a plugin's endless timer).
 ---@field prompt? "hit-enter"|"more"|"confirm" Wait until the child shows this prompt.
 ---@field measure? string A Lua expression in the child that gives a number (`name`, `min`, `max`, `unit`, `runs`).
 ---@field name? string
@@ -290,6 +295,7 @@ local STEP_KEYS = {
   note = "string",
   ignore_errmsg = "boolean",
   restart = "boolean",
+  rebaseline = "boolean",
   prompt = "string",
   measure = "string",
   name = "string",
@@ -624,6 +630,9 @@ local function check_step(step, i, engine)
   end
   if action == "restart" and step.restart ~= true then
     return at .. ".restart must be true"
+  end
+  if action == "rebaseline" and step.rebaseline ~= true then
+    return at .. ".rebaseline must be true"
   end
   if action == "blur" and step.blur ~= true then
     return at .. ".blur must be true"

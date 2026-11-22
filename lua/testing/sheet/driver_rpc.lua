@@ -224,6 +224,9 @@ local function run_step(child, step, ctx)
     if not v then
       return "got " .. shown(v)
     end
+  elseif step.rebaseline then
+    -- a plugin that keeps a timer for ever (it was set up by the steps before): that timer is the new quiet of settle
+    child.rebaseline()
   elseif step.restart then
     -- as a person does: quit (VimLeavePre runs), start again on what the first editor left in the sandbox
     child.restart({

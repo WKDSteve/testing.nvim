@@ -48,6 +48,7 @@ return {
 | `prompt = name` (`timeout` ms, default 2000) | waits until the child shows a prompt: `"hit-enter"` (a message longer than the command line), `"more"` (a long one with `'more'` set; it is off in a child), `"confirm"` (`confirm()`; one called from Lua (`vim.fn.confirm`, also `input`, `inputlist`) answers "cancelled" at once unless the sheet sets `prompts = "real"`: by default a `lua` step that calls `input()` would wait for an answer until the RPC timeout). Asked through `nvim_get_mode`, which the editor answers while the prompt holds every other call back. Answer it with `input`: `"<CR>"`, `"q"` or `" "` for more, the letter of a choice for confirm | no such prompt in time (the line names one the child shows instead) |
 | `measure = expr` (`name`, `min`, `max`, `unit`, `runs`) | reads a number in the child (a Lua expression), `runs` times (default 1, at most 20) and takes the median, so one reading under load does not decide; `name` says what it is (`"gopath (VeryLazy)"`), `unit` how it reads (`"ms"`). The value is kept in the result (`measures`), in the step's event (`measure`), as a note of a stepped run, and with `testing sheets run --tasks` as the notes of the run in the task's block: `- Schritt 2 (80x24): gopath (VeryLazy) = 3.2 ms (median of 3: 3.1, 3.2, 4; max 20)` | the median is above `max` or below `min` (the value is kept all the same), or the expression gives no finite number |
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
+| `rebaseline = true` | takes what keeps the child busy right now (active timers, jobs, pipes) as the new quiet of `settle`: for a plugin that keeps a timer that repeats for ever, after the step that set it up (see Pitfalls) | never |
 | `shot = name` | a picture of the screen, `TESTS/sheets/out/<id>.<name>.<cols>x<rows>.png`: the screen (every cell with its colours and styles, the cursor as a block) is drawn as a page and photographed by the browser engine (node and playwright-core, as for a browser sheet); the font is the browser's, not a terminal's; a cell whose attribute the screen could not name (more than 52 attributes) is outlined dashed. The input of the AI judge and of README images. Without node, playwright-core or a browser the step is **skipped**: the other steps go on and the sheet ends as `skip` (never a green run without its picture) | the browser fails |
 
 Milliseconds are whole numbers up to 600000 (10 minutes), sizes up to 1000 rows or columns (4000 pixels for a browser, desktop or webview sheet): an endless wait
@@ -798,6 +799,11 @@ return {
 * A text search in a chooser or list hits the first matching line, not the meant one: search for the field name at the
   start of the line.
 * Temporary paths change on every run: mask them in a screen snapshot.
+* A plugin that starts a timer that repeats for ever never lets `settle` be idle (`not idle after N ms: handles
+  (timer=1)`). color_my_ascii.nvim sets itself up on the first `FileType` and starts a cleanup timer of 30 s then: a
+  sheet on a markdown buffer that `settle`s after opening it fails. Put `{ rebaseline = true }` after the step that set
+  the plugin up (the file is open, its `FileType` ran): that timer is the new quiet, anything started later still
+  counts. Never call the internal `require("testing.child.rpc_boot").rebaseline()` from a `lua` step.
 * To run one sheet while you work on it: `testing sheets run --sheet <id>` (one line of result), or
   `testing sheets step <id> --run` to see each step.
 

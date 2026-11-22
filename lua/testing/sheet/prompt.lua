@@ -52,6 +52,7 @@ a person can do), notes. Each step has exactly one action and may carry a note:
 | expect = "expr" | evaluates a Lua expression now | not truthy |
 | screen = "name" | compares the screen with a snapshot (masks = { { row = n } } hide rows) | it differs |
 | restart = true, args = { ... } | quits like a person (VimLeavePre runs), starts again on the same files | no quit |
+| rebaseline = true | what keeps the child busy now (a plugin's timer that repeats for ever) is the new quiet of settle | never |
 
 Milliseconds are whole numbers up to 600000. The first failed step ends the run of that size. Put what a machine can
 check into steps (wait/expect/screen) and only the judgement into judge.]]
