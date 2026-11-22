@@ -659,11 +659,11 @@ A repository without a Lua spec needs no suite for its sheets:
 
 ```
 testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]
-testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict]
+testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict]
 ```
 
 runs every sheet of the roots, with `--engine` only those of that engine (default the current directory; trust gate and workstation rule as above) and writes
-the Result-IR `testing sheets report --from` reads. `--sheet <id>` (repeatable) runs only the named sheets, by id or
+the Result-IR `testing sheets report --from` reads. `--sheet <id>` (repeatable, one id each: `--sheet a --sheet b`) runs only the named sheets, by id or
 file name (`ci-editor-live` for `TESTS/sheets/ci-editor-live.sheet.lua`), as `--all` would run them; a name that is
 no sheet of the roots is refused before anything runs (a sheet that does not load has no id: the refusal names each
 such file with its load error, file and line), and `--sheet` takes no `--task` (the block of a task is

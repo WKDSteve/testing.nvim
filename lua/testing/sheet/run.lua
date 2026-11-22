@@ -26,7 +26,7 @@ local M = {}
 
 M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live] [--result]\n"
   .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live] [--result]\n"
-  .. "       testing sheets run --sheet <id>... [--root <dir>]... [--json <ir>] [--strict] [--live] [--result]"
+  .. "       testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict] [--live] [--result]"
 
 ---The schema of the document `--result` prints.
 M.SCHEMA = "testing-sheet-run/1"
@@ -278,14 +278,13 @@ function M.main(argv, sv, deps)
         ["--sheet"] = "sheet",
       })[a]
       if not key or not argv[i + 1] then
-        sv.err(
-          (
-            key and ("testing sheets: " .. a .. " needs a value")
-            or ("testing sheets: unknown argument " .. tostring(a))
-          )
-            .. "\n"
-            .. M.USAGE
-        )
+        local why = key and ("testing sheets: " .. a .. " needs a value")
+          or ("testing sheets: unknown argument " .. tostring(a))
+        if not key and argv[i - 2] == "--sheet" and not tostring(a):find("^%-") then
+          -- `--sheet a b`: one id per flag
+          why = why .. " (one id per --sheet: --sheet " .. argv[i - 1] .. " --sheet " .. a .. ")"
+        end
+        sv.err(why .. "\n" .. M.USAGE)
         return 2
       end
       if key == "root" then
