@@ -977,7 +977,7 @@ released without a review. Details, the way back and the limits: [RUNNER-GUARD.m
 
 ```
 testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>]
-                  [--wait[=<duration>]] [--history[=N]]
+                  [--wait[=<duration>]] [--history[=N]] [--sha=<commit>]
 ```
 
 The latest GitHub Actions run of the CI workflow per repository, one cell per system. It runs nothing locally and
@@ -1036,8 +1036,20 @@ prints the
 document `testing-ci-remote/1` instead: `schema`, `generated_at`, `token_source` (`env:TESTING_GITHUB_TOKEN` or `gh`,
 never the token) or `token_error`, `workflow` (the `--workflow`), and `repos`, sorted by name, each with `repo`, `owner`,
 `dir`, `branch`, `workflow`, `sha`, `overall`, `run` (`id`, `url`, `status`, `conclusion`, `created_at`, `updated_at`,
-`event`, `attempt`), `os` (per cell `state`, `url` and `job`: the job that decided it), `non_gating`, `note`, `error`
-and `config_error`. Keys are sorted and the same answers give the same bytes.
+`event`, `attempt`), `os` (per cell `state`, `url` and `job`: the job that decided it), `non_gating`, `note`, `error`,
+`config_error` and, only for a refused run, `guard` (below). Keys are sorted and the same answers give the same bytes.
+
+**A run of one commit: `--sha=<commit>`.** `testing ci remote --sha=<commit> <root>` asks about this commit (7 to 40 hex
+digits, known in the checkout) instead of the head of `origin/<branch>`: the same document, `repos[0].sha` is the long
+sha of that commit, `overall`, `run` and `os` are those of its run, and the exit codes are the same. It takes exactly one
+repository and neither `--wait` nor `--history`. A commit the checkout does not know is exit `2` with no document (the
+stderr says so); a known commit without a run is `no_run`. A hub with a red head uses it to judge an older commit by its
+own run.
+
+**A run the runner guard refused: `guard`.** A job the job-started hook of the [runner guard](RUNNER-GUARD.md) refused
+fails in its setup (`Set up runner` red, every later step skipped): no test ran. When every job of the run is like that,
+the repository carries `"guard": "refused"` (the key is absent otherwise) and a note; `overall` stays `failure`, so a
+reader that does not know the key never reads it as green. The commit needs `testing ci release`, not a fix.
 
 **Waiting: `--wait[=<duration>]`.** After a push the runs are still queued or running; `testing ci remote --wait` asks
 again every 30 seconds until no run of the head commits is going any more (a run whose status is not `completed`:

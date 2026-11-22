@@ -96,6 +96,7 @@ M.WAIT_NO_RUN_S = 180
 
 M.USAGE = table.concat({
   "usage: testing ci remote [<root>...] [--repos-root=<dir>] [--json] [--workflow=<name>] [--state-dir=<dir>] [--history[=N]]",
+  "                         [--sha=<commit>]",
   "                         [--wait[=<duration>]]",
   "  <root>              a repository (default: the current directory)",
   "  --repos-root=<dir>  every directory directly below <dir> with a GitHub origin and .github/workflows",
@@ -105,6 +106,8 @@ M.USAGE = table.concat({
   "  --state-dir=<dir>   where the ETag cache lives (default: stdpath('state'))",
   "  --history[=N]       the last N push runs (default 30, at most 100) per repository and system instead of the head",
   "                      commit only, and how often macOS (or another system) was red ALONE (docs/CI.md)",
+  "  --sha=<commit>      the run of this commit (7 to 40 hex digits, known in the checkout; one repository) instead of",
+  "                      the head of origin/<branch>; an unknown commit is exit 2",
   "  --wait[=<duration>] ask again every 30s until no run of the head commits is still going, then the table",
   "                      (default 60m; 90s, 10m, 1h); past the limit: exit 1, not finished",
   "  token: $" .. M.TOKEN_ENV .. " (read-only), else `gh auth token`; never GITHUB_TOKEN",
@@ -172,10 +175,11 @@ M.deps = {
 ---@field history? integer
 ---@field wait? number seconds
 ---@field workflow? string
+---@field sha? string
 ---@field state_dir? string
 ---@field help boolean
 
-local VALUED = { ["repos-root"] = true, workflow = true, ["state-dir"] = true }
+local VALUED = { ["repos-root"] = true, workflow = true, ["state-dir"] = true, sha = true }
 
 ---@param argv string[] The arguments after `remote`.
 ---@return Testing.Ci.Remote.Args|nil args
@@ -224,6 +228,12 @@ function M.parse(argv)
         args.repos_roots[#args.repos_roots + 1] = value
       elseif key == "state-dir" then
         args.state_dir = value
+      elseif key == "sha" then
+        if not value:match("^%x+$") or #value < 7 or #value > 40 then
+          return nil,
+            ("--sha takes 7 to 40 hex digits (got %s)"):format((value:sub(1, 60):gsub("%c", " ")))
+        end
+        args.sha = value:lower()
       else
         args.workflow = value
       end
@@ -320,11 +330,55 @@ local function trim_run(raw)
   }
 end
 
+---Did a job fail in its setup, before any of its own steps? That is how a job the runner guard refused looks (the
+---job-started hook exits non-zero: "Set up runner" fails, every later step is skipped), not a red test.
+---@param steps any The `steps` of a job of the GitHub API.
+---@return boolean
+function M.setup_failed(steps)
+  if type(steps) ~= "table" or #steps == 0 then
+    return false
+  end
+  local first = steps[1]
+  local failed
+  for i, step in ipairs(steps) do
+    if type(step) ~= "table" then
+      return false
+    end
+    if step.conclusion == "failure" then
+      failed = i
+      break
+    end
+    if step.conclusion ~= "success" and step.conclusion ~= nil then
+      return false
+    end
+  end
+  if not failed or type(first) ~= "table" then
+    return false
+  end
+  local name = type(steps[failed].name) == "string" and steps[failed].name or ""
+  -- the setup steps of the runner; nothing that ran of the workflow itself
+  if name ~= "Set up runner" and name ~= "Set up job" then
+    return false
+  end
+  for i = failed + 1, #steps do
+    local c = type(steps[i]) == "table" and steps[i].conclusion or nil
+    -- "Complete job" may still run (success); anything else of the workflow was skipped
+    if c ~= "skipped" and c ~= nil and not (c == "success" and steps[i].name == "Complete job") then
+      return false
+    end
+  end
+  return true
+end
+
 ---@param raw any
 ---@return table|nil
 local function trim_job(raw)
   if type(raw) ~= "table" or type(raw.id) ~= "number" then
     return nil
+  end
+  local refused = raw.refused == true
+  if type(raw.steps) == "table" then
+    refused = M.setup_failed(raw.steps)
   end
   local labels = {}
   if type(raw.labels) == "table" then
@@ -349,6 +403,8 @@ local function trim_job(raw)
         and #raw.steps == 0
         and (type(raw.runner_name) ~= "string" or raw.runner_name == "")
       ),
+    -- the job-started hook of the runner guard refused it: its setup failed, nothing after it ran (`M.setup_failed`)
+    refused = refused or nil,
   }
 end
 
@@ -560,7 +616,11 @@ function M.classify(rec, run, jobs, non_gating, now)
   end)
   local cells = {}
   local others_red, ng, without_runner = {}, {}, {}
+  local refused_all = true
   for _, job in ipairs(jobs) do
+    if not (job.refused and job.conclusion == "failure") then
+      refused_all = false
+    end
     local state = M.job_state(job, now, run.created_at)
     local lname = job.name:lower()
     local gating = true
@@ -622,6 +682,13 @@ function M.classify(rec, run, jobs, non_gating, now)
     notes[#notes + 1] = "only non-gating jobs"
   end
   rec.overall = overall or "unknown"
+  if refused_all and run.status == "completed" and overall == "failure" then
+    -- every job failed in its setup: the runner guard refused the commit, no test ran. `overall` stays red (an old
+    -- reader must not read it as green); `guard` tells it apart from a red test.
+    rec.guard = "refused"
+    notes[#notes + 1] =
+      "refused by the runner guard, no test ran (the commit is not released: see the job log)"
+  end
   rec.os = require("lib.nvim.json.canonical").object(cells)
   if #others_red > 0 then
     notes[#notes + 1] = "also red: " .. table.concat(vim.list_slice(others_red, 1, 2), ", ")
@@ -1154,7 +1221,9 @@ function M.collect(repos, opts)
           local sha = head_res.code == 0 and (head_res.stdout or ""):match("^(%x+)") or nil
           if not sha or #sha < 40 then
             rec.overall = "unknown"
-            rec.error = ("no origin/%s (not fetched?)"):format(s.cfg.branch)
+            rec.error = opts.sha and ("commit %s is not known in this checkout"):format(opts.sha)
+              or ("no origin/%s (not fetched?)"):format(s.cfg.branch)
+            rec.unknown_commit = opts.sha ~= nil or nil
             rec.note = rec.error
           else
             rec.sha = sha
@@ -1564,6 +1633,12 @@ function M.main(argv, sv)
     return M.EXIT_USAGE
   end
   local state_dir = args.state_dir or sv.state_dir or vim.fn.stdpath("state")
+  if args.sha and (args.history or args.wait or #repos ~= 1) then
+    sv.err(
+      "testing ci remote: --sha takes exactly one repository, and neither --history nor --wait"
+    )
+    return M.EXIT_USAGE
+  end
   if args.history then
     if args.wait then
       sv.err("testing ci remote: --wait and --history do not go together")
@@ -1580,7 +1655,12 @@ function M.main(argv, sv)
       sv
     )
   else
-    records, info = M.collect(repos, { workflow = args.workflow, state_dir = state_dir })
+    records, info =
+      M.collect(repos, { workflow = args.workflow, state_dir = state_dir, sha = args.sha })
+  end
+  if args.sha and records[1] and records[1].unknown_commit then
+    sv.err("testing ci remote: " .. tostring(records[1].error))
+    return M.EXIT_USAGE
   end
   if #records == 0 then
     sv.err("testing ci remote: no repository with a GitHub origin and .github/workflows found")

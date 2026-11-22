@@ -244,7 +244,11 @@ return function(H)
     norun = repo("norun", "https://github.com/WKDSteve/norun", sha("3")),
     norun2 = repo("norun2", "https://github.com/WKDSteve/norun2", sha("4")),
     zeta = repo("zeta", "https://gitlab.com/WKDSteve/zeta.git", sha("2")),
+    older = repo("older", "https://github.com/WKDSteve/older", sha("5")),
+    guard = repo("guard", "https://github.com/WKDSteve/guard", sha("6")),
   }
+  -- `older`: the head is red, the commit before it has its own run
+  GIT[dirs.older].commits = { [sha("5")] = "head", [sha("7")] = "older commit" }
 
   local R = "/repos/WKDSteve/"
   ---path -> { etag, body } (body: a table to encode or a JSON text)
@@ -389,6 +393,44 @@ return function(H)
     },
   }
 
+  API[R .. "older/actions/runs"] = {
+    etag = '"runs-older"',
+    body = {
+      workflow_runs = { run_(110, "CI", "completed", "failure", "2026-10-31T11:00:00Z") },
+    },
+  }
+  API[R .. "older/actions/runs/110/jobs"] = {
+    etag = '"jobs-older"',
+    body = { jobs = { job_(1101, "test (ubuntu-latest)", "completed", "failure") } },
+  }
+  -- what GitHub lists for a job the job-started hook of the runner guard refused
+  local steps_refused = {
+    { name = "Set up job", conclusion = "success" },
+    { name = "Set up runner", conclusion = "failure" },
+    { name = "Run actions/checkout@abc", conclusion = "skipped" },
+    { name = "Run cargo test", conclusion = "skipped" },
+    { name = "Complete job", conclusion = "success" },
+  }
+  API[R .. "guard/actions/runs"] = {
+    etag = '"runs-guard"',
+    body = { workflow_runs = { run_(120, "CI", "completed", "failure", "2026-10-31T11:00:00Z") } },
+  }
+  API[R .. "guard/actions/runs/120/jobs"] = {
+    etag = '"jobs-guard"',
+    body = {
+      jobs = {
+        job_(1201, "test (ubuntu-latest)", "completed", "failure", {
+          runner_name = "STEVESPC-guard",
+          steps = steps_refused,
+        }),
+        job_(1202, "test (windows-latest)", "completed", "failure", {
+          runner_name = "STEVESPC-guard",
+          steps = steps_refused,
+        }),
+      },
+    },
+  }
+
   local requests = {}
   local transport_fail = nil
   local function transport(url, copts, done)
@@ -432,12 +474,19 @@ return function(H)
       res = g.url and { code = 0, stdout = g.url .. "\n" }
         or { code = 2, stdout = "", stderr = "no such remote" }
     elseif args[1] == "log" then
-      eq(
-        args[#args - 1],
-        "origin/" .. (g.branch or "main"),
-        "git: the head of origin/<branch> is asked for"
-      )
-      res = { code = 0, stdout = g.sha .. "\n" .. g.msg }
+      local ref = args[#args - 1]
+      if g.commits and not vim.startswith(ref, "origin/") then
+        -- `--sha`: the checkout resolves a (short) name of a commit it knows, else git fails
+        res = { code = 128, stdout = "", stderr = "fatal: bad revision" }
+        for full, msg in pairs(g.commits) do
+          if vim.startswith(full, ref) then
+            res = { code = 0, stdout = full .. "\n" .. msg }
+          end
+        end
+      else
+        eq(ref, "origin/" .. (g.branch or "main"), "git: the head of origin/<branch> is asked for")
+        res = { code = 0, stdout = g.sha .. "\n" .. g.msg }
+      end
       if vim.tbl_contains(args, "--format=%ct") then
         res = { code = 0, stdout = tostring(g.ts or 0) .. "\n" }
       end
@@ -1434,6 +1483,71 @@ return function(H)
       "sha: not the head of origin/<branch>"
     )
     eq(recs[1].sha, ("f"):rep(40), "sha: the record is about that commit")
+  end
+
+  -- ------------------------------------------------------------------ --sha and the runner guard
+
+  do
+    -- --sha: a short name of a commit the checkout knows; the document is about that commit
+    local res = run({ "--json", "--sha=" .. ("7"):rep(8), dirs.older })
+    local d = vim.json.decode(res.out)
+    eq(d.repos[1].sha, sha("7"), "--sha: repos[1].sha is the long sha of that commit")
+    eq(res.code, remote.EXIT_RED, "--sha: the exit codes are those of the head (red run)")
+    eq(
+      requests[1].query and requests[1].query.head_sha,
+      sha("7"),
+      "--sha: the runs of THAT commit are asked for"
+    )
+
+    -- an unknown commit: usage error, no document, no request
+    local unknown = run({ "--json", "--sha=" .. ("9"):rep(10), dirs.older })
+    eq(unknown.code, remote.EXIT_USAGE, "--sha: an unknown commit is exit 2")
+    eq(unknown.out, "", "--sha: an unknown commit prints no document")
+    has(unknown.err, "is not known in this checkout", "--sha: the stderr says why")
+    eq(#requests, 0, "--sha: an unknown commit asks GitHub nothing")
+
+    -- the argument itself
+    for _, bad in ipairs({ "--sha=xyz1234", "--sha=abc12", "--sha=" .. ("a"):rep(41) }) do
+      eq(run({ bad, dirs.older }).code, remote.EXIT_USAGE, "--sha: " .. bad .. " is a usage error")
+    end
+    eq(
+      run({ "--sha=" .. ("7"):rep(8), dirs.older, dirs.alpha }).code,
+      remote.EXIT_USAGE,
+      "--sha: exactly one repository"
+    )
+
+    -- a run whose every job failed in its setup: the guard refused it
+    local refused = run({ "--json", dirs.guard })
+    local g = vim.json.decode(refused.out).repos[1]
+    eq(g.overall, "failure", "guard: overall stays red for an old reader")
+    eq(g.guard, "refused", "guard: refused is marked")
+    eq(refused.code, remote.EXIT_RED, "guard: exit 1 as for any red")
+    -- a red test is no refusal, and no key then
+    local red = vim.json.decode(run({ "--json", dirs.older }).out).repos[1]
+    eq(red.guard, nil, "guard: a red test carries no guard key")
+    -- the second asking comes from the cache: the flag survives it
+    local again = vim.json.decode(run({ "--json", dirs.guard }).out).repos[1]
+    eq(again.guard, "refused", "guard: also from the cache")
+
+    -- setup_failed: only a failed setup with nothing run after it
+    eq(remote.setup_failed(steps_refused), true, "setup_failed: the hook refused the job")
+    eq(
+      remote.setup_failed({
+        { name = "Set up job", conclusion = "success" },
+        { name = "Run cargo test", conclusion = "failure" },
+      }),
+      false,
+      "setup_failed: a failed test is none"
+    )
+    eq(
+      remote.setup_failed({
+        { name = "Set up runner", conclusion = "failure" },
+        { name = "Run cargo test", conclusion = "success" },
+      }),
+      false,
+      "setup_failed: something ran after it"
+    )
+    eq(remote.setup_failed({}), false, "setup_failed: no steps")
   end
 
   vim.fn.delete(tmp, "rf")
