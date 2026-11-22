@@ -84,6 +84,8 @@ return {
         -- sheet_native_host_spec: the real run registers its fixture host under HKCU\Software\Chromium and the
         -- check afterwards asks whether its key is gone (Windows)
         "reg",
+        -- ci_wsl_lock_spec: holds the mirror lock of a temporary HOME and asks whether it is free (Linux)
+        "flock",
       },
     },
   },

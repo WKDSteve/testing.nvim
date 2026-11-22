@@ -49,7 +49,11 @@ return function(H)
     argv = { "abc1234", "--quick", "--", "--cached" },
     json = "C:/T/out.json",
   })
-  has(script, "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' ||", "script: a dependency at its HEAD")
+  has(
+    script,
+    "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' 9>&- ||",
+    "script: a dependency at its HEAD"
+  )
   local hb = script:match("head_of%(%) {\n(.-)\n}")
   ok(
     hb and hb:find("rev-parse HEAD", 1, true) < hb:find('sync "$1"', 1, true),
@@ -62,13 +66,43 @@ return function(H)
     'XDG_CONFIG_HOME="$M/.xdg-config" nvim ',
     "script: the run sees no nvim configuration of the distribution (its lua/lib shadowed lib.nvim)"
   )
-  has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' ||", "script: the repository itself")
+  has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' 9>&- ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
-  local lock_at, first_sync = script:find("flock 9", 1, true), script:find("head_of '", 1, true)
+  local lock_at, first_sync = script:find("flock -w ", 1, true), script:find("head_of '", 1, true)
   ok(
     lock_at and first_sync and lock_at < first_sync,
     "script: the mirror is locked before anything is checked out (two checks at once)"
   )
+  -- the lock's fd 9 is the shell's alone: no command under it inherits it (an orphaned child held it for an hour)
+  has(
+    script,
+    "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' 9>&- ||",
+    "script: git runs without the lock's fd"
+  )
+  local run_line = script:match("\n(env TESTING_WSL_RUN=[^\n]*)\n$")
+  ok(run_line ~= nil, "script: the run is the last line and carries the run marker")
+  ok(run_line and run_line:sub(-5) == " 9>&-", "script: the run starts without the lock's fd")
+  has(script, "trap testing_wsl_sweep EXIT", "script: leftovers of the run are ended when it exits")
+
+  -- a run that waits for the lock says so at once on Windows, the rest of its stderr only at the end
+  do
+    local out = {}
+    local sink = {
+      write = function(_, s)
+        out[#out + 1] = s
+      end,
+    }
+    local rest = wsl.forward_waiting(
+      "noise\ntesting: wsl: waiting for the mirror lock /m/.lock (60 s), loc",
+      sink
+    )
+    eq(out, {}, "forward: half a line is kept back")
+    rest = wsl.forward_waiting(rest .. "ked by pid 7; open in: none\nmore\npart", sink)
+    eq(out, {
+      "testing: wsl: waiting for the mirror lock /m/.lock (60 s), locked by pid 7; open in: none\n",
+    }, "forward: the waiting line, whole, and nothing else")
+    eq(rest, "part", "forward: the unfinished last line comes back")
+  end
   has(
     script,
     "TESTING_QUEUE=off TESTING_METRICS=off",
@@ -111,13 +145,13 @@ return function(H)
     })
     has(
       wt_script,
-      ("head_at 'x.nvim' '/mnt/e/repos/x.nvim/.git' '%s' ||"):format(("b"):rep(40)),
+      ("head_at 'x.nvim' '/mnt/e/repos/x.nvim/.git' '%s' 9>&- ||"):format(("b"):rep(40)),
       "worktree: the shared repository at the Windows HEAD"
     )
     ok(not wt_script:find("head_of 'x.nvim'", 1, true), "worktree: not through its .git file")
     has(
       wt_script,
-      "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' ||",
+      "head_of 'lib.nvim' '/mnt/e/repos/lib.nvim' 9>&- ||",
       "worktree: an ordinary checkout as before"
     )
     has(
@@ -166,7 +200,7 @@ return function(H)
     wsl.run(linked, {}, { ["lib.nvim"] = main_dir })
     wsl.run_bash = saved
     has(got, "head_at 'linked' ", "run: the worktree goes to the mirror through head_at")
-    has(got, ("'%s' ||"):format(linked_head), "run: ... at its HEAD")
+    has(got, ("'%s' 9>&- ||"):format(linked_head), "run: ... at its HEAD")
     has(got, "head_of 'lib.nvim'", "run: an ordinary dependency through head_of")
     vim.fn.delete(base, "rf")
   end
@@ -256,7 +290,7 @@ return function(H)
   )
   has(
     wsl.script({ repo = "r", root = "E:/r", deps = {}, argv = {}, json = "C:/o" }),
-    "head_of 'r' '/mnt/e/r' ||",
+    "head_of 'r' '/mnt/e/r' 9>&- ||",
     "script: the repository itself at the Windows HEAD"
   )
   -- scripts/test.sh hands down `--state-dir <dir>` and, for --cached, `--cache-dir <dir>`: Windows paths, never into WSL.

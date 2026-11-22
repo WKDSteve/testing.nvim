@@ -27,17 +27,45 @@ M.MIRROR = ".cache/testing-wsl"
 ---@return string stdout
 ---@return string stderr
 M.run_bash = function(script, timeout_ms)
+  local err, pending = {}, ""
   local ok, res = pcall(function()
     -- the script on stdin, not as an argument: the Windows command line rewrites quotes and `$(...)` of one long
     -- argument, and the run in WSL then failed to load its own modules
     return vim
-      .system({ "wsl.exe", "-e", "bash", "-s" }, { text = true, stdin = script })
+      .system({ "wsl.exe", "-e", "bash", "-s" }, {
+        text = true,
+        stdin = script,
+        stderr = function(_, data)
+          if not data then
+            return
+          end
+          err[#err + 1] = data
+          pending = M.forward_waiting(pending .. data, io.stderr)
+        end,
+      })
       :wait(timeout_ms)
   end)
   if not ok or not res then
     return 127, "", tostring(res)
   end
-  return res.code or 1, res.stdout or "", res.stderr or ""
+  return res.code or 1, res.stdout or "", table.concat(err)
+end
+
+---Hand the lines of the run's stderr that say it waits for the mirror lock (`M.lock_lines`) to `out` now, not when the
+---run is over: a wait of an hour must be visible while it lasts. The unfinished last line is returned (to be continued
+---by the next chunk).
+---@param text string
+---@param out { write: fun(self: any, s: string) }
+---@return string rest
+function M.forward_waiting(text, out)
+  local rest = text
+  for line, after in text:gmatch("([^\n]*)\n()") do
+    if line:find("testing: wsl: waiting for the mirror lock", 1, true) then
+      out:write(line .. "\n")
+    end
+    rest = text:sub(after)
+  end
+  return rest
 end
 
 ---Replaced by a spec: git in a Windows checkout; its trimmed stdout, nil when it failed.
@@ -96,6 +124,67 @@ local function q(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
+---Seconds a run waits for the mirror lock before it names the holder (and waits on); a spec sets it lower.
+M.LOCK_WAIT_S = 60
+
+---The lines that take the mirror lock (`$M/.lock`, fd 9) and clean up behind the run: `$M` is set before them.
+---
+---The lock is held by this shell alone. Every command started under it gets `9>&-` (`M.run_line`, the mirror calls):
+---a child that inherited fd 9 would hold the lock as long as it lives, and on 2026-11-22 one orphaned, stopped sheet
+---child (a detached `nvim --embed`, out of reach of any process-group kill) held it for an hour while every `--wsl`
+---check of every session waited in `flock 9`.
+---
+---Every process of a run carries `TESTING_WSL_RUN=$M` in its environment (detached children inherit it too). With the
+---lock taken, no other run of this mirror is alive, so a process that still carries the marker is an orphan of an
+---earlier run (one whose shell was killed before its exit trap ran): it is ended (`SIGCONT`, `SIGKILL`) before
+---anything is checked out, and the run's own leftovers are ended the same way when the shell exits.
+---
+---Waiting longer than `M.LOCK_WAIT_S` names the holder on stderr (the pid `/proc/locks` gives, and every process with
+---the lock file open, with state and command line) and waits on.
+---@return string[]
+function M.lock_lines()
+  return {
+    "testing_wsl_sweep() {",
+    -- one grep over every environment (NUL-separated entries), not a process per process
+    '  for e in $(grep -lzxF "TESTING_WSL_RUN=$M" /proc/[0-9]*/environ 2>/dev/null); do',
+    '    p="${e#/proc/}"; p="${p%/environ}"',
+    '    [ "$p" = "$$" ] && continue',
+    '    kill -CONT "$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null',
+    "  done",
+    "}",
+    "testing_wsl_holder() {",
+    '  i="$(stat -c %i "$M/.lock" 2>/dev/null)"',
+    '  l="$(awk -v i="$i" \'$2 == "FLOCK" { n = split($6, a, ":"); if (a[n] == i) print $5 }\' /proc/locks 2>/dev/null)"',
+    '  o=""',
+    "  for f in /proc/[0-9]*/fd/*; do",
+    '    [ "$(readlink "$f" 2>/dev/null)" = "$M/.lock" ] || continue',
+    '    p="${f#/proc/}"; p="${p%%/*}"',
+    '    [ "$p" = "$$" ] && continue',
+    '    o="$o$(ps -o pid=,stat=,args= -p "$p" 2>/dev/null | cut -c1-200)"\'; \'',
+    "  done",
+    '  echo "testing: wsl: waiting for the mirror lock $M/.lock ('
+      .. M.LOCK_WAIT_S
+      .. ' s), locked by pid ${l:-?}; open in: ${o:-none}" >&2',
+    "}",
+    "if command -v flock >/dev/null 2>&1; then",
+    '  exec 9>"$M/.lock"',
+    "  until flock -w " .. M.LOCK_WAIT_S .. " 9; do testing_wsl_holder; done",
+    "fi",
+    "testing_wsl_sweep",
+    "trap testing_wsl_sweep EXIT",
+    "trap 'exit 129' HUP",
+    "trap 'exit 130' INT",
+    "trap 'exit 143' TERM",
+  }
+end
+
+---A command run under the lock: marked as the run's (`TESTING_WSL_RUN`) and without fd 9 (see `M.lock_lines`).
+---@param cmd string
+---@return string
+function M.run_line(cmd)
+  return ('env TESTING_WSL_RUN="$M" %s 9>&-'):format(cmd)
+end
+
 ---The bash script that syncs the mirror and runs `ci commit` there.
 ---@param o { repo: string, root: string, deps: table<string, string>, argv: string[], json: string, worktrees?: table<string, { src: string, head: string }> }
 ---`repo` the directory name, `root` its Windows path, `deps` name -> Windows path, `argv` the arguments of the inner
@@ -110,8 +199,10 @@ function M.script(o)
     'export PATH="$HOME/.local/bin:$PATH"',
     'M="$HOME/' .. M.MIRROR .. '"',
     'mkdir -p "$M"',
-    -- one check at a time per mirror: a second one would check the dependencies out under the running suite
-    'if command -v flock >/dev/null 2>&1; then exec 9>"$M/.lock"; flock 9; fi',
+  }
+  -- one check at a time per mirror: a second one would check the dependencies out under the running suite
+  vim.list_extend(lines, M.lock_lines())
+  vim.list_extend(lines, {
     "sync() {",
     '  if [ ! -d "$M/$1/.git" ]; then git -c core.autocrlf=false clone -q "$2" "$M/$1" || return 1; fi',
     -- HEAD too: a detached HEAD of the Windows checkout is on no branch
@@ -132,14 +223,15 @@ function M.script(o)
       .. '|| git -C "$M/$1" -c core.autocrlf=false fetch -q "$2" "$3" || return 1',
     '  git -C "$M/$1" -c core.autocrlf=false checkout -q --force --detach "$3" || return 1',
     "}",
-  }
+  })
   ---@param name string
   ---@param path string Windows path of the checkout.
   local function mirror(name, path)
     local wt = worktrees[name]
     local fail = ("{ echo 'testing: wsl: cannot mirror %s' >&2; exit 3; }"):format(name)
+    -- `9>&-`: git may leave a background `gc --auto` behind, which must not hold the lock
     if not wt then
-      lines[#lines + 1] = ("head_of %s %s || %s"):format(q(name), q(M.wsl_path(path)), fail)
+      lines[#lines + 1] = ("head_of %s %s 9>&- || %s"):format(q(name), q(M.wsl_path(path)), fail)
       return
     end
     local src = M.wsl_path(wt.src)
@@ -147,7 +239,7 @@ function M.script(o)
       q(src),
       q(("testing: wsl: %s is a worktree of %s, which WSL cannot reach"):format(name, wt.src))
     )
-    lines[#lines + 1] = ("head_at %s %s %s || %s"):format(q(name), q(src), q(wt.head), fail)
+    lines[#lines + 1] = ("head_at %s %s %s 9>&- || %s"):format(q(name), q(src), q(wt.head), fail)
   end
   local names = vim.tbl_keys(o.deps)
   table.sort(names)
@@ -169,11 +261,14 @@ function M.script(o)
   -- a configuration of its own: the runner (`-u NONE` keeps stdpath("config") on the runtimepath) must not see the
   -- user's nvim configuration of the distribution, whose `lua/lib` shadowed lib.nvim's `lib` in specs that run in it
   lines[#lines + 1] = 'mkdir -p "$M/.xdg-config"'
-  lines[#lines + 1] = (
-    'env -u REPOS_DIR -u TESTING_EXPORT_DIR -u TESTING_EXPORT_REPOS_ROOT TESTING_QUEUE=off TESTING_METRICS=off TESTING_TRUST=1 REPOS_DIR="$M" XDG_CONFIG_HOME="$M/.xdg-config" '
-    .. 'nvim -n -i NONE --headless -u NONE -l "$M/testing.nvim/scripts/testing.lua" ci commit '
-    .. '--root=. --no-agent --json="$(wslpath -u %s)" %s'
-  ):format(q(o.json), table.concat(args, " "))
+  -- no `exec`: the shell holds the lock and ends what the run left behind (`M.lock_lines`)
+  lines[#lines + 1] = M.run_line(
+    (
+      'env -u REPOS_DIR -u TESTING_EXPORT_DIR -u TESTING_EXPORT_REPOS_ROOT TESTING_QUEUE=off TESTING_METRICS=off TESTING_TRUST=1 REPOS_DIR="$M" XDG_CONFIG_HOME="$M/.xdg-config" '
+      .. 'nvim -n -i NONE --headless -u NONE -l "$M/testing.nvim/scripts/testing.lua" ci commit '
+      .. '--root=. --no-agent --json="$(wslpath -u %s)" %s'
+    ):format(q(o.json), table.concat(args, " "))
+  )
   return table.concat(lines, "\n") .. "\n"
 end
 
