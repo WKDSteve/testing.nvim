@@ -194,6 +194,11 @@ return {
   reason says which. The workstation rule and the trust gate of the project root are those of every sheet.
 * A real config starts and draws slower: one call may take 30 s, the start 60 s. `settle` rarely fits (a config
   keeps timers running); `wait` for what the step needs. `v:errmsg` is set by a `silent!` too: look at `:messages`.
+* **A start that runs out of time is marked, not hidden.** When the child of an rpc sheet does not start in time (the
+  boot call or its first draw; on a busy machine, all the more with this run at its low CPU priority, `testing.priority`)
+  the sheet is red, but its line says `fail (did not start, no finding)` with the load and the way out
+  (`TESTING_PRIORITY=normal`), and `--result` marks it `"unstarted": true`. It stays red on purpose: a config that hangs at
+  its start looks the same. Run it again when the machine is idle.
 
 The file is read as **data**: `load` with an empty environment, so a sheet cannot call anything while it is
 read (a sheet that touches `os` does not load). What runs is the Lua of its steps, inside the child editor.

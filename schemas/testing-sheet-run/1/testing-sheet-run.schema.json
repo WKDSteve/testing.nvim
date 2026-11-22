@@ -21,7 +21,8 @@
       "required": ["id", "status"],
       "properties": {
         "id": { "description": "The id of the sheet; of a sheet that does not load, its file below the root.", "type": "string", "minLength": 1 },
-        "status": { "description": "skip: it could not run here (no browser, a live sheet without --live); a sheet that waits for a person's judgement is pass.", "enum": ["pass", "fail", "skip"] }
+        "status": { "description": "skip: it could not run here (no browser, a live sheet without --live); a sheet that waits for a person's judgement is pass.", "enum": ["pass", "fail", "skip"] },
+        "unstarted": { "description": "Only on a failed sheet, and only true: every failure is a child that did not start in time (a busy machine, a low CPU priority). The sheet is red, but its steps did not run: no finding of the sheet. Absent otherwise.", "const": true }
       }
     },
     "task": {

@@ -37,6 +37,63 @@ function M.prompt_failure(prompt)
   )
 end
 
+---Whether the error of a child's start is a time limit that ran out (the boot call, or the first `nvim_ui_attach`),
+---not an error the child reported: on a busy machine (a build, a runner, a low CPU priority) the child of a whole
+---config is not slow because of the sheet.
+---@param err any
+---@return boolean
+function M.start_timeout(err)
+  local s = tostring(err)
+  return s:find("timed out after", 1, true) ~= nil or s:find("no answer within", 1, true) ~= nil
+end
+
+---What the machine looked like when a start ran out of time: the load (POSIX; Windows has none) and whether this
+---run has a lowered CPU priority (`testing.priority`, which its children inherit).
+---@param info? { load?: number, cpus?: integer, priority?: integer }
+---@return string
+function M.load_note(info)
+  info = info or {}
+  local parts = {}
+  if info.load and info.load > 0 then
+    parts[#parts + 1] = ("load %.1f on %d CPUs"):format(info.load, info.cpus or 0)
+  end
+  if info.priority and info.priority > 0 then
+    parts[#parts + 1] = "this run has a low CPU priority (TESTING_PRIORITY=normal keeps it normal)"
+  else
+    parts[#parts + 1] = "run it again when the machine is idle"
+  end
+  return table.concat(parts, "; ")
+end
+
+---The machine as `load_note` reads it.
+---@return { load?: number, cpus?: integer, priority?: integer }
+function M.machine()
+  local okl, load = pcall(vim.uv.loadavg)
+  local okp, prio = pcall(vim.uv.os_getpriority, 0)
+  return {
+    load = okl and load or nil,
+    cpus = #(vim.uv.cpu_info() or {}),
+    priority = okp and type(prio) == "number" and prio or nil,
+  }
+end
+
+---The failure of a size whose child did not start in time: marked as a start under load, not as a finding of the
+---sheet (`unstarted`; the sheet stays red: a config that hangs at its start looks the same).
+---@param tag string The size (`120x30`).
+---@param err any
+---@param info? { load?: number, cpus?: integer, priority?: integer } Default: `M.machine()`.
+---@return { failure: string, unstarted: true }
+function M.unstarted_failure(tag, err, info)
+  return {
+    failure = ("%s: the child did not start in time, the machine may be busy (%s): %s"):format(
+      tag,
+      M.load_note(info or M.machine()),
+      (tostring(err):gsub("^the child did not start: ", ""))
+    ),
+    unstarted = true,
+  }
+end
+
 ---@param v any
 ---@return string
 local function shown(v)
@@ -358,13 +415,18 @@ function M.new(s, opts, ctx)
       c, err = nil, c
     end
     if not c then
+      if M.start_timeout(err) then
+        return M.unstarted_failure(tag, err)
+      end
       return { failure = ("%s: the child did not start: %s"):format(tag, tostring(err)) }
     end
     child = c
     local answer
+    local attached = false
     local ok, perr = pcall(function()
       -- attach the UI first: the editor lays out windows (floats too) for the size of its UI
       child.screen()
+      attached = true
       if live then
         -- the guard watches while a case is open: the whole size is one
         child.guard.begin_case({ id = s.id, name = s.title })
@@ -384,7 +446,12 @@ function M.new(s, opts, ctx)
       end
     end)
     if not ok then
-      answer = { failure = mask(("%s: %s"):format(tag, tostring(perr))) }
+      if not attached and M.start_timeout(perr) then
+        -- the first draw of a child that is still starting (its config loads) is part of its start
+        answer = M.unstarted_failure(tag, mask(tostring(perr)))
+      else
+        answer = { failure = mask(("%s: %s"):format(tag, tostring(perr))) }
+      end
     end
     if answer then
       D.close_size()

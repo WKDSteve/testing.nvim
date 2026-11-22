@@ -253,6 +253,7 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field ok boolean
 ---@field status "pass"|"fail"|"manual"|"skip"|"aborted" `aborted` only from a session that was cancelled.
 ---@field skipped? string Why a sheet was skipped (a browser sheet without node, Playwright or chromium).
+---@field unstarted? true Every failure is a child that did not start in time (a busy machine, a low CPU priority): the sheet is red, but its steps did not run (`testing.sheet.driver_rpc.unstarted_failure`).
 ---@field failures string[] One line per failed step (size, step number, what).
 ---@field snapshots string[] The messages of the screen steps (written, matched, updated).
 ---@field measures? Testing.Sheet.Measure[] What the `measure` steps measured, in order.

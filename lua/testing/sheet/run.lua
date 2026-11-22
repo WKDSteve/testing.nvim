@@ -62,6 +62,7 @@ function M.result_doc(o, entries, red, results, exit, problem)
     sheets[#sheets + 1] = {
       id = e.sheet and e.sheet.id or e.rel,
       status = e.case and e.case.status or "fail",
+      unstarted = e.case and e.case.unstarted or nil,
     }
   end
   local tasks_out, written = {}, nil
@@ -508,16 +509,16 @@ function M.main(argv, sv, deps)
           res.skipped
         ) or nil,
         duration_ms = math.floor((vim.uv.hrtime() - started) / 1e6),
+        unstarted = status == "fail" and res.unstarted or nil,
       }
       red = red or status == "fail"
       skipped = skipped or status == "skip"
-      sv.out(
-        ("sheet %s: %s%s"):format(
-          e.sheet.id,
-          res.status,
-          (status == "fail" or status == "skip") and (": " .. tostring(e.case.message)) or ""
-        )
-      )
+      sv.out(("sheet %s: %s%s"):format(
+        e.sheet.id,
+        -- a child that did not start in time is no finding of the sheet: the line says so before the reason
+        e.case.unstarted and (res.status .. " (did not start, no finding)") or res.status,
+        (status == "fail" or status == "skip") and (": " .. tostring(e.case.message)) or ""
+      ))
     end
   end
 

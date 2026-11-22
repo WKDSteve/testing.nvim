@@ -165,6 +165,9 @@ function Session:peek()
       self:_notify(self.tag, "skip", answer.skip)
     elseif answer and answer.failure then
       self.failures[#self.failures + 1] = answer.failure
+      if answer.unstarted then
+        self.unstarted = (self.unstarted or 0) + 1
+      end
       self:_notify(self.tag, "failed", answer.failure)
     else
       self.size_open, self.size_done, self.step_i = true, false, 0
@@ -265,6 +268,8 @@ function Session:result()
     result.ok, result.status = false, "aborted"
   elseif #self.failures > 0 then
     result.ok, result.status = false, "fail"
+    -- every failure is a child that did not start in time: red (nothing was proved), but no finding of the sheet
+    result.unstarted = self.unstarted == #self.failures or nil
   elseif
     self.skipped
     and self.sheet.feature
