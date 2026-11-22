@@ -310,6 +310,11 @@ The command-line runner looks for lib.nvim in four places, in this order: `$LIB_
 `<repo>/.deps/lib.nvim`, a sibling `../lib.nvim`, `stdpath("data")/lazy/lib.nvim`. If none holds it, it
 prints all four and exits with `3`.
 
+The generated `scripts/test.sh` of a project searches two more places after those, so a git worktree (for example
+`<repo>/.claude/worktrees/<name>`, which has no siblings) finds the dependencies without a variable: `$REPOS_DIR/<name>`
+and `<main checkout>/../<name>` (the checkout the worktree was made from, via `git rev-parse --git-common-dir`). An
+override such as `$LIB_NVIM_DIR` still decides alone. Projects pick this up with `testing init --update`.
+
 ## Installation
 
 With [lazy.nvim](https://github.com/folke/lazy.nvim):
