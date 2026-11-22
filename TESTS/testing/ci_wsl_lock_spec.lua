@@ -186,6 +186,42 @@ return function(H)
     ok(pid ~= nil and not gone(pid), "other mirror: its process is not ended")
   end
 
+  -- without flock there is no lock, and another check of the mirror may be running: nothing is swept
+  do
+    local dir = home()
+    local bin = dir .. "/bin"
+    vim.fn.mkdir(bin, "p")
+    for _, tool in ipairs({ "mkdir", "grep", "env", "sh", "true" }) do
+      vim.uv.fs_symlink(vim.fn.exepath(tool), bin .. "/" .. tool)
+    end
+    write(
+      dir .. "/y.sh",
+      ('echo $$ > "%s/y.tmp"; mv "%s/y.tmp" "%s/y.pid"\nsleep 30\n'):format(dir, dir, dir)
+    )
+    vim
+      .system({
+        "bash",
+        "-c",
+        ('setsid sh "%s/y.sh" </dev/null >/dev/null 2>&1 &'):format(dir),
+      }, {
+        env = { TESTING_WSL_RUN = dir .. "/m" },
+      })
+      :wait(5000)
+    local pid = pid_in(dir .. "/y.pid")
+    local res = vim
+      .system({ vim.fn.exepath("bash"), "-s" }, {
+        text = true,
+        stdin = fragment("true"),
+        env = { HOME = dir, PATH = bin },
+      })
+      :wait(20000)
+    ok(res.code == 0, "no flock: the run ends well (" .. tostring(res.stderr) .. ")")
+    ok(
+      pid ~= nil and not gone(pid),
+      "no flock: a process with the mirror's marker is left alone (it may be another check's)"
+    )
+  end
+
   -- the exit code of the run's command is the script's
   do
     local res = run(home(), "sh -c 'exit 7'")

@@ -144,7 +144,11 @@ M.LOCK_WAIT_S = 60
 ---@return string[]
 function M.lock_lines()
   return {
+    -- only while this shell holds the lock: without flock another check of the mirror may be running, and what carries
+    -- the marker may be its
+    "testing_wsl_locked=0",
     "testing_wsl_sweep() {",
+    '  [ "$testing_wsl_locked" = 1 ] || return 0',
     -- one grep over every environment (NUL-separated entries), not a process per process
     '  for e in $(grep -lzxF "TESTING_WSL_RUN=$M" /proc/[0-9]*/environ 2>/dev/null); do',
     '    p="${e#/proc/}"; p="${p%/environ}"',
@@ -156,8 +160,8 @@ function M.lock_lines()
     '  i="$(stat -c %i "$M/.lock" 2>/dev/null)"',
     '  l="$(awk -v i="$i" \'$2 == "FLOCK" { n = split($6, a, ":"); if (a[n] == i) print $5 }\' /proc/locks 2>/dev/null)"',
     '  o=""',
-    "  for f in /proc/[0-9]*/fd/*; do",
-    '    [ "$(readlink "$f" 2>/dev/null)" = "$M/.lock" ] || continue',
+    -- one find over every fd table, not a readlink per descriptor
+    '  for f in $(find /proc/[0-9]*/fd -maxdepth 1 -lname "$M/.lock" 2>/dev/null); do',
     '    p="${f#/proc/}"; p="${p%%/*}"',
     '    [ "$p" = "$$" ] && continue',
     '    o="$o$(ps -o pid=,stat=,args= -p "$p" 2>/dev/null | cut -c1-200)"\'; \'',
@@ -169,6 +173,7 @@ function M.lock_lines()
     "if command -v flock >/dev/null 2>&1; then",
     '  exec 9>"$M/.lock"',
     "  until flock -w " .. M.LOCK_WAIT_S .. " 9; do testing_wsl_holder; done",
+    "  testing_wsl_locked=1",
     "fi",
     "testing_wsl_sweep",
     "trap testing_wsl_sweep EXIT",
