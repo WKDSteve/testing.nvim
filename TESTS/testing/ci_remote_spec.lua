@@ -1547,6 +1547,15 @@ return function(H)
       false,
       "setup_failed: something ran after it"
     )
+    eq(
+      remote.setup_failed({
+        { name = "Set up job", conclusion = "failure" },
+        { name = "Set up runner", conclusion = "skipped" },
+        { name = "Run cargo test", conclusion = "skipped" },
+      }),
+      false,
+      "setup_failed: Set up job red (an outage, an action not downloadable) is no refusal"
+    )
     eq(remote.setup_failed({}), false, "setup_failed: no steps")
   end
 

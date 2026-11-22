@@ -356,8 +356,9 @@ function M.setup_failed(steps)
     return false
   end
   local name = type(steps[failed].name) == "string" and steps[failed].name or ""
-  -- the setup steps of the runner; nothing that ran of the workflow itself
-  if name ~= "Set up runner" and name ~= "Set up job" then
+  -- Only "Set up runner": that is where the job-started hook runs (real refusals of tasks-desktop, 2026-11-22). "Set up
+  -- job" also fails on an outage or an action that cannot be downloaded: that is no refusal.
+  if name ~= "Set up runner" then
     return false
   end
   for i = failed + 1, #steps do

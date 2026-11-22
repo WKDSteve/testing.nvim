@@ -1047,7 +1047,8 @@ stderr says so); a known commit without a run is `no_run`. A hub with a red head
 own run.
 
 **A run the runner guard refused: `guard`.** A job the job-started hook of the [runner guard](RUNNER-GUARD.md) refused
-fails in its setup (`Set up runner` red, every later step skipped): no test ran. When every job of the run is like that,
+fails in its setup (`Set up runner` red, every later step skipped): no test ran. A red `Set up job` is not a refusal
+(an outage, an action that cannot be downloaded); the guard never shows there (real refusals, tasks-desktop, 2026-11-22). When every job of the run is like that,
 the repository carries `"guard": "refused"` (the key is absent otherwise) and a note; `overall` stays `failure`, so a
 reader that does not know the key never reads it as green. The commit needs `testing ci release`, not a fix.
 
