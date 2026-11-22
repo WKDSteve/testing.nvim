@@ -505,12 +505,13 @@ end
 
 ---Collect a process from `start`: its trimmed stdout when it exited 0.
 ---@param obj table|nil
+---@param ms? integer How long to wait (default 10 s).
 ---@return string|nil
-local function collect(obj)
+local function collect(obj, ms)
   if not obj then
     return nil
   end
-  local ok, res = pcall(obj.wait, obj, 10000)
+  local ok, res = pcall(obj.wait, obj, ms or 10000)
   if not ok or not res or res.code ~= 0 then
     return nil
   end
@@ -995,17 +996,25 @@ end
 ---@param facts Testing.Ci.Facts
 ---@return boolean head_moved
 ---@return boolean tree_changed
+---@return boolean head_unknown HEAD could not be read after the run (not even with a longer wait).
 local function after_facts(root, facts)
   if not facts.commit then
-    return false, false
+    return false, false, false
   end
   local head = start({ "git", "rev-parse", "HEAD" }, root)
   local status = facts.status
     and start({ "git", "--no-optional-locks", "status", "--porcelain" }, root)
   local now = collect(head)
+  if now == nil then
+    -- a git that did not answer in time (a machine at 100 % CPU) is not a HEAD that moved: once more, longer
+    now = collect(start({ "git", "rev-parse", "HEAD" }, root), 60000)
+  end
   local st = status and collect(status)
-  return now ~= facts.commit, facts.status ~= nil and st ~= nil and st ~= facts.status
+  return now ~= nil and now ~= facts.commit,
+    facts.status ~= nil and st ~= nil and st ~= facts.status,
+    now == nil
 end
+M._after_facts = after_facts
 
 ---Write the document (state directory, `--json`) and the transitional `.ci-last.json` where git ignores it.
 ---@param doc table
@@ -1606,9 +1615,15 @@ function M.main(argv, sv)
 
   local exit, deciding = exit_code(results)
   -- a commit, a checkout or a step that changed files: the document must not claim the new tree was tested
-  local head_moved, tree_changed = after_facts(root, facts)
+  local head_moved, tree_changed, head_unknown = after_facts(root, facts)
   if head_moved then
     err("testing ci: HEAD moved during the run; the result is about " .. facts.commit)
+  elseif head_unknown then
+    -- nothing says the tested commit is still the checked-out one: no proof, but no claim that it moved either
+    partial_why[#partial_why + 1] = "HEAD could not be read after the run"
+    err(
+      "testing ci: git did not answer after the run (busy machine?); HEAD is not known, the result is partial"
+    )
   end
   if tree_changed then
     partial_why[#partial_why + 1] = "the tree changed during the run"

@@ -987,11 +987,16 @@ local function made_here(cwd, local_sha, remote_sha)
   end
   local merges =
     git_lines(cwd, vim.list_extend({ "rev-list", "--merges", local_sha, "--not" }, base))
-  if not merges or #merges > 0 then
+  if not merges then
+    -- git did not answer (a machine at 100 % CPU): that is not a merge in the range
+    return false, "the range could not be read (git did not answer)"
+  end
+  if #merges > 0 then
     return false, "the range holds a merge commit"
   end
   return true
 end
+M._made_here = made_here
 
 ---`testing ci trust --pushed`: the pre-push hook releases the tip of every branch it pushes when all of what it
 ---adds was made here. Anything else is left to `testing ci trust`. Never fails the push (exit 0).

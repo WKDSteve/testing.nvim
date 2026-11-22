@@ -1321,6 +1321,9 @@ process step's own exit code other than 0 is red), `2` a usage or pipeline error
 with `2` (state `error`), `3` a missing tool or dependency, a step that could not start, or an in-process step that
 ended with `3` (state `infra`), and a report (`ci.json`, `--json`, `--junit`) that could not be written. The last
 line of a complete green run is `TESTING_CI_OK`; never after a partial run, and never when HEAD moved during the run.
+HEAD is read again after the run (in the checkout or linked worktree the run was in); a git that does not answer
+in time (a busy machine) is asked once more with a longer wait, and if it still says nothing the run is partial
+(`HEAD could not be read after the run`), never "HEAD moved".
 The headline names the step that decided the exit code. See [EXIT-CODES.md](EXIT-CODES.md).
 
 ## The document `testing-ci/1`
