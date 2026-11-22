@@ -20,6 +20,9 @@
 #   2. <repo>/.deps/<name>          (what CI checks out)
 #   3. <repo>/../<name>             (a sibling checkout)
 #   4. stdpath('data')/lazy/<name>  (what a plugin manager installed)
+#   5. $REPOS_DIR/<name>            (the root of all checkouts, when the machine sets it)
+#   6. <main checkout>/../<name>    (in a git worktree, the siblings of the checkout it was made from:
+#                                    a worktree under .claude/worktrees has none beside it)
 
 set -euo pipefail
 
@@ -74,7 +77,18 @@ show_path() {
   printf '%s' "${1//\\//}"
 }
 
-# resolve <name>: sets RESOLVED, or exits 1 naming all four places.
+# The checkout this one is a worktree of (empty when it is not one): the parent of the git common dir.
+main_checkout() {
+  local common
+  common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  [[ -n "$common" && "$(basename "$common")" == ".git" ]] || return 0
+  common="$(cd "$common/.." 2>/dev/null && pwd)" || return 0
+  [[ "$common" != "$ROOT" ]] && printf '%s' "$common"
+  return 0
+}
+MAIN_CHECKOUT="$(main_checkout)"
+
+# resolve <name>: sets RESOLVED, or exits 1 naming all the places.
 resolve() {
   local name="$1" marker envname override
   marker="$(marker_of "$name")"
@@ -86,6 +100,9 @@ resolve() {
   p2="$(show_path "$ROOT/.deps/$name")"
   p3="$(show_path "$ROOT/../$name")"
   p4="$(show_path "$DATA/lazy/$name")"
+  local p5="unset" p6="not a worktree"
+  [[ -n "${REPOS_DIR:-}" ]] && p5="$(show_path "$REPOS_DIR/$name")"
+  [[ -n "$MAIN_CHECKOUT" ]] && p6="$(show_path "$MAIN_CHECKOUT/../$name")"
 
   if [[ -n "$override" ]]; then
     # An override that is set decides alone: it is never skipped for another checkout.
@@ -95,7 +112,10 @@ resolve() {
     fi
   else
     local dir
-    for dir in "$ROOT/.deps/$name" "$ROOT/../$name" "$DATA/lazy/$name"; do
+    local -a places=("$ROOT/.deps/$name" "$ROOT/../$name" "$DATA/lazy/$name")
+    [[ -n "${REPOS_DIR:-}" ]] && places+=("$REPOS_DIR/$name")
+    [[ -n "$MAIN_CHECKOUT" ]] && places+=("$MAIN_CHECKOUT/../$name")
+    for dir in "${places[@]}"; do
       if [[ -d "$dir/$marker" ]]; then
         RESOLVED="$dir"
         return 0
@@ -108,6 +128,8 @@ resolve() {
   2. .deps/$name ($p2)
   3. ../$name ($p3)
   4. stdpath('data')/lazy/$name ($p4)
+  5. \$REPOS_DIR/$name ($p5)
+  6. beside the main checkout of this worktree ($p6)
 Set \$$envname, or clone it to .deps/$name, or place it beside this repo."
 }
 
