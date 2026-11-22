@@ -222,6 +222,24 @@ return function(H)
     )
   end
 
+  -- the note of a check that was killed while it waited is removed by the next one that gets the lock (its pid could be
+  -- the holder's later, which would then be counted as waiting instead of named); a living one stays
+  do
+    local dir = home()
+    write(dir .. "/m/.wait.999999999", "")
+    write(dir .. "/m/.wait.1", "")
+    local res = run(dir, "true")
+    ok(res.code == 0, "stale wait note: the run ends well")
+    ok(
+      vim.uv.fs_stat(dir .. "/m/.wait.999999999") == nil,
+      "stale wait note: the note of a pid that is gone is removed"
+    )
+    ok(
+      vim.uv.fs_stat(dir .. "/m/.wait.1") ~= nil,
+      "stale wait note: the note of a living pid stays"
+    )
+  end
+
   -- the exit code of the run's command is the script's
   do
     local res = run(home(), "sh -c 'exit 7'")

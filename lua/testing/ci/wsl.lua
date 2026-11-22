@@ -184,6 +184,9 @@ function M.lock_lines()
     '  : > "$M/.wait.$$"',
     "  until flock -w " .. M.LOCK_WAIT_S .. " 9; do testing_wsl_holder; done",
     '  rm -f "$M/.wait.$$"',
+    -- the note of a check killed while it waited: its pid may be the holder's one day, which would then be counted
+    -- instead of named
+    '  for f in "$M"/.wait.*; do [ -e "$f" ] && [ ! -d "/proc/${f##*.}" ] && rm -f "$f"; done',
     "  testing_wsl_locked=1",
     "fi",
     "testing_wsl_sweep",
