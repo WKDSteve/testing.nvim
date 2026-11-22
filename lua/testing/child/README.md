@@ -135,7 +135,10 @@ its descendants are read from one `ps -A -o pid= -o ppid=` call, then the proces
 started detached, `kill(-pid, SIGKILL)`) **and every descendant** get `SIGKILL`. The descendant walk
 is needed because `jobstart` puts every job in a session of its own (measured on Linux: PGID = SID =
 the helper's pid), so the group kill alone leaves a spec's `jobstart`ed helper alive. The root is killed
-directly if that fails. The children are also killed when the editor quits (`VimLeavePre`; the
+directly if that fails. A frozen root stays remembered until it is killed: when the killer ends before the
+table is read (`os.exit`, which runs no `VimLeavePre`, is wrapped while a root is frozen; a deadly signal runs
+`VimLeavePre`), the root is killed first instead of being left stopped for good (an orphaned stopped process is
+never continued). The children are also killed when the editor quits (`VimLeavePre`; the
 autocmd exists only while a child does). **Limits:** a parent that is itself killed
 cannot clean up; a descendant that was reparented before the walk (its parent died on its own) is
 not found by the walk (POSIX: unless it kept the group); without `ps` only the group dies; on

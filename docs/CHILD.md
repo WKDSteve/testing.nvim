@@ -285,7 +285,8 @@ value snapshots (`a.snapshot`) yet.
   `taskkill /PID /T /F`); POSIX: the root is
   frozen, its descendants are read from one `ps` call, the process group and every descendant get
   SIGKILL (a `jobstart`ed helper has a group of its own). A grandchild that was reparented before
-  the walk is not found. Idempotent.
+  the walk is not found. A killer that ends between the freeze and the kill (`os.exit`, a deadly signal) kills the
+  frozen root first: it is never left stopped. Idempotent.
 * `close_stdin()`: ends the session from the client side; an embedded editor quits by itself (exit
   code 1, reported as `exited`). Nothing hangs when the client goes away.
 

@@ -437,11 +437,24 @@ end
 local live = {}
 local leave_hooked = false
 
----Kill the process trees of all children that are still running.
+---POSIX roots a kill froze (SIGSTOP) and has not killed yet, by pid. The kill reads the process table between the two
+---signals; a killer that ends in that window (its own `os.exit`, a deadly signal) would leave the root stopped for
+---good: it is detached, no group kill of the killer reaches it, and an orphaned stopped process is never continued.
+---`kill_all` (the `VimLeavePre` reaper) takes these too, and `os.exit` is wrapped while one is frozen (`freeze`).
+---@type table<integer, Testing.Child.Handle>
+local frozen = {}
+
+---Kill the process trees of all children that are still running, and of every root a kill froze.
 function M.kill_all()
-  local all = {}
+  local all, seen = {}, {}
   for _, h in pairs(live) do
     all[#all + 1] = h
+    seen[h] = true
+  end
+  for _, h in pairs(frozen) do
+    if not seen[h] then
+      all[#all + 1] = h
+    end
   end
   M.kill_trees(all)
 end
@@ -463,9 +476,64 @@ end
 ---in-process must not leave an autocmd behind (the state guard names it), and an idle editor needs
 ---none. The next `spawn` hooks it again.
 local function unhook_leave()
-  if leave_hooked and next(live) == nil then
+  if leave_hooked and next(live) == nil and next(frozen) == nil then
     leave_hooked = false
     pcall(vim.api.nvim_del_augroup_by_name, "TestingChildReaper")
+  end
+end
+
+---The `os.exit` that was in place when the first root was frozen; nil while none is (no wrapper installed).
+---@type function?
+local exit_before_freeze
+---The wrapper `freeze` installed (it is taken out again only while it is still the one in place).
+---@type function?
+local exit_wrapper
+
+---Kill every frozen root at once, without reading a process table: the editor is ending NOW (`os.exit` does not run
+---`VimLeavePre`). The group of a root (it is detached: its own group) and the root itself get SIGKILL, which also ends
+---a stopped process.
+local function reap_frozen()
+  for pid, h in pairs(frozen) do
+    pcall(vim.uv.kill, -pid, "sigkill")
+    if h.uv_handle and not h.uv_handle:is_closing() then
+      pcall(vim.uv.process_kill, h.uv_handle, 9)
+    else
+      pcall(vim.uv.kill, pid, "sigkill")
+    end
+    frozen[pid] = nil
+  end
+end
+
+---POSIX: freeze the root of `h` (SIGSTOP) and remember it until `thaw` (see `frozen`). The first frozen root hooks the
+---reaper and puts a wrapper in front of `os.exit` that kills the frozen roots first.
+---@param h Testing.Child.Handle
+local function freeze(h)
+  frozen[h.pid] = h
+  hook_leave()
+  if exit_before_freeze == nil then
+    local real = os.exit
+    exit_before_freeze = real
+    exit_wrapper = function(...)
+      reap_frozen()
+      return real(...)
+    end
+    rawset(os, "exit", exit_wrapper)
+  end
+  pcall(vim.uv.kill, h.pid, "sigstop")
+end
+
+---The root of `h` is killed (or the kill gave up): forget it; the last one takes the `os.exit` wrapper out again.
+---@param h Testing.Child.Handle
+local function thaw(h)
+  if frozen[h.pid] == h then
+    frozen[h.pid] = nil
+  end
+  if next(frozen) == nil and exit_before_freeze ~= nil then
+    if os.exit == exit_wrapper then
+      rawset(os, "exit", exit_before_freeze)
+    end
+    exit_before_freeze, exit_wrapper = nil, nil
+    unhook_leave()
   end
 end
 
@@ -759,6 +827,18 @@ local function root_kill(h)
   end
 end
 
+---POSIX: kill a root this kill froze. A handle without a libuv handle (a process that is not our child, such as the
+---app of a sheet) is killed by its number: it is stopped, so it cannot have ended and given the number away.
+---@param h Testing.Child.Handle
+local function frozen_root_kill(h)
+  if h.uv_handle then
+    return root_kill(h)
+  end
+  if not h.ended then
+    pcall(vim.uv.kill, h.pid, "sigkill")
+  end
+end
+
 ---The kill of the trees of `hs` (handles whose tree is to be taken now), ONE process table for all of them.
 ---`exec` and `pause` decide whether it waits (the sync path: the editor is quitting, or the caller needs the result)
 ---or goes on in callbacks (the supervisor of a run must not stand still for the seconds a Windows snapshot takes).
@@ -861,19 +941,18 @@ local function kill_trees(hs, exec, pause, done)
     return
   end
   for _, h in ipairs(hs) do
-    pcall(vim.uv.kill, h.pid, "sigstop")
+    freeze(h)
   end
   read_table(exec, function(procs)
     for _, h in ipairs(hs) do
       ---@type { pid: integer, created: integer }[]
       local below = procs and below_of(procs, h.pid) or {}
-      if not pcall(vim.uv.kill, -h.pid, "sigkill") then
-        root_kill(h)
-      end
+      pcall(vim.uv.kill, -h.pid, "sigkill")
       for _, d in ipairs(below) do
         pcall(vim.uv.kill, d.pid, "sigkill")
       end
-      root_kill(h)
+      frozen_root_kill(h)
+      thaw(h)
     end
     done()
   end)
@@ -953,7 +1032,12 @@ local function flush()
   -- (POSIX: SIGSTOP was sent): the roots are killed directly and the queue goes on
   local function fail()
     for _, h in ipairs(batch) do
-      root_kill(h)
+      if frozen[h.pid] == h then
+        frozen_root_kill(h)
+        thaw(h)
+      else
+        root_kill(h)
+      end
     end
     finish()
   end
