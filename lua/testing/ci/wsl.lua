@@ -1,3 +1,5 @@
+-- @cache-allow outside
+-- (the absolute paths here, `/proc/locks` among them, are read by the bash in WSL; this process never reads them)
 ---@module 'testing.ci.wsl'
 ---@brief `testing ci commit --wsl`: the same check in WSL2, about ten times faster than on Windows.
 ---@description
