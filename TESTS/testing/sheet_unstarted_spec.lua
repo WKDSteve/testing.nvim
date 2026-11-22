@@ -67,9 +67,31 @@ return function(H)
   ok(boot.unstarted == true, "and marks it unstarted: " .. vim.inspect(boot.failures))
   has(boot.failures[1], "did not start in time", "the failure says it did not start in time")
 
-  local attach = run({ { expect = "true" } }, { call_timeout_ms = 1 })
+  -- the first draw: a stand-in for `testing.rpc` whose child times out in its first `screen` (a real child answers
+  -- `nvim_ui_attach` within 1 ms on a fast Linux machine, so a lowered limit proves nothing there)
+  local real_rpc = package.loaded["testing.rpc"]
+  local function fake_rpc(screen_err)
+    package.loaded["testing.rpc"] = setmetatable({
+      spawn = function()
+        return {
+          screen = function()
+            error(screen_err, 0)
+          end,
+          kill = function() end,
+        }
+      end,
+    }, { __index = real_rpc })
+  end
+  fake_rpc("RPC call nvim_ui_attach timed out after 30000 ms (child pid 1 was killed)")
+  local okr, attach = pcall(run, { { expect = "true" } })
+  package.loaded["testing.rpc"] = real_rpc
+  ok(okr, "the run with a stand-in child does not raise: " .. tostring(attach))
   eq(attach.status, "fail", "a first draw that ran out of time leaves the sheet red")
   ok(attach.unstarted == true, "and is a start too: " .. vim.inspect(attach.failures))
+  fake_rpc("E5108: boom")
+  local okd, drawn = pcall(run, { { expect = "true" } })
+  package.loaded["testing.rpc"] = real_rpc
+  ok(okd and drawn.unstarted == nil, "a first draw that raised otherwise is an ordinary failure")
 
   local real = run({ { expect = "false" } })
   eq(real.status, "fail", "a step that fails in a started child is red")
