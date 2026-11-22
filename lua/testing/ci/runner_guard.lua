@@ -808,7 +808,7 @@ local function repo_of_cwd(ctx, cwd)
     end
     ---@cast proc vim.SystemObj
     r = proc:wait(ms)
-    -- `SystemObj:wait` ends a process past its time with SIGTERM: code 124
+    -- `SystemObj:wait` kills a process past its time (SIGKILL): code 124 with a signal
     if not (r.code == 124 and (r.signal or 0) ~= 0) then
       break
     end
@@ -955,6 +955,7 @@ end
 ---@param cwd string
 ---@param args string[]
 ---@return string[]|nil
+---@return string|nil why `timeout` when git did not answer in time (a busy machine), else nil
 local function git_lines(cwd, args)
   local ok, proc = pcall(vim.system, vim.list_extend({ "git", "-C", cwd }, args), { text = true })
   if not ok then
@@ -962,6 +963,9 @@ local function git_lines(cwd, args)
   end
   ---@cast proc vim.SystemObj
   local r = proc:wait(30000)
+  if r.code == 124 and (r.signal or 0) ~= 0 then
+    return nil, "timeout"
+  end
   if r.code ~= 0 then
     return nil
   end
@@ -984,9 +988,12 @@ local function made_here(cwd, local_sha, remote_sha)
   if new_branch then
     added[#added + 1] = "--remotes"
   end
-  local mine = git_lines(cwd, added)
+  local mine, mine_why = git_lines(cwd, added)
   if not mine then
-    return false, "the range is not known here (fetch first)"
+    -- a git that did not answer is not a range that is missing here
+    return false,
+      mine_why == "timeout" and "the range could not be read (git did not answer)"
+        or "the range is not known here (fetch first)"
   end
   if #mine == 0 then
     return false, "nothing new to release"

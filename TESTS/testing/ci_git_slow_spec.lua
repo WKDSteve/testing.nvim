@@ -107,4 +107,18 @@ return function(H)
       "it says the range could not be read"
     )
   end
+
+  -- ---- the runner guard: a first `rev-list` that runs out of time is not a range missing here ----------------------
+  do
+    local _, restore = stub(function()
+      return nil -- every git call runs out of its wait
+    end)
+    local good, why = guard._made_here("/root", SHA, string.rep("c", 40))
+    restore()
+    eq(good, false, "a range git could not read is not released")
+    ok(
+      not tostring(why):find("fetch first", 1, true),
+      "and is not called missing here: " .. tostring(why)
+    )
+  end
 end

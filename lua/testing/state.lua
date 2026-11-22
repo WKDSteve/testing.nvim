@@ -79,6 +79,7 @@ local uv = vim.uv or vim.loop
 ---@field describe? string[]
 ---@field name? string
 ---@field message? string  First failing assertion (or the error, or the skip reason), first line.
+---@field unstarted? true  A sheet's case: every failure is a child that did not start in time (`testing.sheet.run`).
 ---@field expected? string
 ---@field actual? string
 ---@field fails? Testing.State.Fail[]  Every failing assertion with its source line (at most `MAX_FAILS`), for a case that is a whole file.
