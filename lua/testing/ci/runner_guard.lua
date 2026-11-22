@@ -787,20 +787,35 @@ function M.parse_trust(argv)
   return a
 end
 
+---How long `repo_of_cwd` waits for git: the first wait, and the one more when the first ran out (a machine at 100 %
+---CPU, a pre-push hook among many processes: a git start alone took longer than 10 s).
+M.ORIGIN_WAITS_MS = { 10000, 60000 }
+
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@param cwd? string
----@return string|nil
+---@return string|nil repo `owner/name`
+---@return string|nil why `timeout` when git did not answer in time (not even on the longer wait), else nil
 local function repo_of_cwd(ctx, cwd)
-  local ok, proc = pcall(
-    vim.system,
-    { "git", "-C", cwd or ".", "remote", "get-url", "origin" },
-    { text = true }
-  )
-  if not ok then
-    return nil
+  local r
+  for _, ms in ipairs(M.ORIGIN_WAITS_MS) do
+    local ok, proc = pcall(
+      vim.system,
+      { "git", "-C", cwd or ".", "remote", "get-url", "origin" },
+      { text = true }
+    )
+    if not ok then
+      return nil
+    end
+    ---@cast proc vim.SystemObj
+    r = proc:wait(ms)
+    -- `SystemObj:wait` ends a process past its time with SIGTERM: code 124
+    if not (r.code == 124 and (r.signal or 0) ~= 0) then
+      break
+    end
   end
-  ---@cast proc vim.SystemObj
-  local r = proc:wait(10000)
+  if r.code == 124 and (r.signal or 0) ~= 0 then
+    return nil, "timeout"
+  end
   if r.code ~= 0 then
     return nil
   end
@@ -1006,10 +1021,14 @@ M._made_here = made_here
 ---@return integer
 function M.trust_pushed(stdin, sv, ctx)
   local cwd = sv.cwd or "."
-  local repo = repo_of_cwd(ctx, cwd)
+  local repo, origin_why = repo_of_cwd(ctx, cwd)
   local key = repo_key(repo)
   if not key then
-    sv.err("testing ci trust --pushed: no origin to name a repository: nothing released")
+    sv.err(
+      origin_why == "timeout"
+          and "testing ci trust --pushed: git did not answer in time (busy machine?), the origin is not known: nothing released; push again or name the commit to `testing ci trust` when the machine is idle"
+        or "testing ci trust --pushed: no origin to name a repository: nothing released"
+    )
     return 0
   end
   local path = M.store_path(M.root(ctx))

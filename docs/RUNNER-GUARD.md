@@ -199,7 +199,9 @@ releases the tip of each pushed branch **only if every commit the push adds was 
 commit, and no commit reachable from a remote-tracking ref (a commit you fetched, also one built upon, comes from a
 remote). Anything else prints the `testing ci trust` command for a review and releases nothing. A deleted branch, a
 tag, a remote tip that was never fetched, and a push without an `origin` release nothing. The call never fails the
-push. It is opt-in (`--auto-trust`): without it the hook releases nothing.
+push. A git that does not answer in time (a busy machine) is asked once more with a longer wait; when it still says
+nothing the hook says so (`git did not answer in time`) instead of "no origin", and a range git could not read is
+named as such, never as a merge commit. It is opt-in (`--auto-trust`): without it the hook releases nothing.
 The release happens before git sends the push: a push that is then rejected leaves an entry for a commit that is not on
 GitHub, which does no harm (it names exactly that content). `trust --pushed` reads git's lines from stdin, so run
 it by hand only with a pipe.
