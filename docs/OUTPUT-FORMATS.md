@@ -569,6 +569,22 @@ On the workstation (`NVIM_MACHINE_ROLE=workstation`) the export reads no local r
 false` a client shows them as unknown); `--remote` still asks the CI adapter. Another value than `workstation` or
 `default` is refused (exit `2`). The export never starts a test run, on any machine.
 
+#### Classifying a new repository
+
+A repository that is not in the data classes of the device is `unclassified` and is left out (the summary line says
+`unclassified N`; fail-closed, so it is also missing from a hub's traffic light). To release it, add an entry to
+`areas.json` of tasks-desktop (Windows `%APPDATA%/tasks-desktop/areas.json`; the file `testing export` reads through
+`lib.nvim.data_classes`), keyed by the area name, with the repository directory name in `repo`:
+
+```json
+"my-new-repo": { "class": "internal", "repo": "my-new-repo" }
+```
+
+`class` is `public`, `internal` (both exported) or `private` (never exported). When unsure, use `internal`: a
+repository that is public on GitHub is still fine as `internal`. A `"default"` key of the file does not classify
+anything. Run `testing export --out <scratch> --repos-root=<dir>` again: `unclassified 0` means every repository found
+has a class.
+
 ### Redaction and paths
 
 `last.json` keeps messages as the code under test wrote them, with absolute paths. Every free text of a document
