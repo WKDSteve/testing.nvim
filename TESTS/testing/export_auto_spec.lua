@@ -101,13 +101,26 @@ return function(H)
     "after: one line, the summary"
   )
 
+  -- `scripts/test.sh` names the real state with --state-dir on the command line: the export reads that one, not the
+  -- throwaway stdpath("state") (an export from there is empty and replaces the full one)
+  eq(
+    auto.after("commit", { "--state-dir=D:/real/state", "HEAD" }, sv),
+    true,
+    "after: with --state-dir"
+  )
+  eq(
+    calls[2].state_dir,
+    "D:/real/state",
+    "after: the state of the command line wins over the services'"
+  )
+
   eq(auto.after("commit", { "HEAD", "--quick" }, sv), nil, "after: nothing for --quick")
-  eq(#calls, 1, "after: --quick does not export")
+  eq(#calls, 2, "after: --quick does not export")
 
   sv.export_after = { dir = "C:/x" }
   auto.after("land", {}, sv)
   eq(
-    calls[2].argv[3],
+    calls[3].argv[3],
     "--repos-root=" .. vim.fs.dirname(root),
     "after: without a root, the folder above the repository"
   )

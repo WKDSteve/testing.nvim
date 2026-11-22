@@ -45,6 +45,7 @@ end
 ---@param kind "commit"|"land"
 ---@param argv string[] The arguments after `ci commit` / `ci land`.
 ---@return string|nil root
+---@return string|nil state_dir The `--state-dir` of the command line (`scripts/test.sh` names the real one there).
 function M.final_root(kind, argv)
   local ok, args =
     pcall(require(kind == "land" and "testing.ci.land" or "testing.ci.commit").parse, argv)
@@ -54,7 +55,9 @@ function M.final_root(kind, argv)
   if kind == "commit" and (args.quick or #(args.repos_roots or {}) > 0) then
     return nil
   end
-  return (vim.fs.normalize(vim.fn.fnamemodify(args.root or ".", ":p")):gsub("/$", ""))
+  local root = vim.fs.normalize(vim.fn.fnamemodify(args.root or ".", ":p")):gsub("/$", "")
+  local state = args.state_dir and args.state_dir ~= "" and vim.fs.normalize(args.state_dir) or nil
+  return root, state
 end
 
 ---Write the export after a run; one line on `sv.out` either way. Never raises.
@@ -67,7 +70,7 @@ function M.after(kind, argv, sv)
   if type(auto) ~= "table" or type(auto.dir) ~= "string" then
     return nil
   end
-  local root = M.final_root(kind, argv)
+  local root, run_state = M.final_root(kind, argv)
   if not root then
     return nil
   end
@@ -85,7 +88,9 @@ function M.after(kind, argv, sv)
       errs[#errs + 1] = line
     end,
     env = sv.env,
-    state_dir = sv.state_dir,
+    -- the state the run was given: `scripts/test.sh` points `stdpath("state")` at a throwaway folder and names the real
+    -- one with `--state-dir` on the command line (never in `sv`); read without it, the export holds no runs, no cases
+    state_dir = run_state or sv.state_dir,
   })
   if ok and code == 0 then
     sv.out(("export (%s): %s"):format(M.DIR_ENV, said[#said] or "written"))

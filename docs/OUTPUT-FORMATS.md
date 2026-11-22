@@ -507,7 +507,9 @@ nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci --repos-root=<dir> 
 final check before a push, `--wsl` too) and `testing ci land` end with `testing export --out $TESTING_EXPORT_DIR
 --repos-root=<root>` (root: `TESTING_EXPORT_REPOS_ROOT`, else `REPOS_DIR`, else the folder above the repository), about
 3 s for 60 repositories, and one line `export (TESTING_EXPORT_DIR): ...`. The same code and the same data classes as by
-hand; nothing is committed or pushed. A failing export (another writer, a refused folder) is that line and nothing else:
+hand, reading the run's state directory: the `--state-dir` of the command line (`scripts/test.sh` names the real one
+there and points `stdpath("state")` at a throwaway folder, which would hold no runs and no cases); a check in WSL2
+exports from the Windows process, never from inside WSL. Nothing is committed or pushed. A failing export (another writer, a refused folder) is that line and nothing else:
 the verdict and the exit code of the run stand. Never under a CI service (`CI` set) and never for a library call of
 `cli.main` (only the command-line entry arms it). Point hub-desktop's `testing_export` at the same folder and its lights
 follow each push.
