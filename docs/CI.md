@@ -604,7 +604,9 @@ user on that machine:
 - light, never waiting: a selected suite (`--file`, `--affected`, `--changed`, `--only`, ...), a run without the suite
   step (the `fast` profile of the pre-push hook), `--shard`, `--watch`;
 - a lane of its own: `testing ci commit --quick` waits for another quick run (`heavy-run-<user>-quick.lock`, the same
-  slots and the same fair order), never behind a full run. At most one full and one quick run go at the same time. Measured
+  slots and the same fair order), never behind a full run. At most one full and one quick run go at the same time;
+  a job of a CI service (`CI=true`, e.g. a self-hosted runner on a machine that also runs local work) has a lane of
+  its own too (`heavy-run-<user>-ci.lock`): it waits for another CI job, never behind a local run until the job limit. Measured
   2026-11-12 to 11-20 before the lane: 75.6 of 98 hours of waiting were quick runs behind full ones, the p90 wait 17
   minutes, which made "check each commit at once in the background" a wait.
 

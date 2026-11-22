@@ -79,6 +79,24 @@ return function(H)
     "from_env: the default file in temp"
   )
 
+  -- a CI job (`CI=true`) queues in a lane of its own, never behind a local run; an explicit file stays as it is
+  local ci_env = function(extra)
+    return function(name)
+      return extra[name] or (name == "CI" and "true" or nil)
+    end
+  end
+  local local_path = queue.from_env(function() end).path
+  eq(
+    queue.from_env(ci_env({})).path,
+    (local_path:gsub("%.lock$", "")) .. "-ci.lock",
+    "from_env: CI=true has a lane of its own"
+  )
+  eq(
+    queue.from_env(ci_env({ TESTING_QUEUE_FILE = "/x.lock" })).path,
+    "/x.lock",
+    "from_env: an explicit file wins"
+  )
+
   -- take, nest, give back
   local h = queue.acquire(q(), "suite A", say)
   ok(h and h.held, "acquire: taken")

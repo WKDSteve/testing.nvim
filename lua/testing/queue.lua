@@ -55,6 +55,8 @@ function M.clock_ms()
   local sec, usec = uv.gettimeofday()
   return sec * 1000 + math.floor(usec / 1000)
 end
+---The lane of the jobs of a CI service (`$CI=true`).
+M.CI_LANE = "ci"
 ---A ticket that cannot be read as one is removed after this long (one being written is not).
 M.GARBAGE_TICKET_S = 60
 
@@ -101,12 +103,18 @@ function M.from_env(getenv)
   if not slots or slots ~= math.floor(slots) or slots < 1 or slots > 16 then
     slots = M.DEFAULT_SLOTS
   end
-  return {
+  local q = {
     path = (file and file ~= "") and file or M.default_path(),
     token = (token and token ~= "") and token or nil,
     off = getenv(M.OFF_ENV) == "off",
     slots = slots,
   }
+  -- a job of a CI service (a self-hosted runner shares the machine with the local runs) has a lane of its own: it
+  -- waits for another CI job, never behind a local `ci commit` for up to the job limit (an explicit file stays)
+  if getenv("CI") == "true" and not (file and file ~= "") then
+    q = M.lane(q, M.CI_LANE) --[[@as Testing.Queue]]
+  end
+  return q
 end
 
 ---The queue of a lane of its own beside `q`: the same rules (slots, fairness, the token of a holder), another lock
