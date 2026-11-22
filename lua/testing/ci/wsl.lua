@@ -1,5 +1,5 @@
 -- @cache-allow outside
--- (the absolute paths here, `/proc/locks` among them, are read by the bash in WSL; this process never reads them)
+-- (the absolute paths here, below `/proc` among them, are read by the bash in WSL; this process never reads them)
 ---@module 'testing.ci.wsl'
 ---@brief `testing ci commit --wsl`: the same check in WSL2, about ten times faster than on Windows.
 ---@description
@@ -141,8 +141,8 @@ M.LOCK_WAIT_S = 60
 ---earlier run (one whose shell was killed before its exit trap ran): it is ended (`SIGCONT`, `SIGKILL`) before
 ---anything is checked out, and the run's own leftovers are ended the same way when the shell exits.
 ---
----Waiting longer than `M.LOCK_WAIT_S` names the holder on stderr (the pid `/proc/locks` gives, and every process with
----the lock file open, with state and command line) and waits on.
+---Waiting longer than `M.LOCK_WAIT_S` names the holder on stderr (every process with the lock file open that is not
+---a waiting check, with pid, state and command line; the waiting checks are counted) and waits on.
 ---@return string[]
 function M.lock_lines()
   return {
@@ -158,23 +158,32 @@ function M.lock_lines()
     '    kill -CONT "$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null',
     "  done",
     "}",
+    -- the holder from the fd tables, not /proc/locks: the lock is taken by the flock program, which has ended since,
+    -- and a lock of a pid that is gone is not listed there. A check that waits has fd 9 too (and so has its flock
+    -- child): it says so with `$M/.wait.<pid>` while it waits, and is counted, not named.
     "testing_wsl_holder() {",
-    '  i="$(stat -c %i "$M/.lock" 2>/dev/null)"',
-    '  l="$(awk -v i="$i" \'$2 == "FLOCK" { n = split($6, a, ":"); if (a[n] == i) print $5 }\' /proc/locks 2>/dev/null)"',
-    '  o=""',
+    '  h=""; w=0; seen=" "',
     -- one find over every fd table, not a readlink per descriptor
     '  for f in $(find /proc/[0-9]*/fd -maxdepth 1 -lname "$M/.lock" 2>/dev/null); do',
     '    p="${f#/proc/}"; p="${p%%/*}"',
+    '    case "$seen" in *" $p "*) continue;; esac',
+    '    seen="$seen$p "',
     '    [ "$p" = "$$" ] && continue',
-    '    o="$o$(ps -o pid=,stat=,args= -p "$p" 2>/dev/null | cut -c1-200)"\'; \'',
+    '    [ "$(ps -o comm= -p "$p" 2>/dev/null)" = flock ] && continue',
+    '    if [ -e "$M/.wait.$p" ]; then w=$((w + 1)); continue; fi',
+    '    s="$(ps -o pid=,stat=,args= -p "$p" 2>/dev/null | cut -c1-200)"',
+    '    [ -n "$s" ] && h="$h${h:+; }$s"',
     "  done",
     '  echo "testing: wsl: waiting for the mirror lock $M/.lock ('
       .. M.LOCK_WAIT_S
-      .. ' s), locked by pid ${l:-?}; open in: ${o:-none}" >&2',
+      .. ' s), held by: ${h:-?} ($w other check(s) waiting)" >&2',
     "}",
     "if command -v flock >/dev/null 2>&1; then",
     '  exec 9>"$M/.lock"',
+    "  trap 'rm -f \"$M/.wait.$$\"' EXIT",
+    '  : > "$M/.wait.$$"',
     "  until flock -w " .. M.LOCK_WAIT_S .. " 9; do testing_wsl_holder; done",
+    '  rm -f "$M/.wait.$$"',
     "  testing_wsl_locked=1",
     "fi",
     "testing_wsl_sweep",

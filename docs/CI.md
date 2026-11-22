@@ -335,8 +335,9 @@ by the shell of the check alone: nothing it starts inherits the lock's file desc
 stopped, orphaned sheet child, say) cannot keep it. Every process of a check carries `TESTING_WSL_RUN` (the mirror's
 path) in its environment; what still carries it when the check ends is ended (`SIGCONT`, `SIGKILL`), and so is the
 leftover of an earlier check whose shell was killed, before the next check checks anything out. A check that waits
-longer than a minute for the lock says so, with the holder (`testing: wsl: waiting for the mirror lock ..., locked by
-pid <pid>; open in: <pid> <state> <command>`), and waits on. The export folder
+longer than a minute for the lock says so, with the holder (`testing: wsl: waiting for the mirror lock ..., held by:
+<pid> <state> <command> (<n> other check(s) waiting)`), and waits on. A holder in state `T` whose check is over is
+such a leftover: ending that pid (`kill -CONT <pid>; kill -9 <pid>`) frees the lock. The export folder
 (`TESTING_EXPORT_DIR`) is not written from inside WSL either (the variables are unset there, also when `WSLENV` hands them
 down): it would see only the WSL state and replace the full export of Windows; the Windows process writes it afterwards.
 

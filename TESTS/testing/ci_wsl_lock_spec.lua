@@ -228,10 +228,17 @@ return function(H)
     H.eq(res.code, 7, "exit code: the command's, through the exit trap")
   end
 
-  -- waiting longer than LOCK_WAIT_S names the holder, then the run goes on once the lock is free
+  -- waiting longer than LOCK_WAIT_S names the holder, then the run goes on once the lock is free. The holder is taken
+  -- as on 2026-11-22: the flock program locks fd 9 and ends (so /proc/locks names no living pid), and what holds it
+  -- is a process that inherited the fd; a second waiting check is counted, not named.
   do
     local dir = home()
-    local holder = vim.system({ "flock", "-o", dir .. "/m/.lock", "sleep", "31.7" })
+    local holder = vim.system({
+      "bash",
+      "-c",
+      'exec 9>"$0"; flock 9; exec sleep 31.7',
+      dir .. "/m/.lock",
+    }, { stdin = false, stdout = false, stderr = false })
     vim.wait(2000, function()
       return not lock_free(dir)
     end, 20)
@@ -241,18 +248,28 @@ return function(H)
     local ok_start, job = pcall(start, dir, "true", function(_, data)
       err[#err + 1] = data
     end)
+    local ok_second, second = pcall(start, dir, "true")
     wsl.LOCK_WAIT_S = saved
-    ok(ok_start, "holder: the run starts")
+    ok(ok_start and ok_second, "holder: the runs start")
     local said = vim.wait(10000, function()
-      return table.concat(err):find("waiting for the mirror lock", 1, true) ~= nil
+      return table.concat(err):find("1 other check(s) waiting", 1, true) ~= nil
     end, 50)
     local text = table.concat(err)
-    ok(said, "holder: a run that waits says so: " .. text)
-    H.has(text, ("locked by pid %d"):format(holder.pid), "holder: the pid from /proc/locks")
-    H.has(text, "sleep 31.7", "holder: the command line of what has the lock open")
+    ok(said, "holder: a run that waits says so, and counts the other waiting check: " .. text)
+    ok(
+      text:find("held by: +" .. holder.pid .. " ") ~= nil,
+      "holder: the pid of the process that holds the lock: " .. text
+    )
+    H.has(text, "sleep 31.7", "holder: its command line")
+    ok(
+      not text:find("held by:[^\n]*bash %-s"),
+      "holder: a waiting check is not named as the holder: " .. text
+    )
     holder:kill(9)
     local res = ok_start and job:wait(10000) or {}
     ok(res.code == 0, "holder: the run goes on once the lock is free")
+    local res2 = ok_second and second:wait(10000) or {}
+    ok(res2.code == 0, "holder: and so does the second one")
   end
 
   for _, pid in ipairs(leftovers) do

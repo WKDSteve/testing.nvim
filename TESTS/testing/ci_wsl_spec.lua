@@ -93,13 +93,14 @@ return function(H)
       end,
     }
     local rest = wsl.forward_waiting(
-      "noise\ntesting: wsl: waiting for the mirror lock /m/.lock (60 s), loc",
+      "noise\ntesting: wsl: waiting for the mirror lock /m/.lock (60 s), hel",
       sink
     )
     eq(out, {}, "forward: half a line is kept back")
-    rest = wsl.forward_waiting(rest .. "ked by pid 7; open in: none\nmore\npart", sink)
+    rest =
+      wsl.forward_waiting(rest .. "d by: 7 T sleep (0 other check(s) waiting)\nmore\npart", sink)
     eq(out, {
-      "testing: wsl: waiting for the mirror lock /m/.lock (60 s), locked by pid 7; open in: none\n",
+      "testing: wsl: waiting for the mirror lock /m/.lock (60 s), held by: 7 T sleep (0 other check(s) waiting)\n",
     }, "forward: the waiting line, whole, and nothing else")
     eq(rest, "part", "forward: the unfinished last line comes back")
   end
