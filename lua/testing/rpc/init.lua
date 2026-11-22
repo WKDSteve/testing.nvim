@@ -1177,6 +1177,13 @@ local function build_child(S, opts)
         end
         table.sort(parts)
         local why = ("not idle after %d ms: %s"):format(limit, table.concat(parts, "; "))
+        if last == nil then
+          -- no probe found work: the probes themselves took longer than the limit (a busy machine), not a busy child
+          why = (
+            "not idle after %d ms: no probe found work, but %d quiet probe(s) in a row did not fit in the limit "
+            .. "(a busy machine answers slowly: a longer settle, or TESTING_PRIORITY=normal)"
+          ):format(limit, rounds)
+        end
         if settle_opts.raise then
           error(why, 0)
         end
