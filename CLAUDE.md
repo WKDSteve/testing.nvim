@@ -62,3 +62,4 @@ pre-push-Hook ab, auch aus WSL2 (für ein Profil ohne Windows-spezifischen Schri
 läuft nur `scripts/test.sh --file <teil>`. Ein umgeschriebener Commit (Rebase, Amend) mit gleichem Baum behält sein
 Urteil. Vor einem Push, der Exporte entfernt oder umbenennt: `testing callers` (CI-09). Wartet die eigene Aufgabe nur
 noch auf die CI, eine kleine Task nehmen statt warten (CI-10).
+- Git: In einer Cloud-Sitzung (`CLAUDE_CODE_REMOTE` gesetzt) nie auf `main` pushen, nur auf den eigenen Branch `claude/…`; gelandet wird lokal per Rebase, der Geräteschlüssel signiert dabei (`GIT-09`). Das „auf main pushen“ (`GIT-01`) gilt nur lokal.
