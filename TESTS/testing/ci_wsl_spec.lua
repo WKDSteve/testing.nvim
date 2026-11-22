@@ -74,6 +74,11 @@ return function(H)
     "TESTING_QUEUE=off TESTING_METRICS=off",
     "script: queue and metrics are the Windows side's"
   )
+  has(
+    script,
+    "-u TESTING_EXPORT_DIR -u TESTING_EXPORT_REPOS_ROOT",
+    "script: the export is the Windows side's (the WSL state alone would replace it with an empty one)"
+  )
   local inner = script:match("ci commit (.-)\n")
   ok(inner ~= nil, "script: the inner ci commit")
   local root_at, dashdash_at = inner:find("--root=.", 1, true), inner:find("'--'", 1, true)

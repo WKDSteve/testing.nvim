@@ -330,7 +330,9 @@ changes are not seen), runs the ordinary `ci commit` there and prints its report
 those names would be its own refs. Options of this side never go into WSL (`--root`, `--json`, `--state-dir`, a
 `--cache-dir` of the suite: Windows paths). It takes no turn in the queue (a minute must not wait behind a Windows run
 of ten) and writes its metrics line with `os = "wsl"`; two `--wsl` checks at once wait for each other on a lock of
-the mirror (`flock`), since the second would check the dependencies out under the first one's suite.
+the mirror (`flock`), since the second would check the dependencies out under the first one's suite. The export folder
+(`TESTING_EXPORT_DIR`) is not written from inside WSL either (the variables are unset there, also when `WSLENV` hands them
+down): it would see only the WSL state and replace the full export of Windows; the Windows process writes it afterwards.
 
 **A clean result in WSL2 is the proof here too** (decided 2026-11-21), for a profile without a Windows-specific step
 (a step whose `os` names `windows` and not `linux`): a clean, whole run (not `--quick`) is kept on this side as the
