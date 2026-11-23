@@ -138,6 +138,44 @@ return function(H)
 
   sv.export_after = nil
   eq(auto.after("land", {}, sv), nil, "after: nothing armed, nothing written (a library call)")
+
+  -- after_run: a plain suite run (`scripts/test.sh`, `testing fast`) leaves the hubs on an old state unless it writes too
+  result.code, result.raise, lines = 0, nil, {}
+  eq(auto.after_run(root, nil, sv), nil, "after_run: nothing armed, nothing written")
+  sv.export_after = { dir = "C:/x", repos_root = "E:/repos" }
+  eq(auto.after_run(root, nil, sv), true, "after_run: written")
+  eq(
+    calls[#calls],
+    { argv = { "--out", "C:/x", "--repos-root=E:/repos" }, state_dir = "S" },
+    "after_run: the same export, the run's state"
+  )
+
+  -- the real path: a plain run of a project through `testing.cli` ends with the export, and a red run too
+  local proj = vim.fs.normalize(vim.fn.tempname())
+  vim.fn.mkdir(proj .. "/TESTS", "p")
+  local spec = assert(io.open(proj .. "/TESTS/x_spec.lua", "wb"))
+  spec:write("return function(H)\n  H.ok(true, 'x')\nend\n")
+  spec:close()
+  local function run(extra)
+    local n = #calls
+    local out = {}
+    local code = require("testing.cli").main(vim.list_extend({ proj, "--no-cache" }, extra or {}), {
+      out = function(s)
+        out[#out + 1] = s
+      end,
+      err = function() end,
+      state_dir = proj .. "/state",
+      color = false,
+      export_after = { dir = "C:/y", repos_root = "E:/repos" },
+    })
+    return code, #calls - n, table.concat(out, "\n")
+  end
+  local code, written, said = run()
+  eq(code, 0, "cli: the plain run is green")
+  eq(written, 1, "cli: a plain run writes the export once")
+  has(said, "export (TESTING_EXPORT_DIR)", "cli: ... and says so")
+  eq(calls[#calls].state_dir, proj .. "/state", "cli: from the state the run was given")
+  vim.fn.delete(proj, "rf")
   package.loaded["testing.export.folder"] = saved
 
   -- the dispatch of `testing ci`: commit and land call it (a red run too)
@@ -156,4 +194,11 @@ return function(H)
     'require("testing.export.auto").after("land", rest, sv)',
     "dispatch: ci land exports after"
   )
+  -- the suite step of `testing ci` runs in a throwaway state: it must not write the export of the hubs, nor must the
+  -- processes a suite starts (their environment names TESTING_EXPORT_DIR otherwise)
+  has(text, "export_after = false", "dispatch: the suite step of ci never exports")
+  local q = assert(io.open(repo .. "/lua/testing/queue.lua", "rb"))
+  local qtext = q:read("*a")
+  q:close()
+  has(qtext, 'vim.env.TESTING_EXPORT_DIR = ""', "dispatch: a suite's children never export")
 end

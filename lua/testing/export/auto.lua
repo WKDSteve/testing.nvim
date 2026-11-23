@@ -2,7 +2,7 @@
 -- @cache-allow env
 -- (`from_env` takes the environment as an argument and is tested with a fake one; only the command-line entry hands
 -- it `os.getenv`, and what it arms runs after the run, so a spec never sees it)
----@brief After a final check (`ci commit` of a whole tree, `ci land`), write the export folder the hubs read.
+---@brief After a final check (`ci commit` of a whole tree, `ci land`) or a plain suite run, write the export folder the hubs read.
 ---@description
 --- hub-desktop's monitor, testing-desktop and testing-web read a folder that `testing export --out` writes; written by
 --- hand, it was 15 days old on 2026-11-20. With `TESTING_EXPORT_DIR` set, the command-line entry
@@ -60,20 +60,13 @@ function M.final_root(kind, argv)
   return root, state
 end
 
----Write the export after a run; one line on `sv.out` either way. Never raises.
----@param kind "commit"|"land"
----@param argv string[] The arguments after `ci commit` / `ci land`.
----@param sv table The services (`export_after`, `out`, `env`, `state_dir`).
----@return boolean|nil written nil when nothing was to be written (not armed, not a final check)
-function M.after(kind, argv, sv)
-  local auto = sv.export_after
-  if type(auto) ~= "table" or type(auto.dir) ~= "string" then
-    return nil
-  end
-  local root, run_state = M.final_root(kind, argv)
-  if not root then
-    return nil
-  end
+---Write the export folder for the run of `root`; one line on `sv.out` either way. Never raises.
+---@param auto Testing.ExportAuto
+---@param root string The repository that ran.
+---@param run_state? string The `--state-dir` of the command line.
+---@param sv table The services (`out`, `env`, `state_dir`).
+---@return boolean written
+local function write(auto, root, run_state, sv)
   local repos_root = auto.repos_root or vim.fs.dirname(root)
   local said, errs = {}, {}
   local ok, code = pcall(require("testing.export.folder").main, {
@@ -99,6 +92,39 @@ function M.after(kind, argv, sv)
   local why = ok and (errs[1] or ("exit " .. tostring(code))) or tostring(code)
   sv.out(("export (%s): not written (%s); the verdict above stands"):format(M.DIR_ENV, why))
   return false
+end
+
+---Write the export after a run; one line on `sv.out` either way. Never raises.
+---@param kind "commit"|"land"
+---@param argv string[] The arguments after `ci commit` / `ci land`.
+---@param sv table The services (`export_after`, `out`, `env`, `state_dir`).
+---@return boolean|nil written nil when nothing was to be written (not armed, not a final check)
+function M.after(kind, argv, sv)
+  local auto = sv.export_after
+  if type(auto) ~= "table" or type(auto.dir) ~= "string" then
+    return nil
+  end
+  local root, run_state = M.final_root(kind, argv)
+  if not root then
+    return nil
+  end
+  return write(auto, root, run_state, sv)
+end
+
+---Write the export after a plain suite run (`scripts/test.sh`, `testing fast`): the run recorded its state, the hubs
+---read it from the export folder, so a run that leaves the export alone leaves them on an old state. A partial run
+---(`--file`) writes it too: the export only reads what is recorded. Never raises.
+---@param root string The repository that ran.
+---@param state_dir? string The `--state-dir` of the command line.
+---@param sv table The services (`export_after`, `out`, `env`, `state_dir`).
+---@return boolean|nil written nil when nothing was armed
+function M.after_run(root, state_dir, sv)
+  local auto = sv.export_after
+  if type(auto) ~= "table" or type(auto.dir) ~= "string" then
+    return nil
+  end
+  local state = state_dir and state_dir ~= "" and vim.fs.normalize(state_dir) or nil
+  return write(auto, vim.fs.normalize(root):gsub("/$", ""), state, sv)
 end
 
 return M

@@ -504,7 +504,9 @@ nvim -n -i NONE --headless -u NONE -l scripts/testing.lua ci --repos-root=<dir> 
 ```
 
 **Written by itself after a final check.** With `TESTING_EXPORT_DIR` set, `testing ci commit` without `--quick` (the
-final check before a push, `--wsl` too) and `testing ci land` end with `testing export --out $TESTING_EXPORT_DIR
+final check before a push, `--wsl` too), `testing ci land` and a plain suite run (`scripts/test.sh`, `testing fast`, also a
+partial one with `--file`: the export only reads what the run recorded; not the suite step of `testing ci`, not the
+processes a suite starts) end with `testing export --out $TESTING_EXPORT_DIR
 --repos-root=<root>` (root: `TESTING_EXPORT_REPOS_ROOT`, else `REPOS_DIR`, else the folder above the repository), about
 3 s for 60 repositories, and one line `export (TESTING_EXPORT_DIR): ...`. The same code and the same data classes as by
 hand, reading the run's state directory: the `--state-dir` of the command line (`scripts/test.sh` names the real one

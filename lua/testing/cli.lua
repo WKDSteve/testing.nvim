@@ -962,6 +962,8 @@ local function execute(argv, sv)
     error(code, 0)
   end
   M.record_metrics(sv, plan, handle, (vim.uv.hrtime() - started) / 1e9)
+  -- the run recorded its state: the export folder the hubs read follows it (only when the entry armed it, TESTING_EXPORT_DIR)
+  require("testing.export.auto").after_run(plan.root, nil, sv)
   return code
 end
 

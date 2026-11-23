@@ -825,12 +825,15 @@ local function run_inprocess(planned, root, suite_args, sv, o)
   local ok, code = pcall(
     require("testing.cli").main,
     argv,
-    -- `metrics = false`: the pipeline records this run as one `ci` line, not a second `suite` line
-    vim.tbl_extend(
-      "force",
-      sv,
-      { out = sink(sv.out), err = sink(sv.err), trust = trust_ctx, metrics = false }
-    )
+    -- `metrics = false`: the pipeline records this run as one `ci` line, not a second `suite` line;
+    -- `export_after = false`: the suite step runs in a throwaway state, its state is not the one the hubs read
+    vim.tbl_extend("force", sv, {
+      out = sink(sv.out),
+      err = sink(sv.err),
+      trust = trust_ctx,
+      metrics = false,
+      export_after = false,
+    })
   )
   if scratch then
     scratch_traces = isolated.trace_base()
