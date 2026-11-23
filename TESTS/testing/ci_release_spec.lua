@@ -326,4 +326,69 @@ return function(H)
     "testing ci release --repos: the text form too"
   )
   has(joined(o), "o/r", "... names the repository of the list")
+  -- ------------------------------------------------------------------ a reason, always
+
+  -- gh gives no answer and an empty text (a timeout or a silent exit left it): the message still names why
+  o = sink()
+  eq(
+    release.main({ "o/r", "--commits" }, o.sv, {
+      root = root,
+      gh = function()
+        return nil, ""
+      end,
+    }),
+    3,
+    "--commits: gh without a reason fails"
+  )
+  has(joined(o), "cannot list the commits of o/r: gh gave no answer", "... and says why")
+  -- an answer that is not JSON shows its first characters
+  o = sink()
+  release.main({ "o/r", "--commits" }, o.sv, {
+    root = root,
+    gh = function()
+      return "<html>rate limited</html>"
+    end,
+  })
+  has(
+    joined(o),
+    "not what was expected: <html>rate limited",
+    "--commits: a non-JSON answer is quoted"
+  )
+  -- the real call: a timeout leaves code 124 and no stderr
+  local real_system = vim.system
+  vim.system = function()
+    return {
+      wait = function()
+        return { code = 124, signal = 9, stdout = "", stderr = "" }
+      end,
+    }
+  end
+  local gh_out, gh_err = guard.call_gh(nil, { "api", "x" })
+  vim.system = real_system
+  eq(gh_out, nil, "gh timeout: no answer")
+  has(gh_err or "", "timed out after 30 s", "gh timeout: the reason names the timeout")
+
+  -- a commit that is not among the last --count is found by its own address, from any folder
+  local ncalls = #calls
+  o = sink() -- its cwd is no checkout
+  eq(
+    release.main({ "o/r", "--show", S1:sub(1, 12) }, o.sv, {
+      root = root,
+      now = 1,
+      ask = false,
+      gh = function(args)
+        if args[2] == "repos/o/r/commits?per_page=10" then
+          return vim.json.encode({ commit(S3, "newest", "Al") }) -- S1 is not in this list
+        end
+        return gh(args)
+      end,
+    }),
+    0,
+    "a commit outside the listed ones: --show works"
+  )
+  local asked = false
+  for i = ncalls + 1, #calls do
+    asked = asked or calls[i] == "api repos/o/r/commits/" .. S1:sub(1, 12) .. " --jq .sha"
+  end
+  ok(asked, "... asked for by its address")
 end

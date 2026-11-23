@@ -302,6 +302,8 @@ function M.decide(f)
     "unreviewed"
 end
 
+local GH_TIMEOUT_MS = 30000
+
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@param args string[]
 ---@return string|nil out
@@ -315,9 +317,15 @@ local function gh(ctx, args)
     return nil, "gh cannot be started: " .. tostring(proc)
   end
   ---@cast proc vim.SystemObj
-  local r = proc:wait(30000)
+  local r = proc:wait(GH_TIMEOUT_MS)
   if r.code ~= 0 then
-    return nil, ((r.stderr or ""):gsub("%s+$", ""):sub(1, 300))
+    -- a timeout (code 124) or a silent failure has no stderr: the reason is never empty
+    local why = (r.stderr or ""):gsub("%s+$", ""):sub(1, 300)
+    if why == "" then
+      why = r.code == 124 and ("gh timed out after %d s"):format(GH_TIMEOUT_MS / 1000)
+        or ("gh exited %s without a message"):format(tostring(r.code))
+    end
+    return nil, why
   end
   return r.stdout or ""
 end

@@ -209,6 +209,22 @@ function M.repos(store, here)
   return list
 end
 
+---Why a `gh` call gave no usable answer: never empty (an empty `err` is what a timeout or a silent exit leaves).
+---@param raw string|nil The answer, when there was one.
+---@param err string|nil
+---@return string
+local function reason(raw, err)
+  local rg = require("testing.ci.runner_guard")
+  local text = rg.clean(err, 300)
+  if text ~= "" then
+    return text
+  end
+  if raw ~= nil and raw:gsub("%s+", "") ~= "" then
+    return ("the answer is not what was expected: %s"):format(rg.clean(raw, 80))
+  end
+  return raw == nil and "gh gave no answer and no reason" or "gh gave an empty answer"
+end
+
 ---@class Testing.Release.Commit
 ---@field sha string
 ---@field title string
@@ -228,7 +244,7 @@ function M.commits(ctx, store, repo, count)
   local raw, err = rg.call_gh(ctx, { "api", ("repos/%s/commits?per_page=%d"):format(repo, count) })
   local list = decode(raw)
   if not list then
-    return nil, ("cannot list the commits of %s: %s"):format(repo, rg.clean(err or "not JSON", 300))
+    return nil, ("cannot list the commits of %s: %s"):format(repo, reason(raw, err))
   end
   local key = rg.repo_key(repo) or repo:lower()
   local released = {}
@@ -264,7 +280,7 @@ local function resolve(ctx, repo, ref)
     rg.call_gh(ctx, { "api", ("repos/%s/commits/%s"):format(repo, ref), "--jq", ".sha" })
   full = full and full:gsub("%s+", "")
   if not rg.is_sha(full) then
-    return nil, ("%s has no commit %s: %s"):format(repo, ref, rg.clean(err or "?", 300))
+    return nil, ("%s has no commit %s: %s"):format(repo, ref, reason(full, err))
   end
   return full
 end
@@ -320,7 +336,7 @@ function M.rerun(ctx, repo, full)
     rg.call_gh(ctx, { "api", ("repos/%s/actions/runs?head_sha=%s&per_page=50"):format(repo, full) })
   local doc = decode(raw)
   if not doc or type(doc.workflow_runs) ~= "table" then
-    return nil, "released, but the runs cannot be read: " .. rg.clean(err or "not JSON", 300)
+    return nil, "released, but the runs cannot be read: " .. reason(raw, err)
   end
   local out = {}
   for _, run in ipairs(doc.workflow_runs) do
@@ -336,7 +352,7 @@ function M.rerun(ctx, repo, full)
         name = rg.clean(run.name or "?", 200),
         was = run.conclusion,
         ok = rerr == nil,
-        problem = rerr and rg.clean(rerr, 300) or nil,
+        problem = rerr and reason(nil, rerr) or nil,
       }
     end
   end
