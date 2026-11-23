@@ -446,6 +446,10 @@ return function(H)
       return done(false, transport_fail)
     end
     local entry = API[path]
+    -- GitHub leaves a run that waits for a runner out of the filtered lists: such a path has its own plain list
+    if entry and entry.plain and not (copts.query and copts.query.head_sha) then
+      entry = entry.plain
+    end
     if not entry then
       return done(
         true,
@@ -1130,7 +1134,7 @@ return function(H)
     has(rows[1].note, "further clone: twin-one", "twins: the other checkout is named")
     local twin_asked = 0
     for i = 1, #requests do
-      if requests[i].path == R .. "twin/actions/runs" then
+      if requests[i].path == R .. "twin/actions/runs" and requests[i].query.head_sha then
         twin_asked = twin_asked + 1
       end
     end
@@ -1483,6 +1487,91 @@ return function(H)
       "sha: not the head of origin/<branch>"
     )
     eq(recs[1].sha, ("f"):rep(40), "sha: the record is about that commit")
+  end
+
+  -- ------------------------------------------------------------------ a run that waits for a stopped runner
+
+  do
+    -- the filtered list (`head_sha=`) is empty, the plain list has the queued run: found, and `waiting_runner`
+    local qsha = sha("8")
+    local qdir = repo("qrun", "https://github.com/WKDSteve/qrun", qsha)
+    GIT[qdir].commits = { [qsha] = "a commit" }
+    local queued = run_(70, "CI", "queued", nil, "2026-10-31T11:50:00Z", { head_sha = qsha })
+    API[R .. "qrun/actions/runs"] = {
+      etag = '"runs-qrun"',
+      body = '{"total_count":0,"workflow_runs":[]}',
+      plain = {
+        etag = '"runs-qrun-plain"',
+        body = {
+          workflow_runs = {
+            run_(71, "CI", "completed", "success", "2026-10-31T11:00:00Z", { head_sha = sha("9") }),
+            queued,
+            -- another workflow of the same commit does not count
+            run_(72, "pages", "completed", "success", "2026-10-31T11:51:00Z", { head_sha = qsha }),
+          },
+        },
+      },
+    }
+    API[R .. "qrun/actions/runs/70/jobs"] = {
+      etag = '"jobs-qrun"',
+      body = {
+        jobs = {
+          job_(
+            701,
+            "build",
+            "queued",
+            nil,
+            { labels = { "self-hosted", "Windows" }, created_at = "2026-10-31T11:50:00Z" }
+          ),
+        },
+      },
+    }
+    local res = run({ "--json", qdir })
+    local q = vim.json.decode(res.out).repos[1]
+    eq(q.overall, "waiting_runner", "queued run: found in the plain list, waiting for its runner")
+    eq(q.run and q.run.id, 70, "queued run: the run of the commit")
+    local seen = {}
+    for _, r in ipairs(requests) do
+      seen[#seen + 1] = r.path:find("/jobs$") and "jobs"
+        or (r.query.head_sha and "filtered" or "plain")
+        or (r.query and "plain" or "jobs")
+    end
+    eq(
+      seen,
+      { "filtered", "plain", "jobs" },
+      "queued run: the filtered list, then the plain one, then the jobs"
+    )
+    -- the second asking: both lists with their ETags (a 304 each)
+    local again = run({ "--json", qdir })
+    eq(
+      vim.json.decode(again.out).repos[1].overall,
+      "waiting_runner",
+      "queued run: also from the cache"
+    )
+    eq(requests[2].etag, '"runs-qrun-plain"', "queued run: the plain list is asked with its ETag")
+    -- `--sha`: the same commit named by hand
+    local by_sha = run({ "--json", "--sha=" .. qsha:sub(1, 10), qdir })
+    eq(
+      vim.json.decode(by_sha.out).repos[1].overall,
+      "waiting_runner",
+      "queued run: found with --sha too"
+    )
+    -- a commit with a run in the filtered list never asks for the plain one
+    run({ "--json", dirs.alpha })
+    for _, r in ipairs(requests) do
+      ok(
+        not (r.query and r.query.per_page == remote.ALL_PER_PAGE),
+        "plain list: not asked when a run was found"
+      )
+    end
+    -- a [skip ci] head without a run does not ask either
+    run({ "--json", dirs.skipci })
+    for _, r in ipairs(requests) do
+      ok(
+        not (r.query and r.query.per_page == remote.ALL_PER_PAGE),
+        "plain list: not asked for [skip ci]"
+      )
+    end
   end
 
   -- ------------------------------------------------------------------ --sha and the runner guard

@@ -27,6 +27,12 @@
 --- `$TESTING_GITHUB_TOKEN` (no `gh auth token`: the account's broad login). It goes to curl through its config on stdin and appears
 --- in no output, no document, no cache file and no error text.
 ---
+--- GitHub leaves a run that waits for a runner (none of its labels online: a stopped self-hosted runner) out of the
+--- filtered lists (`head_sha=`, `status=`), though the plain list has it. When the filtered list has no run of the
+--- workflow, the latest `ALL_PER_PAGE` runs are asked for without a filter and searched by the commit: a run found
+--- there is judged like any other (a queued self-hosted job waiting long enough is `waiting_runner`), `no_run` only
+--- when that list has none either. A commit with `[skip ci]` and no filtered run stays `skipped` without that request.
+---
 --- Requests are conditional: per checkout the ETag and the last answer live in
 --- `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json`; a `304` reuses the stored answer (it does not count
 --- against the rate limit), and the jobs of a completed run whose `updated_at` did not change are not asked for again.
@@ -427,6 +433,10 @@ end
 ---The version of a stored runs list: 2 since runs carry `head_branch` (`testing ci land`, `pick_run`).
 M.RUNS_V = 2
 
+---How many of the latest runs the plain (unfiltered) list is asked for, when the list filtered by commit has no run of
+---the workflow: GitHub leaves a run that waits for a runner out of the filtered lists.
+M.ALL_PER_PAGE = "30"
+
 ---The newest run of `workflow` (by `created_at`, then id) that a push started; nil when there is none. The name is
 ---compared without case: the repositories spell their CI workflow `CI` and `ci`. A pull-request run of the same
 ---workflow on the same SHA (a fast-forward PR) is not the verdict of the commit on the branch. After `testing ci land`
@@ -750,6 +760,12 @@ local function read_cache(path)
         { etag = doc.runs.etag, list = list, v = doc.runs.v == M.RUNS_V and M.RUNS_V or nil }
     end
   end
+  if type(doc.all) == "table" and type(doc.all.etag) == "string" then
+    local list = trim_list(doc.all.list, trim_run)
+    if list then
+      out.all = { etag = doc.all.etag, list = list, v = doc.all.v == M.RUNS_V and M.RUNS_V or nil }
+    end
+  end
   local j = doc.jobs
   if type(j) == "table" and type(j.run_id) == "number" then
     local list = trim_list(j.list, trim_job)
@@ -846,6 +862,112 @@ local function fetch(rec, ctx, done)
   if runs_cache and runs_cache.v ~= M.RUNS_V then
     runs_cache = nil
   end
+  ---The commit's runs from the plain, unfiltered list of the latest runs (`ALL_PER_PAGE`): the answer for a commit whose
+  ---filtered list is empty. Its own ETag lives in the cache beside the filtered one.
+  ---@param got fun(run: table|nil, err: string|nil)
+  local function ask_all(got)
+    local all_cache = cache.sha == rec.sha and cache.all or nil
+    if all_cache and all_cache.v ~= M.RUNS_V then
+      all_cache = nil
+    end
+    ask(
+      all_cache,
+      base,
+      opts(all_cache and all_cache.etag, { per_page = M.ALL_PER_PAGE }),
+      function(res, err)
+        if ctx.closed then
+          return
+        end
+        local ok, perr = pcall(function()
+          if not res then
+            return got(nil, err)
+          end
+          local list
+          if res.not_modified and all_cache then
+            list = all_cache.list
+            fresh.all = { etag = res.etag or all_cache.etag, list = list, v = M.RUNS_V }
+          else
+            list = trim_list(type(res.data) == "table" and res.data.workflow_runs, trim_run)
+            if not list then
+              return got(nil, "GitHub answered the runs without a workflow_runs list")
+            end
+            fresh.all = res.etag and { etag = res.etag, list = list, v = M.RUNS_V } or nil
+          end
+          local mine = {}
+          for _, r in ipairs(list) do
+            if r.head_sha == rec.sha then
+              mine[#mine + 1] = r
+            end
+          end
+          got(M.pick_run(mine, rec.workflow))
+        end)
+        if not ok then
+          finish("internal error: " .. tostring(perr))
+        end
+      end
+    )
+  end
+
+  ---Judge the run that decided the commit: its jobs, then the verdict of the repository.
+  ---@param run table
+  local function with_run(run)
+    local jc = cache.jobs and cache.jobs.run_id == run.id and cache.jobs or nil
+    -- a completed run whose stored jobs list lags behind it (a job still running in it) is asked for afresh,
+    -- without its ETag: a 304 on that ETag would bring the lagging list back, round after round
+    if jc and run.status == "completed" and not all_completed(jc.list) then
+      jc = nil
+    end
+    -- a completed run that did not change since its jobs were stored: no request at all
+    if
+      jc
+      and run.status == "completed"
+      and jc.run_status == "completed"
+      and jc.run_updated_at == run.updated_at
+    then
+      fresh.jobs = jc
+      M.classify(rec, run, vim.deepcopy(jc.list), ctx.non_gating[rec], ctx.now)
+      return finish()
+    end
+    ask(
+      jc,
+      ("%s/%d/jobs"):format(base, run.id),
+      opts(jc and jc.etag, { per_page = "100" }),
+      function(res2, err2)
+        if ctx.closed then
+          return
+        end
+        local ok2, perr2 = pcall(function()
+          if not res2 then
+            return finish(err2)
+          end
+          local jobs
+          if res2.not_modified and jc then
+            jobs = jc.list
+          else
+            jobs = trim_list(type(res2.data) == "table" and res2.data.jobs, trim_job)
+            if not jobs then
+              return finish("GitHub answered the jobs without a jobs list")
+            end
+          end
+          fresh.jobs = {
+            run_id = run.id,
+            run_status = run.status,
+            run_updated_at = run.updated_at,
+            -- the stored ETag only for the stored list: a 200 without an ETag must not pair the old one with
+            -- the new list (a later 304 on it would bring the old list back)
+            etag = res2.not_modified and (res2.etag or (jc and jc.etag)) or res2.etag,
+            list = jobs,
+          }
+          M.classify(rec, run, vim.deepcopy(jobs), ctx.non_gating[rec], ctx.now)
+          finish()
+        end)
+        if not ok2 then
+          finish("internal error: " .. tostring(perr2))
+        end
+      end
+    )
+  end
+
   -- an older lib.nvim lets a throwing curl (none on PATH) through: that is this repository's error, not a crash
   local sent, send_err = pcall(
     ask,
@@ -872,71 +994,27 @@ local function fetch(rec, ctx, done)
           fresh.runs = res.etag and { etag = res.etag, list = runs, v = M.RUNS_V } or nil
         end
         local run = M.pick_run(runs, rec.workflow)
-        if not run then
-          if has_skip_marker(rec.message) then
-            rec.overall = "skipped"
-            rec.note = "head commit has [skip ci]"
-          else
-            rec.overall = "no_run"
-            rec.note = ("no %s run for %s"):format(rec.workflow, rec.sha:sub(1, 7))
-          end
+        if run then
+          return with_run(run)
+        end
+        if has_skip_marker(rec.message) then
+          rec.overall = "skipped"
+          rec.note = "head commit has [skip ci]"
           return finish()
         end
-        local jc = cache.jobs and cache.jobs.run_id == run.id and cache.jobs or nil
-        -- a completed run whose stored jobs list lags behind it (a job still running in it) is asked for afresh,
-        -- without its ETag: a 304 on that ETag would bring the lagging list back, round after round
-        if jc and run.status == "completed" and not all_completed(jc.list) then
-          jc = nil
-        end
-        -- a completed run that did not change since its jobs were stored: no request at all
-        if
-          jc
-          and run.status == "completed"
-          and jc.run_status == "completed"
-          and jc.run_updated_at == run.updated_at
-        then
-          fresh.jobs = jc
-          M.classify(rec, run, vim.deepcopy(jc.list), ctx.non_gating[rec], ctx.now)
-          return finish()
-        end
-        ask(
-          jc,
-          ("%s/%d/jobs"):format(base, run.id),
-          opts(jc and jc.etag, { per_page = "100" }),
-          function(res2, err2)
-            if ctx.closed then
-              return
-            end
-            local ok2, perr2 = pcall(function()
-              if not res2 then
-                return finish(err2)
-              end
-              local jobs
-              if res2.not_modified and jc then
-                jobs = jc.list
-              else
-                jobs = trim_list(type(res2.data) == "table" and res2.data.jobs, trim_job)
-                if not jobs then
-                  return finish("GitHub answered the jobs without a jobs list")
-                end
-              end
-              fresh.jobs = {
-                run_id = run.id,
-                run_status = run.status,
-                run_updated_at = run.updated_at,
-                -- the stored ETag only for the stored list: a 200 without an ETag must not pair the old one with
-                -- the new list (a later 304 on it would bring the old list back)
-                etag = res2.not_modified and (res2.etag or (jc and jc.etag)) or res2.etag,
-                list = jobs,
-              }
-              M.classify(rec, run, vim.deepcopy(jobs), ctx.non_gating[rec], ctx.now)
-              finish()
-            end)
-            if not ok2 then
-              finish("internal error: " .. tostring(perr2))
-            end
+        -- GitHub leaves a run that waits for a runner out of the filtered lists (`head_sha=`, `status=`) while no
+        -- runner of its labels is online, yet the plain list has it: look there, by the commit, before `no_run`
+        ask_all(function(found, aerr)
+          if aerr then
+            return finish(aerr)
           end
-        )
+          if found then
+            return with_run(found)
+          end
+          rec.overall = "no_run"
+          rec.note = ("no %s run for %s"):format(rec.workflow, rec.sha:sub(1, 7))
+          finish()
+        end)
       end)
       if not ok then
         finish("internal error: " .. tostring(perr))

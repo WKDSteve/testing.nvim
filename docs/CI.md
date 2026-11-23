@@ -1013,6 +1013,12 @@ Per repository:
    verdict for the branch), the newest by `created_at`. A
    path-filtered sibling workflow (`pages`, `release-engine`) can be created after the CI run for the same push and must
    not become the verdict.
+   GitHub leaves a run that waits for a runner out of the filtered lists (`head_sha=`, `status=`) while no runner of
+   its labels is online (a stopped self-hosted runner): the filter answers `total_count 0`, the plain list has the
+   run. Without a run of the workflow in the filtered answer, `GET /repos/<o>/<r>/actions/runs?per_page=30` is asked
+   too and searched by `head_sha` (same workflow and event rules; its own ETag in the cache). Such a run is judged
+   like any other, so a queued self-hosted job older than 2 minutes is `waiting_runner`, which is what the hub's
+   `start_when_waiting` reads. Not asked when the filtered answer has the run, nor for a `[skip ci]` head.
 4. `GET .../runs/<id>/jobs`: each job goes to the cell `ubuntu`, `windows` or `macos` by its name, else, on a
    self-hosted runner, by its labels (`Linux` counts as ubuntu), or to `other` (a hosted stylua, luacheck or publish
    job: its `ubuntu-latest` image says nothing about the ubuntu leg). A job whose name contains a
@@ -1031,7 +1037,7 @@ States, worst first; a cell has the worst state of its jobs, the repository (`ov
 | `queued`, `running` | the run is not done |
 | `success` | every job of the cell succeeded (skipped ones do not count against it) |
 | `skipped` | every job skipped, or a head commit with `[skip ci]` (and the like) without a run |
-| `no_run` | no run of the workflow for the commit |
+| `no_run` | no run of the workflow for the commit, in neither the filtered nor the plain list |
 | `no_github` | the origin is not on GitHub |
 
 The table (one row per repository: repo, with the directory in front when it is named otherwise, ubuntu, windows,
