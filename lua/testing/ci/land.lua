@@ -453,6 +453,7 @@ function M.run(args, say, state_dir)
     return M.EXIT_RED
   end
 
+  local unchecked = false
   pos, base = where()
   if not pos then
     say("land: green, but " .. tostring(base))
@@ -469,6 +470,44 @@ function M.run(args, say, state_dir)
     drop_check()
     return M.EXIT_RED
   elseif pos == "ancestor" then
+    -- a workflow without a run that is `skipped`: GitHub skipped the push by the marker in the commit text, so nothing
+    -- was checked. That may land only when the commit changes documentation and nothing else (`commit.is_doc`, as
+    -- `ci commit` reads DOCS-ONLY); a code change with the marker (often a quoted one) stops here
+    for _, r in ipairs(recs) do
+      if r.overall == "skipped" and type(r.run) ~= "table" then
+        unchecked = true
+      end
+    end
+    if unchecked then
+      local dcode, dout, derr = git("diff", "--name-only", "--no-renames", "-z", base, sha)
+      local only_docs = dcode == 0
+      local is_doc = require("testing.ci.commit").is_doc
+      local n = 0
+      for _, f in ipairs(vim.split(dout or "", "\0", { trimempty = true })) do
+        n = n + 1
+        only_docs = only_docs and is_doc(f)
+      end
+      if dcode ~= 0 then
+        say(
+          ("land: %s was skipped by the CI and its files cannot be read: %s"):format(
+            short,
+            vim.trim(derr or "")
+          )
+        )
+        drop_check()
+        return M.EXIT_INFRA
+      end
+      if not only_docs or n == 0 then
+        say(
+          ("land: %s: skipped by marker in the commit text, but code changed: %s stays; reword the commit and land again"):format(
+            short,
+            upstream
+          )
+        )
+        drop_check()
+        return M.EXIT_RED
+      end
+    end
     -- no force: a branch that moved between the fetch and this push refuses it. The pre-push hook refuses a direct
     -- push of main in a land repository; this is the push after green, said so (`testing.ci.hook.guard`)
     local hook = require("testing.ci.hook")
@@ -489,13 +528,22 @@ function M.run(args, say, state_dir)
       return M.EXIT_RED
     end
   end
-  say(
-    ("land: %s landed on %s (green on the hosted CI%s)"):format(
-      short,
-      args.branch,
-      url and (": " .. url) or ""
+  if unchecked then
+    say(
+      ("land: %s landed on %s WITHOUT a hosted run (docs only, skipped by marker)"):format(
+        short,
+        args.branch
+      )
     )
-  )
+  else
+    say(
+      ("land: %s landed on %s (green on the hosted CI%s)"):format(
+        short,
+        args.branch,
+        url and (": " .. url) or ""
+      )
+    )
+  end
   drop_check()
   return M.EXIT_OK
 end

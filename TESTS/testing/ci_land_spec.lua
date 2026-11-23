@@ -49,6 +49,8 @@ return function(H)
         return 0, "", ""
       elseif cmd == "merge-base" then
         return args[3] == BASE and 0 or 1, "", ""
+      elseif cmd == "diff" then
+        return 0, table.concat(o.changed or { "lua/x.lua" }, "\0"), ""
       elseif cmd == "show" then
         return 0, o.workflow or 'on:\n  push:\n    branches: [main, "ci/**"]\n', ""
       elseif cmd == "push" then
@@ -117,6 +119,42 @@ return function(H)
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")
   has(w.text, "CI-10:", "green: while the hosted CI runs, the line of rule CI-10")
+
+  -- a run GitHub skipped by the marker in the commit text (no run, `skipped`): only documentation may land that way
+  do
+    local skipped = { overall = "skipped", note = "head commit has the skip marker" }
+    local code_change = scenario({ states = { skipped }, changed = { "lua/x.lua", "README.md" } })
+    eq(code_change.code, 1, "skipped + code: land stops")
+    has(
+      code_change.text,
+      "skipped by marker in the commit text, but code changed",
+      "skipped + code: says why"
+    )
+    has(code_change.text, "main stays", "skipped + code: ... and that main stays")
+    eq(code_change.text:find("landed on", 1, true), nil, "skipped + code: never says landed")
+    for _, p in ipairs(code_change.pushes) do
+      eq(p:find(":refs/heads/main", 1, true), nil, "skipped + code: main is not pushed")
+    end
+    local docs = scenario({ states = { skipped }, changed = { "README.md", "docs/CI.md" } })
+    eq(docs.code, 0, "skipped + docs only: lands")
+    has(
+      docs.text,
+      "landed on main WITHOUT a hosted run (docs only, skipped by marker)",
+      "skipped + docs: says it honestly"
+    )
+    eq(
+      docs.text:find("green on the hosted CI", 1, true),
+      nil,
+      "skipped + docs: never claims a hosted run"
+    )
+    -- a real run whose jobs were all skipped is a run: lands as green
+    local real = scenario({
+      states = { { overall = "skipped", run = { url = "https://x/run/2" } } },
+      changed = { "lua/x.lua" },
+    })
+    eq(real.code, 0, "skipped jobs of a real run: lands")
+    has(real.text, "green on the hosted CI", "skipped jobs of a real run: as green")
+  end
 
   -- the line of CI-10 can be turned off: in the environment and with vim.g
   do

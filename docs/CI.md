@@ -579,6 +579,12 @@ The first red system ends the wait, even while other systems still run (they sho
 is then `land: red (<system> <state>, ...); <remote>/<branch> does not move, nothing landed`.
 Green means the run is completed: while it is still in progress, jobs that are all green so far are no verdict (a job
 created later or the run's own conclusion could still be red).
+A check branch whose commit text carries the CI's skip marker gets no run at all (`testing ci remote` says `skipped`
+with no run): nothing was checked. Such a commit lands only when it changes documentation and nothing else (the files
+`ci commit` reads as `DOCS-ONLY`), and the last line says `landed on <branch> WITHOUT a hosted run (docs only, skipped by
+marker)`, never "green on the hosted CI". A commit that changes code stops with `skipped by marker in the commit text,
+but code changed: <remote>/<branch> stays; reword the commit and land again` (exit 1); a quoted marker in a commit
+body is enough to cause it. A real run whose jobs were all skipped is a run and lands as green.
 
 - `<remote>/<branch>` (fetched) must be an ancestor of the commit. When another session landed meanwhile, the commit is
   rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
