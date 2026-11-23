@@ -31,7 +31,7 @@
 --- filtered lists (`head_sha=`, `status=`), though the plain list has it. When the filtered list has no run of the
 --- workflow, the latest `ALL_PER_PAGE` runs are asked for without a filter and searched by the commit: a run found
 --- there is judged like any other (a queued self-hosted job waiting long enough is `waiting_runner`), `no_run` only
---- when that list has none either. A commit with `[skip ci]` and no filtered run stays `skipped` without that request.
+--- when that list has none either. A head commit that skips the CI (see `has_skip_marker`) and has no filtered run stays `skipped` without that request.
 ---
 --- Requests are conditional: per checkout the ETag and the last answer live in
 --- `<state>/testing/ci-remote/<owner>_<repo>_<dir hash>.json`; a `304` reuses the stored answer (it does not count
