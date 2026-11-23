@@ -35,7 +35,9 @@ function M.from_env(getenv)
     return (v and v ~= "") and v or nil
   end
   local dir = value(M.DIR_ENV)
-  if not dir or value("CI") then
+  -- `TESTING_QUEUE=off` is what a suite hands its children (testing.queue.quiet_children): a spec that starts
+  -- `scripts/testing.lua` is no run of the user's, its state is a spec's own
+  if not dir or value("CI") or value("TESTING_QUEUE") == "off" then
     return nil
   end
   return { dir = dir, repos_root = value(M.ROOT_ENV) or value("REPOS_DIR") }

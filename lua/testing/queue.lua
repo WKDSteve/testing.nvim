@@ -395,14 +395,10 @@ end
 ---@return T
 function M.quiet_children(fn)
   -- nor do they write metrics lines (testing.metrics): what a spec starts is no run of the user's
-  -- and they never write the export folder of the hubs (testing.export.auto): their state is a spec's, not the user's
   local before, metrics_before = vim.env[M.OFF_ENV], vim.env.TESTING_METRICS
-  local export_before = vim.env.TESTING_EXPORT_DIR
   vim.env[M.OFF_ENV], vim.env.TESTING_METRICS = "off", "off"
-  vim.env.TESTING_EXPORT_DIR = ""
   local ok, res = pcall(fn)
   vim.env[M.OFF_ENV], vim.env.TESTING_METRICS = before, metrics_before
-  vim.env.TESTING_EXPORT_DIR = export_before
   if not ok then
     error(res, 0)
   end

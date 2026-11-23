@@ -49,6 +49,12 @@ return function(H)
     "from_env: TESTING_EXPORT_REPOS_ROOT wins"
   )
 
+  eq(
+    auto.from_env(env({ TESTING_EXPORT_DIR = "C:/x", TESTING_QUEUE = "off" })),
+    nil,
+    "from_env: never for what a suite starts (its children carry TESTING_QUEUE=off)"
+  )
+
   -- final_root: which command lines are a final check
   local root = vim.fs.normalize(vim.fn.getcwd())
   eq(auto.final_root("commit", { "HEAD", "--base=@{upstream}" }), root, "final: a full ci commit")
@@ -200,5 +206,5 @@ return function(H)
   local q = assert(io.open(repo .. "/lua/testing/queue.lua", "rb"))
   local qtext = q:read("*a")
   q:close()
-  has(qtext, 'vim.env.TESTING_EXPORT_DIR = ""', "dispatch: a suite's children never export")
+  has(qtext, 'M.OFF_ENV = "TESTING_QUEUE"', "dispatch: the marker a suite hands its children")
 end
