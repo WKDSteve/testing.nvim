@@ -1024,7 +1024,7 @@ Per repository:
    run. Without a run of the workflow in the filtered answer, `GET /repos/<o>/<r>/actions/runs?per_page=30` is asked
    too and searched by `head_sha` (same workflow and event rules; its own ETag in the cache). Such a run is judged
    like any other, so a queued self-hosted job older than 2 minutes is `waiting_runner`, which is what the hub's
-   `start_when_waiting` reads. Not asked when the filtered answer has the run, nor for a `[skip ci]` head.
+   `start_when_waiting` reads. Not asked when the filtered answer has the run, nor for a `[skip ci]` head. The limit: a waiting run further back than the latest 30 runs of the repository (`ALL_PER_PAGE`) is not found, the record says `no_run`.
 4. `GET .../runs/<id>/jobs`: each job goes to the cell `ubuntu`, `windows` or `macos` by its name, else, on a
    self-hosted runner, by its labels (`Linux` counts as ubuntu), or to `other` (a hosted stylua, luacheck or publish
    job: its `ubuntu-latest` image says nothing about the ubuntu leg). A job whose name contains a
