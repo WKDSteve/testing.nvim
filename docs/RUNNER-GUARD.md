@@ -122,7 +122,7 @@ reviewed one, their authors, and the files that deserve a close look: `.github/`
 obfuscated code or by instructions written into it.)
 
 Other commands: `testing ci trust --list`; `--revoke [<repo>] [<sha>]` (one commit, or all of the repository);
-`--mode=auto|always|off <repo>`; `--note=<text>`. The list is `<runners>/reviewed.json`, at most 50 commits per
+`--mode=auto|always|off|solo <repo>`; `--note=<text>`. The list is `<runners>/reviewed.json`, at most 50 commits per
 repository.
 
 ## Your own devices: signed commits

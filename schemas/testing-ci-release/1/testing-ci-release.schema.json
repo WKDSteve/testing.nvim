@@ -32,7 +32,7 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "here": { "type": "boolean", "description": "The repository of the current folder (listed first)." },
-        "mode": { "enum": ["auto", "always", "off", null], "description": "The guard mode on the list; absent: not on it." },
+        "mode": { "enum": ["auto", "always", "off", "solo", null], "description": "The guard mode on the list; absent: not on it." },
         "reviewed": { "type": "integer", "minimum": 0 }
       }
     },

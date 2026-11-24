@@ -146,7 +146,7 @@ return function(H)
   o = sink()
   eq(release.main({ "--repos" }, o.sv, ctx(false)), 0, "--repos: no terminal needed")
   has(joined(o), "o/r", "--repos: the repository of the list")
-  has(joined(o), "mode=auto, 1 reviewed", "--repos: with its mode and count")
+  has(joined(o), "mode=solo, 1 reviewed", "--repos: with its mode and count")
   o = sink()
   eq(release.main({ "o/r", "--commits" }, o.sv, ctx(false)), 0, "--commits")
   has(joined(o), S1:sub(1, 10) .. "  oldest", "--commits: the commits with their titles")
@@ -193,7 +193,7 @@ return function(H)
   eq(d.step, "repos", "json repos: step")
   eq(
     { d.repos[1].name, d.repos[1].mode, d.repos[1].reviewed, d.repos[1].here },
-    { "o/r", "auto", 1, false },
+    { "o/r", "solo", 1, false },
     "json repos: the repository with its mode and count"
   )
 
@@ -316,7 +316,7 @@ return function(H)
   eq({ cli.schema, cli.step, cli.exit }, { release.SCHEMA, "repos", 0 }, "... the step repos")
   eq(
     { cli.repos and cli.repos[1].name, cli.repos and cli.repos[1].mode },
-    { "o/r", "auto" },
+    { "o/r", "solo" },
     "... with the repository of the list"
   )
   o = sink()

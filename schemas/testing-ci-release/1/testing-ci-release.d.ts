@@ -25,7 +25,7 @@ export interface Repo {
   name: string;
   here: boolean;
   /** The guard mode on the list; absent: not on it. */
-  mode?: "auto" | "always" | "off" | null;
+  mode?: "auto" | "always" | "off" | "solo" | null;
   reviewed: number;
 }
 
