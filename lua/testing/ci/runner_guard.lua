@@ -47,6 +47,7 @@ M.MAX_SIGNERS_BYTES = 64 * 1024
 M.MAX_SIGNED = 250 -- the compare API lists at most 250 commits without paging
 M.MAX_BASES = 3
 M.MODES = { auto = true, always = true, off = true, solo = true }
+M.DEFAULT_MODE = "solo" -- a repository without an entry: the owner alone needs no release (see `solo_clear`)
 M.SOLO_TTL_S = 600 -- the most a run's jobs share one answer "no other party" (they start within seconds)
 M.SOLO_PAGE = 100 -- the newest pull requests and contributors the detection reads
 M.EVENTS =
@@ -811,7 +812,7 @@ local function check(sv, ctx)
   if note then
     sv.err("runner-guard: note: " .. note)
   end
-  facts.entry = key and repos[key] or nil
+  facts.entry = key and (repos[key] or { mode = M.DEFAULT_MODE, shas = {} }) or nil
   if key and (facts.entry and facts.entry.mode or "auto") ~= "off" then
     local out = gh(ctx, { "api", "repos/" .. repo, "--jq", ".private" })
     local v = out and out:gsub("%s+", "")
@@ -828,8 +829,10 @@ local function check(sv, ctx)
     -- turns `solo` on again by hand, after looking)
     local found = facts.solo_found
     local done, err = update(M.store_path(M.root(ctx)), function(rs)
-      local e = rs[key]
-      if e and e.mode == "solo" then
+      -- a repository without an entry was `solo` by default: it gets one now, as `auto`
+      local e = rs[key] or { mode = M.DEFAULT_MODE, shas = {} }
+      if e.mode == "solo" then
+        rs[key] = e
         e.mode = "auto"
         e.flipped = ("%s (%s)"):format(found, os.date("!%Y-%m-%d", ctx and ctx.now or os.time()))
       end
@@ -858,7 +861,7 @@ local function check(sv, ctx)
       good, who, query_failed = M.shared_release(facts.repo, sha, facts.entry, signers, ctx, root)
       if good then
         local done, err = update(M.store_path(root), function(rs)
-          local e = rs[key] or { mode = "auto", shas = {} }
+          local e = rs[key] or { mode = M.DEFAULT_MODE, shas = {} }
           rs[key] = e
           -- two jobs of one push (one per system) both release it: one entry
           e.shas = vim.tbl_filter(function(x)
@@ -1279,7 +1282,7 @@ function M.trust_pushed(stdin, sv, ctx)
       else
         local now = ctx and ctx.now or os.time()
         local done, err = update(path, function(rs)
-          local e = rs[key] or { mode = "auto", shas = {} }
+          local e = rs[key] or { mode = M.DEFAULT_MODE, shas = {} }
           rs[key] = e
           e.shas = vim.tbl_filter(function(x)
             return x.sha ~= lsha
@@ -1387,7 +1390,7 @@ function M.trust_main(argv, sv, ctx)
   end
   if a.mode then
     local ok, err = update(path, function(repos)
-      repos[key] = repos[key] or { mode = "auto", shas = {} }
+      repos[key] = repos[key] or { mode = M.DEFAULT_MODE, shas = {} }
       repos[key].mode = a.mode
       repos[key].flipped = nil
     end)
@@ -1464,7 +1467,7 @@ function M.trust_main(argv, sv, ctx)
   end
   local now = ctx and ctx.now or os.time()
   local ok, err = update(path, function(rs)
-    local e = rs[key] or { mode = "auto", shas = {} }
+    local e = rs[key] or { mode = M.DEFAULT_MODE, shas = {} }
     rs[key] = e
     e.shas = vim.tbl_filter(function(s)
       return s.sha ~= full
@@ -1723,6 +1726,7 @@ local function manage(action, argv, sv, ctx)
     )
   end
   if action == "status" then
+    sv.out(("a repository without an entry: %s"):format(M.DEFAULT_MODE))
     local _, ignored = M.solo_ignore(root)
     if #ignored > 0 then
       sv.out("solo mode ignores: " .. table.concat(ignored, ", "))

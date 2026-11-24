@@ -435,7 +435,11 @@ return function(H)
 
     o = sink()
     eq(guard.trust_main({ "--list" }, o.sv, ctx), 0, "list")
-    has(joined(o), "o/r  mode=auto  2 reviewed", "list: shows the repository")
+    has(
+      joined(o),
+      ("o/r  mode=%s  2 reviewed"):format(guard.DEFAULT_MODE),
+      "list: shows the repository"
+    )
 
     o = sink()
     eq(guard.trust_main({ "--revoke", "o/r", SHA:sub(1, 8) }, o.sv, ctx), 0, "revoke one by prefix")

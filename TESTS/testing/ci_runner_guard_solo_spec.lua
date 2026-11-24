@@ -309,10 +309,39 @@ return function(H)
   end
 
   do
-    -- a repository that was never released has no entry: `auto`, the guard is on
+    -- a repository that was never released has no entry: it is `solo` by default (decision 2026-11-24)
+    eq(guard.DEFAULT_MODE, "solo", "default: a repository without an entry is solo")
     local root = tmp()
-    local code = run_check(root, {})
-    eq(code, 1, "check: no entry means no free pass")
+    local code, text = run_check(root, {})
+    eq(code, 0, "default: no entry, the owner alone: the job runs")
+    has(text, "solo", "default: ... as solo")
+    eq(entry(root), nil, "default: ... and nothing is written for it")
+
+    -- somebody else: an entry is made, as `auto`, with the reason, and it stays
+    root = tmp()
+    code, text = run_check(root, { pulls = { "eve" } })
+    eq(code, 1, "default: no entry, another account: refused")
+    has(text, "solo mode ended", "default: ... says that solo ended")
+    eq(entry(root).mode, "auto", "default: ... and the repository is guarded from now on")
+    has(entry(root).flipped or "", "pull request by eve", "default: ... with the reason")
+    eq(run_check(root, {}), 1, "default: ... also when the account is gone")
+
+    -- no answer from GitHub: strict for the job, no entry made (a rate limit says nothing)
+    root = tmp()
+    code = run_check(root, { fail = "pulls" })
+    eq(code, 1, "default: no entry, no answer: refused")
+    eq(entry(root), nil, "default: ... and no entry is made")
+
+    -- releasing a commit of a repository without an entry must not turn it strict
+    root = tmp()
+    local o = sink()
+    guard.trust_main({ "--runners=" .. root, REPO, ("c"):rep(40) }, o.sv, {
+      root = root,
+      gh = function()
+        return ("c"):rep(40) .. "\n"
+      end,
+    })
+    eq(entry(root).mode, "solo", "default: a release creates the entry as solo, not auto")
   end
 
   -- ------------------------------------------------------------------ setting and showing the mode

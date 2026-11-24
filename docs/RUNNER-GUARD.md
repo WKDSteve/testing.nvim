@@ -192,6 +192,10 @@ testing ci trust --mode=solo WKDSteve/tasks.nvim   # one repository (also one th
 testing ci runner-guard status                     # which repositories are alone, which lost it and why
 ```
 
+`solo` is also the **default** for a repository that has no entry (never released, not on the list): a new repository
+with a runner needs no first release while you are alone. A repository gets an entry when somebody else is found
+(then as `auto`, with the reason) or when you release a commit. Want it strict: `--mode=auto <repo>`.
+
 What stays the same in `solo`: rule 2 and 2b (a pull request, an event outside the allowlist) and rule 3 (an actor
 that is not the owner) still refuse, and a private repository still runs by rule 4. Only rules 5 and 6 (the list of
 reviewed commits, the signature of the device registry) are not asked.
