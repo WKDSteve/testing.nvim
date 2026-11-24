@@ -5,7 +5,7 @@
 --- testing ci runner-guard check                     (the hook: decides from GITHUB_*; exit 0 = run, 1 = refuse)
 --- testing ci runner-guard install|remove|status [--runners=<dir>]
 --- testing ci trust [<owner/repo>] [<sha>] [--show] [--note=<text>] [--runners=<dir>]
---- testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off [<owner/repo>]
+--- testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off|solo [<owner/repo>|--all]
 --- ```
 ---
 --- A runner executes what a job says with the rights of its user. Foreign code reaches it by a pull request that
@@ -16,7 +16,8 @@
 --- `testing ci runner-guard check`; the rules are here, so a spec can run them.
 ---
 --- Rules, in this order (`decide`):
----   1. mode `off` for the repository: run
+---   1. mode `off` for the repository: run (`solo` behaves as `auto` here and below, except that rules 5 and 6 are
+---      skipped while nobody but the owner collaborates, contributes or opens a pull request; see `M.solo_clear`)
 ---   2. event `pull_request` / `pull_request_target`: refuse (their code is never trusted)
 ---   3. actor or triggering actor is not the owner of the repository (the maintainer): refuse
 ---   4. repository private (and mode not `always`): run
@@ -45,7 +46,9 @@ M.ENV_SIGNERS = "TESTING_ALLOWED_SIGNERS"
 M.MAX_SIGNERS_BYTES = 64 * 1024
 M.MAX_SIGNED = 250 -- the compare API lists at most 250 commits without paging
 M.MAX_BASES = 3
-M.MODES = { auto = true, always = true, off = true }
+M.MODES = { auto = true, always = true, off = true, solo = true }
+M.SOLO_TTL_S = 600 -- the most a run's jobs share one answer "no other party" (they start within seconds)
+M.SOLO_PAGE = 100 -- the newest pull requests and contributors the detection reads
 M.EVENTS =
   { push = true, workflow_dispatch = true, workflow_run = true, schedule = true, release = true }
 
@@ -54,7 +57,7 @@ M.USAGE = table.concat({
   "       testing ci runner-guard install|remove|status [--runners=<dir>]",
   "       testing ci trust [<owner/repo>] [<sha>] [--show] [--note=<text>] [--runners=<dir>]",
   "       testing ci trust --pushed   (the pre-push hook: git's lines on stdin; own local commits only)",
-  "       testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off [<owner/repo>]",
+  "       testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off|solo [<owner/repo>|--all]",
   "  The runner folder is $TESTING_RUNNER_ROOT, else `actions-runners` in your home folder (docs/RUNNER-GUARD.md).",
 }, "\n")
 
@@ -138,8 +141,9 @@ end
 M.repo_key = repo_key
 
 ---@class Testing.RunnerGuard.Entry
----@field mode string auto|always|off
+---@field mode string auto|always|off|solo
 ---@field shas { sha: string, at: integer, note?: string }[]
+---@field flipped? string why `solo` turned into `auto` by itself (a foreign party was found)
 
 ---Read the list. Never raises. `keep`: the file may hold more than this reader sees, so a writer must not replace it.
 ---@param path string
@@ -176,6 +180,9 @@ function M.read(path)
       truncated = true
     elseif key and type(e) == "table" then
       local entry = { mode = M.MODES[e.mode] and e.mode or "auto", shas = {} }
+      if type(e.flipped) == "string" then
+        entry.flipped = e.flipped:gsub("%c", " "):sub(1, 300)
+      end
       if type(e.shas) == "table" then
         for _, s in ipairs(e.shas) do
           if type(s) == "table" and is_sha(s.sha) and #entry.shas >= M.MAX_SHAS then
@@ -241,6 +248,8 @@ end
 ---@field sha? string
 ---@field is_private? boolean|nil nil: unknown (treated as public)
 ---@field entry? Testing.RunnerGuard.Entry
+---@field solo? fun(): boolean|nil, string, boolean|nil `solo` mode: is the owner alone (true), is somebody else here (false) or is it unknown (nil)? then the signals or the failure, and whether the answer came from the cache. Asked lazily, only when nothing else decided
+---@field solo_found? string set by `decide`: the signals of a foreign party, when it found one (a writer records it)
 
 ---@param s string|nil
 ---@return string
@@ -294,11 +303,25 @@ function M.decide(f)
       return true, "commit " .. f.sha:sub(1, 12) .. " is on the list of reviewed commits"
     end
   end
+  local solo_note = ""
+  if mode == "solo" and f.solo then
+    -- rules 2, 2b and 3 are behind us: a pull request or a foreign actor never got here. Alone, the owner's own
+    -- commits are the owner's code; with a foreign party (or no answer) the guard is on as in `auto`
+    local clear, detail = f.solo()
+    if clear == true then
+      return true, "solo: the owner is the only contributor (" .. tostring(detail) .. ")"
+    end
+    if clear == false then
+      f.solo_found = tostring(detail)
+    end
+    solo_note = ("solo mode is not in force (%s); "):format(tostring(detail))
+  end
   return false,
-    ("commit %s of %s is not reviewed (unreviewed commits since the last release)"):format(
-      f.sha:sub(1, 12),
-      f.repo
-    ),
+    solo_note
+      .. ("commit %s of %s is not reviewed (unreviewed commits since the last release)"):format(
+        f.sha:sub(1, 12),
+        f.repo
+      ),
     "unreviewed"
 end
 
@@ -606,6 +629,128 @@ function M.shared_release(repo, sha, entry, signers, ctx, root)
   end
 end
 
+-- --------------------------------------------------------------------------------------------------- working alone
+
+---@param root string
+---@param key string `owner/name`, lower case
+---@return string
+local function solo_cache_path(root, key)
+  return root .. "/_solo/" .. key:gsub("/", "__") .. ".json"
+end
+
+---The logins one `gh api ... --jq` call printed, lower case, or nil and why it failed.
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param endpoint string
+---@param jq string
+---@return string[]|nil logins
+---@return string|nil err
+local function logins(ctx, endpoint, jq)
+  local out, err = gh(ctx, { "api", endpoint, "--jq", jq })
+  if not out then
+    return nil, query_failure(ctx, err)
+  end
+  local list = {}
+  for line in out:gmatch("[^\r\n]+") do
+    local name = vim.trim(line):lower()
+    if name ~= "" and name ~= "null" and #name <= 100 then
+      list[#list + 1] = name
+    end
+  end
+  return list
+end
+
+---`solo` mode: is the owner the only party of the repository? "Somebody else" is any other account that is a
+---collaborator, a contributor (bots too: their commits are not the owner's code) or the author of a pull request,
+---read from the newest `M.SOLO_PAGE` entries of each. Commits authored by a name GitHub cannot link to an account
+---(an agent's `noreply` address) do not count: they land under the owner's account and the owner's push.
+---Fail closed: a question GitHub does not answer gives `nil` (the guard stays on for that job, but nothing is
+---recorded: a rate limit says nothing about the repository). Only "alone" is kept, for the jobs of the same run.
+---@param repo string `owner/name`
+---@param owner string
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param root string
+---@return boolean|nil alone true: only the owner; false: somebody else; nil: unknown
+---@return string detail the signals, or why it is unknown, or what the answer rests on
+function M.solo_clear(repo, owner, ctx, root)
+  local key = repo_key(repo)
+  if not key then
+    return nil, "not a repository name"
+  end
+  owner = lc(owner ~= "" and owner or repo:match("^([^/]+)/"))
+  local now = ctx and ctx.now or os.time()
+  -- The answer is kept for the jobs of ONE run (a run's jobs start together and would each ask the same three
+  -- things), never for the time: a pull request opened and merged within minutes must not be waved through by an
+  -- answer from before it. Without a run id nothing is kept.
+  local run_id = read_var(ctx, "GITHUB_RUN_ID")
+  local attempt = read_var(ctx, "GITHUB_RUN_ATTEMPT")
+  local stamp = (run_id and #run_id <= 20 and run_id:match("^%d+$"))
+      and ("%s-%s-%s"):format(
+        run_id,
+        (attempt and #attempt <= 10 and attempt:match("^%d+$")) and attempt or "1",
+        lc(read_var(ctx, "GITHUB_SHA"))
+      )
+    or nil
+  local cache = solo_cache_path(root, key)
+  local fh = stamp and io.open(cache, "rb")
+  if fh then
+    local text = fh:read(2048)
+    fh:close()
+    local ok, d = pcall(vim.json.decode, text or "")
+    if
+      ok
+      and type(d) == "table"
+      and d.clear == true
+      and d.owner == owner
+      and d.run == stamp
+      and type(d.at) == "number"
+      and now >= d.at
+      and now - d.at < M.SOLO_TTL_S
+    then
+      return true, "asked GitHub for this run " .. (now - d.at) .. " s ago"
+    end
+  end
+  local per = "?per_page=" .. M.SOLO_PAGE
+  local sources = {
+    { "collaborator", ("repos/%s/collaborators%s"):format(repo, per), ".[].login" },
+    { "contributor", ("repos/%s/contributors%s"):format(repo, per), ".[].login" },
+    {
+      "pull request by",
+      ("repos/%s/pulls%s&state=all"):format(repo, per),
+      ".[].user.login",
+    },
+  }
+  local found, seen = {}, {}
+  for _, s in ipairs(sources) do
+    local list, err = logins(ctx, s[2], s[3])
+    if not list then
+      return nil, ("%s: %s"):format(s[1], err)
+    end
+    for _, name in ipairs(list) do
+      if name ~= owner and not seen[s[1] .. name] then
+        seen[s[1] .. name] = true
+        found[#found + 1] = ("%s %s"):format(s[1], name)
+      end
+    end
+  end
+  if #found > 0 then
+    table.sort(found)
+    local text = table.concat(vim.list_slice(found, 1, 5), ", "):gsub("%c", " ")
+    if #found > 5 then
+      text = text .. (" and %d more"):format(#found - 5)
+    end
+    return false, text
+  end
+  if stamp then
+    require("lib.nvim.fs.write.atomic")(
+      cache,
+      vim.json.encode({ clear = true, owner = owner, at = now, run = stamp }),
+      { mkdirp = true }
+    )
+    pcall(prune_answers, vim.fs.dirname(cache))
+  end
+  return true, "no other collaborator, contributor or pull request author"
+end
+
 ---@type fun(ctx?: Testing.RunnerGuard.Ctx): string, string
 local tools
 
@@ -634,7 +779,30 @@ local function check(sv, ctx)
     local v = out and out:gsub("%s+", "")
     facts.is_private = v == "true" and true or (v == "false" and false or nil)
   end
+  if facts.entry and facts.entry.mode == "solo" then
+    facts.solo = function()
+      return M.solo_clear(facts.repo, facts.owner or "", ctx, M.root(ctx))
+    end
+  end
   local allowed, reason, why = M.decide(facts)
+  if facts.solo_found and key then
+    -- somebody else is here: the guard stays on from now on, also when that account is gone again (a person
+    -- turns `solo` on again by hand, after looking)
+    local found = facts.solo_found
+    local done, err = update(M.store_path(M.root(ctx)), function(rs)
+      local e = rs[key]
+      if e and e.mode == "solo" then
+        e.mode = "auto"
+        e.flipped = ("%s (%s)"):format(found, os.date("!%Y-%m-%d", ctx and ctx.now or os.time()))
+      end
+    end)
+    pcall(os.remove, solo_cache_path(M.root(ctx), key))
+    sv.err(
+      "runner-guard: note: solo mode ended, the guard is on for this repository: "
+        .. found
+        .. (done and "" or (" (not recorded: " .. tostring(err) .. ")"))
+    )
+  end
   if allowed then
     sv.out("runner-guard: allowed: " .. reason)
     return 0
@@ -767,12 +935,12 @@ function M.parse_trust(argv)
   ---@type table<string, any>
   local a = { positional = {} }
   for _, x in ipairs(argv) do
-    if x == "--show" or x == "--list" or x == "--revoke" or x == "--pushed" then
+    if x == "--show" or x == "--list" or x == "--revoke" or x == "--pushed" or x == "--all" then
       a[x:sub(3)] = true
     elseif x:match("^%-%-mode=") then
       a.mode = x:sub(8)
       if not M.MODES[a.mode] then
-        return nil, "--mode is auto, always or off"
+        return nil, "--mode is auto, always, off or solo"
       end
     elseif x:match("^%-%-note=") then
       a.note = x:sub(8):gsub("%c", " "):sub(1, 200)
@@ -791,6 +959,9 @@ function M.parse_trust(argv)
   end
   if #a.positional > 2 then
     return nil, "at most a repository and a commit id"
+  end
+  if a.all and (not a.mode or #a.positional > 0) then
+    return nil, "--all goes with --mode=<mode> and no repository"
   end
   return a
 end
@@ -1124,13 +1295,41 @@ function M.trust_main(argv, sv, ctx)
     table.sort(keys)
     for _, k in ipairs(keys) do
       local e = repos[k]
-      sv.out(("%s  mode=%s  %d reviewed"):format(k, e.mode, #e.shas))
+      sv.out(
+        ("%s  mode=%s  %d reviewed%s"):format(
+          k,
+          e.mode,
+          #e.shas,
+          e.flipped and ("  (solo ended: " .. e.flipped .. ")") or ""
+        )
+      )
       for _, s in ipairs(e.shas) do
         sv.out(("  %s  %s  %s"):format(s.sha:sub(1, 12), os.date("!%Y-%m-%d", s.at), s.note or ""))
       end
     end
     if #keys == 0 then
       sv.out("(the list of reviewed commits is empty: " .. path .. ")")
+    end
+    return 0
+  end
+  if a.all then
+    -- every repository on the list; one that was never released has no entry and is `auto` (the guard on)
+    local names = {}
+    local ok, err = update(path, function(repos)
+      for k, e in pairs(repos) do
+        names[#names + 1] = k
+        e.mode = a.mode
+        e.flipped = nil
+      end
+    end)
+    if not ok then
+      sv.err("testing ci trust: " .. tostring(err))
+      return 3
+    end
+    table.sort(names)
+    sv.out(("mode %s for %d repositor%s"):format(a.mode, #names, #names == 1 and "y" or "ies"))
+    for _, k in ipairs(names) do
+      sv.out("  " .. k)
     end
     return 0
   end
@@ -1152,6 +1351,7 @@ function M.trust_main(argv, sv, ctx)
     local ok, err = update(path, function(repos)
       repos[key] = repos[key] or { mode = "auto", shas = {} }
       repos[key].mode = a.mode
+      repos[key].flipped = nil
     end)
     if not ok then
       sv.err("testing ci trust: " .. tostring(err))
@@ -1483,6 +1683,19 @@ local function manage(action, argv, sv, ctx)
         note and (" (" .. note .. ")") or ""
       )
     )
+  end
+  if action == "status" then
+    local repos = M.read(M.store_path(root))
+    local keys = vim.tbl_keys(repos)
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+      local e = repos[k]
+      if e.mode == "solo" then
+        sv.out(("%s: solo (the owner alone; guard on when somebody else appears)"):format(k))
+      elseif e.flipped then
+        sv.out(("%s: guarded, solo ended: %s"):format(k, e.flipped))
+      end
+    end
   end
   if action ~= "remove" then
     sv.out(

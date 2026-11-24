@@ -52,7 +52,7 @@ M.USAGE = table.concat({
   "       testing ci overview [<root>...] [--repos-root=<dir>] [--out=<file.html>] [--json] [--no-remote] ...",
   "       testing ci hook install|remove|status [--run=<profile>] [--verify=<profile>] [--auto-trust] [--root=<dir>]",
   "       testing ci runner-guard check|install|remove|status [--runners=<dir>]",
-  "       testing ci trust [<owner/repo>] [<sha>] [--show|--list|--revoke|--mode=<m>] [--runners=<dir>]",
+  "       testing ci trust [<owner/repo>] [<sha>] [--show|--list|--revoke|--mode=<m> [--all]] [--runners=<dir>]",
   "                  [--junit=<file>] [--state-dir=<dir>] [--root=<dir>] [-- <suite options>]",
   "  --profile=<name>  the profile to run (default: ci.default)",
   "  --step=<a,b>      only these steps (a partial run: no proof, no sentinel)",

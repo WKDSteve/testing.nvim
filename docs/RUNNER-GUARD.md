@@ -36,7 +36,8 @@ Review is **per commit id, never per author**: the author of a commit is free te
 covers the tree that runs; its ancestors are not executed.
 
 Rules 5 and 6 only apply to public repositories (rule 4), so the private repositories are unaffected and keep their
-no-friction CI; use `--mode=always` to guard one anyway.
+no-friction CI; use `--mode=always` to guard one anyway. A public repository you work on alone can skip them too:
+[`--mode=solo`](#working-alone---modesolo).
 
 ## Hosted legs
 
@@ -178,6 +179,42 @@ What it rests on: a key on a device of yours signs whatever is committed there, 
 Code that was committed on your machine has normally run there already (tests before the push); the guard keeps out
 what did not come from your devices. A foreign commit that you rebase or cherry-pick is signed anew by your key and
 counts as yours, as with `--pushed`.
+
+## Working alone: `--mode=solo`
+
+A maintainer who is the only contributor has nobody whose code the guard needs to keep out, and every release is
+friction. Mode `solo` says so: the guard lets the owner's own pushes through without a release, and turns itself on,
+for good, when that stops being true.
+
+```sh
+testing ci trust --mode=solo --all                 # every repository on the list
+testing ci trust --mode=solo WKDSteve/tasks.nvim   # one repository (also one that was never released)
+testing ci runner-guard status                     # which repositories are alone, which lost it and why
+```
+
+What stays the same in `solo`: rule 2 and 2b (a pull request, an event outside the allowlist) and rule 3 (an actor
+that is not the owner) still refuse, and a private repository still runs by rule 4. Only rules 5 and 6 (the list of
+reviewed commits, the signature of the device registry) are not asked.
+
+**When it is "alone".** The hook asks GitHub (`gh`, the login of the runner's user) three things, each over the newest
+100 entries: the **collaborators**, the **contributors** (bots such as `dependabot[bot]` included: their commits are not
+yours) and the **authors of pull requests** of the repository. Any account other than the owner is somebody else. A
+commit whose author GitHub cannot link to an account (an agent's `noreply` address) is not a signal: it lands under your
+push.
+
+- **Found:** the repository's mode becomes `auto`, with the signal and the day in `reviewed.json` (`flipped`), and the
+  job is judged by rules 5 and 6 as always. It stays `auto` when the other account is gone again; you turn `solo` on
+  again by hand, after looking (`--mode=solo` clears the note).
+- **No answer** (no `gh`, a rate limit, the network): this job is judged by rules 5 and 6, nothing is recorded: a
+  rate limit says nothing about the repository.
+- **Alone** is kept only for the jobs of the same run (`<runners>/_solo/`, keyed by run id, attempt and commit): a run's
+  jobs start together and would each ask GitHub the same three things. Every new run asks again, so a pull request
+  that somebody opens and you merge minutes later is seen by the push run of the merge.
+
+**The limit.** `solo` trusts that nobody but you pushes. Commits that an agent or a cloud session made under your
+account run without a release, as does a push with a stolen token: the signature rule is what stopped them. Use it
+while you work alone and keep `auto` for a repository an agent works in unattended. The pre-push hook
+(`testing ci hook install --auto-trust`, below) is the other way to get fewer releases and keeps the guard on.
 
 ## Going back
 
