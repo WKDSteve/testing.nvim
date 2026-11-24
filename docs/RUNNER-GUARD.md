@@ -198,9 +198,23 @@ reviewed commits, the signature of the device registry) are not asked.
 
 **When it is "alone".** The hook asks GitHub (`gh`, the login of the runner's user) three things, each over the newest
 100 entries: the **collaborators**, the **contributors** (bots such as `dependabot[bot]` included: their commits are not
-yours) and the **authors of pull requests** of the repository. Any account other than the owner is somebody else. A
-commit whose author GitHub cannot link to an account (an agent's `noreply` address) is not a signal: it lands under your
-push.
+yours) and the **authors of pull requests** of the repository. Any account other than the owner is somebody else, except
+the ones you put on the **ignore list**. A commit whose author GitHub cannot link to any account lists nobody.
+
+Claude's commits (author or co-author `noreply@anthropic.com`) are linked to the GitHub account `claude`, so that account
+shows up as a contributor in nearly every repository you work on with it, and solo mode ends at the first job. Whether
+that account is "somebody else" is your decision, so nothing is ignored by default:
+
+```sh
+testing ci runner-guard solo-ignore add claude      # the accounts that are you or your tools; one login per line in
+testing ci runner-guard solo-ignore remove claude   # <runners>/solo_ignore
+testing ci runner-guard solo-ignore list            # (runner-guard status shows it too)
+```
+
+An ignored account is left out of all three questions. It means: a commit whose author is that account is as good as
+yours. The author of a commit is free text, so an outsider's pull request could carry that address too; the checks
+that stay in front are the collaborators (only people with write access) and the authors of pull requests (who opened
+it, not what a commit says). Do not ignore an account you do not control.
 
 - **Found:** the repository's mode becomes `auto`, with the signal and the day in `reviewed.json` (`flipped`), and the
   job is judged by rules 5 and 6 as always. It stays `auto` when the other account is gone again; you turn `solo` on

@@ -19,6 +19,13 @@ return function(H)
     )
   end
 
+  local function lacks(haystack, needle, msg)
+    return ok(
+      type(haystack) == "string" and haystack:find(needle, 1, true) == nil,
+      msg .. " (found " .. vim.inspect(needle) .. " in " .. tostring(haystack):sub(1, 1500) .. ")"
+    )
+  end
+
   local guard = require("testing.ci.runner_guard")
   local SHA = ("a"):rep(40)
   local REPO = "WKDSteve/tasks.nvim"
@@ -368,5 +375,93 @@ return function(H)
       "trust --list: the repository that lost it is guarded"
     )
     has(listing, "(solo ended: collaborator mallory", "trust --list: ... with the reason")
+  end
+
+  -- ------------------------------------------------------------------ accounts the owner does not count
+
+  do
+    local function ignore(root, args)
+      local o = sink()
+      local code = guard.main(vim.list_extend({ "solo-ignore" }, args), o.sv, { root = root })
+      return code, joined(o)
+    end
+    local agent = { contrib = { "WKDSteve", "claude" } }
+
+    local root = setup("solo")
+    eq(run_check(root, agent), 1, "ignore: the account Claude's commits link to counts by default")
+    eq(entry(root).mode, "auto", "ignore: ... and ends solo mode")
+
+    root = setup("solo")
+    local code, text = ignore(root, { "list" })
+    eq(code, 0, "ignore: list on an empty list")
+    has(text, "no account is ignored", "ignore: ... says so")
+    code, text = ignore(root, { "add", "Claude" })
+    eq(code, 0, "ignore: add")
+    has(text, "claude", "ignore: ... the login is lower case")
+    eq(select(2, guard.solo_ignore(root)), { "claude" }, "ignore: the list holds it")
+    ignore(root, { "add", "claude" })
+    eq(select(2, guard.solo_ignore(root)), { "claude" }, "ignore: adding twice keeps one line")
+
+    eq(run_check(root, agent), 0, "ignore: with the account on the list the owner is alone")
+    eq(entry(root).mode, "solo", "ignore: ... and the mode stays")
+
+    -- a bot is not ignored by the account that is
+    code, text = run_check(root, { contrib = { "WKDSteve", "claude", "dependabot[bot]" } })
+    eq(code, 1, "ignore: another account still counts")
+    has(text, "contributor dependabot[bot]", "ignore: ... and is named")
+    lacks(text, "contributor claude", "ignore: ... without the ignored one")
+
+    -- the ignored account is ignored in every list GitHub gives
+    root = setup("solo")
+    ignore(root, { "add", "claude" })
+    eq(
+      run_check(root, { collab = { "claude" }, pulls = { "claude" } }),
+      0,
+      "ignore: as collaborator and as author of a pull request too"
+    )
+
+    -- it stops counting when taken off
+    code = ignore(root, { "remove", "claude" })
+    eq(code, 0, "ignore: remove")
+    eq(select(2, guard.solo_ignore(root)), {}, "ignore: ... the list is empty again")
+    eq(run_check(root, agent), 1, "ignore: removed, the account counts again")
+
+    -- the file is read as untrusted data
+    local f = assert(io.open(root .. "/solo_ignore", "wb"))
+    f:write(
+      "# a comment\nclaude   # trailing\n../../x\n  Eve  \nbad name\n\n" .. ("x"):rep(300) .. "\n"
+    )
+    f:close()
+    eq(
+      select(2, guard.solo_ignore(root)),
+      { "claude", "eve" },
+      "ignore: comments and non-logins are skipped"
+    )
+
+    for _, bad in ipairs({
+      { "add", "bad name" },
+      { "add", "a/b" },
+      { "add", ("x"):rep(101) },
+      { "add" },
+      { "list", "claude" },
+      { "frobnicate", "claude" },
+      {},
+    }) do
+      eq(select(1, ignore(root, bad)), 2, "ignore: refused " .. vim.inspect(bad))
+    end
+    eq(select(2, guard.solo_ignore(root)), { "claude", "eve" }, "ignore: a refusal writes nothing")
+
+    local o = sink()
+    local runner = root .. "/runner1"
+    vim.fn.mkdir(runner, "p")
+    local rc = assert(io.open(runner .. "/run.cmd", "wb"))
+    rc:write("@echo off\n")
+    rc:close()
+    guard.main(
+      { "status", "--runners=" .. root },
+      o.sv,
+      { root = root, nvim = "/x/nvim", script = "/x/t.lua" }
+    )
+    has(joined(o), "solo mode ignores: claude, eve", "ignore: status shows the list")
   end
 end

@@ -55,6 +55,7 @@ M.EVENTS =
 M.USAGE = table.concat({
   "usage: testing ci runner-guard check",
   "       testing ci runner-guard install|remove|status [--runners=<dir>]",
+  "       testing ci runner-guard solo-ignore list | add <login> | remove <login> [--runners=<dir>]",
   "       testing ci trust [<owner/repo>] [<sha>] [--show] [--note=<text>] [--runners=<dir>]",
   "       testing ci trust --pushed   (the pre-push hook: git's lines on stdin; own local commits only)",
   "       testing ci trust --list | --revoke [<owner/repo>] [<sha>] | --mode=auto|always|off|solo [<owner/repo>|--all]",
@@ -638,6 +639,41 @@ local function solo_cache_path(root, key)
   return root .. "/_solo/" .. key:gsub("/", "__") .. ".json"
 end
 
+M.SOLO_IGNORE_FILE = "solo_ignore"
+M.MAX_IGNORE = 100
+
+---A GitHub login as the ignore list takes it: letters, digits and hyphens, or a bot (`name[bot]`).
+---@param s any
+---@return boolean
+function M.valid_login(s)
+  return type(s) == "string"
+    and #s <= 100
+    and (s:match("^%w[%w%-]*$") ~= nil or s:match("^%w[%w%-]*%[bot%]$") ~= nil)
+end
+
+---The accounts the owner said are not "somebody else" (`<runners>/solo_ignore`, one login per line, `#` starts a
+---comment). Read as untrusted data: a line that is no login is skipped, at most `M.MAX_IGNORE` count.
+---@param root string
+---@return table<string, true> set
+---@return string[] list in file order
+function M.solo_ignore(root)
+  local set, list = {}, {}
+  local fh = io.open(root .. "/" .. M.SOLO_IGNORE_FILE, "rb")
+  if not fh then
+    return set, list
+  end
+  local text = fh:read(8192)
+  fh:close()
+  for line in (text or ""):gmatch("[^\r\n]+") do
+    local name = vim.trim((line:gsub("#.*$", ""))):lower()
+    if M.valid_login(name) and not set[name] and #list < M.MAX_IGNORE then
+      set[name] = true
+      list[#list + 1] = name
+    end
+  end
+  return set, list
+end
+
 ---The logins one `gh api ... --jq` call printed, lower case, or nil and why it failed.
 ---@param ctx? Testing.RunnerGuard.Ctx
 ---@param endpoint string
@@ -661,8 +697,9 @@ end
 
 ---`solo` mode: is the owner the only party of the repository? "Somebody else" is any other account that is a
 ---collaborator, a contributor (bots too: their commits are not the owner's code) or the author of a pull request,
----read from the newest `M.SOLO_PAGE` entries of each. Commits authored by a name GitHub cannot link to an account
----(an agent's `noreply` address) do not count: they land under the owner's account and the owner's push.
+---read from the newest `M.SOLO_PAGE` entries of each. An account the owner put on the ignore list (`M.solo_ignore`,
+---e.g. the account Claude's commits are linked to) does not count. Commits whose author GitHub cannot link to any
+---account list nobody.
 ---Fail closed: a question GitHub does not answer gives `nil` (the guard stays on for that job, but nothing is
 ---recorded: a rate limit says nothing about the repository). Only "alone" is kept, for the jobs of the same run.
 ---@param repo string `owner/name`
@@ -720,13 +757,14 @@ function M.solo_clear(repo, owner, ctx, root)
     },
   }
   local found, seen = {}, {}
+  local ignored = M.solo_ignore(root)
   for _, s in ipairs(sources) do
     local list, err = logins(ctx, s[2], s[3])
     if not list then
       return nil, ("%s: %s"):format(s[1], err)
     end
     for _, name in ipairs(list) do
-      if name ~= owner and not seen[s[1] .. name] then
+      if name ~= owner and not ignored[name] and not seen[s[1] .. name] then
         seen[s[1] .. name] = true
         found[#found + 1] = ("%s %s"):format(s[1], name)
       end
@@ -1685,6 +1723,10 @@ local function manage(action, argv, sv, ctx)
     )
   end
   if action == "status" then
+    local _, ignored = M.solo_ignore(root)
+    if #ignored > 0 then
+      sv.out("solo mode ignores: " .. table.concat(ignored, ", "))
+    end
     local repos = M.read(M.store_path(root))
     local keys = vim.tbl_keys(repos)
     table.sort(keys)
@@ -1710,6 +1752,82 @@ local function manage(action, argv, sv, ctx)
   return code
 end
 
+---`testing ci runner-guard solo-ignore list | add <login> | remove <login> [--runners=<dir>]`.
+---@param argv string[]
+---@param sv { out: fun(s: string), err: fun(s: string) }
+---@param ctx? Testing.RunnerGuard.Ctx
+---@return integer
+local function solo_ignore_cmd(argv, sv, ctx)
+  local action, login, given
+  for _, x in ipairs(argv) do
+    if x:match("^%-%-runners=") then
+      given = x:sub(11)
+    elseif not action then
+      action = x
+    elseif not login then
+      login = x:lower()
+    else
+      sv.err(
+        "testing ci runner-guard solo-ignore: unexpected argument " .. x:sub(1, 40):gsub("%c", "?")
+      )
+      return 2
+    end
+  end
+  if
+    not ((action == "list" and not login) or ((action == "add" or action == "remove") and login))
+  then
+    sv.err(
+      "usage: testing ci runner-guard solo-ignore list | add <login> | remove <login> [--runners=<dir>]"
+    )
+    return 2
+  end
+  local root = M.root(ctx, given)
+  local _, list = M.solo_ignore(root)
+  if action == "list" then
+    for _, name in ipairs(list) do
+      sv.out(name)
+    end
+    if #list == 0 then
+      sv.out("(no account is ignored by solo mode: " .. root .. "/" .. M.SOLO_IGNORE_FILE .. ")")
+    end
+    return 0
+  end
+  if not M.valid_login(login) then
+    sv.err(
+      "testing ci runner-guard solo-ignore: not a GitHub login: "
+        .. tostring(login):sub(1, 40):gsub("%c", "?")
+    )
+    return 2
+  end
+  local keep = vim.tbl_filter(function(n)
+    return n ~= login
+  end, list)
+  if action == "add" then
+    if #keep >= M.MAX_IGNORE then
+      sv.err("testing ci runner-guard solo-ignore: at most " .. M.MAX_IGNORE .. " accounts")
+      return 2
+    end
+    keep[#keep + 1] = login
+  end
+  local text = "# Accounts solo mode does not count as somebody else (docs/RUNNER-GUARD.md). One login per line.\n"
+    .. table.concat(keep, "\n")
+    .. (#keep > 0 and "\n" or "")
+  local ok, err =
+    require("lib.nvim.fs.write.atomic")(root .. "/" .. M.SOLO_IGNORE_FILE, text, { mkdirp = true })
+  if not ok then
+    sv.err("testing ci runner-guard solo-ignore: cannot write the list: " .. tostring(err))
+    return 3
+  end
+  sv.out(
+    ("%s: %s (%d ignored)"):format(
+      login,
+      action == "add" and "ignored by solo mode" or "counts again",
+      #keep
+    )
+  )
+  return 0
+end
+
 ---`testing ci runner-guard ...`.
 ---@param argv string[]
 ---@param sv table
@@ -1719,6 +1837,9 @@ function M.main(argv, sv, ctx)
   local sub = argv[1]
   if sub == "check" and #argv == 1 then
     return check(sv, ctx)
+  end
+  if sub == "solo-ignore" then
+    return solo_ignore_cmd(vim.list_slice(argv, 2), sv, ctx)
   end
   if sub == "install" or sub == "remove" or sub == "status" then
     return manage(sub, vim.list_slice(argv, 2), sv, ctx)
