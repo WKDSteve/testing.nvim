@@ -39,11 +39,7 @@ function M.lua_quote(s)
 end
 
 ---POSIX single-quoted word of `s`. A NUL cannot be represented; the caller checks for it.
----@param s string
----@return string
-function M.sh_quote(s)
-  return "'" .. s:gsub("'", [['\'']]) .. "'"
-end
+M.sh_quote = require("lib.nvim.cross.shell_quote.single")
 
 ---Double-quoted YAML scalar of `s`.
 ---@param s string
