@@ -1,3 +1,4 @@
+---@module 'testing.child.rpc_init'
 ---@brief The `-u` file of an RPC child (`testing.rpc`): puts the runtimepath in order, then runs the project's minimal init.
 ---@description
 --- A CONSTANT command line starts `nvim --embed --headless --clean -n -i NONE -u <this file>`; the

@@ -1,3 +1,4 @@
+---@module 'testing.priority'
 -- testing.priority -- heavy runs of the command line start with a low CPU priority, so the self-hosted CI runners on
 -- the same machine get the CPU first.
 --
