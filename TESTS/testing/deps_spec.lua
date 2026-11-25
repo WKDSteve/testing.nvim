@@ -161,6 +161,16 @@ return function(H)
     has(deps.lib_problem(res), "55b96be", "a lib.nvim without lib.lua.time.parse names that commit")
     vim.fn.mkdir(stale .. "/lua/lib/lua/time/parse", "p")
     vim.fn.writefile({ "return {}" }, stale .. "/lua/lib/lua/time/parse/init.lua")
+    has(
+      deps.lib_problem(res),
+      "a8d4f9b",
+      "a lib.nvim without cross.shell_quote.single names that commit"
+    )
+    vim.fn.mkdir(stale .. "/lua/lib/nvim/cross/shell_quote", "p")
+    vim.fn.writefile(
+      { "return function() end" },
+      stale .. "/lua/lib/nvim/cross/shell_quote/single.lua"
+    )
     eq(deps.lib_problem(res), nil, "with the modules present there is no problem")
     -- the real lib.nvim this suite runs on must pass its own check
     local real_lib = deps.resolve("lib.nvim", deps.self_dir())
