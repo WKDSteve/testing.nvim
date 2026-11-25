@@ -50,6 +50,7 @@ local REQUIRED_LIB = {
   { "lib.nvim.fs.project_key", "stable project key of a run" },
   { "lib.nvim.fs.write.atomic", "atomic write of the JSON IR and the reports" },
   { "lib.nvim.fs.write.append", "appending to the history files" },
+  { "lib.nvim.cross.shell_quote.single", "quoting a word of the generated scaffold script" },
   { "lib.nvim.system.job", "process execution (runner)" },
   { "lib.lua.config", "the setup() configuration" },
   { "lib.nvim.cross.executable", "finding the tools of a testing ci step" },

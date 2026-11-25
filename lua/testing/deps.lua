@@ -250,6 +250,11 @@ M.LIB_REQUIRED = {
     what = "lib.lua.time.presets.since_utc (testing stats --since)",
     commit = "55b96be",
   },
+  {
+    module = "lib/nvim/cross/shell_quote/single",
+    what = "cross.shell_quote.single (the generated scaffold script)",
+    commit = "a8d4f9b",
+  },
 }
 
 ---Is the lib.nvim checkout `dir` too old for this runner? A stale copy that comes first in the search
