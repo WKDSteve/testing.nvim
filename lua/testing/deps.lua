@@ -293,6 +293,96 @@ function M.lib_problem(resolved)
   return table.concat(lines, "\n")
 end
 
+---Are `a` and `b` the same directory (normalized, without case: Windows)?
+---@param a string
+---@param b string
+---@return boolean
+function M.same_dir(a, b)
+  return norm(a):lower() == norm(b):lower()
+end
+
+---Places of a project's own: a lib.nvim found there is the project's choice, not a stranger's state.
+local OWN_SOURCES =
+  { ["the project itself"] = true, [".deps/lib.nvim"] = true, ["../lib.nvim"] = true }
+
+---Which lib.nvim the specs of the project at `root` load. Found 2026-11-24 (and again): in a worktree of lib.nvim
+---`testing run` and `ci commit` loaded the lib.nvim beside the runner (`$REPOS_DIR/lib.nvim`), because the runner's
+---own lib.nvim came first on the runtimepath; the new code of the worktree never ran.
+---
+--- 1. The project is itself a lib.nvim checkout (a worktree, the snapshot of `ci commit`): its own checkout.
+--- 2. Else the lib.nvim the project resolves (`resolved`, of `resolve_all`), when it declares one.
+--- 3. Else (it declares none) nil: the runner's lib.nvim, as before.
+---
+---A checkout of 1 or 2 too old for this runner (`lib_problem`) is not taken (nil, with a note): the runner cannot
+---run on it. A lib.nvim of 2 from no place of the project's own (`stdpath('data')/lazy`, or beside the runner: a
+---worktree of a consumer has no sibling checkout) is taken, and the note says where it comes from: the specs then
+---check against another state of lib.nvim than the project's.
+---@param root string
+---@param resolved? Testing.Deps.Resolved[]
+---@param runner_lib? Testing.Deps.Resolved The runner's own (`resolve("lib.nvim", self_dir())`).
+---@return Testing.Deps.Resolved|nil lib nil: keep the runner's.
+---@return string|nil note One line for stderr.
+function M.project_lib(root, resolved, runner_lib)
+  local own
+  local root_abs = norm(root)
+  if dir_state(root_abs, MARKERS["lib.nvim"]) == "ok" then
+    own = { name = "lib.nvim", dir = root_abs, source = "the project itself", locations = {} }
+  else
+    for _, r in ipairs(resolved or {}) do
+      if r.name == "lib.nvim" then
+        own = r
+      end
+    end
+  end
+  if not own then
+    return nil
+  end
+  local same = runner_lib ~= nil and M.same_dir(own.dir, runner_lib.dir)
+  if not same then
+    local problem = M.lib_problem(own)
+    if problem then
+      return nil,
+        ("testing: note: lib.nvim for the specs: the project's %s (%s) is too old for this runner, the runner's %s comes first: the specs do not load the project's lib.nvim"):format(
+          own.dir,
+          own.source,
+          runner_lib and runner_lib.dir or "(none)"
+        )
+    end
+  end
+  -- `$LIB_NVIM_DIR` is an explicit choice; `stdpath('data')/lazy` and "beside the runner" are no place of the project
+  if not OWN_SOURCES[own.source] and own.source:sub(1, 1) ~= "$" then
+    return own,
+      ("testing: note: lib.nvim for the specs: %s (%s), not a checkout of the project's own (.deps/lib.nvim, ../lib.nvim): they check against that state of lib.nvim"):format(
+        own.dir,
+        own.source
+      )
+  end
+  if own.source == "the project itself" and not same then
+    return own,
+      ("testing: note: lib.nvim for the specs: the project itself (%s), not the runner's %s"):format(
+        own.dir,
+        runner_lib and runner_lib.dir or "(none)"
+      )
+  end
+  return own
+end
+
+---Make the lib.nvim at `dir` the one a `require` finds from now on, in this process: first on the runtimepath, and
+---the `lib.*` modules loaded so far (the runner's) dropped from `package.loaded`. Modules that hold one keep theirs.
+---@param dir string
+function M.use_lib(dir)
+  local want = norm(dir):lower()
+  local first = vim.split(vim.o.runtimepath, ",", { plain = true })[1]
+  if not (first and norm(first):lower() == want) then
+    vim.opt.rtp:prepend(dir)
+  end
+  for name in pairs(package.loaded) do
+    if name == "lib" or name:sub(1, 4) == "lib." then
+      package.loaded[name] = nil
+    end
+  end
+end
+
 ---Checkout of testing.nvim that this very file belongs to.
 ---@return string
 function M.self_dir()

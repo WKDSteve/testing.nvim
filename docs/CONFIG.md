@@ -139,6 +139,15 @@ earlier CI run) that lacks what the runner needs (`fs.write.atomic`, lib.nvim >=
 blindly: the runner exits `3` and names the checkout, what is missing, the commit that has it and the four
 places. `testing doctor` prints the resolution of everything.
 
+The specs, though, load the **project's** lib.nvim, not the runner's, in the runner's own editor and in every child
+(`--isolated`): a project that is itself a lib.nvim checkout (a worktree of it, the snapshot of `ci commit`) loads its
+own checkout, even with `$LIB_NVIM_DIR` set; a project that declares `lib.nvim` loads the one it resolves. The runner's
+lib.nvim stays behind it on the runtimepath for what the project's lacks. A line on stderr says when that is not the
+project's own checkout: `testing: note: lib.nvim for the specs: the project itself (...)`, not the runner's; `... (stdpath('data')/lazy/lib.nvim)` or
+`(beside the runner)`, not a checkout of the project's own: a worktree of a consumer checks against that state of
+lib.nvim. A project lib.nvim too old for the runner (see above) is not taken: the runner's stays first, and the note
+says that the specs do not load the project's.
+
 ## Workspace trust
 
 `.testing.lua`, `TESTS/minimal_init.lua` and the specs are Lua that runs with your rights. The command-line

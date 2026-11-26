@@ -432,15 +432,27 @@ function M.child_rtp(plan)
   local append = {}
   -- the checkout that is running: a project's minit asks for `testing.nvim` like for any dependency
   local env = { [deps.env_name("testing.nvim")] = deps.self_dir() }
-  local lib = deps.resolve("lib.nvim", deps.self_dir())
+  local resolved = deps.resolve_all((plan.project or {}).deps or {}, plan.root)
+  -- the lib.nvim of the specs: the project's (itself when it is lib.nvim, or the one it resolves) before the runner's,
+  -- as in the parent (`testing.deps.project_lib`; the parent said the note)
+  local runner_lib = deps.resolve("lib.nvim", deps.self_dir())
+  local lib = deps.project_lib(plan.root, resolved, runner_lib) or runner_lib
   if lib then
     append[#append + 1] = lib.dir
-    env[deps.env_name("lib.nvim")] = lib.dir
   end
-  local resolved = deps.resolve_all((plan.project or {}).deps or {}, plan.root)
+  -- the runner's behind it: what the runner needs and the project's lib.nvim lacks still comes from there (in this
+  -- process it stays on the runtimepath too, `testing.deps.use_lib`)
+  if runner_lib and lib and not deps.same_dir(runner_lib.dir, lib.dir) then
+    append[#append + 1] = runner_lib.dir
+  end
   for _, r in ipairs(resolved) do
-    append[#append + 1] = r.dir
+    if not (r.name == "lib.nvim" and lib) then
+      append[#append + 1] = r.dir
+    end
     env[deps.env_name(r.name)] = r.dir
+  end
+  if lib then
+    env[deps.env_name("lib.nvim")] = lib.dir
   end
   append[#append + 1] = plan.root
   for _, dir in ipairs((plan.args or {}).rtp or {}) do

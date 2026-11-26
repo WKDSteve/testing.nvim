@@ -889,6 +889,20 @@ local function execute(argv, sv)
   for _, r in ipairs(resolved) do
     deps.add_to_rtp(r.dir, false)
   end
+  -- The lib.nvim of the specs: the project's (itself, when it is lib.nvim; or the one it resolves), not the runner's
+  -- that came first on the runtimepath (`testing.deps.project_lib`); the note says when it is not the project's own
+  do
+    local runner_lib = deps.resolve("lib.nvim", deps.self_dir())
+    local lib_for_specs, lib_note = deps.project_lib(root, resolved, runner_lib)
+    if lib_note then
+      err(lib_note)
+    end
+    -- only another checkout is switched to: the same one stays as it is (a spec that calls `cli.main` keeps the
+    -- modules it loaded or replaced)
+    if lib_for_specs and not (runner_lib and deps.same_dir(lib_for_specs.dir, runner_lib.dir)) then
+      deps.use_lib(lib_for_specs.dir)
+    end
+  end
   -- Optional dependencies: on the runner's runtimepath when found, nothing when not (docmap.nvim for --changed)
   for _, name in ipairs(plan.project.deps_optional or {}) do
     local found = deps.resolve(name, root)
