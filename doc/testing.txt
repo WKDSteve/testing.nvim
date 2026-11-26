@@ -620,6 +620,10 @@ so a program that started the run tells a red sheet from a task that was not
 written (both are exit 1).
 `testing sheets run --all [--root <dir>] [--json <ir>] [--strict]` runs every
 sheet of the roots; `--json` writes the Result-IR, `--strict` makes a skip red.
+`--repeat {n}` (any form but `--tasks`) runs each sheet n times and prints
+the median, min, max and spread of each step (timed next to the target; a
+browser `wait` also since the click before it) and of each measure. See
+docs/SHEETS.md, "How long the steps take".
 `testing sheets run --sheet {id}...` runs only the named sheets (id or file
 name), as `--all` would. `--live` (any form) lets live sheets (`live = { env,
 hosts, cost }`) run with their real keys, only the named hosts and the cost

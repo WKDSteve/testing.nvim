@@ -1,5 +1,5 @@
 // The browser engine of a test sheet (testing.sheet.browser), with Playwright. Two ways in, one step function:
-//   node browser_runner.mjs <plan.json>   the whole plan: prints one JSON line { failures, shots } and exits 0 (also on
+//   node browser_runner.mjs <plan.json>   the whole plan: prints one JSON line { failures, shots, steps } and exits 0 (also on
 //                                         failed steps); exit 77 = a prerequisite is missing. The suite's way.
 //   node browser_runner.mjs --driver      one JSON line per command on stdin, one answer per line on stdout
 //                                         (testing-sheet-driver/1): open, step, close. stdin at its end closes too.
@@ -14,7 +14,10 @@ import { pathToFileURL } from 'node:url';
 
 const SKIP = 77;
 const DRIVER_SCHEMA = 'testing-sheet-driver/1';
-const ACTIONS = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'frame', 'scheme', 'wait', 'expect', 'shot'];
+const ACTIONS = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'frame', 'scheme', 'wait', 'expect', 'measure', 'shot'];
+// The steps that do something to the page: a later `wait` is timed from the start of the last of them as well
+// (`after_ms`, a click until the page shows what it did).
+const ACTING = ['open', 'press', 'click', 'hover', 'drag', 'focus', 'blur', 'scheme'];
 
 function describe(step) {
   for (const a of ACTIONS) {
@@ -50,7 +53,18 @@ async function waitFor(page, expression, timeout) {
   }
 }
 
-// Throws when the step fails; a `shot` answers with its file. `where.frame`, once a `frame` step chose one, is the
+// The median of numbers (the mean of the middle two of an even count), as testing.sheet.median.
+function median(values) {
+  const v = values.toSorted((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 === 1 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+// Milliseconds to a tenth: finer is noise of the clock and the event loop.
+const tenth = (ms) => Math.round(ms * 10) / 10;
+
+// Throws when the step fails; a `shot` answers { shot: file }, a `measure` { values } (testing.sheet.measure_of judges
+// them). `where.frame`, once a `frame` step chose one, is the
 // iframe the element and script steps act in (a Playwright Frame answers as a page does); keys and pictures stay with
 // the page.
 async function runStep(page, step, where) {
@@ -96,6 +110,17 @@ async function runStep(page, step, where) {
   } else if (step.expect !== undefined) {
     const value = await scope.evaluate(step.expect);
     if (!value) throw new Error(`got ${JSON.stringify(value)}`);
+  } else if (step.measure !== undefined) {
+    // `runs` readings in the page (an async expression is awaited), the median counts
+    const values = [];
+    for (let i = 0; i < (step.runs ?? 1); i += 1) {
+      const v = await scope.evaluate(step.measure);
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`${step.name}: got ${JSON.stringify(v) ?? 'undefined'}, not a number`);
+      }
+      values.push(v);
+    }
+    return { values };
   } else if (step.shot !== undefined) {
     if (!existsSync(where.out_dir)) mkdirSync(where.out_dir, { recursive: true });
     const file = resolve(where.out_dir, `${where.id}.${step.shot}.${where.tag}.png`);
@@ -105,9 +130,29 @@ async function runStep(page, step, where) {
     } else {
       await page.screenshot({ path: file });
     }
-    return file;
+    return { shot: file };
   }
-  return undefined;
+  return {};
+}
+
+// A step with its duration, measured here next to the page (not in the process that asked for it): `ms` the step
+// itself; a `wait` also `after_ms`, from the start of the last acting step (`after_n`) to the moment its condition held.
+// A `measure` whose median broke `min` / `max` answers `broke`: the size ends there, as after any failed step.
+async function timedStep(page, step, where, n) {
+  const started = performance.now();
+  if (ACTING.some((a) => step[a] !== undefined)) where.acted = { at: started, n };
+  const out = await runStep(page, step, where);
+  const ended = performance.now();
+  out.ms = tenth(ended - started);
+  if (step.wait !== undefined && where.acted) {
+    out.after_ms = tenth(ended - where.acted.at);
+    out.after_n = where.acted.n;
+  }
+  if (out.values) {
+    const m = median(out.values);
+    out.broke = (step.max !== undefined && m > step.max) || (step.min !== undefined && m < step.min);
+  }
+  return out;
 }
 
 // An unpacked extension needs a persistent context (a profile of its own, thrown away at the end): `launch` cannot
@@ -266,6 +311,8 @@ async function wholePlan(planPath) {
   }
   const failures = [];
   const shots = [];
+  // per step that ran: { size, n, ms, after_ms?, after_n?, values? }; a failed step has none
+  const steps = [];
   for (const size of plan.sizes) {
     const tag = `${size.cols}x${size.rows}`;
     const page = await browser.newPage({ viewport: { width: size.cols, height: size.rows } });
@@ -273,18 +320,23 @@ async function wholePlan(planPath) {
     let n = 0;
     for (const step of plan.steps) {
       n += 1;
+      let out;
       try {
-        const shot = await runStep(page, step, where);
-        if (shot) shots.push(`screenshot ${shot}`);
+        out = await timedStep(page, step, where, n);
       } catch (e) {
         failures.push(`${tag} step ${n}, ${describe(step)}: ${String(e.message).split('\n')[0]}`);
         break;
       }
+      const { shot, broke, ...timing } = out;
+      if (shot) shots.push(`screenshot ${shot}`);
+      steps.push({ size: tag, n, ...timing });
+      // the failure line of a broken bound is written by testing.sheet.browser (testing.sheet.measure_of)
+      if (broke) break;
     }
     await page.close();
   }
   await browser.close();
-  console.log(JSON.stringify({ failures, shots }));
+  console.log(JSON.stringify({ failures, shots, steps }));
 }
 
 function driver() {
@@ -350,8 +402,9 @@ function driver() {
         return;
       }
       try {
-        const shot = await runStep(page, cmd.step, where);
-        answer(shot ? { ok: true, shot } : { ok: true });
+        // a broken bound is judged by testing.sheet.measure_of on the other side, from `values`
+        const { broke, ...out } = await timedStep(page, cmd.step, where, cmd.n);
+        answer({ ok: true, ...out });
       } catch (e) {
         answer({ ok: false, reason: String(e.message).split('\n')[0] });
       }

@@ -130,6 +130,8 @@ M.ENGINE_ACTIONS = {
     expect = true,
     shot = true,
     ask = true,
+    -- a JavaScript expression in the page that gives a number (an async one is awaited)
+    measure = true,
   },
   -- the page in the WebView2 of an app, through WebDriver (tauri-driver): as browser, without `open` (the app shows its
   -- page), `scheme` and `drag` (WebDriver has neither the media emulation nor HTML5 drag and drop)
@@ -207,7 +209,8 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field restart? boolean Quit the child and start it again in the same sandbox.
 ---@field rebaseline? boolean Take the handles that are active now as the quiet of `settle` (a plugin's endless timer).
 ---@field prompt? "hit-enter"|"more"|"confirm" Wait until the child shows this prompt.
----@field measure? string A Lua expression in the child that gives a number (`name`, `min`, `max`, `unit`, `runs`).
+---@field measure? string A Lua expression in the child (rpc) or a JavaScript expression in the page (browser, an async
+---one is awaited) that gives a number (`name`, `min`, `max`, `unit`, `runs`).
 ---@field name? string
 ---@field min? number
 ---@field max? number
@@ -262,6 +265,16 @@ M.ID_PATTERN = "^[%w][%w_.%-]*$"
 ---@field failures string[] One line per failed step (size, step number, what).
 ---@field snapshots string[] The messages of the screen steps (written, matched, updated).
 ---@field measures? Testing.Sheet.Measure[] What the `measure` steps measured, in order.
+---@field timings? Testing.Sheet.Timing[] How long each step that ran took, in order.
+
+---@class Testing.Sheet.Timing
+---@field size string The size it ran in (`1000x700`).
+---@field n integer The number of the step.
+---@field step string What the step is (`click #save`), as a failure line names it.
+---@field ms number How long the step took, measured next to the target (the browser runner, the session).
+---@field after_ms? number A `wait`: from the start of the last acting step before it (a `click`, a `press`, ...) to the
+---moment its condition held, e.g. a click until the page shows its result.
+---@field after_n? integer The number of that acting step.
 
 local STEP_KEYS = {
   keys = "string",
@@ -957,6 +970,36 @@ function M.check_measure(step, action, at)
     return at .. ": min is above max"
   end
   return nil
+end
+
+---Whether a reading of a `measure` step is a number that can be measured (finite).
+---@param v any
+---@return boolean
+function M.is_reading(v)
+  return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge
+end
+
+---What a `measure` step measured from its readings, and why the step failed (its median broke `min` / `max`).
+---@param step Testing.Sheet.Step
+---@param values number[]
+---@return Testing.Sheet.Measure measure, string|nil reason
+function M.measure_of(step, values)
+  local m = {
+    name = step.name,
+    value = M.median(values),
+    values = values,
+    unit = step.unit,
+    min = step.min,
+    max = step.max,
+  }
+  local text = M.measure_text(m)
+  if step.max and m.value > step.max then
+    return m, ("%s: above the max"):format(text)
+  end
+  if step.min and m.value < step.min then
+    return m, ("%s: below the min"):format(text)
+  end
+  return m, nil
 end
 
 ---The median of numbers (the mean of the middle two of an even count).

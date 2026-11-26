@@ -212,7 +212,7 @@ function M.new(s, opts, ctx, how)
 
   ---@param step Testing.Sheet.Step
   ---@param n integer
-  ---@return { reason?: string, shot?: string }
+  ---@return { reason?: string, shot?: string, ms?: number, after_ms?: number, after_n?: integer, measure?: Testing.Sheet.Measure }
   function D.run(step, n)
     if step.procs then
       if not watch then
@@ -245,7 +245,24 @@ function M.new(s, opts, ctx, how)
     if not answer.ok then
       return { reason = tostring(answer.reason or answer.error) }
     end
-    return { shot = answer.shot }
+    -- the durations as the driver measured them next to its target (testing-sheet-driver/1 `ms`, `after_ms`)
+    local out = {
+      shot = answer.shot,
+      ms = tonumber(answer.ms),
+      after_ms = tonumber(answer.after_ms),
+      after_n = tonumber(answer.after_n),
+    }
+    if step.measure and type(answer.values) == "table" and #answer.values > 0 then
+      local sheet = require("testing.sheet")
+      for _, v in ipairs(answer.values) do
+        if not sheet.is_reading(v) then
+          out.reason = ("%s: got %s, not a number"):format(step.name, vim.inspect(v))
+          return out
+        end
+      end
+      out.measure, out.reason = sheet.measure_of(step, answer.values)
+    end
+    return out
   end
 
   ---The picture of the target after a step, moved out of the project's shots into `dir`. Nil when there is none.

@@ -122,6 +122,41 @@ local function with_config(root, opts)
 end
 
 ---@param s Testing.Sheet
+---What the runner says of the steps that ran (`{ size, n, ms, after_ms?, after_n?, values? }`, measured in node next
+---to the page): their durations, what the `measure` steps measured, and per size the failure line of a `measure`
+---whose median broke its bound (the runner ended that size there).
+---@param rows any The `steps` of the runner's answer.
+---@param steps Testing.Sheet.Step[] The steps of the plan (`app` variables filled in).
+---@return Testing.Sheet.Timing[] timings, Testing.Sheet.Measure[] measures, table<string, string> broken
+function M.timings_of(rows, steps)
+  local sheet = require("testing.sheet")
+  local timings, measures, broken = {}, {}, {}
+  for _, t in ipairs(type(rows) == "table" and rows or {}) do
+    local step = type(t) == "table" and type(t.n) == "number" and steps[t.n] or nil
+    if step and type(t.size) == "string" and type(t.ms) == "number" then
+      local what = sheet._describe(step)
+      timings[#timings + 1] = {
+        size = t.size,
+        n = t.n,
+        step = what,
+        ms = t.ms,
+        after_ms = tonumber(t.after_ms),
+        after_n = tonumber(t.after_n),
+      }
+      if step.measure and type(t.values) == "table" and #t.values > 0 then
+        local m, why = sheet.measure_of(step, t.values)
+        m.size, m.n = t.size, t.n
+        measures[#measures + 1] = m
+        if why then
+          broken[t.size] = ("%s step %d, %s: %s"):format(t.size, t.n, what, why)
+        end
+      end
+    end
+  end
+  return timings, measures, broken
+end
+
+---@param s Testing.Sheet
 ---@param opts? Testing.Sheet.BrowserOpts
 ---@return Testing.Sheet.Result
 function M.run(s, opts)
@@ -236,7 +271,29 @@ function M.run(s, opts)
     result.failures[1] = ("the browser runner failed (exit %s): %s"):format(tostring(res.code), why)
     return result
   end
-  vim.list_extend(result.failures, decoded.failures or {})
+  local timings, measures, broken = M.timings_of(decoded.steps, steps)
+  if #timings > 0 then
+    result.timings = timings
+  end
+  if #measures > 0 then
+    result.measures = measures
+  end
+  -- one failure per size at most (its first failed step ends it): in the order of the sizes, a line without a size
+  -- (the extension's host) first
+  local by_size, sizeless = {}, {}
+  for _, line in ipairs(decoded.failures or {}) do
+    local tag = tostring(line):match("^(%d+x%d+) step ")
+    if tag and not by_size[tag] then
+      by_size[tag] = line
+    else
+      sizeless[#sizeless + 1] = line
+    end
+  end
+  vim.list_extend(result.failures, sizeless)
+  for _, size in ipairs(s.sizes or {}) do
+    local tag = ("%dx%d"):format(size.cols, size.rows)
+    result.failures[#result.failures + 1] = by_size[tag] or broken[tag]
+  end
   vim.list_extend(result.snapshots, decoded.shots or {})
   if #result.failures > 0 then
     result.ok, result.status = false, "fail"

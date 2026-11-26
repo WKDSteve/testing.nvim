@@ -35,7 +35,9 @@ end
 
 ---@class Testing.Sheet.StepResult: Testing.Sheet.NextStep
 ---@field status "pass"|"fail"|"skip"
----@field ms integer
+---@field ms integer How long the step took (as its driver measured it next to the target, where it does).
+---@field after_ms? integer A browser `wait`: from the start of the last acting step (`after_n`) until it held.
+---@field after_n? integer
 ---@field reason? string Why the step failed.
 ---@field failure? string The failure line, as in `Testing.Sheet.Result.failures`.
 ---@field shot? string The file of a `shot` step.
@@ -197,7 +199,13 @@ function Session:step(answer)
   else
     out = self.driver.run(step, next_step.n)
   end
-  next_step.ms = math.floor((vim.uv.hrtime() - started) / 1e6)
+  -- a driver that times the step next to its target (the browser runner) is believed over the clock here, which also
+  -- counts the way to the driver and back
+  local ms = out.ms or (vim.uv.hrtime() - started) / 1e6
+  next_step.ms = math.floor(ms + 0.5)
+  if out.after_ms then
+    next_step.after_ms, next_step.after_n = math.floor(out.after_ms + 0.5), out.after_n
+  end
   next_step.status = "pass"
   next_step.screen, next_step.shot = out.screen, out.shot
   if out.measure then
@@ -236,6 +244,17 @@ function Session:step(answer)
     next_step.status, next_step.failure = "fail", line
     self.failures[#self.failures + 1] = line
     self.size_done = true
+  elseif next_step.status == "pass" and not step.ask then
+    -- a question waits for a person: its time says nothing about the target
+    self.timings = self.timings or {}
+    self.timings[#self.timings + 1] = {
+      size = self.tag,
+      n = next_step.n,
+      step = sheet._describe(step),
+      ms = ms,
+      after_ms = out.after_ms,
+      after_n = out.after_n,
+    }
   end
   self.step_i = next_step.n
   return next_step
@@ -262,6 +281,7 @@ function Session:result()
     failures = self.failures,
     snapshots = self.snapshots,
     measures = self.measures,
+    timings = self.timings,
   }
   if self.aborted then
     -- nothing is proved by half a run, whatever its steps did so far

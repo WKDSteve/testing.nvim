@@ -22,4 +22,11 @@ export interface TestingSheetDriverAnswer {
   error?: string;
   /** `step`: the file a `shot` wrote. */
   shot?: string;
+  /** `step`: how long the step took, measured by the driver next to its target. */
+  ms?: number;
+  /** `step` of a `wait`: from the start of the last acting step (`after_n`) to the moment the condition held. */
+  after_ms?: number;
+  after_n?: number;
+  /** `step` of a `measure`: its readings; testing.nvim takes the median and judges `min` / `max`. */
+  values?: number[];
 }

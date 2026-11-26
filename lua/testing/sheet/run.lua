@@ -25,8 +25,11 @@
 local M = {}
 
 M.USAGE = "usage: testing sheets run --task <area/slug> [--root <dir>]... [--tasks <vault> [--tasks-cli <tasks.lua>] [--dry-run]] [--live] [--result]\n"
-  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live] [--result]\n"
-  .. "       testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict] [--live] [--result]"
+  .. "       testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--live] [--repeat <n>] [--result]\n"
+  .. "       testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict] [--live] [--repeat <n>] [--result]"
+
+---The most runs of `--repeat`.
+M.MAX_REPEAT = 50
 
 ---The schema of the document `--result` prints.
 M.SCHEMA = "testing-sheet-run/1"
@@ -59,10 +62,15 @@ end
 function M.result_doc(o, entries, red, results, exit, problem)
   local sheets = {}
   for _, e in ipairs(entries) do
+    local t = e.timing
     sheets[#sheets + 1] = {
       id = e.sheet and e.sheet.id or e.rel,
       status = e.case and e.case.status or "fail",
       unstarted = e.case and e.case.unstarted or nil,
+      -- `--repeat`: how often it ran, and per step and measure the readings with median and spread
+      runs = t and t.runs or nil,
+      timings = t and t.rows or nil,
+      measures = t and t.measures or nil,
     }
   end
   local tasks_out, written = {}, nil
@@ -264,7 +272,17 @@ function M.main(argv, sv, deps)
   local i = 1
   while i <= #argv do
     local a = argv[i]
-    if a == "--dry-run" or a == "--all" or a == "--strict" or a == "--live" or a == "--result" then
+    if a:match("^%-%-repeat=") then
+      -- `--repeat=N` as well as `--repeat N`
+      o["repeat"] = a:sub(#"--repeat=" + 1)
+      i = i + 1
+    elseif
+      a == "--dry-run"
+      or a == "--all"
+      or a == "--strict"
+      or a == "--live"
+      or a == "--result"
+    then
       o[a:sub(3):gsub("-", "_")] = true
       i = i + 1
     else
@@ -276,6 +294,7 @@ function M.main(argv, sv, deps)
         ["--json"] = "json",
         ["--engine"] = "engine",
         ["--sheet"] = "sheet",
+        ["--repeat"] = "repeat",
       })[a]
       if not key or not argv[i + 1] then
         local why = key and ("testing sheets: " .. a .. " needs a value")
@@ -324,6 +343,24 @@ function M.main(argv, sv, deps)
   if not o.all and not o.id or (o.id and not o.id:match("^[%w_][%w_.%-]*/[%w_.%-]+$")) then
     sv.err("testing sheets: --task <area/slug> is required\n" .. M.USAGE)
     return 2
+  end
+  local repeats
+  if o["repeat"] ~= nil then
+    repeats = tonumber(o["repeat"])
+    if not repeats or repeats ~= math.floor(repeats) or repeats < 1 or repeats > M.MAX_REPEAT then
+      sv.err(
+        ("testing sheets: --repeat takes a whole number from 1 to %d, not %s\n"):format(
+          M.MAX_REPEAT,
+          tostring(o["repeat"])
+        ) .. M.USAGE
+      )
+      return 2
+    end
+    if o.vault then
+      -- a block holds the state of one run; N runs measure, they are no state of the task
+      sv.err("testing sheets: --repeat measures and writes no task: without --tasks\n" .. M.USAGE)
+      return 2
+    end
   end
   if (o.cli or o.dry_run) and not o.vault then
     sv.err("testing sheets: --tasks-cli and --dry-run belong to --tasks <vault>\n" .. M.USAGE)
@@ -482,8 +519,18 @@ function M.main(argv, sv, deps)
         sv.err("testing sheets: " .. live.notice(e.sheet))
       end
       local started = vim.uv.hrtime()
-      local res = run(e.sheet, { root = e.root, ci = true, live = o.live, getenv = getenv })
+      -- `--repeat N`: N runs while it stays green (a red or skipped run proves nothing more, and its state counts)
+      local runs = {}
+      local res
+      repeat
+        res = run(e.sheet, { root = e.root, ci = true, live = o.live, getenv = getenv })
+        runs[#runs + 1] = res
+      until #runs >= (repeats or 1) or res.status == "fail" or res.status == "skip" or not res.ok
       e.result = res
+      if repeats then
+        local rows, measures = require("testing.sheet.timing").aggregate(runs)
+        e.timing = { runs = #runs, rows = rows, measures = measures }
+      end
       -- what the measure steps measured goes into the task as the notes of this run (`--tasks`)
       if res.measures and #res.measures > 0 then
         local notes = {}
@@ -518,6 +565,19 @@ function M.main(argv, sv, deps)
         e.case.unstarted and (res.status .. " (did not start, no finding)") or res.status,
         (status == "fail" or status == "skip") and (": " .. tostring(e.case.message)) or ""
       ))
+      if e.timing then
+        if #runs < repeats then
+          sv.out(("sheet %s: stopped after run %d of %d"):format(e.sheet.id, #runs, repeats))
+        end
+        sv.out(
+          require("testing.sheet.timing").text(
+            e.sheet.id,
+            e.timing.runs,
+            e.timing.rows,
+            e.timing.measures
+          )
+        )
+      end
     end
   end
 

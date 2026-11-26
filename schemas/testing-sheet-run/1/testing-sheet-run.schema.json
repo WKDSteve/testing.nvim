@@ -22,7 +22,45 @@
       "properties": {
         "id": { "description": "The id of the sheet; of a sheet that does not load, its file below the root.", "type": "string", "minLength": 1 },
         "status": { "description": "skip: it could not run here (no browser, a live sheet without --live); a sheet that waits for a person's judgement is pass.", "enum": ["pass", "fail", "skip"] },
-        "unstarted": { "description": "Only on a failed sheet, and only true: every failure is a child that did not start in time (a busy machine, a low CPU priority). The sheet is red, but its steps did not run: no finding of the sheet. Absent otherwise.", "const": true }
+        "unstarted": { "description": "Only on a failed sheet, and only true: every failure is a child that did not start in time (a busy machine, a low CPU priority). The sheet is red, but its steps did not run: no finding of the sheet. Absent otherwise.", "const": true },
+        "runs": { "description": "Only with `--repeat N`: how often the sheet ran (fewer than N when a run was red or skipped; that run counts).", "type": "integer", "minimum": 1 },
+        "timings": { "description": "Only with `--repeat N`: one row per step that ran, in the order they first ran, and one more per browser `wait` (`kind = after`): the time from the start of the step that acted (`after_n`) to the moment its condition held. Milliseconds, measured next to the target.", "type": "array", "items": { "$ref": "#/$defs/timing" } },
+        "measures": { "description": "Only with `--repeat N`: one row per `measure` step; one reading per run (the median of its `runs`), in the step's `unit`.", "type": "array", "items": { "$ref": "#/$defs/measure" } }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["runs", "median", "min", "max", "sd", "values"],
+      "properties": {
+        "runs": { "description": "How many readings there are.", "type": "integer", "minimum": 1 },
+        "median": { "type": "number" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "sd": { "description": "The sample standard deviation; 0 for one reading.", "type": "number", "minimum": 0 },
+        "values": { "description": "The readings, in the order of the runs.", "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "timing": {
+      "allOf": [{ "$ref": "#/$defs/stats" }],
+      "type": "object",
+      "required": ["size", "n", "step", "kind"],
+      "properties": {
+        "size": { "description": "The size it ran in (`1000x700`).", "type": "string" },
+        "n": { "description": "The number of the step, from 1.", "type": "integer", "minimum": 1 },
+        "step": { "description": "What the step is (`click #save`), as a failure line names it.", "type": "string" },
+        "kind": { "description": "step: the step itself; after: a `wait` from the start of step `after_n`.", "enum": ["step", "after"] },
+        "after_n": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "measure": {
+      "allOf": [{ "$ref": "#/$defs/stats" }],
+      "type": "object",
+      "required": ["size", "n", "name"],
+      "properties": {
+        "size": { "type": "string" },
+        "n": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string" },
+        "unit": { "type": "string" }
       }
     },
     "task": {

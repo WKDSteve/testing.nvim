@@ -198,27 +198,13 @@ local function run_step(child, step, ctx)
     local values = {}
     for i = 1, step.runs or 1 do
       local v = child.lua_get(step.measure)
-      if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then
+      if not sheet.is_reading(v) then
         return ("%s: got %s, not a number"):format(step.name, shown(v))
       end
       values[i] = v
     end
-    local m = {
-      name = step.name,
-      value = sheet.median(values),
-      values = values,
-      unit = step.unit,
-      min = step.min,
-      max = step.max,
-    }
-    local text = sheet.measure_text(m)
-    if step.max and m.value > step.max then
-      return ("%s: above the max"):format(text), { measure = m }
-    end
-    if step.min and m.value < step.min then
-      return ("%s: below the min"):format(text), { measure = m }
-    end
-    return nil, { measure = m }
+    local m, why = sheet.measure_of(step, values)
+    return why, { measure = m }
   elseif step.expect then
     local v = child.lua_get(step.expect)
     if not v then

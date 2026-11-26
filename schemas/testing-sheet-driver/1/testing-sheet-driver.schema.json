@@ -57,7 +57,11 @@
         "reason": { "description": "Why a step failed.", "type": "string" },
         "skip": { "description": "`open`: a prerequisite is missing, the sheet is a reported skip.", "type": "string" },
         "error": { "description": "The command itself could not be done.", "type": "string" },
-        "shot": { "description": "`step`: the file a `shot` wrote.", "type": "string" }
+        "shot": { "description": "`step`: the file a `shot` wrote.", "type": "string" },
+        "ms": { "description": "`step`: how long the step took, measured by the driver next to its target (testing.nvim believes it over its own clock).", "type": "number", "minimum": 0 },
+        "after_ms": { "description": "`step` of a `wait`: from the start of the last acting step (`after_n`) to the moment the condition held.", "type": "number", "minimum": 0 },
+        "after_n": { "description": "The number of that acting step.", "type": "integer", "minimum": 1 },
+        "values": { "description": "`step` of a `measure`: its readings, `runs` of them; testing.nvim takes the median and judges `min` / `max`.", "type": "array", "items": { "type": "number" } }
       }
     }
   }

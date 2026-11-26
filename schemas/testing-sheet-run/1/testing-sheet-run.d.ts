@@ -25,6 +25,40 @@ export interface Sheet {
   /** The id of the sheet; of a sheet that does not load, its file below the root. */
   id: string;
   status: "pass" | "fail" | "skip";
+  /** Only with `--repeat N`: how often it ran (fewer than N when a run was red or skipped). */
+  runs?: number;
+  /** Only with `--repeat N`: per step that ran (and per browser `wait` since its acting step), milliseconds. */
+  timings?: Timing[];
+  /** Only with `--repeat N`: per `measure` step, one reading per run, in its `unit`. */
+  measures?: Measure[];
+}
+
+export interface Stats {
+  runs: number;
+  median: number;
+  min: number;
+  max: number;
+  /** The sample standard deviation; 0 for one reading. */
+  sd: number;
+  /** The readings, in the order of the runs. */
+  values: number[];
+}
+
+export interface Timing extends Stats {
+  size: string;
+  n: number;
+  /** What the step is (`click #save`). */
+  step: string;
+  /** step: the step itself; after: a `wait` from the start of step `after_n` until its condition held. */
+  kind: "step" | "after";
+  after_n?: number;
+}
+
+export interface Measure extends Stats {
+  size: string;
+  n: number;
+  name: string;
+  unit?: string;
 }
 
 export interface Task {

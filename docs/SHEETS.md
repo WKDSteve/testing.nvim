@@ -46,7 +46,7 @@ return {
 | `screen = name` (`masks`, `cursor`, `mode`, `groups`) | compares the screen with a snapshot ([CHILD.md](CHILD.md#screen-snapshots-testingscreen)); the name gets the size: `float.80x24`; `groups = true` keeps the highlight group of every attribute letter in it | the snapshot differs (or is missing on CI) |
 | `hl = { ... }` | how a place is drawn: `text = "..."` (its first appearance on the screen, every cell of it) or `row`, `col` (`cols` wide), and what must hold: `group` (by its name, or the group a link ends in: `group = "FileopsConflict"` holds for a cell drawn with `DiffText` when it links there), `fg`, `bg`, `sp` (`#rrggbb` as drawn), `bold`, `italic`, `underline`, `undercurl`, `strikethrough`, `reverse` (`false` = must not be) | a cell is drawn otherwise (the line names it, what it has and what was expected), the text is not on the screen, or the group is not defined |
 | `prompt = name` (`timeout` ms, default 2000) | waits until the child shows a prompt: `"hit-enter"` (a message longer than the command line), `"more"` (a long one with `'more'` set; it is off in a child), `"confirm"` (`confirm()`; one called from Lua (`vim.fn.confirm`, also `input`, `inputlist`) answers "cancelled" at once unless the sheet sets `prompts = "real"`: by default a `lua` step that calls `input()` would wait for an answer until the RPC timeout). Asked through `nvim_get_mode`, which the editor answers while the prompt holds every other call back. Answer it with `input`: `"<CR>"`, `"q"` or `" "` for more, the letter of a choice for confirm | no such prompt in time (the line names one the child shows instead) |
-| `measure = expr` (`name`, `min`, `max`, `unit`, `runs`) | reads a number in the child (a Lua expression), `runs` times (default 1, at most 20) and takes the median, so one reading under load does not decide; `name` says what it is (`"gopath (VeryLazy)"`), `unit` how it reads (`"ms"`). The value is kept in the result (`measures`), in the step's event (`measure`), as a note of a stepped run, and with `testing sheets run --tasks` as the notes of the run in the task's block: `- Schritt 2 (80x24): gopath (VeryLazy) = 3.2 ms (median of 3: 3.1, 3.2, 4; max 20)` | the median is above `max` or below `min` (the value is kept all the same), or the expression gives no finite number |
+| `measure = expr` (`name`, `min`, `max`, `unit`, `runs`) | reads a number in the child (a Lua expression; in a browser sheet a JavaScript expression in the page), `runs` times (default 1, at most 20) and takes the median, so one reading under load does not decide; `name` says what it is (`"gopath (VeryLazy)"`), `unit` how it reads (`"ms"`). The value is kept in the result (`measures`), in the step's event (`measure`), as a note of a stepped run, and with `testing sheets run --tasks` as the notes of the run in the task's block: `- Schritt 2 (80x24): gopath (VeryLazy) = 3.2 ms (median of 3: 3.1, 3.2, 4; max 20)` | the median is above `max` or below `min` (the value is kept all the same), or the expression gives no finite number |
 | `restart = true` (`args`) | quits the child as a person does (`:qall!`: `VimLeavePre` and `VimLeave` run, a session plugin writes its files) and starts it again **in the same sandbox** (its `stdpath` and temp directories stay), the UI attached again at the sheet's size; `args = { ... }` on the step is the command line of this start, without it the sheet's `args` | the editor does not quit within 10 s (it is killed), or the new one does not start |
 | `rebaseline = true` | takes what keeps the child busy right now (active timers, jobs, pipes) as the new quiet of `settle`: for a plugin that keeps a timer that repeats for ever, after the step that set it up (see Pitfalls) | never |
 | `shot = name` | a picture of the screen, `TESTS/sheets/out/<id>.<name>.<cols>x<rows>.png`: the screen (every cell with its colours and styles, the cursor as a block) is drawn as a page and photographed by the browser engine (node and playwright-core, as for a browser sheet); the font is the browser's, not a terminal's; a cell whose attribute the screen could not name (more than 52 attributes) is outlined dashed. The input of the AI judge and of README images. Without node, playwright-core or a browser the step is **skipped**: the other steps go on and the sheet ends as `skip` (never a green run without its picture) | the browser fails |
@@ -259,7 +259,7 @@ end)
 ```
 
 `sheet.expect(H.ok, s, opts)` hands the verdict to a collecting harness instead of raising; `sheet.run(s, opts)`
-returns `{ ok, status, failures, snapshots, measures }` (`measures`: what the `measure` steps read). A project whose process guard is strict lists `nvim` in
+returns `{ ok, status, failures, snapshots, measures, timings }` (`measures`: what the `measure` steps read; `timings`: how long each step that ran took). A project whose process guard is strict lists `nvim` in
 `guard_allow.spawn` (the sheet starts a child editor). A `manual` sheet runs nothing (status `manual`).
 
 ## The report
@@ -436,6 +436,7 @@ Exit 1 is a red sheet and a task that could not be written alike, and the lines 
 | `red` | a sheet is red; under `--strict` a skipped one too |
 | `tasks` | with `--tasks`: each task with its `outcome` (`changed`, `unchanged`, `would_change`: the block stands; `failed`, `missing`, `truncated`: it does not) and, when it does not, the `message` |
 | `written` | every block stands; `false`: one does not, or tasks.nvim could not be reached (`problem`, exit 3); `null`: nothing was to be written (no `--tasks`) |
+| `sheets[].runs`, `.timings`, `.measures` | only with `--repeat`: how often it ran, and per step and per measure the readings with median and spread ([How long the steps take](#how-long-the-steps-take---repeat-n)) |
 
 So `red: false, written: false` with exit 1 is "the sheets are green, the task does not say so". A run that was
 refused or could not start (exit 2, or 3 before a sheet ran), or whose Result-IR (`--json`) could not be written,
@@ -497,7 +498,7 @@ ignores unknown events and fields and refuses a higher schema), written as it ha
 | `size` | the target of a size is `open`, `failed` to start, or the sheet is a `skip` |
 | `step-before` | size, number, action, value, note: what is about to happen |
 | `paused` | waiting for a command; `reason` is `start`, `step`, `break`, `until` or `failed` |
-| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms`, `measure` what a `measure` step measured (`name`, `value`, `values`, `unit`, `min`, `max`; a `note` with its text follows), on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser, desktop and webview sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
+| `step-after` | `status` (`pass`, `fail`, `skip`: an rpc `shot` without a browser), `ms` (as the driver measured it next to its target, where it does: the browser runner), a browser `wait` also `after_ms` since the last acting step `after_n`, `measure` what a `measure` step measured (`name`, `value`, `values`, `unit`, `min`, `max`; a `note` with its text follows), on a failure or a skip `reason` and on a failure the `failure` line of a normal run; `shot` the file of a `shot` step; `image` the picture of the target after this step (browser, desktop and webview sheets; a folder per sheet under `stdpath("cache")`, emptied by the next stepped run, `sheet.run` makes none); `screen` the child's screen as text, one string per row (rpc sheets) |
 | `ask` | a question to a person (`ask` step): `size`, `n`, `text`. The run waits for `answer` |
 | `note` | a note was taken: `size`, `n` (the step the run stands before, else the one that ran last), `text`, `time` (UTC) |
 | `task` | with `--tasks`: what became of the task's block (`id`, `outcome`, `message`) |
@@ -658,8 +659,8 @@ return {
 A repository without a Lua spec needs no suite for its sheets:
 
 ```
-testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict]
-testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict]
+testing sheets run --all [--root <dir>]... [--engine <name>] [--json <ir>] [--strict] [--repeat <n>]
+testing sheets run --sheet <id> [--sheet <id>]... [--root <dir>]... [--json <ir>] [--strict] [--repeat <n>]
 ```
 
 runs every sheet of the roots, with `--engine` only those of that engine (default the current directory; trust gate and workstation rule as above) and writes
@@ -670,6 +671,38 @@ such file with its load error, file and line), and `--sheet` takes no `--task` (
 written whole, with every sheet of it). `--strict` makes a skip red, for a CI job that exists to prove
 something: without it a missing browser would leave the job green. Exit codes: 0 green, 1 a sheet is red (or a skip
 with `--strict`), 2 bad usage, refused or no sheet, 3 the IR could not be written.
+
+### How long the steps take (`--repeat <n>`)
+
+`--repeat <n>` (or `--repeat=<n>`, 1 to 50; with `--all`, `--sheet` or `--task`, not with `--tasks`: N runs measure,
+they are no state of a task) runs each sheet `n` times in a row and prints, after its status line, how long each step
+took: the median, min, max and the sample standard deviation over the runs, in milliseconds, and the same for each
+`measure` (one reading per run, the median of its own `runs`, in its `unit`). A red or skipped run ends the repeats of
+that sheet (`stopped after run 2 of 5`) and decides its status; the steps it got to still count.
+
+```
+$ testing sheets run --sheet app.save --root . --repeat 5
+sheet app.save: pass
+timings of app.save (5 runs, ms): median, min, max, sd
+  1000x700     1  open page.html                                       33.9    25.4    38.8     4.9
+  1000x700     2  save (click #save)                                  129.8    74.0   378.0   117.9
+  1000x700     3  wait !document.getElementById('saved').hidden        309.5   302.7   311.3     3.5
+  1000x700     3  wait !document.getElementById('saved').hidden since step 2   440.3   376.7   687.6   119.4
+  1000x700     4  measure save in the page (ms)                         308.4   307.7     310   1.049
+```
+
+* A step is timed next to its target, not in the process that asked for it: the browser runner in node, around the
+  step itself; an rpc step by the session around its driver call. A red step has no time (the size ends there).
+* A browser `wait` has a second row, `since step <k>`: from the start of the last step before it that acts on the page
+  (`open`, `press`, `click`, `hover`, `drag`, `focus`, `blur`, `scheme`) to the moment the condition held. That is the
+  time a person waits after the click, including what the driver needs for the click itself (Playwright first checks
+  that the element is visible, steady and enabled, which can take tens of milliseconds and more under load).
+* For the time of the page alone, without the driver, measure it in the page with `measure` (see
+  [Browser sheets](#browser-sheets-enginebrowser)): `performance.now()` around the action, awaited until its result
+  shows.
+* With `--result` each sheet in the document has `runs`, `timings` (per step: `size`, `n`, `step`, `kind` `step` or
+  `after` with `after_n`, and `runs`, `median`, `min`, `max`, `sd`, `values`) and `measures` (per measure: `size`, `n`,
+  `name`, `unit` and the same numbers). Without `--repeat` neither the lines nor the document change.
 
 ## Desktop sheets (`engine = "desktop"`)
 
@@ -872,6 +905,7 @@ data like the others, but they are a different set; `wait` and `expect` are Java
 | `scheme = "light"\|"dark"` | the page's `prefers-color-scheme` from now on, without a reload | never |
 | `wait = js` (`timeout` ms, default 2000) | waits until the expression is truthy | it is not truthy in time |
 | `expect = js` | evaluates the expression now | it is not truthy |
+| `measure = js` (`name`, `min`, `max`, `unit`, `runs`) | reads a number in the page, `runs` times, and takes the median, as in an rpc sheet; an expression that gives a promise is awaited, so it can time an action in the page itself: `(async () => { const t = performance.now(); document.querySelector('#save').click(); while (!saved()) await new Promise((r) => setTimeout(r, 5)); return performance.now() - t })()` | the median is above `max` or below `min` (the value is kept), or the expression gives no finite number |
 | `shot = name` | a screenshot `TESTS/sheets/out/<id>.<name>.<w>x<h>.png` (the input of the AI judge) | never |
 
 A `shot` name is part of a file name: letters, digits, `_` and `-` only; `open`, `press`, `click`, `hover` and `focus`
@@ -881,7 +915,10 @@ control in one sheet: `{ scheme = "dark" }`, `{ hover = "#save" }`, `{ shot = "s
 
 `sizes` are the viewport in pixels (`cols` = width, `rows` = height; default 1000 x 700, at most 4000 each). A step of the other engine
 is refused when the sheet loads (`steps[2]: keys is not a step of a browser sheet`). The first failed step ends a
-size. The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-core`, found in
+size. Each step that ran is timed by the runner next to the page: the result has `timings` (`size`, `n`, `step`, `ms`,
+and for a `wait` `after_ms` since the last acting step `after_n`), a stepped run has them on the step's event
+(`step-after`), and `testing sheets run --repeat <n>` gives their median and spread
+([How long the steps take](#how-long-the-steps-take---repeat-n)). The runner is `lua/testing/sheet/browser_runner.mjs` (node + `playwright-core`, found in
 `$TESTING_PLAYWRIGHT_DIR`, the project or `../mdview.nvim`). Without node, `playwright-core` or chromium the sheet
 is a **reported skip** (`status = "skip"`, the case prints `n/a  <reason>`), never a green run. There is no
 `prepare` step on purpose: a sheet is data and must not start programs; a page a sheet needs is a file the project

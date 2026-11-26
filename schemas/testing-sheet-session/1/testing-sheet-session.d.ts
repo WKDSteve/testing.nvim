@@ -71,7 +71,11 @@ export interface StepAfter extends Base {
   n: number;
   /** skip: the step could not be done here (an rpc `shot` without a browser); the others go on, the sheet ends as a skip. */
   status: "pass" | "fail" | "skip";
+  /** How long the step took; a driver that measures next to its target (the browser) is believed. */
   ms: number;
+  /** A browser `wait`: from the start of the last acting step (`after_n`) to the moment its condition held. */
+  after_ms?: number;
+  after_n?: number;
   reason?: string;
   /** The failure line as a normal run writes it. */
   failure?: string;

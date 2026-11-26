@@ -196,12 +196,15 @@ function M.text_line(ev, before)
   elseif e == "step-after" then
     local b = before[("%s:%s"):format(tostring(ev.size), tostring(ev.n))] or {}
     local why = ev.failure or ev.reason
-    return ("%s %s/%s %s %d ms %s%s%s%s%s"):format(
+    return ("%s %s/%s %s %d ms%s %s%s%s%s%s"):format(
       tostring(ev.size),
       tostring(ev.n),
       tostring(b.total or "?"),
       tostring(ev.status),
       tonumber(ev.ms) or 0,
+      -- a browser `wait`: how long since the step that acted (a click until the page showed its result)
+      tonumber(ev.after_ms) and (" (%d ms since step %s)"):format(ev.after_ms, tostring(ev.after_n))
+        or "",
       tostring(b.action or "?"),
       b.value ~= nil and (" " .. one_line(b.value)) or "",
       b.note and (" # " .. one_line(b.note)) or "",
@@ -883,6 +886,8 @@ function M.main(argv, sv, deps)
         n = res.n,
         status = res.status,
         ms = res.ms,
+        after_ms = res.after_ms,
+        after_n = res.after_n,
         reason = res.reason,
         failure = res.failure,
         shot = res.shot,
