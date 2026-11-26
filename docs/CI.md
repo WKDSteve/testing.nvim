@@ -586,6 +586,16 @@ marker)`, never "green on the hosted CI". A commit that changes code stops with 
 but code changed: <remote>/<branch> stays; reword the commit and land again` (exit 1); a quoted marker in a commit
 body is enough to cause it. A real run whose jobs were all skipped is a run and lands as green.
 
+Before the check branch is pushed, `land` looks at the runs of the commit once. Is the newest push run of every awaited
+workflow green and completed already (an earlier `land` of the same commit gave up, or its push of `<branch>` failed),
+`<branch>` moves at once: `land: <sha> is green already on the hosted CI on <its branch>: no new run, ...`, no check
+branch, no second hosted run. Any other run seen then is told apart from the run of this push by its id, not by the
+clocks of the machine and of GitHub: an older red one is no answer until the check branch has a run of its own; an
+older one still going is waited for (it checks the same commit) and its green completion is the verdict. `no_run` ends
+the wait (exit 3) only when after 300 s there is no run of the commit at all (`does the pushed workflow run on
+ci/**?`) or only the older red one (`GitHub started no run ... the only run of the commit is an older one ...: rerun it
+(gh run rerun <id>) or land again`); a queued or running run is waited for until `--timeout`.
+
 - `<remote>/<branch>` (fetched) must be an ancestor of the commit. When another session landed meanwhile, the commit is
   rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
 - The workflow of the commit must run on `ci/**`: `ci.workflow.land = true` in `.testing.lua`, regenerated with

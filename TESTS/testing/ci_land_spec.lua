@@ -67,7 +67,16 @@ return function(H)
       end
       return o.also or {}
     end
+    -- `o.before` (`o.before_also[name]`): the answer before the check branch is pushed, default no run
+    w.before_looks = 0
     land.deps.remote = function(_, sha, _, wf)
+      if #w.pushes == 0 then
+        w.before_looks = w.before_looks + 1
+        if wf then
+          return o.before_also and o.before_also[wf] or { overall = "no_run" }
+        end
+        return o.before or { overall = "no_run" }
+      end
       if wf then
         w.asked_wf[#w.asked_wf + 1] = wf
         w.wf_looks[wf] = (w.wf_looks[wf] or 0) + 1
@@ -250,15 +259,109 @@ return function(H)
   eq(w.code, 0, "in progress: lands once the run is completed")
 
   -- landing the same commit again (an earlier land was red): its old run is no answer until the new one exists
+  local old_red = {
+    overall = "failure",
+    run = {
+      id = 1,
+      status = "completed",
+      conclusion = "failure",
+      url = "https://x/run/old",
+      created_at = "1970-01-01T00:00:00Z",
+    },
+  }
   w = scenario({
+    before = old_red,
     states = {
-      { overall = "failure", run = { created_at = "1970-01-01T00:00:00Z" } },
-      { overall = "running", run = { created_at = "1970-01-01T00:20:00Z" } },
-      { overall = "success", run = { created_at = "1970-01-01T00:20:00Z" } },
+      old_red,
+      { overall = "running", run = { id = 2, created_at = "1970-01-01T00:20:00Z" } },
+      { overall = "success", run = { id = 2, created_at = "1970-01-01T00:20:00Z" } },
     },
   })
   eq(w.code, 0, "again: the old red run of the commit does not count")
   has(w.text, "only an older run of this commit so far", "again: says why it waits")
+
+  -- no new run for the check branch, only the old red one: give up after NO_RUN_S, saying which run to rerun
+  w = scenario({ before = old_red, states = { old_red } })
+  eq(w.code, 3, "old red only: exit 3")
+  has(w.text, "the only run of the commit is an older one", "old red only: says so")
+  has(w.text, "gh run rerun 1", "old red only: ... and how to rerun it")
+
+  -- the commit is green and completed already (an earlier land gave up, or its push of main failed): main moves at
+  -- once, no check branch, no second hosted run (found 2026-11-26: only a second `ci land` landed)
+  do
+    local green = {
+      overall = "success",
+      run = {
+        id = 3,
+        status = "completed",
+        conclusion = "success",
+        branch = "ci/x-aaaa",
+        url = "https://x/run/3",
+      },
+    }
+    w = scenario({ before = green, states = { { overall = "no_run" } } })
+    eq(w.code, 0, "green before: landed")
+    eq(
+      w.pushes,
+      { "push --quiet origin " .. SHA .. ":refs/heads/main" },
+      "green before: only main is pushed, no check branch"
+    )
+    has(w.text, "green already on the hosted CI on ci/x-aaaa", "green before: says so")
+    has(w.text, "https://x/run/3", "green before: names the run")
+    -- an also-workflow that is not green yet: the check branch goes up as before
+    w = scenario({
+      before = green,
+      before_also = { native = { overall = "no_run" } },
+      also = { "native" },
+      states = { green },
+      also_states = { native = { { overall = "success" } } },
+    })
+    eq(w.code, 0, "green before, native not: landed after the wait")
+    eq(#w.pushes, 3, "green before, native not: check branch, main, deletion")
+  end
+
+  -- GitHub's clock and the machine's differ by minutes: the new run looks older than the push by created_at, but it is
+  -- not the run from before (another id), so it is this push's run, not `no_run` until NO_RUN_S
+  w = scenario({
+    before = old_red,
+    states = {
+      {
+        overall = "running",
+        run = { id = 9, status = "in_progress", created_at = "1970-01-01T00:00:00Z" },
+      },
+      {
+        overall = "success",
+        run = { id = 9, status = "completed", created_at = "1970-01-01T00:00:00Z" },
+      },
+    },
+  })
+  eq(w.code, 0, "clock skew: the new run is told apart by its id")
+  eq(w.text:find("only an older run", 1, true), nil, "clock skew: never called an older run")
+
+  -- an earlier run of the commit still runs (pushed elsewhere a moment before): no `no_run` after NO_RUN_S, it is
+  -- waited for, and its green completion is the verdict
+  do
+    local states = {}
+    local going = {
+      overall = "running",
+      run = { id = 5, status = "in_progress", created_at = "1970-01-01T00:00:00Z" },
+    }
+    for _ = 1, 15 do -- 15 looks of 31 s each: past NO_RUN_S
+      states[#states + 1] = going
+    end
+    states[#states + 1] = {
+      overall = "success",
+      run = { id = 5, status = "completed", created_at = "1970-01-01T00:00:00Z", branch = "ci/y" },
+    }
+    w = scenario({ before = going, states = states })
+    eq(w.code, 0, "earlier run going: waited for past NO_RUN_S, then landed")
+    has(w.text, "an earlier run of this commit still runs", "earlier run going: says so")
+    has(
+      w.text,
+      "an earlier run of this commit on ci/y is green",
+      "earlier run going: its green is the verdict"
+    )
+  end
 
   -- main moved before: nothing is pushed
   w = scenario({ base = OTHER, states = { { overall = "success" } } })

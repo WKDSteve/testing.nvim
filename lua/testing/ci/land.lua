@@ -14,7 +14,8 @@
 --- 1. `<remote>/<branch>` (fetched) must be an ancestor of the commit: one that moved meanwhile (another session landed)
 ---    is not merged here, the commit is rebased and landed again (a new run: the rebased state is unchecked).
 --- 2. The workflow file of the commit must run on `ci/**` (else: set `land = true`, regenerate).
---- 3. Push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit (and of every
+--- 3. A commit whose push runs are green and completed already (every awaited workflow) lands at once, no check branch.
+---    Else push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit (and of every
 ---    workflow of `ci.workflow.land.also` / `--also`: a red one holds `<branch>` as well). Every system green:
 ---    fetch again, push `<sha>:<branch>` (no force: a branch that moved meanwhile refuses it). Red: `<branch>` stays, the
 ---    report names the systems. The check branch is deleted either way (`--keep` leaves it).
@@ -31,7 +32,8 @@ M.EXIT_OK, M.EXIT_RED, M.EXIT_USAGE, M.EXIT_INFRA = 0, 1, 2, 3
 M.POLL_S = 30
 ---Default minutes to wait for the run.
 M.TIMEOUT_MIN = 90
----A pushed check branch without a run after this many seconds: the pushed workflow does not run on `ci/**`.
+---A pushed check branch without any run of the commit (or only an older red one) after this many seconds: the pushed
+---workflow does not run on `ci/**`, or GitHub started no new run. A queued or running run is waited for.
 M.NO_RUN_S = 300
 
 M.USAGE = table.concat({
@@ -50,6 +52,23 @@ M.USAGE = table.concat({
 ---What the hosted run's overall state means here.
 local GREEN = { success = true, skipped = true }
 local RED = { failure = true, rejected = true, cancelled = true, no_runner = true }
+
+---A record whose run is completed and green: a verdict (not a run whose jobs are green so far, not a skip by marker).
+---@param rec table
+---@return boolean
+local function done_green(rec)
+  return type(rec) == "table"
+    and rec.overall == "success"
+    and type(rec.run) == "table"
+    and rec.run.status == "completed"
+end
+
+---` on <branch>` of a run record, or nothing.
+---@param run? table
+---@return string
+local function on_branch(run)
+  return type(run) == "table" and type(run.branch) == "string" and (" on " .. run.branch) or ""
+end
 
 ---Replaced by a spec: processes, GitHub and the clock.
 M.deps = {
@@ -300,15 +319,25 @@ function M.run(args, say, state_dir)
   -- the repository's name, also from a linked worktree of it (`testing.metrics.repo_name`), not the folder's
   local repo = require("testing.metrics").repo_name(root):gsub("[^%w._-]", "-")
   local check = ("ci/%s-%s"):format(repo, sha:sub(1, 12))
-  say(("land: %s -> %s, the hosted CI checks it"):format(short, check))
-  code, _, err = git("push", "--quiet", args.remote, sha .. ":refs/heads/" .. check)
-  if code ~= 0 then
-    say(("land: the push of %s failed: %s"):format(check, vim.trim(err)))
-    return M.EXIT_INFRA
+
+  -- the runs of the commit before its check branch is pushed: one that is green and completed already (an earlier land
+  -- that gave up, or whose push of main failed) is the verdict, nothing is checked twice; any other is told apart from
+  -- the run of this push by its id, not by the clocks of the machine and of GitHub
+  ---@type table[]
+  local before = {}
+  local all_green_before = true
+  for i, wf in ipairs(workflows) do
+    before[i] = d.remote(root, sha, state_dir, wf or nil)
+    if not done_green(before[i]) then
+      all_green_before = false
+    end
   end
-  -- the hosted CI takes minutes: rule CI-10, the next small task meanwhile
-  require("testing.ci.hint").say(say)
+
+  local pushed = false
   local function drop_check()
+    if not pushed then
+      return
+    end
     if args.keep then
       say(("land: the check branch %s stays (--keep)"):format(check))
       return
@@ -319,99 +348,173 @@ function M.run(args, say, state_dir)
     end
   end
 
-  local pushed_at = d.now()
-  local deadline = pushed_at + args.timeout * 60
-  ---One look at the run of `wf` (false: the CI workflow) for the commit: its state and record.
-  ---@param wf string|false
-  ---@return string state
-  ---@return table rec
-  local function look(wf)
-    local rec = d.remote(root, sha, state_dir, wf or nil)
-    local state = rec.overall or "unknown"
-    -- a run of the same commit from before this push (an earlier land that was red) is no answer for this one: until
-    -- the new run exists, the newest run of the commit is that old one (a minute of slack for the two clocks)
-    local created = type(rec.run) == "table"
-      and require("testing.ci.remote").epoch(rec.run.created_at)
-    if created and created < pushed_at - 60 then
-      return "no_run", { overall = "no_run", note = "only an older run of this commit so far" }
-    end
-    -- every job created so far is green, but the run is not completed: a job that GitHub creates later (`needs:`) or
-    -- the run's own conclusion could still be red, so this is no verdict yet
-    if
-      GREEN[state]
-      and type(rec.run) == "table"
-      and rec.run.status
-      and rec.run.status ~= "completed"
-    then
-      return "running",
-        vim.tbl_extend(
-          "force",
-          rec,
-          { overall = "running", note = "jobs green, the run is not completed yet" }
-        )
-    end
-    return state, rec
+  local recs = {}
+  if all_green_before then
+    recs = before
+    local run = before[1].run
+    say(
+      ("land: %s is green already on the hosted CI%s: no new run, %s moves to it"):format(
+        short,
+        on_branch(run),
+        upstream
+      )
+    )
   end
-  ---`ci/x` for the CI workflow (as before), `ci/x (native)` for another one.
-  local function where_of(wf)
-    return wf and ("%s (%s)"):format(check, wf) or check
-  end
-  local last, recs = {}, {}
   local red_wf
-  while true do
-    local all_green = true
-    for i, wf in ipairs(workflows) do
-      local state, rec = look(wf)
-      recs[i] = rec
-      if state ~= last[i] then
-        say(
-          ("land: %s on %s: %s%s"):format(
-            short,
-            where_of(wf),
-            state,
-            rec.note and ("  (" .. rec.note .. ")") or ""
-          )
-        )
-        last[i] = state
+  if not all_green_before then
+    say(("land: %s -> %s, the hosted CI checks it"):format(short, check))
+    code, _, err = git("push", "--quiet", args.remote, sha .. ":refs/heads/" .. check)
+    if code ~= 0 then
+      say(("land: the push of %s failed: %s"):format(check, vim.trim(err)))
+      return M.EXIT_INFRA
+    end
+    pushed = true
+    -- the hosted CI takes minutes: rule CI-10, the next small task meanwhile
+    require("testing.ci.hint").say(say)
+
+    local pushed_at = d.now()
+    local deadline = pushed_at + args.timeout * 60
+    ---Is `run` (the newest run of the commit now) one from before this push, not the run of the check branch?
+    ---@param run table
+    ---@param b table The record of the look before the push.
+    ---@return boolean
+    local function earlier(run, b)
+      local brun = type(b) == "table" and type(b.run) == "table" and b.run or nil
+      if brun and brun.id ~= nil and run.id ~= nil then
+        return run.id == brun.id
       end
-      if RED[state] then
-        red_wf = i
+      if not brun and type(b) == "table" and b.overall ~= nil and b.overall ~= "unknown" then
+        -- the commit had no run before the push: every run now is this push's
+        return false
+      end
+      -- the look before told nothing (GitHub unreachable, a record without ids): the clocks, a minute of slack
+      local created = require("testing.ci.remote").epoch(run.created_at)
+      return created ~= nil and created < pushed_at - 60
+    end
+    ---One look at the run of `wf` (false: the CI workflow) for the commit: its state and record.
+    ---@param wf string|false
+    ---@param i integer
+    ---@return string state
+    ---@return table rec
+    local function look(wf, i)
+      local rec = d.remote(root, sha, state_dir, wf or nil)
+      local state = rec.overall or "unknown"
+      local run = type(rec.run) == "table" and rec.run or nil
+      if run and earlier(run, before[i]) then
+        -- a run of the same commit from before this push: green and completed it is the verdict (the same commit, the
+        -- same workflow file); still going, it is waited for (no `no_run`: the commit is being checked); red, it is no
+        -- answer for this push (an earlier land that was red) until the run of the check branch exists
+        if done_green(rec) then
+          return "success",
+            vim.tbl_extend(
+              "force",
+              rec,
+              { note = ("an earlier run of this commit%s is green"):format(on_branch(run)) }
+            )
+        end
+        if run.status ~= "completed" and not RED[state] then
+          return "running",
+            vim.tbl_extend("force", rec, {
+              overall = "running",
+              note = ("an earlier run of this commit%s still runs"):format(on_branch(run)),
+            })
+        end
+        return "no_run",
+          {
+            overall = "no_run",
+            earlier = run,
+            note = ("only an older run of this commit so far: %s%s"):format(state, on_branch(run)),
+          }
+      end
+      -- every job created so far is green, but the run is not completed: a job that GitHub creates later (`needs:`)
+      -- or the run's own conclusion could still be red, so this is no verdict yet
+      if GREEN[state] and run and run.status and run.status ~= "completed" then
+        return "running",
+          vim.tbl_extend(
+            "force",
+            rec,
+            { overall = "running", note = "jobs green, the run is not completed yet" }
+          )
+      end
+      return state, rec
+    end
+    ---`ci/x` for the CI workflow (as before), `ci/x (native)` for another one.
+    local function where_of(wf)
+      return wf and ("%s (%s)"):format(check, wf) or check
+    end
+    local last = {}
+    while true do
+      local all_green = true
+      for i, wf in ipairs(workflows) do
+        local state, rec = look(wf, i)
+        recs[i] = rec
+        if state ~= last[i] then
+          say(
+            ("land: %s on %s: %s%s"):format(
+              short,
+              where_of(wf),
+              state,
+              rec.note and ("  (" .. rec.note .. ")") or ""
+            )
+          )
+          last[i] = state
+        end
+        if RED[state] then
+          red_wf = i
+          break
+        end
+        if not GREEN[state] then
+          all_green = false
+        end
+        -- `no_run` only while no run of this push exists: a queued or running one (also an earlier one of the same
+        -- commit) is waited for until the deadline
+        if state == "no_run" and d.now() - pushed_at >= M.NO_RUN_S then
+          local old = rec.earlier
+          if old then
+            say(
+              ("land: GitHub started no run of %s for %s on %s within %d s; the only run of the commit is an older one (%s%s): rerun it (gh run rerun %s) or land again"):format(
+                wf and ("the workflow " .. wf) or "the CI workflow",
+                short,
+                check,
+                M.NO_RUN_S,
+                tostring(old.conclusion or old.status),
+                old.url and (", " .. old.url) or "",
+                tostring(old.id)
+              )
+            )
+          else
+            say(
+              ("land: no run of %s for %s after %d s: does the pushed workflow run on ci/**?"):format(
+                wf and ("the workflow " .. wf) or "the CI workflow",
+                short,
+                M.NO_RUN_S
+              )
+            )
+          end
+          drop_check()
+          return M.EXIT_INFRA
+        end
+      end
+      if red_wf or all_green then
         break
       end
-      if not GREEN[state] then
-        all_green = false
-      end
-      if state == "no_run" and d.now() - pushed_at >= M.NO_RUN_S then
+      if d.now() >= deadline then
+        local states = {}
+        for i, wf in ipairs(workflows) do
+          states[i] = wf and (wf .. " " .. tostring(last[i])) or tostring(last[i])
+        end
         say(
-          ("land: no run of %s for %s after %d s: does the pushed workflow run on ci/**?"):format(
-            wf and ("the workflow " .. wf) or "the CI workflow",
-            short,
-            M.NO_RUN_S
+          ("land: no verdict within %d min (last: %s); %s does not move"):format(
+            args.timeout,
+            table.concat(states, ", "),
+            upstream
           )
         )
         drop_check()
         return M.EXIT_INFRA
       end
+      d.sleep(M.POLL_S)
     end
-    if red_wf or all_green then
-      break
-    end
-    if d.now() >= deadline then
-      local states = {}
-      for i, wf in ipairs(workflows) do
-        states[i] = wf and (wf .. " " .. tostring(last[i])) or tostring(last[i])
-      end
-      say(
-        ("land: no verdict within %d min (last: %s); %s does not move"):format(
-          args.timeout,
-          table.concat(states, ", "),
-          upstream
-        )
-      )
-      drop_check()
-      return M.EXIT_INFRA
-    end
-    d.sleep(M.POLL_S)
   end
 
   local rec = recs[1]
