@@ -115,6 +115,16 @@ return function(H)
       "400x600 step 2, click #b: boom",
     }, "a broken bound is a failure line of its size, in the order of the sizes")
     eq(broke.measures[1].value, 42, "... and the value is kept")
+    local odd = fake({
+      failures = { "400x600 step 2, click #b: boom", "9x9 step 1, open p.html: a size of no plan" },
+      shots = {},
+      steps = { { size = "1000x700", n = 4, ms = 50, values = { 42 } } },
+    })
+    eq(odd.failures, {
+      "9x9 step 1, open p.html: a size of no plan",
+      "1000x700 step 4, measure x(): load = 42 ms (max 10): above the max",
+      "400x600 step 2, click #b: boom",
+    }, "no failure line of the runner is lost, also one of a size the sheet does not name")
     local old = fake({ failures = {}, shots = {} })
     eq(
       { old.status, old.timings },

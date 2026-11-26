@@ -121,7 +121,6 @@ local function with_config(root, opts)
   return out
 end
 
----@param s Testing.Sheet
 ---What the runner says of the steps that ran (`{ size, n, ms, after_ms?, after_n?, values? }`, measured in node next
 ---to the page): their durations, what the `measure` steps measured, and per size the failure line of a `measure`
 ---whose median broke its bound (the runner ended that size there).
@@ -278,21 +277,27 @@ function M.run(s, opts)
   if #measures > 0 then
     result.measures = measures
   end
-  -- one failure per size at most (its first failed step ends it): in the order of the sizes, a line without a size
-  -- (the extension's host) first
-  local by_size, sizeless = {}, {}
-  for _, line in ipairs(decoded.failures or {}) do
-    local tag = tostring(line):match("^(%d+x%d+) step ")
-    if tag and not by_size[tag] then
-      by_size[tag] = line
-    else
-      sizeless[#sizeless + 1] = line
-    end
+  -- the runner's lines and the broken bounds in the order of the sizes, a line of no known size (the extension's host)
+  -- first; every line is kept, in the runner's order within its size
+  local order, lines = {}, {}
+  for k, size in ipairs(s.sizes or {}) do
+    order[("%dx%d"):format(size.cols, size.rows)] = k
   end
-  vim.list_extend(result.failures, sizeless)
-  for _, size in ipairs(s.sizes or {}) do
-    local tag = ("%dx%d"):format(size.cols, size.rows)
-    result.failures[#result.failures + 1] = by_size[tag] or broken[tag]
+  for k, line in ipairs(decoded.failures or {}) do
+    local tag = tostring(line):match("^(%d+x%d+) step ")
+    lines[#lines + 1] = { at = tag and order[tag] or 0, seq = k, text = line }
+  end
+  for tag, line in pairs(broken) do
+    lines[#lines + 1] = { at = order[tag] or math.huge, seq = 0, text = line }
+  end
+  table.sort(lines, function(a, b)
+    if a.at ~= b.at then
+      return a.at < b.at
+    end
+    return a.seq < b.seq
+  end)
+  for _, l in ipairs(lines) do
+    result.failures[#result.failures + 1] = l.text
   end
   vim.list_extend(result.snapshots, decoded.shots or {})
   if #result.failures > 0 then
