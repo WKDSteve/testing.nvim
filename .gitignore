@@ -1,6 +1,8 @@
 /doc/tags
 /docs/map/
 /.deps/
-/.claude/
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
 /contract/node_modules/
 TESTS/sheets/out/
