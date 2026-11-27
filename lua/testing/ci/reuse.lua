@@ -1,4 +1,5 @@
 ---@module 'testing.ci.reuse'
+-- @cache-env GITHUB_SHA GITHUB_REPOSITORY GITHUB_RUN_ID GITHUB_WORKFLOW_REF GITHUB_OUTPUT GITHUB_STEP_SUMMARY TESTING_REUSE
 ---@brief `testing ci reuse` and `testing ci superseded`: which jobs of a hosted run another run already proved green.
 ---@description
 --- ```
