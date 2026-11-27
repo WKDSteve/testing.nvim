@@ -36,7 +36,10 @@ return function(H)
       if cmd == "push" then
         w.push_env[#w.push_env + 1] = env and env.TESTING_LAND_PUSH or "-"
       end
-      if cmd == "rev-parse" then
+      if cmd == "rev-list" and o.range then
+        -- `o.range`: the commits of base..sha, oldest first (`--reverse`)
+        return 0, table.concat(o.range, "\n") .. "\n", ""
+      elseif cmd == "rev-parse" then
         local rev = args[#args]:gsub("%^{commit}$", "")
         if rev == "origin/main" then
           return 0, w.base .. "\n", ""
@@ -566,6 +569,50 @@ return function(H)
       eq(fine.code, 0, v .. ": lands")
     end
     eq(scenario({ states = GREEN }).code, 0, "no local verdict: lands (the hosted CI checks it)")
+
+    -- several commits, oldest first: a later clean commit is the fix of an earlier red one, a known-red one is not
+    local A, B = ("d"):rep(40), ("e"):rep(40)
+    local fixed = scenario({
+      states = GREEN,
+      range = { A, SHA },
+      verdicts = { [A] = { verdict = "regression" }, [SHA] = { verdict = "clean" } },
+    })
+    eq(fixed.code, 0, "range: red, then a clean commit: lands")
+    eq(fixed.verdicts_asked, { A, SHA }, "range: every commit was asked about")
+    local still = scenario({
+      states = GREEN,
+      range = { A, B, SHA },
+      verdicts = {
+        [A] = { verdict = "regression", quick = true },
+        [B] = { verdict = "known-red" },
+      },
+    })
+    eq(still.code, 1, "range: red, then known-red and an unchecked tip: held")
+    has(still.text, A:sub(1, 7) .. " REGRESSION quick", "range: ... naming the red commit")
+    eq(still.pushes, {}, "range: ... nothing pushed")
+  end
+
+  -- the walk itself
+  do
+    local function red(list)
+      local out = {}
+      for _, it in ipairs(land.still_red(list)) do
+        out[#out + 1] = it.sha
+      end
+      return out
+    end
+    local function v(sha, verdict)
+      return { sha = sha, kept = verdict and { verdict = verdict } or nil }
+    end
+    eq(red({}), {}, "walk: nothing")
+    eq(red({ v("a", "regression") }), { "a" }, "walk: one red")
+    eq(red({ v("a", "regression"), v("b", "clean") }), {}, "walk: fixed by a clean one")
+    eq(red({ v("a", "clean"), v("b", "unclassified") }), { "b" }, "walk: red after clean")
+    eq(
+      red({ v("a", "regression"), v("b", "flaky"), v("c"), v("d", "regression") }),
+      { "a", "d" },
+      "walk: flaky and unchecked leave it red, both red ones named"
+    )
   end
 
   -- the newest kept result of a commit wins, from any project below the state directory (the real function: `saved`

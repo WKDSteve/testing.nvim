@@ -177,8 +177,26 @@ M.deps = {
   end,
 }
 
----Local verdicts that hold a land: what `ci commit` found new or could not compare (exit 1 there).
+---Local verdicts that make the state red: what `ci commit` found new or could not compare (exit 1 there).
 M.HOLDING = { regression = true, unclassified = true }
+
+---The commits whose red local verdict is still red at the tip. Read oldest first: a `regression` or `unclassified`
+---commit makes the state red, a `clean` one makes it green again (the run at that commit was green), and any other
+---verdict (`known-red`, `flaky`, `nothing-affected`, `docs-only`) or none leaves it as it was.
+---@param verdicts { sha: string, kept: { verdict: string, quick?: boolean, path?: string }|nil }[] Oldest first.
+---@return { sha: string, kept: table }[] red The red commits since the last clean one; empty: the tip is not red.
+function M.still_red(verdicts)
+  local red = {}
+  for _, it in ipairs(verdicts) do
+    local v = it.kept and it.kept.verdict
+    if v and M.HOLDING[v] then
+      red[#red + 1] = it
+    elseif v == "clean" then
+      red = {}
+    end
+  end
+  return red
+end
 
 ---@class Testing.Ci.Land.Args
 ---@field rev string
@@ -342,21 +360,23 @@ function M.run(args, say, state_dir)
 
   -- the local verdicts of what goes out: a `ci commit` that found something new (a quick run per commit, `CI-01`) holds
   -- the land, whatever the shell made of its exit code (a pipe such as `| tail` hides it: 2026-11-21, a red quick run
-  -- went on to land). Only the newest verdict of each commit counts: a red one checked again and clean lets it go.
+  -- went on to land). The commits are read oldest first (`M.still_red`): a later clean commit is the fix of an earlier
+  -- red one, a later known-red one is not. Only the newest verdict of each commit counts.
   if not args.ignore_local then
-    local rc, list = git("rev-list", tostring(base) .. ".." .. sha)
+    local rc, list = git("rev-list", "--reverse", tostring(base) .. ".." .. sha)
     local shas = rc == 0 and vim.split(vim.trim(list), "%s+", { trimempty = true }) or { sha }
+    local verdicts = {}
+    for i, c in ipairs(shas) do
+      verdicts[i] = { sha = c, kept = d.local_verdict(state_dir, c) }
+    end
     local held = {}
-    for _, c in ipairs(shas) do
-      local v = d.local_verdict(state_dir, c)
-      if v and M.HOLDING[v.verdict] then
-        held[#held + 1] = ("  %s %s%s  %s"):format(
-          c:sub(1, 7),
-          v.verdict:upper(),
-          v.quick and " quick" or "",
-          v.path
-        )
-      end
+    for _, it in ipairs(M.still_red(verdicts)) do
+      held[#held + 1] = ("  %s %s%s  %s"):format(
+        it.sha:sub(1, 7),
+        it.kept.verdict:upper(),
+        it.kept.quick and " quick" or "",
+        it.kept.path or ""
+      )
     end
     if #held > 0 then
       say(
