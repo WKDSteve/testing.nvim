@@ -13,6 +13,10 @@
 ---
 --- 1. `<remote>/<branch>` (fetched) must be an ancestor of the commit: one that moved meanwhile (another session landed)
 ---    is not merged here, the commit is rebased and landed again (a new run: the rebased state is unchecked).
+--- 1a. No commit of `<remote>/<branch>..<sha>` may be red in its newest local `ci commit` verdict (`regression` or
+---    `unclassified`, kept below every project of the state directory, WSL2 checks included): the quick run of each
+---    commit (`CI-01`) holds the land even when a pipe hid its exit code. `--ignore-local` lands anyway; a commit that
+---    was never checked locally does not hold it (the hosted CI still checks it).
 --- 2. The workflow file of the commit must run on `ci/**` (else: set `land = true`, regenerate).
 --- 3. A commit whose push runs are green and completed already (every awaited workflow) lands at once, no check branch.
 ---    Else push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit (and of every
@@ -37,7 +41,7 @@ M.TIMEOUT_MIN = 90
 M.NO_RUN_S = 300
 
 M.USAGE = table.concat({
-  "usage: testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep] [--also=<name>]",
+  "usage: testing ci land [<rev>] [--root=<dir>] [--branch=main] [--remote=origin] [--timeout=<minutes>] [--keep] [--also=<name>] [--ignore-local]",
   "  <rev>             the commit to land (default HEAD); <remote>/<branch> must be its ancestor",
   "  --branch=<name>   the branch that moves to it when the hosted CI is green (default main)",
   "  --remote=<name>   default origin",
@@ -45,6 +49,8 @@ M.USAGE = table.concat({
   "  --keep            leave the check branch ci/<repo>-<sha> on the remote",
   "  --also=<name>     wait for this workflow too (its name; repeatable, comma-separated), besides",
   "                    ci.workflow.land = { also = { ... } } of .testing.lua",
+  "  --ignore-local    land although the newest local `ci commit` verdict of a commit is regression",
+  "                    or unclassified (by default that holds the land before anything is pushed)",
   "needs ci.workflow.land = true in .testing.lua and the regenerated workflow (docs/WORKFLOW-CI.md)",
   "exit: 0 landed, 1 red or the branch moved, 2 usage, 3 git/GitHub/timeout",
 }, "\n")
@@ -131,7 +137,48 @@ M.deps = {
   now = function()
     return os.time()
   end,
+  ---The latest local `ci commit` verdict of a commit: its kept results below every project of the state directory (a
+  ---worktree is a project of its own, and a check in WSL2 is kept on this side too), the newest file wins.
+  ---@param state_dir string
+  ---@param sha string
+  ---@return { verdict: string, quick: boolean, path: string }|nil
+  local_verdict = function(state_dir, sha)
+    local best, best_t
+    -- by listing, not `glob`: a folder name with `[`, `{` or `,` is a pattern to `glob`
+    local paths = {}
+    local root = state_dir .. "/testing"
+    local ok_root, projects = pcall(vim.fs.dir, root)
+    for project, kind in ok_root and projects or function() end do
+      if kind == "directory" then
+        local dir = root .. "/" .. project .. "/ci-commit"
+        local ok_dir, files = pcall(vim.fs.dir, dir)
+        for name, fkind in ok_dir and files or function() end do
+          if fkind == "file" and name:sub(1, #sha + 1) == sha .. "-" and name:match("%.json$") then
+            paths[#paths + 1] = dir .. "/" .. name
+          end
+        end
+      end
+    end
+    for _, path in ipairs(paths) do
+      local st = vim.uv.fs_stat(path)
+      local t = st and (st.mtime.sec * 1e9 + (st.mtime.nsec or 0)) or 0
+      if not best_t or t > best_t then
+        local okd, r = pcall(
+          vim.json.decode,
+          require("lib.nvim.fs.read")(path) or "",
+          { luanil = { object = true } }
+        )
+        if okd and type(r) == "table" and r.sha == sha and type(r.verdict) == "string" then
+          best, best_t = { verdict = r.verdict, quick = r.quick == true, path = path }, t
+        end
+      end
+    end
+    return best
+  end,
 }
+
+---Local verdicts that hold a land: what `ci commit` found new or could not compare (exit 1 there).
+M.HOLDING = { regression = true, unclassified = true }
 
 ---@class Testing.Ci.Land.Args
 ---@field rev string
@@ -141,6 +188,7 @@ M.deps = {
 ---@field timeout integer Minutes.
 ---@field keep boolean
 ---@field also string[] More workflows (`--also=<name>`) besides `ci.workflow.land.also`.
+---@field ignore_local boolean Land although a local `ci commit` verdict of a commit is red (`--ignore-local`).
 ---@field state_dir? string
 ---@field help boolean
 
@@ -160,6 +208,7 @@ function M.parse(argv)
     timeout = M.TIMEOUT_MIN,
     keep = false,
     also = {},
+    ignore_local = false,
     help = false,
   }
   local revs = {}
@@ -172,6 +221,8 @@ function M.parse(argv)
       args.help = true
     elseif key == "keep" and value == nil then
       args.keep = true
+    elseif key == "ignore-local" and value == nil then
+      args.ignore_local = true
     elseif key and VALUED[key] then
       if value == nil then
         i = i + 1
@@ -287,6 +338,43 @@ function M.run(args, say, state_dir)
       )
     )
     return M.EXIT_RED
+  end
+
+  -- the local verdicts of what goes out: a `ci commit` that found something new (a quick run per commit, `CI-01`) holds
+  -- the land, whatever the shell made of its exit code (a pipe such as `| tail` hides it: 2026-11-21, a red quick run
+  -- went on to land). Only the newest verdict of each commit counts: a red one checked again and clean lets it go.
+  if not args.ignore_local then
+    local rc, list = git("rev-list", tostring(base) .. ".." .. sha)
+    local shas = rc == 0 and vim.split(vim.trim(list), "%s+", { trimempty = true }) or { sha }
+    local held = {}
+    for _, c in ipairs(shas) do
+      local v = d.local_verdict(state_dir, c)
+      if v and M.HOLDING[v.verdict] then
+        held[#held + 1] = ("  %s %s%s  %s"):format(
+          c:sub(1, 7),
+          v.verdict:upper(),
+          v.quick and " quick" or "",
+          v.path
+        )
+      end
+    end
+    if #held > 0 then
+      say(
+        ("land: %d commit(s) of %s..%s are red in their local ci commit verdict; %s does not move"):format(
+          #held,
+          tostring(base):sub(1, 7),
+          short,
+          upstream
+        )
+      )
+      for _, line in ipairs(held) do
+        say(line)
+      end
+      say(
+        "land: fix them, or check again (testing ci commit <sha> --force); --ignore-local lands anyway"
+      )
+      return M.EXIT_RED
+    end
   end
 
   local wc, wtext = git("show", sha .. ":.github/workflows/ci.yml")

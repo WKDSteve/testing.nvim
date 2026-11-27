@@ -23,6 +23,7 @@ return function(H)
   local land = require("testing.ci.land")
   local SHA, BASE, OTHER = ("a"):rep(40), ("b"):rep(40), ("c"):rep(40)
   local saved = vim.deepcopy(land.deps)
+  local real_local_verdict = land.deps.local_verdict
 
   ---One scenario: `o.states` are the answers of the remote, one per look; `o.base` main before, `o.moved_after` the
   ---main after a green run; `o.workflow` the text of the commit's workflow file.
@@ -91,6 +92,12 @@ return function(H)
     land.deps.now = function()
       clock = clock + 31
       return clock
+    end
+    -- `o.verdicts[sha]`: the newest local `ci commit` verdict of a commit (default none)
+    w.verdicts_asked = {}
+    land.deps.local_verdict = function(_, sha)
+      w.verdicts_asked[#w.verdicts_asked + 1] = sha
+      return o.verdicts and o.verdicts[sha] or nil
     end
     local args = assert(land.parse(argv or {}))
     w.code = land.run(args, function(s)
@@ -529,5 +536,71 @@ return function(H)
     )
     eq(code2, 0, sub .. ": --state-dir=<dir> in front: dispatched")
     eq(got2, { "--state-dir=/st" }, sub .. ": ... with the state directory")
+  end
+
+  -- a red local verdict holds the land before anything is pushed (a pipe once hid the exit code of a red quick run)
+  do
+    local GREEN = { { overall = "success", run = { url = "https://x/run/1" } } }
+    local red = scenario({
+      states = GREEN,
+      verdicts = { [SHA] = { verdict = "regression", quick = true, path = "/state/x.json" } },
+    })
+    eq(red.code, 1, "local red: held")
+    eq(red.pushes, {}, "local red: nothing pushed")
+    has(red.text, "REGRESSION quick", "local red: the verdict named")
+    has(red.text, "--ignore-local", "local red: ... and the way past it")
+    eq(red.verdicts_asked, { SHA }, "local red: the commit was asked about")
+
+    local unc = scenario({ states = GREEN, verdicts = { [SHA] = { verdict = "unclassified" } } })
+    eq(unc.code, 1, "local unclassified: held too")
+
+    local forced = scenario({
+      states = GREEN,
+      verdicts = { [SHA] = { verdict = "regression", path = "/state/x.json" } },
+    }, { "--ignore-local" })
+    eq(forced.code, 0, "--ignore-local: landed")
+    eq(forced.verdicts_asked, {}, "--ignore-local: no verdict read")
+
+    for _, v in ipairs({ "clean", "known-red", "flaky" }) do
+      local fine = scenario({ states = GREEN, verdicts = { [SHA] = { verdict = v } } })
+      eq(fine.code, 0, v .. ": lands")
+    end
+    eq(scenario({ states = GREEN }).code, 0, "no local verdict: lands (the hosted CI checks it)")
+  end
+
+  -- the newest kept result of a commit wins, from any project below the state directory (the real function: `saved`
+  -- is `land.deps` itself since the `also` block, so the scenarios above replaced its copy)
+  do
+    land.deps.local_verdict = real_local_verdict
+    local state = vim.fs.normalize(vim.fn.tempname()) .. "-land-verdicts"
+    local function keep(project, name, verdict, mtime)
+      local dir = state .. "/testing/" .. project .. "/ci-commit"
+      vim.fn.mkdir(dir, "p")
+      local path = dir .. "/" .. name
+      local f = assert(io.open(path, "wb"))
+      f:write(vim.json.encode({ sha = SHA, verdict = verdict, quick = true }))
+      f:close()
+      vim.uv.fs_utime(path, mtime, mtime)
+      return path
+    end
+    local function newest()
+      local v = land.deps.local_verdict(state, SHA)
+      return v and v.verdict or "none"
+    end
+    eq(newest(), "none", "kept: none")
+    keep("proj-111", SHA .. "-aaa.json", "regression", 1000)
+    eq(newest(), "regression", "kept: the one red result")
+    keep("proj-wt-222", SHA .. "-wslbbb.json", "clean", 2000)
+    eq(
+      newest(),
+      "clean",
+      "kept: a newer clean check of another project (a worktree, WSL2) lets it go"
+    )
+    keep("proj-111", SHA .. "-ccc.json", "regression", 3000)
+    eq(newest(), "regression", "kept: ... until it is red again")
+    keep("proj-111", OTHER .. "-ddd.json", "clean", 4000)
+    eq(newest(), "regression", "kept: another commit is not read")
+    vim.fn.delete(state, "rf")
+    land.deps.local_verdict = real_local_verdict
   end
 end
