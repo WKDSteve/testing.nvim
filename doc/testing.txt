@@ -309,6 +309,10 @@ the check in WSL2 (about ten times faster; docs/CI.md, "Check a commit");
 `ci land [{rev}]` pushes a commit to a check branch `ci/<repo>-<sha>`, waits
 for the hosted CI and moves main to it only when that is green (needs
 `ci.workflow.land = true`; docs/CI.md, "Land through the hosted CI").
+`ci reuse --job={key}={pathspecs}...` (in a GitHub workflow) says which jobs a
+push run of an ancestor already had green with those paths unchanged
+(`{key}=reuse|run`, in doubt `run`); `ci superseded` whether a newer commit on
+main overtook this one (docs/WORKFLOW-CI.md, "Overtaken runs and reused jobs").
 Heavy runs (a whole suite, `ci` with the whole suite, `ci commit`) take turns
 on one machine: a second one waits and says for what (docs/CI.md, "One heavy
 run at a time"). `TESTING_QUEUE=off` turns that off.

@@ -308,6 +308,102 @@ gh run download <run-id> -R <owner>/<repo> -n ci-macos
 
 Save what matters at once: GitHub can answer an old run with HTTP 404 well before the usual retention ends.
 
+## Overtaken runs and reused jobs
+
+Two pushes in a row must not mean two full runs. The older run is ended as soon as the run of the newer commit starts,
+and the jobs it already had green count for the newer one when nothing they depend on changed since.
+
+- **Overtaking is GitHub's `concurrency`.** Every generated workflow has `cancel-in-progress: true` in a group of
+  workflow, event and ref; on `main` the newer push is a descendant of the older one. A hand-written workflow (a native
+  app) takes the same lines:
+
+  ```yaml
+  concurrency:
+    group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+    cancel-in-progress: true
+  ```
+
+- **The generated workflow needs nothing more.** Each leg saves its result cache after a green run, at once, also when
+  the run is cancelled later; the leg of the newer commit restores the newest one and runs only the specs whose key
+  changed ([CI-CACHE.md](CI-CACHE.md)). A leg cancelled in the middle saves nothing yet (the entries are written when
+  the run ends).
+- **Any workflow: `testing ci reuse`.** A first job asks, for every job and the paths it depends on, whether a push run
+  of this workflow already had it green for an ancestor of this commit, with those paths unchanged since:
+
+  ```yaml
+  on:
+    push:
+      branches: [main]
+    workflow_dispatch:
+      inputs:
+        full: { description: "run every job, take nothing over", type: boolean, default: false }
+  jobs:
+    plan:
+      runs-on: ubuntu-latest
+      timeout-minutes: 5
+      permissions:
+        actions: read      # the job results of earlier runs
+        contents: read     # the commits they ran on (fetched when the checkout lacks them)
+      outputs:
+        rust: ${{ steps.reuse.outputs.rust }}
+        ui: ${{ steps.reuse.outputs.ui }}
+      steps:
+        - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+          with: { repository: WKDSteve/testing.nvim, ref: ci-verified, path: .deps/testing.nvim, persist-credentials: false }
+        - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+          with: { repository: WKDSteve/lib.nvim, ref: ci-verified, path: .deps/lib.nvim, persist-credentials: false }
+        - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+          with: { neovim: true, version: v0.12.2 }
+        - id: reuse
+          env:
+            GH_TOKEN: ${{ github.token }}
+            TESTING_REUSE: ${{ inputs.full && 'off' || '' }}
+          run: >-
+            nvim -n -i NONE --headless -u NONE -l .deps/testing.nvim/scripts/testing.lua ci reuse
+            --job=rust=src-tauri,Cargo.lock,rust-toolchain.toml
+            --job=ui=ui,package.json,pnpm-lock.yaml --name="ui:ui (node)"
+    rust:
+      needs: plan
+      if: needs.plan.outputs.rust != 'reuse'
+      # ...
+    ui:
+      name: ui (node)
+      needs: plan
+      if: needs.plan.outputs.ui != 'reuse'
+      # ...
+  ```
+
+  - `--job=<key>=<pathspecs>`: `<key>` is the output (`reuse` or `run`, and `<key>_from` the commit taken over) and the
+    job's name in the run; `--name=<key>:<name>` when its `name:` differs. The paths are git pathspecs, comma-separated.
+    The workflow file always counts too: a change to a job runs it again. Without paths a job depends on the whole tree,
+    and only a run of a commit with the same tree counts (a rebase, the push of main after `testing ci land`).
+  - **Where the verdict lies:** in the job results of the Actions API, nowhere else. Every run can read them, they are
+    bound to the commit, nobody without write access to the repository makes one, and a cancelled run leaves the jobs
+    that were green before the cancel. Nothing is written for it.
+  - **What counts:** a run of this workflow file in this repository, of the event `push` (no pull request, no fork, no
+    run by hand), not this run, on an ancestor of the commit or the commit itself (the compare API). Newest run first,
+    the newest completed job of the name decides: green with unchanged paths is `reuse`, green with changed paths or red
+    is `run`. A cancelled or skipped one (a job that reused something itself) is passed over, so the search finds the
+    run in which it really was green; at most `--runs` (50) runs are looked at.
+  - **In doubt it runs:** an error of the API or of git, a commit that cannot be fetched, a job never seen decide `run`,
+    with the reason. `--full`, `TESTING_REUSE=off` (above: the `full` input of a run by hand) run every job.
+  - **The report:** one line per job (`reuse  rust  green at 1d48a8d, src-tauri, Cargo.lock unchanged since`) and a
+    table in the step summary, with a link to the job taken over.
+  - **The runner guard is untouched** ([RUNNER-GUARD.md](RUNNER-GUARD.md)): the command never starts anything, it only
+    leaves jobs out. A green job of a self-hosted runner became green only after the guard let its commit run, and only
+    pushes count as sources. Let the `plan` job run on a hosted runner.
+  - A job that `needs` a reused (skipped) job runs only with `if: ${{ !cancelled() && !contains(needs.*.result,
+    'failure') }}`; GitHub counts a skipped job as passed for a required check.
+  - The paths decide how safe it is: name everything the job reads (sources, lock files, toolchain files, scripts it
+    runs). A job whose inputs cannot be named keeps no paths and is reused only for the same tree.
+- **Before a rolling build: `testing ci superseded`.** `superseded=true` and `by=<sha>` (to `$GITHUB_OUTPUT`) when the
+  tip of `--ref` (default `main`) is a strict descendant of the commit: the newer commit will build, this one need not.
+  An error answers `false`, so the build happens rather than silently not.
+
+A commit that was overtaken has no verdict of its own. When the newer one is red, `testing ci commit
+--range=@{upstream}..HEAD` checks it along (`CI-04`).
+
 ## What the `conformance` step checks
 
 K1 to K15 of [CONFORMANCE.md](CONFORMANCE.md): layout, documentation, tooling, and static rules read from the text of

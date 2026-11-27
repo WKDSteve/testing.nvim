@@ -1144,8 +1144,15 @@ M.internal = {
 -- The subcommands that read `--state-dir`, and those that have none.
 local SUB_WITH_STATE_DIR =
   { verify = true, commit = true, land = true, remote = true, overview = true }
-local SUB_WITHOUT_STATE_DIR =
-  { hook = true, release = true, list = true, ["runner-guard"] = true, trust = true }
+local SUB_WITHOUT_STATE_DIR = {
+  hook = true,
+  release = true,
+  list = true,
+  ["runner-guard"] = true,
+  trust = true,
+  reuse = true,
+  superseded = true,
+}
 
 ---`scripts/test.sh ci <sub>` puts its `--state-dir <dir>` in front of the subcommand (copies of the script older
 ---than the list in its template do so for every subcommand but `verify`, `list` and `hook`). A subcommand that reads
@@ -1194,6 +1201,10 @@ function M.main(argv, sv)
     local code = require("testing.ci.land").main(rest, sv)
     require("testing.export.auto").after("land", rest, sv)
     return code
+  end
+  -- which jobs of a hosted run another run already proved green; is this commit overtaken (testing.ci.reuse)
+  if argv[1] == "reuse" or argv[1] == "superseded" then
+    return require("testing.ci.reuse").main(argv[1], vim.list_slice(argv, 2), sv)
   end
   -- before the multi-repository run: `remote --repos-root` is not `testing ci --repos-root`
   if argv[1] == "remote" then
