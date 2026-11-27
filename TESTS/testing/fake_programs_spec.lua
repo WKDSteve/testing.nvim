@@ -54,6 +54,44 @@ return function(H)
   eq(#fake:calls("open") == 1 and fake:calls("open")[1].argv, { "bare" }, "bare name: recorded")
   fake:reset()
 
+  -- every argument as the program got it: cmd splits `%1` at `=`, `,` and `;`, and an empty one ended the list
+  local hard = {
+    "--start=1",
+    "--window-size=1280,900",
+    "a;b",
+    "",
+    "x y",
+    'q"uote',
+    "C:\\dir\\",
+    "back\\slash",
+    "after",
+  }
+  r = run(fake, "open", hard)
+  eq(r.code, 0, "hard arguments: the stand-in runs")
+  eq(
+    #fake:calls("open") == 1 and fake:calls("open")[1].argv,
+    hard,
+    "hard arguments: recorded one by one, an empty one included"
+  )
+  run(fake, "open", { "" })
+  eq(fake:calls("open")[2] and fake:calls("open")[2].argv, { "" }, "an empty argument alone")
+  run(fake, "open", {})
+  eq(fake:calls("open")[3] and fake:calls("open")[3].argv, {}, "no argument at all")
+
+  -- the Windows command line rules, on every system
+  for _, case in ipairs({
+    { "", {} },
+    { "  a  b\t c ", { "a", "b", "c" } },
+    { '--start=1 "" "x y"', { "--start=1", "", "x y" } },
+    { '"q\\"uote"', { 'q"uote' } },
+    { '"a""b"', { 'a"b' } },
+    { 'C:\\dir\\ "C:\\dir\\\\"', { "C:\\dir\\", "C:\\dir\\" } },
+    { 'a\\\\\\"b', { 'a\\"b' } },
+    { 'x"y z"w', { "xy zw" } },
+  }) do
+    eq(fp.split_cmdline(case[1]), case[2], "split_cmdline: " .. case[1])
+  end
+
   fake:reset()
   eq(#fake:calls(), 0, "reset: forgotten")
 

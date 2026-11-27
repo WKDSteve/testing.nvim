@@ -146,8 +146,9 @@ interop: there the stand-in catches the call before Windows runs it. On Windows 
 and only the bare name (`powershell`) reaches it, so a sheet that runs on both lists both.
 
 `read(dir, program?)` gives `{ program, argv, cwd }` per call, in order. It proves what would be called, not what the
-system does with it: keep one `manual` line for the real effect. Known limit on Windows: an empty argument ends the
-argument list of a `.cmd` stand-in.
+system does with it: keep one `manual` line for the real effect. Known limit on Windows: an argument without blanks
+that holds `&`, `|`, `<`, `>` or `^`, or one with a line break, does not reach a `.cmd` stand-in as given (`=`, `,`, `;`
+and empty arguments do).
 
 ### The environment of the child
 

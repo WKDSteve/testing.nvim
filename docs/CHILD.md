@@ -460,9 +460,10 @@ fake:close()
   `stdin = true` records standard input (POSIX only; off by default, because reading an inherited terminal blocks).
 * It proves what would be called, never what the system does with it. A feature that calls the program by its bare
   name (`vim.system({ "open", "-R", file })`, `jobstart`) finds the stand-in on every system, the `.cmd` on Windows
-  too. On Windows an empty argument ends the argument list, and an
-  argument with `&`, `|`, `<`, `>` or `^` is not recorded faithfully (the batch shell reads it as an operator); a line
-  break in an argument breaks the record on every system.
+  too. On Windows every argument is recorded as the program got it (`=`, `,`, `;`, empty ones, blanks and quotes
+  included: the stand-in records the raw command line, split by the C runtime's rules), except an argument without
+  blanks that holds `&`, `|`, `<`, `>` or `^` (the batch shell reads it as an operator before the stand-in runs); a
+  line break in an argument breaks the record on every system.
 * The guard (`process_net`) must allow the program names: list them in `allow_exec` or tag the case `@spawn`.
 
 ## Limits (honest)

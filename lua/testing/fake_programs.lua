@@ -15,7 +15,9 @@
 ---   fake:close()
 ---
 --- A child editor gets the folder through `fake:path()` (the value for its `PATH`). Stand-ins are `.cmd` files on
---- Windows and `sh` scripts elsewhere. Known limit on Windows: an empty argument ends the argument list.
+--- Windows and `sh` scripts elsewhere. Known limits on Windows: cmd itself still parses the command line before the
+--- stand-in runs, so an argument without blanks that holds `&`, `|`, `<`, `>` or `^`, or one with a line break, does
+--- not arrive as given (an argument with a blank is quoted and arrives whole).
 
 local uv = vim.uv or vim.loop
 
@@ -112,18 +114,21 @@ local function cmd_script(name, spec, log)
     end
     return out
   end
+  -- The arguments as one raw line (`%*`), split by `M.split_cmdline` when read: `%1` and `shift` split at `=`, `,`
+  -- and `;` too, and `if "%~1"==""` ended the list at an empty argument. Read back through delayed expansion, so
+  -- what the line holds is not parsed by cmd a second time. The redirection first: `echo x 1>>log` would take the
+  -- `1` of an argument for the handle.
   local lines = {
     "@echo off",
     "setlocal DisableDelayedExpansion",
-    ('echo program=%s>> "%s"'):format(name, win_log),
-    ('echo cwd=%%CD%%>> "%s"'):format(win_log),
-    ":loop",
-    'if "%~1"=="" goto done',
-    ('echo arg=%%~1>> "%s"'):format(win_log),
-    "shift",
-    "goto loop",
-    ":done",
-    ('echo end>> "%s"'):format(win_log),
+    ('>>"%s" echo(program=%s'):format(win_log, name),
+    ('>>"%s" echo(cwd=%%CD%%'):format(win_log),
+    'set "TESTING_FAKE_ARGS="',
+    "set TESTING_FAKE_ARGS=%*",
+    "setlocal EnableDelayedExpansion",
+    ('>>"%s" echo(args=!TESTING_FAKE_ARGS!'):format(win_log),
+    "endlocal",
+    ('>>"%s" echo(end'):format(win_log),
   }
   vim.list_extend(lines, echo_lines(spec.stdout))
   vim.list_extend(lines, echo_lines(spec.stderr, true))
@@ -218,6 +223,57 @@ function Fake:as(system, fn)
   return res
 end
 
+---The arguments of a Windows command line, split as a program's C runtime splits them (`CommandLineToArgvW`):
+---blanks separate outside quotes, `"` toggles quoting, `""` inside quotes is one `"`, and backslashes are literal
+---except before a `"` (2n of them give n and a toggle, 2n+1 give n and a literal `"`).
+---@param s string
+---@return string[]
+function M.split_cmdline(s)
+  local args, cur, quoted, any = {}, {}, false, false
+  local i, n = 1, #s
+  while i <= n do
+    local c = s:sub(i, i)
+    if c == "\\" then
+      local j = i
+      while s:sub(j, j) == "\\" do
+        j = j + 1
+      end
+      local count = j - i
+      if s:sub(j, j) == '"' then
+        cur[#cur + 1] = ("\\"):rep(math.floor(count / 2))
+        if count % 2 == 1 then
+          cur[#cur + 1] = '"'
+          j = j + 1
+        end
+      else
+        cur[#cur + 1] = ("\\"):rep(count)
+      end
+      any, i = true, j
+    elseif c == '"' then
+      any = true
+      if quoted and s:sub(i + 1, i + 1) == '"' then
+        cur[#cur + 1] = '"'
+        i = i + 2
+      else
+        quoted, i = not quoted, i + 1
+      end
+    elseif (c == " " or c == "\t") and not quoted then
+      if any then
+        args[#args + 1] = table.concat(cur)
+        cur, any = {}, false
+      end
+      i = i + 1
+    else
+      cur[#cur + 1] = c
+      any, i = true, i + 1
+    end
+  end
+  if any then
+    args[#args + 1] = table.concat(cur)
+  end
+  return args
+end
+
 ---The recorded calls, oldest first.
 ---@param program? string Only the calls of this stand-in.
 ---@return Testing.FakePrograms.Call[]
@@ -236,6 +292,8 @@ function Fake:calls(program)
       cur.cwd = value
     elseif cur and key == "arg" then
       cur.argv[#cur.argv + 1] = value
+    elseif cur and key == "args" then
+      cur.argv = M.split_cmdline(value)
     elseif cur and key == "stdin" then
       cur.stdin = (cur.stdin and cur.stdin .. "\n" or "") .. value
     elseif cur and line == "end" then
