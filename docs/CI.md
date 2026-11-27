@@ -414,6 +414,7 @@ and the result says `inexact`: a false alarm rather than a false green.
 | `clean` | the pipeline is green at the commit | `0` |
 | `known-red` | red, and nothing of it is new | `0` |
 | `flaky` | what was new is green on one of up to 3 reruns of its spec files at the commit (red under load only) | `0` |
+| `superseded` | not run: while it waited in the queue, a run for a later commit of the same line (same repository and profile, a base that is this one's base or older) was there; that verdict covers this commit. Nothing is kept; `--no-supersede` checks it anyway. Never for `--quick`, `--force`, `--keep` or a call of several commits | `0` |
 | `nothing-affected` | the pipeline is green and the suite's selection (`--quick`) reached no spec file: lint and the other steps ran, no spec did | `0` |
 | `docs-only` / `empty` | the commit changes only documentation (`*.md`, `doc/`, `docs/`, `LICENSE*`, `CHANGELOG*`) or nothing; not run (`--include-docs` runs it) | `0` |
 | `regression` | at least one finding is new | `1` |

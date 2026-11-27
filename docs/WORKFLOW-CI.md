@@ -400,6 +400,12 @@ and the jobs it already had green count for the newer one when nothing they depe
 - **Before a rolling build: `testing ci superseded`.** `superseded=true` and `by=<sha>` (to `$GITHUB_OUTPUT`) when the
   tip of `--ref` (default `main`) is a strict descendant of the commit: the newer commit will build, this one need not.
   An error answers `false`, so the build happens rather than silently not.
+- **Locally: the queue.** A full `testing ci commit <sha>` (one commit, not `--quick`, `--force` or `--keep`) that
+  waits in the queue of the machine leaves with the verdict `superseded` (exit `0`, nothing kept, no proof for the
+  pre-push hook) as soon as another run of the same repository and profile, waiting or running, checks a strict
+  descendant against a base that is this one's base or older: its verdict covers every change of this one. A run that
+  already has its turn is never stopped (its results go to the cache the newer run reads). `--no-supersede` keeps it
+  in the line.
 
 A commit that was overtaken has no verdict of its own. When the newer one is red, `testing ci commit
 --range=@{upstream}..HEAD` checks it along (`CI-04`).

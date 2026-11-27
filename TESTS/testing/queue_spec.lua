@@ -392,6 +392,76 @@ return function(H)
   eq(read().token, "other", "wiring: the other session's lock is untouched")
   queue.MAX_WAIT_MS = saved_max
 
+  -- overtaking (ci commit --no-supersede): a waiting run sees what the others are (`meta`) and leaves when `give_up`
+  -- answers; a run that gets its turn at once is never asked
+  do
+    os.remove(lock)
+    vim.fn.delete(queue.waiting_dir(lock), "rf")
+    local asked = 0
+    h = queue.acquire(q(), "free", say, {
+      meta = { sha = "aaa" },
+      give_up = function()
+        asked = asked + 1
+        return "never"
+      end,
+    })
+    ok(h and h.held, "give_up: a free queue is taken")
+    eq(asked, 0, "give_up: ... and give_up is never asked")
+    eq(read().meta, { sha = "aaa" }, "meta: the lock keeps what the run is")
+    eq(queue.others(q()), {}, "others: this process's own lock is not another run")
+    queue.release(h)
+
+    write_lock({
+      pid = parent,
+      token = "holder",
+      started = os.time(),
+      what = "B",
+      meta = { sha = "bbb" },
+    })
+    local dir = queue.waiting_dir(lock)
+    vim.fn.mkdir(dir, "p")
+    local f = assert(io.open(dir .. "/000000000000001-dead.json", "wb"))
+    f:write(vim.json.encode({ pid = 2147480000, token = "dead", meta = { sha = "ddd" } }))
+    f:close()
+    eq(
+      queue.others(q()),
+      { { sha = "bbb" } },
+      "others: the live holder's meta, not a dead waiter's"
+    )
+    eq(queue.others(nil), {}, "others: no queue, nobody")
+
+    local looks, seen = 0, nil
+    local h2, reason, overtaken = queue.acquire(q(), "A", say, {
+      poll_ms = 1,
+      meta = { sha = "aaa" },
+      sleep = function() end,
+      give_up = function()
+        looks = looks + 1
+        if looks == 1 then
+          for name in vim.fs.dir(dir) do
+            if name:find("aaa", 1, true) == nil and name:find("dead", 1, true) == nil then
+              seen = name
+            end
+          end
+          return nil
+        end
+        return "bbb covers it"
+      end,
+    })
+    eq(h2, nil, "give_up: the waiting run gets no turn")
+    eq(reason, "bbb covers it", "give_up: ... says the reason give_up gave")
+    eq(overtaken, true, "give_up: ... and that it was overtaken, not too long a wait")
+    eq(looks, 2, "give_up: asked at every look until it answers")
+    ok(seen ~= nil, "give_up: the run had its place in the line while it waited")
+    local left = {}
+    for name in vim.fs.dir(dir) do
+      left[#left + 1] = name
+    end
+    eq(left, {}, "give_up: its place in the line is gone (and the dead one with it)")
+    eq(read().token, "holder", "give_up: the holder's lock is untouched")
+    os.remove(lock)
+  end
+
   vim.env[queue.TOKEN_ENV], vim.env[queue.OFF_ENV] = saved_env.token, saved_env.off
   package.loaded["testing.queue"] = saved_mod
   vim.fn.delete(tmp, "rf")

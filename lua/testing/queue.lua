@@ -76,6 +76,10 @@ M.GARBAGE_TICKET_S = 60
 ---@field poll_ms? integer
 ---@field now? fun(): integer The clock in milliseconds; replaced by specs.
 ---@field sleep? fun(ms: integer) How a waiting run sleeps; replaced by specs.
+---@field meta? table What the run is (`repo`, `sha`, `base`, `profile`): kept in its lock and ticket, so another run
+---can see it (`M.others`). Plain values only.
+---@field give_up? fun(): string|nil Asked at every look while the run waits: a string ends the wait (the run is
+---overtaken: `acquire` answers `nil`, that reason and `true`); never asked once the run has its turn.
 
 ---@type { token: string, path: string, depth: integer, env_before?: string }|nil
 local held = nil
@@ -218,13 +222,45 @@ local function tickets_ahead(dir, mine, pid)
   return ahead, first
 end
 
+---What the other live runs of this queue are: the `meta` of every lock and ticket held by a live process that is not
+---this one (a run that gave no `meta` is not listed). Reads only; the leftovers of dead processes are left to whoever
+---takes the queue.
+---@param q Testing.Queue|nil
+---@return table[] metas
+function M.others(q)
+  local out = {}
+  if not q or q.off then
+    return out
+  end
+  local me = uv.os_getpid()
+  local function add(doc)
+    local pid = doc and type(doc.pid) == "number" and math.floor(doc.pid) or nil
+    if pid and pid ~= me and type(doc.meta) == "table" and M.alive(pid) then
+      out[#out + 1] = doc.meta
+    end
+  end
+  for n = 1, q.slots or M.DEFAULT_SLOTS do
+    add((read_lock(M.slot_path(q.path, n))))
+  end
+  local dir = M.waiting_dir(q.path)
+  if uv.fs_stat(dir) then
+    for name, kind in vim.fs.dir(dir) do
+      if kind == "file" and name:match("%.json$") then
+        add((read_lock(dir .. "/" .. name)))
+      end
+    end
+  end
+  return out
+end
+
 ---Take the queue for a heavy run, waiting while another one holds it.
 ---@param q Testing.Queue|nil nil: no queue (a library call).
 ---@param what string What runs (said to whoever waits).
 ---@param say fun(s: string)
 ---@param opts? Testing.Queue.AcquireOpts
 ---@return Testing.Queue.Handle|nil handle
----@return string|nil problem The wait was too long.
+---@return string|nil problem The wait was too long, or the reason `opts.give_up` gave.
+---@return boolean|nil overtaken `opts.give_up` ended the wait.
 function M.acquire(q, what, say, opts)
   opts = opts or {}
   if not q or q.off then
@@ -258,8 +294,13 @@ function M.acquire(q, what, say, opts)
     local path = M.slot_path(q.path, n)
     for _ = 1, 2 do
       -- `started` is when the run gets the lock, not when it began to wait: a waiter reads it as "running for N s"
-      local body = vim.json.encode({ pid = pid, token = token, started = M.time(), what = what })
-        .. "\n"
+      local body = vim.json.encode({
+        pid = pid,
+        token = token,
+        started = M.time(),
+        what = what,
+        meta = opts.meta,
+      }) .. "\n"
       local ok, err = create_exclusive(path, body)
       if ok then
         held = { token = token, path = path, depth = 1, env_before = vim.env[M.TOKEN_ENV] }
@@ -337,12 +378,23 @@ function M.acquire(q, what, say, opts)
       -- the place in the line; without one (a folder that refuses it) this run only looks, as before
       vim.fn.mkdir(dir, "p")
       local name = ("%015d-%s.json"):format(M.clock_ms(), token)
-      local body = vim.json.encode({ pid = pid, token = token, since = M.time(), what = what })
+      local body = vim.json.encode({
+        pid = pid,
+        token = token,
+        since = M.time(),
+        what = what,
+        meta = opts.meta,
+      })
       if create_exclusive(dir .. "/" .. name, body .. "\n") then
         ticket = name
       end
     end
     local cur = busy[1] or read_lock(q.path) or first or {}
+    local overtaken = opts.give_up and opts.give_up()
+    if overtaken then
+      leave()
+      return nil, overtaken, true
+    end
     if now() >= deadline then
       leave()
       return nil,

@@ -67,6 +67,7 @@ M.USAGE = table.concat({
   "  --base=<rev>      compare with this commit instead of the first parent",
   "  --profile=<name>  the profile to run (default: ci.default of the commit)",
   "  --force           run again even when a result for the commit is kept",
+  "  --no-supersede    keep this full check in the queue even when a run for a later commit of the same line covers it",
   "  --keep            leave the snapshots (git worktrees) in place and name them",
   "  --include-docs    run a commit that changes only documentation too",
   "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
@@ -78,7 +79,7 @@ M.USAGE = table.concat({
   "  --state-dir=<dir> where kept results and snapshots go (default: stdpath('state'); snapshots: temp on Windows)",
   "  --root=<dir>      the repository (default: the current directory)",
   "  -- <options>      passed on to the suite step of both runs",
-  "verdicts: clean 0, known-red 0, flaky 0, docs-only 0, empty 0, nothing-affected 0, regression 1, unclassified 1,",
+  "verdicts: clean 0, known-red 0, flaky 0, superseded 0, docs-only 0, empty 0, nothing-affected 0, regression 1, unclassified 1,",
   "          error 2, infra 3",
 }, "\n")
 
@@ -96,6 +97,8 @@ M.USAGE = table.concat({
 ---@field include_docs boolean
 ---@field quick boolean `--quick`: the suite runs what the diff to the base reaches (`--affected=<base>`).
 ---@field wsl? boolean `--wsl`: the check runs in WSL2 (`testing.ci.wsl`), the report and the exit code come back.
+---@field supersede? boolean A full check of one commit that waits in the queue is dropped when a run for a later commit of the same line covers it (`M.overtaken_by`); set by `main`, off with `--no-supersede`.
+---@field no_supersede? boolean `--no-supersede`.
 ---@field recall? boolean `--recall`: only what is kept about the commits (`M.recall`); never a run, never the queue.
 ---@field queue? Testing.Queue The entry's queue (`testing.queue`): a commit that runs takes its turn.
 ---@field queue_say? fun(s: string) Where the queue says that it waits.
@@ -161,6 +164,8 @@ function M.parse(argv)
       args.wsl = true
     elseif key == "no-wsl" and value == nil then
       args.wsl = false
+    elseif key == "no-supersede" and value == nil then
+      args.no_supersede = true
     elseif key == "recall" and value == nil then
       args.recall = true
     elseif (key == "agent" or key == "no-agent") and value == nil then
@@ -727,6 +732,70 @@ local function unknown_steps(doc)
   return out
 end
 
+---Is `a` an ancestor of `b`, or `b` itself?
+---@param root string
+---@param a string
+---@param b string
+---@return boolean
+local function is_ancestor(root, a, b)
+  return a == b or git({ "merge-base", "--is-ancestor", a, b }, root) == 0
+end
+
+---Does another run, waiting or running, make the check of `sha` unnecessary? It does when it checks a strict
+---descendant of `sha` against a base that is `base` or older (so its diff contains this one's) with the same profile.
+---@param root string
+---@param mine { sha: string, base?: string, profile?: string }
+---@param others table[] `queue.others`
+---@return string|nil reason The descendant's sha and why.
+function M.overtaken_by(root, mine, others)
+  for _, o in ipairs(others) do
+    if
+      type(o.sha) == "string"
+      and o.sha ~= mine.sha
+      and o.profile == (mine.profile or "")
+      and o.repo == mine.repo
+      and type(o.base) == "string"
+      and o.base ~= ""
+      and mine.base
+      and is_ancestor(root, o.base, mine.base)
+      and is_ancestor(root, mine.sha, o.sha)
+    then
+      return ("%s checks a later commit of the same line against %s; its verdict covers this one"):format(
+        o.sha:sub(1, 12),
+        o.base:sub(1, 7)
+      )
+    end
+  end
+  return nil
+end
+
+---The queue options of a full check that may be overtaken while it waits (`--quick`, `--force`, `--keep`,
+---`--no-supersede` and a call of several commits never are): what this run is, and the question asked at every look.
+---@param root string
+---@param sha string
+---@param base string|nil
+---@param args Testing.Ci.Commit.Args
+---@return table opts
+function M.supersede_opts(root, sha, base, args)
+  if not args.supersede or args.quick or args.force or args.keep or not base then
+    return {}
+  end
+  -- absolute from git itself: a plain --git-common-dir answers `.git` in the main checkout, relative to `root`, not to
+  -- the cwd of this process (two sessions would name the same repository differently)
+  local code, common = git({ "rev-parse", "--path-format=absolute", "--git-common-dir" }, root)
+  if code ~= 0 then
+    return {}
+  end
+  common = vim.fs.normalize(vim.trim(common))
+  local mine = { sha = sha, base = base, profile = args.profile or "", repo = common }
+  return {
+    meta = mine,
+    give_up = function()
+      return M.overtaken_by(root, mine, require("testing.queue").others(args.queue))
+    end,
+  }
+end
+
 ---@type fun(root: string, sha: string, args: Testing.Ci.Commit.Args, say: fun(s: string), snaps: table, r: table, base: string|nil, mem: string): table
 local run_check
 
@@ -796,13 +865,19 @@ local function check(root, sha, args, say, snaps)
   -- commit and at the base carry the token and never wait for it.
   -- `--quick` has a lane of its own: it waits for another quick run, never behind a full run of another session
   local queue = require("testing.queue")
-  local queued, waited_too_long = queue.acquire(
+  local queued, waited_too_long, overtaken = queue.acquire(
     args.quick and queue.lane(args.queue, "quick") or args.queue,
     ("ci commit %s in %s"):format(sha:sub(1, 7), vim.fs.basename(root)),
-    args.queue_say or say
+    args.queue_say or say,
+    M.supersede_opts(root, sha, base, args)
   )
   if not queued then
-    r.verdict, r.problems = "infra", { "queue: " .. tostring(waited_too_long) }
+    if overtaken then
+      r.verdict, r.problems = "superseded", { tostring(waited_too_long) }
+      r.superseded_by = tostring(waited_too_long):match("^(%x+)")
+    else
+      r.verdict, r.problems = "infra", { "queue: " .. tostring(waited_too_long) }
+    end
     return r
   end
   local started = vim.uv.hrtime()
@@ -1133,6 +1208,13 @@ function M.headline(r)
       r.exact and "" or " (inexact: a list was cut)",
       tail
     )
+  elseif r.verdict == "superseded" then
+    return ("ci commit %s %s by %s, not run (the later commit's verdict covers it; --no-supersede checks it) %s"):format(
+      short,
+      v,
+      tostring(r.superseded_by or "?"),
+      tail
+    )
   elseif r.verdict == "docs-only" or r.verdict == "empty" then
     return ("ci commit %s %s %d files, not run %s"):format(short, v, #(r.changed_files or {}), tail)
   elseif r.verdict == "clean" or r.verdict == "nothing-affected" then
@@ -1351,6 +1433,7 @@ local VERDICT_ORDER = {
   "infra",
   "flaky",
   "known-red",
+  "superseded",
   "clean",
   "nothing-affected",
   "docs-only",
@@ -1886,6 +1969,8 @@ function M.main(argv, sv)
   local names = M.repo_names(plans)
   -- each commit that runs takes its turn in the queue (testing.queue); a kept result waits for nobody
   args.queue = (sv --[[@as table]]).queue
+  -- one commit named: a call of several wants a verdict for each of them
+  args.supersede = total == 1 and not multi and not args.no_supersede
   args.queue_say = err
   args.metrics = (sv --[[@as table]]).metrics
   for i, plan in ipairs(plans) do

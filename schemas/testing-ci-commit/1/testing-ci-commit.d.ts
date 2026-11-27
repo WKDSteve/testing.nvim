@@ -46,6 +46,8 @@ export type Verdict =
   | "clean"
   | "known-red"
   | "flaky"
+  /** Not run: a run for a later commit of the same line covers it (`superseded_by`); nothing is kept. */
+  | "superseded"
   | "regression"
   | "unclassified"
   | "docs-only"
@@ -69,6 +71,8 @@ export interface CommitResult {
   suite_args?: string[];
   /** True when the result was kept from an earlier call (nothing ran). */
   reused?: boolean;
+  /** Only with verdict `superseded`: the start of the later commit whose run covers this one. */
+  superseded_by?: string;
   /** Only with `--recall`: a kept result, read, not run. */
   recalled?: boolean;
   /** The result came from a check in WSL2 (`ci commit --wsl`). */

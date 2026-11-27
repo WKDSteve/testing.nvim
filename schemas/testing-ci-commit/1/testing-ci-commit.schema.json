@@ -56,8 +56,8 @@
   },
   "$defs": {
     "verdict": {
-      "description": "nothing-affected: green, and the suite's selection (--quick: the diff to the base) reached no spec file; the suite proved nothing.",
-      "enum": ["clean", "known-red", "flaky", "regression", "unclassified", "docs-only", "empty", "nothing-affected", "error", "infra"]
+      "description": "nothing-affected: green, and the suite's selection (--quick: the diff to the base) reached no spec file; the suite proved nothing. superseded: not run, a run for a later commit of the same line (superseded_by) covers it; nothing is kept.",
+      "enum": ["clean", "known-red", "flaky", "superseded", "regression", "unclassified", "docs-only", "empty", "nothing-affected", "error", "infra"]
     },
     "item": {
       "type": "object",
@@ -95,6 +95,7 @@
         "profile": { "type": ["string", "null"] },
         "suite_args": { "type": "array", "items": { "type": "string" } },
         "reused": { "type": "boolean" },
+        "superseded_by": { "type": "string", "pattern": "^[0-9a-f]+$", "description": "Only with verdict superseded: the start of the later commit whose run covers this one." },
         "recalled": { "type": "boolean", "description": "Only with --recall: a kept result, read, not run." },
         "from_wsl": { "type": "boolean", "description": "The result came from a check in WSL2 (ci commit --wsl)." },
         "system": { "enum": ["windows", "macos", "linux"], "description": "Only with --recall: the system the kept result speaks for." },
