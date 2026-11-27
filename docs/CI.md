@@ -604,13 +604,14 @@ ci/**?`) or only the older red one (`GitHub started no run ... the only run of t
 
 - `<remote>/<branch>` (fetched) must be an ancestor of the commit. When another session landed meanwhile, the commit is
   rebased and landed again (a new run: the rebased state was not checked); `land` never merges.
-- The local verdicts come first: when the newest kept `ci commit` result of a commit of `<remote>/<branch>..<sha>` is
-  `regression` or `unclassified` (the quick run after each commit, a full run; below every project of the state
-  directory, so a check from a worktree or in WSL2 counts too), nothing is pushed: `land: 1 commit(s) of abc1234..def5678
-  are red in their local ci commit verdict; origin/main does not move`, one line per commit with the verdict and its file
-  (exit 1). This holds whatever the shell made of the exit code of that check (a `| tail` once hid a red quick run, and
-  it landed). Fix the commit or check it again (`testing ci commit <sha> --force`: the newest result counts);
-  `--ignore-local` lands anyway. A commit that was never checked locally does not hold it.
+- The local verdicts come first. The commits of `<remote>/<branch>..<sha>` are read oldest first, each with the newest
+  kept `ci commit` result it has (the quick run after each commit, a full run; below every project of the state
+  directory, so a check from a worktree or in WSL2 counts too): `regression` or `unclassified` makes the state red,
+  `clean` makes it green again (the usual fix in the next commit), anything else or no result leaves it. Red at the tip:
+  nothing is pushed, `land: 1 commit(s) of abc1234..def5678 are red in their local ci commit verdict; origin/main does
+  not move`, one line per red commit with the verdict and its file (exit 1). This holds whatever the shell made of the
+  exit code of that check (a `| tail` once hid a red quick run, and it landed). Fix it in a commit that checks `clean`,
+  or check again (`testing ci commit <sha> --force`: the newest result counts); `--ignore-local` lands anyway.
 - The workflow of the commit must run on `ci/**`: `ci.workflow.land = true` in `.testing.lua`, regenerated with
   `testing init --workflow=public --force` (docs/WORKFLOW-CI.md). On main its job `already-verified` sees the green run
   of the same commit and skips the legs; only `publish-ci-verified` runs, when the workflow has one.

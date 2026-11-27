@@ -13,10 +13,11 @@
 ---
 --- 1. `<remote>/<branch>` (fetched) must be an ancestor of the commit: one that moved meanwhile (another session landed)
 ---    is not merged here, the commit is rebased and landed again (a new run: the rebased state is unchecked).
---- 1a. No commit of `<remote>/<branch>..<sha>` may be red in its newest local `ci commit` verdict (`regression` or
----    `unclassified`, kept below every project of the state directory, WSL2 checks included): the quick run of each
----    commit (`CI-01`) holds the land even when a pipe hid its exit code. `--ignore-local` lands anyway; a commit that
----    was never checked locally does not hold it (the hosted CI still checks it).
+--- 1a. The local `ci commit` verdicts of `<remote>/<branch>..<sha>` (the newest of each commit, kept below every project
+---    of the state directory, WSL2 checks included) must not leave the tip red (`M.still_red`: oldest first, a
+---    `regression` or `unclassified` commit makes it red, a later `clean` one green again): the quick run of each commit
+---    (`CI-01`) holds the land even when a pipe hid its exit code. `--ignore-local` lands anyway; a commit that was never
+---    checked locally does not hold it (the hosted CI still checks it).
 --- 2. The workflow file of the commit must run on `ci/**` (else: set `land = true`, regenerate).
 --- 3. A commit whose push runs are green and completed already (every awaited workflow) lands at once, no check branch.
 ---    Else push to `refs/heads/ci/<repo>-<sha12>`, then wait for the run of the CI workflow for that commit (and of every
