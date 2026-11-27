@@ -309,6 +309,55 @@ return function(H)
   end
 
   do
+    -- a full page is not the whole list: a stranger beyond the first `SOLO_PAGE` entries must be seen (paged), and a
+    -- list longer than the cap is unknown, never "alone"
+    local function paged(pages)
+      local calls = {}
+      return calls,
+        function(args)
+          local endpoint = args[2] or ""
+          calls[#calls + 1] = endpoint
+          if not endpoint:find("/contributors?", 1, true) then
+            return "WKDSteve\n"
+          end
+          local page = tonumber(endpoint:match("[?&]page=(%d+)") or "1")
+          local list = pages[page] or {}
+          return table.concat(list, "\n") .. (#list > 0 and "\n" or "")
+        end
+    end
+    local function contributor_calls(calls)
+      return #vim.tbl_filter(function(c)
+        return c:find("/contributors?", 1, true) ~= nil
+      end, calls)
+    end
+    local owners = {}
+    for i = 1, guard.SOLO_PAGE do
+      owners[i] = "WKDSteve"
+    end
+    local calls, gh = paged({ owners, { "stranger" } })
+    local alone, detail =
+      guard.solo_clear(REPO, "WKDSteve", { gh = gh, now = NOW, env = {} }, tmp())
+    eq(alone, false, "paging: a stranger on page 2 is somebody else")
+    has(detail, "contributor stranger", "paging: ... and is named")
+    eq(contributor_calls(calls), 2, "paging: a short page ends the paging")
+
+    local short = vim.list_slice(owners, 1, guard.SOLO_PAGE - 1)
+    gh = select(2, paged({ short, { "stranger" } }))
+    alone = guard.solo_clear(REPO, "WKDSteve", { gh = gh, now = NOW, env = {} }, tmp())
+    eq(alone, true, "paging: a list one short of a page is complete (page 2 is not asked)")
+
+    local endless = {}
+    for i = 1, guard.SOLO_PAGES + 1 do
+      endless[i] = owners
+    end
+    calls, gh = paged(endless)
+    alone, detail = guard.solo_clear(REPO, "WKDSteve", { gh = gh, now = NOW, env = {} }, tmp())
+    eq(alone, nil, "paging: a list beyond the cap is unknown (fail closed)")
+    has(detail, "more than", "paging: ... and says so")
+    eq(contributor_calls(calls), guard.SOLO_PAGES, "paging: ... after asking at most the cap")
+  end
+
+  do
     -- a repository that was never released has no entry: it is `solo` by default (decision 2026-11-24)
     eq(guard.DEFAULT_MODE, "solo", "default: a repository without an entry is solo")
     local root = tmp()

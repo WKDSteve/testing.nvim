@@ -200,10 +200,17 @@ What stays the same in `solo`: rule 2 and 2b (a pull request, an event outside t
 that is not the owner) still refuse, and a private repository still runs by rule 4. Only rules 5 and 6 (the list of
 reviewed commits, the signature of the device registry) are not asked.
 
-**When it is "alone".** The hook asks GitHub (`gh`, the login of the runner's user) three things, each over the newest
-100 entries: the **collaborators**, the **contributors** (bots such as `dependabot[bot]` included: their commits are not
-yours) and the **authors of pull requests** of the repository. Any account other than the owner is somebody else, except
-the ones you put on the **ignore list**. A commit whose author GitHub cannot link to any account lists nobody.
+**When it is "alone".** The hook asks GitHub (`gh`, the login of the runner's user) three things: the
+**collaborators**, the **contributors** (bots such as `dependabot[bot]` included: their commits are not yours) and the
+**authors of pull requests** of the repository. Any account other than the owner is somebody else, except the ones you
+put on the **ignore list**. A commit whose author GitHub cannot link to any account lists nobody.
+
+Each list is read in pages of 100 until a page is short, at most 10 pages (1,000 entries). A list that is longer is not
+read to its end, so a stranger could sit beyond it: the answer is then "unknown" and the job is judged with the guard on
+(rules 5 and 6), without ending solo mode. A repository with few entries costs one call per list, three per run (the
+jobs of one run share the answer); the cap keeps a busy one at 30 calls at most, well inside the 5,000 requests an hour
+GitHub allows the runner's login. Ignored accounts are counted in the pages too, so a bot with hundreds of pull requests
+still fills them.
 
 Claude's commits (author or co-author `noreply@anthropic.com`) are linked to the GitHub account `claude`, so that account
 shows up as a contributor in nearly every repository you work on with it, and solo mode ends at the first job. Whether

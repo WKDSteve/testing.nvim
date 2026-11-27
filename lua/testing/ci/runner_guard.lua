@@ -49,7 +49,8 @@ M.MAX_BASES = 3
 M.MODES = { auto = true, always = true, off = true, solo = true }
 M.DEFAULT_MODE = "solo" -- a repository without an entry: the owner alone needs no release (see `solo_clear`)
 M.SOLO_TTL_S = 600 -- the most a run's jobs share one answer "no other party" (they start within seconds)
-M.SOLO_PAGE = 100 -- the newest pull requests and contributors the detection reads
+M.SOLO_PAGE = 100 -- the entries of one page the detection asks for
+M.SOLO_PAGES = 10 -- the most pages of one list it reads; a longer list is "unknown" (the guard stays on)
 M.EVENTS =
   { push = true, workflow_dispatch = true, workflow_run = true, schedule = true, release = true }
 
@@ -686,21 +687,44 @@ local function logins(ctx, endpoint, jq)
   if not out then
     return nil, query_failure(ctx, err)
   end
-  local list = {}
+  local list, n = {}, 0
   for line in out:gmatch("[^\r\n]+") do
+    n = n + 1 -- every entry prints one line (`null` for a missing login), so `n` is the size of the page
     local name = vim.trim(line):lower()
     if name ~= "" and name ~= "null" and #name <= 100 then
       list[#list + 1] = name
     end
   end
-  return list
+  return list, nil, n
+end
+
+---All the logins of a list GitHub hands out in pages of `M.SOLO_PAGE`: page after page until one is short. A list that
+---fills `M.SOLO_PAGES` pages is not read to its end, so it gives nil (unknown): a foreign account may sit beyond.
+---@param ctx? Testing.RunnerGuard.Ctx
+---@param endpoint string with a query (`?per_page=...`)
+---@param jq string
+---@return string[]|nil logins
+---@return string|nil err
+local function all_logins(ctx, endpoint, jq)
+  local all = {}
+  for page = 1, M.SOLO_PAGES do
+    local list, err, n = logins(ctx, endpoint .. (page > 1 and ("&page=" .. page) or ""), jq)
+    if not list then
+      return nil, err
+    end
+    vim.list_extend(all, list)
+    if n < M.SOLO_PAGE then
+      return all
+    end
+  end
+  return nil, ("more than %d entries, not read to the end"):format(M.SOLO_PAGE * M.SOLO_PAGES)
 end
 
 ---`solo` mode: is the owner the only party of the repository? "Somebody else" is any other account that is a
 ---collaborator, a contributor (bots too: their commits are not the owner's code) or the author of a pull request,
----read from the newest `M.SOLO_PAGE` entries of each. An account the owner put on the ignore list (`M.solo_ignore`,
----e.g. the account Claude's commits are linked to) does not count. Commits whose author GitHub cannot link to any
----account list nobody.
+---read page by page (`all_logins`; a list longer than `M.SOLO_PAGES` pages is unknown). An account the owner put
+---on the ignore list (`M.solo_ignore`, e.g. the account Claude's commits are linked to) does not count. Commits whose
+---author GitHub cannot link to any account list nobody.
 ---Fail closed: a question GitHub does not answer gives `nil` (the guard stays on for that job, but nothing is
 ---recorded: a rate limit says nothing about the repository). Only "alone" is kept, for the jobs of the same run.
 ---@param repo string `owner/name`
@@ -760,7 +784,7 @@ function M.solo_clear(repo, owner, ctx, root)
   local found, seen = {}, {}
   local ignored = M.solo_ignore(root)
   for _, s in ipairs(sources) do
-    local list, err = logins(ctx, s[2], s[3])
+    local list, err = all_logins(ctx, s[2], s[3])
     if not list then
       return nil, ("%s: %s"):format(s[1], err)
     end
