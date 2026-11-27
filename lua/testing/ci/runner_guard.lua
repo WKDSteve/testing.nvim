@@ -682,6 +682,7 @@ end
 ---@param jq string
 ---@return string[]|nil logins
 ---@return string|nil err
+---@return integer|nil entries the lines printed (one per entry of the page, also those without a login)
 local function logins(ctx, endpoint, jq)
   local out, err = gh(ctx, { "api", endpoint, "--jq", jq })
   if not out then
