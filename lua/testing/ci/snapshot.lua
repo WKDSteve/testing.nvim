@@ -77,6 +77,41 @@ function M.valid_rev(rev)
     and not rev:find("[%s%c;&|`$<>\"'\\]")
 end
 
+---The suffixes `<rev>@{...}` that lose their braces on the way in (`M.unbrace`).
+local BRACED = { u = true, upstream = true, push = true }
+
+---Replaced by a spec: where `M.unbrace` says what it did.
+---@type fun(s: string)
+M.note = function(s)
+  io.stderr:write(s .. "\n")
+end
+
+---`rev` as it was meant when its braces were lost: `@upstream`, `main@u` or `@push` that do not name a commit are read
+---as `@{upstream}`, `main@{u}`, `@{push}`. Git Bash (`bash.exe`) started by a program that is not itself an MSYS
+---program (node's `execFileSync`, Python, PowerShell) expands the braces of its own arguments like a glob before the
+---script runs, so `scripts/test.sh ci commit --base=@{upstream}` arrived as `--base=@upstream` (`MSYS=noglob` keeps
+---them). Anything else, and a branch that really is called `@upstream`, stays as given.
+---@param root string
+---@param rev string
+---@return string
+function M.unbrace(root, rev)
+  local before, word = rev:match("^(.-)@(%a+)$")
+  if not (before and BRACED[word]) or before:find("[{}]") then
+    return rev
+  end
+  if git({ "rev-parse", "--verify", "--quiet", rev .. "^{commit}" }, root) == 0 then
+    return rev
+  end
+  local meant = ("%s@{%s}"):format(before, word)
+  M.note(
+    ("testing: note: %s read as %s (the braces were lost: Git Bash started by a program that is not an MSYS one "):format(
+      rev,
+      meant
+    ) .. "expands them in its arguments; MSYS=noglob keeps them)"
+  )
+  return meant
+end
+
 ---The full commit id of `rev` in `root`.
 ---@param root string
 ---@param rev string
@@ -86,6 +121,7 @@ function M.resolve(root, rev)
   if not M.valid_rev(rev) then
     return nil, ("not a revision: %q"):format(rev)
   end
+  rev = M.unbrace(root, rev)
   local code, out, err = git({ "rev-parse", "--verify", "--quiet", rev .. "^{commit}" }, root)
   local sha = vim.trim(out)
   if code ~= 0 or not sha:match("^%x+$") then

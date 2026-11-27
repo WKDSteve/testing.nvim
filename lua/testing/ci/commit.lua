@@ -1102,7 +1102,15 @@ local function range_shas(root, range)
   then
     return nil, ("--range=%s: expected <from>..<to>"):format(range)
   end
-  local code, out, err = git({ "rev-list", "--reverse", range, "--" }, root)
+  local code, out, err = git(
+    {
+      "rev-list",
+      "--reverse",
+      snapshot.unbrace(root, a) .. ".." .. snapshot.unbrace(root, b),
+      "--",
+    },
+    root
+  )
   if code ~= 0 then
     return nil, ("--range=%s: %s"):format(range, vim.trim(err))
   end
@@ -1784,10 +1792,12 @@ function M.main_wsl(argv, args, sv)
   -- Revisions as commit ids: in the mirror `HEAD`, a branch name or `@{upstream}` would name the mirror's own refs
   -- (an old clone, no upstream), not the Windows checkout's. Unknown ones stay as given: the run in WSL reports them.
   local function sha_of(rev)
-    local code, sha = git(
-      { "rev-parse", "--verify", "--quiet", (rev == "" and "HEAD" or rev) .. "^{commit}" },
-      root
-    )
+    local code, sha = git({
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      (rev == "" and "HEAD" or snapshot.unbrace(root, rev)) .. "^{commit}",
+    }, root)
     return code == 0 and vim.trim(sha) or rev
   end
   local function range_of(r)

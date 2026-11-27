@@ -389,6 +389,13 @@ no spec file (a change of the workflow only) gets its own verdict, `nothing-affe
 and are green, the suite ran nothing (`ci commit abc1234 NOTHING-AFFECTED quick full 4 steps, the suite reached no spec
 file exit 0`). It is no proof of the tree either.
 
+Braces that got lost on the way in are put back: Git Bash (`bash.exe`) started by a program that is not itself an MSYS
+one (node's `execFileSync`, Python, PowerShell) expands `{...}` in its own arguments before `scripts/test.sh` runs, so
+`--base=@{upstream}` arrives as `--base=@upstream`. A revision `@upstream`, `@u` or `@push` (also after a branch,
+`main@upstream`, and as an end of `--range`) that names no commit is read as `@{upstream}`, `@{u}`, `@{push}`, with a
+note on stderr; a branch that really has such a name stays what it is. `MSYS=noglob` in the caller's environment keeps
+the braces (and the `*` of other arguments) as given.
+
 A finding is its step, its file and its text, without line and column (they move between two commits; a `:<digits>`
 in the text counts as any position, and so do the folders that are new for every run: the snapshot directory
 `testing/snap/<sha8>-<random>` (also when the message is cut right after it, or names it as a Windows or WSL UNC
