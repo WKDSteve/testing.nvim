@@ -400,8 +400,14 @@ base, one with one. That is weaker evidence than the same text twice and stronge
 `known-red`, the headline says `1 known (1 with another failure)` and the line shows both texts (`  known suite
 TESTS/a.lua:5 FAIL filter-tab: ...  (red at the base with another failure: FAIL two-live: ...)`). A second failure in a
 file that was red already, or a red file the base does not have, is still new; only the suite pairs (a new lint warning
-in a file with others is new). A red step without findings (an exit code) is compared as a whole. When a list of findings was cut, the rest counts as new and the result says
-`inexact`: a false alarm rather than a false green.
+in a file with others is new). A red process step without an error format of its own (a repository's `ui-test` or
+`rust-test`) names its red tests from the failure lines of common runners: Vitest (` FAIL  <file> > <test>`), cargo
+test (`test <path> ... FAILED`), pytest (`FAILED <file>::<test>`) and unittest (`FAIL: <test> (<module.Class.test>)`),
+so a test that turns red behind a step that was red already is new. A red step whose output names no test (an exit
+code, a crash, a runner not in that list such as Playwright's list reporter) is compared as a whole; the headline then
+says `1 known (1 compared as a whole)` and its line adds `(compared as a whole: a new failure inside it is not seen)`:
+`known-red` is weaker there, give the step an `efm` of its own. When a list of findings was cut, the rest counts as new
+and the result says `inexact`: a false alarm rather than a false green.
 
 | Verdict | Meaning | Exit |
 | --- | --- | --- |
