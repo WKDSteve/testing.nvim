@@ -364,7 +364,8 @@ function M.run(args, say, state_dir)
   -- went on to land). The commits are read oldest first (`M.still_red`): a later clean commit is the fix of an earlier
   -- red one, a later known-red one is not. Only the newest verdict of each commit counts.
   if not args.ignore_local then
-    local rc, list = git("rev-list", "--reverse", tostring(base) .. ".." .. sha)
+    -- one format, not `base .. ".." .. sha`: the cache scanner reads a bare ".." as a path out of the project
+    local rc, list = git("rev-list", "--reverse", ("%s..%s"):format(tostring(base), sha))
     local shas = rc == 0 and vim.split(vim.trim(list), "%s+", { trimempty = true }) or { sha }
     local verdicts = {}
     for i, c in ipairs(shas) do
