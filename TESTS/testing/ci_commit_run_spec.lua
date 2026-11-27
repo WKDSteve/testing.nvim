@@ -44,7 +44,11 @@ return function(H)
     local json = tmp .. "/c3.json"
     local r = call(root, c3, "--agent", "--json=" .. json)
     eq(r.code, 0, "the gate stays red: exit 0")
-    has(r.first, "KNOWN-RED 0 new, 1 known, 0 fixed exit 0", "... known-red")
+    has(
+      r.first,
+      "KNOWN-RED 0 new, 1 known (1 compared as a whole), 0 fixed exit 0",
+      "... known-red, and the gate names no test: compared as a whole"
+    )
     has(r.out, "  known gate: red", "... known by name")
     local doc = vim.json.decode((require("lib.nvim.fs.read")(json)))
     eq(doc.schema, "testing-ci-commit/1", "json: the schema")

@@ -28,6 +28,9 @@
 ---
 --- The report: the agent report's first line is the verdict (`ci commit abc1234 REGRESSION 2 new, 1 known (luacheck 2)
 --- exit 1`), then only the new findings, then one line per known group; the terminal report lists all three groups.
+--- A known item that is a whole step (red at both ends, no test named in its output) is marked "compared as a whole":
+--- a new failure inside such a step is not seen, so `KNOWN-RED` is weaker there (`testing.ci.runners` names the tests
+--- of common runners; an own `efm` on the step does it for any other).
 --- `--json=<file>` writes the document `testing-ci-commit/1` (`schemas/testing-ci-commit/1/`).
 ---
 --- Limits: the dependencies are not frozen (both sides see the same ones, from `$<NAME>_DIR`, the repository's `.deps/`
@@ -1064,6 +1067,30 @@ local function changed_count(known)
   return n
 end
 
+---How many of the known items are whole steps: red at both ends without findings, so a new failure inside such a step
+---cannot be told from the old one (the step's output names no test that `testing.ci.runners` reads).
+---@param known table[]|nil
+---@return integer
+local function whole_count(known)
+  local n = 0
+  for _, it in ipairs(known or {}) do
+    if it.whole == true then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+---What a known whole step adds to its line.
+M.WHOLE_NOTE = "  (compared as a whole: a new failure inside it is not seen)"
+
+---@param kind string `known` or `fixed`
+---@param it table
+---@return string
+local function listed(kind, it)
+  return where(it) .. ((kind == "known" and it.whole == true) and M.WHOLE_NOTE or "")
+end
+
 ---In the agent report, so many known or fixed items are named one per line; the rest is counted per step.
 M.AGENT_LISTED = 5
 
@@ -1086,13 +1113,20 @@ function M.headline(r)
       by[#by + 1] = ("%s %d"):format(g.step, g.n)
     end
     local flaky = #(r.flaky or {}) > 0 and (", %d flaky"):format(#r.flaky) or ""
-    local changed = changed_count(r.known)
+    local notes = {}
+    local changed, whole = changed_count(r.known), whole_count(r.known)
+    if changed > 0 then
+      notes[#notes + 1] = ("%d with another failure"):format(changed)
+    end
+    if whole > 0 then
+      notes[#notes + 1] = ("%d compared as a whole"):format(whole)
+    end
     return ("ci commit %s %s %d new, %d known%s, %d fixed%s%s%s %s"):format(
       short,
       v,
       #r.new,
       #r.known,
-      changed > 0 and (" (%d with another failure)"):format(changed) or "",
+      #notes > 0 and (" (" .. table.concat(notes, ", ") .. ")") or "",
       #r.fixed,
       flaky,
       #by > 0 and (" (" .. table.concat(by, ", ") .. ")") or "",
@@ -1141,7 +1175,7 @@ function M.lines(r, agent)
     for _, kind in ipairs({ "known", "fixed" }) do
       local items = r[kind] or {}
       for i = 1, math.min(#items, M.AGENT_LISTED) do
-        out[#out + 1] = ("  %-5s %s"):format(kind, where(items[i]))
+        out[#out + 1] = ("  %-5s %s"):format(kind, listed(kind, items[i]))
       end
       for _, g in ipairs(baseline.by_step(vim.list_slice(items, M.AGENT_LISTED + 1))) do
         out[#out + 1] = ("  %-5s %s: %d more%s"):format(
@@ -1154,7 +1188,7 @@ function M.lines(r, agent)
     end
   else
     for _, it in ipairs(r.known or {}) do
-      out[#out + 1] = "  known " .. where(it)
+      out[#out + 1] = "  known " .. listed("known", it)
     end
     for _, it in ipairs(r.fixed or {}) do
       out[#out + 1] = "  fixed " .. where(it)

@@ -428,14 +428,18 @@ return function(H)
     local lines = commit.lines(r, true)
     eq(
       lines[1],
-      "ci commit abcdef1 REGRESSION 1 new, 1 known, 0 fixed (lint 1) exit 1",
+      "ci commit abcdef1 REGRESSION 1 new, 1 known (1 compared as a whole), 0 fixed (lint 1) exit 1",
       "report: the verdict line"
     )
     eq(lines[2], "  new   lint lua/a.lua:3:5 unused x", "report: the new finding")
-    eq(lines[3], "  known suite: red", "report: known by name (agent), as new is")
+    eq(
+      lines[3],
+      "  known suite: red" .. commit.WHOLE_NOTE,
+      "report: known by name (agent), as new is"
+    )
     eq(lines[4], "  rerun " .. r.rerun, "report: how to reproduce")
     local term = commit.lines(r, false)
-    eq(term[3], "  known suite: red", "report: known in full (terminal)")
+    eq(term[3], "  known suite: red" .. commit.WHOLE_NOTE, "report: known in full (terminal)")
     eq(
       commit.headline({
         sha = "abcdef1234",

@@ -527,12 +527,19 @@ local function run_process(planned, root, sv, o)
   local step = planned.step
   local errors, last = {}, {}
   local matcher = require("testing.ci.report").matcher(step.efm, o and o.keep)
+  -- a step without an error format of its own: the failure lines of common test runners, used only when it is red
+  -- (`testing.ci.runners`), so that a red test suite of a repository is compared test by test
+  local runner = step.efm == nil and not (o and o.keep) and require("testing.ci.runners").matcher()
+    or nil
   local function remember(line)
     last[#last + 1] = line
     if #last > MAX_ERRORS then
       table.remove(last, 1)
     end
     matcher.feed(line)
+    if runner then
+      runner.feed(line)
+    end
   end
   local argv = planned.argv --[[@as string[] ]]
   if planned.write then
@@ -616,6 +623,10 @@ local function run_process(planned, root, sv, o)
     result.state, result.reason = "skipped", "skipped by the step" .. (why and (": " .. why) or "")
   else
     result.state = "red"
+  end
+  if runner and result.state == "red" and #result.findings == 0 and runner.total() > 0 then
+    result.findings, result.findings_total, result.matched =
+      runner.list, runner.total(), runner.matched()
   end
   return result
 end
