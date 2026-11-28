@@ -88,7 +88,8 @@ ImageMagick on Windows needs `MAGICK_HOME` / `MAGICK_CONFIGURE_PATH` (`env_allow
 ## Sandbox: no writes into the user's state
 
 Every child gets one directory below the parent's temp directory (`testing-child-<pid>-<n>`, removed
-afterwards) with `config`, `data`, `state`, `cache`, `run` and `tmp`, and `XDG_CONFIG_HOME`,
+afterwards; on POSIX below `/tmp` when that temp directory is so long that a socket below the sandbox, the child's
+own server or a plugin's pipe below `tempname()`, would pass the 104 bytes macOS allows) with `config`, `data`, `state`, `cache`, `run` and `tmp`, and `XDG_CONFIG_HOME`,
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `TEMP`, `TMP`, `TMPDIR` point
 into it. `stdpath('data'|'state'|'cache'|'config')` and `tempname()` of a spec therefore never touch
 the real ones. What each of them was outside stays in `TESTING_OUTER_<NAME>` (empty: unset; a child of

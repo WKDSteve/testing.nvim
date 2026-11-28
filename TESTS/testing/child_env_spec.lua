@@ -237,4 +237,28 @@ return function(H)
     { "off", "off", "C:/U/L" },
     "queue and metrics are off in every child (LOCALAPPDATA still reaches it)"
   )
+  -- a sandbox whose sockets would not fit (macOS: 104 bytes, a runner's temp dir is long) goes below /tmp on POSIX
+  local child_mod = require("testing.child")
+  local mac_tmp = "/var/folders/7x/abcdefghijk_lmnopqrstu0000gn/T/nvim.runner/AbCdEf"
+  eq(
+    {
+      child_mod.sandbox_base(mac_tmp, "testing-child-4389-9", false),
+      child_mod.sandbox_base("/tmp/nvim.runner/AbCdEf", "testing-child-4389-9", false),
+      child_mod.sandbox_base(mac_tmp, "testing-child-4389-9", true),
+      child_mod.sandbox_base(
+        "/tmp/testing-child-4389-9/tmp/nvim.runner/AbCdEf",
+        "testing-child-4400-1",
+        false
+      ),
+    },
+    {
+      "/tmp",
+      "/tmp/nvim.runner/AbCdEf",
+      mac_tmp,
+      "/tmp/testing-child-4389-9/tmp/nvim.runner/AbCdEf",
+    },
+    "sandbox_base: a long POSIX base gives /tmp, a short one stays, Windows (named pipes) and a child of a child keep it"
+  )
+  local own = child_mod.environment({ parent_env = {}, base = mac_tmp, name = "testing-child-x-1" })
+  eq(own.sandbox, mac_tmp .. "/testing-child-x-1", "a base the caller names is kept")
 end

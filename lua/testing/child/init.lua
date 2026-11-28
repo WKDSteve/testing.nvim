@@ -160,6 +160,29 @@ local function long_form(dir)
   return (real:gsub("\\", "/"):gsub("/+$", ""))
 end
 
+---How long a sandbox path may be on POSIX before the sockets below it no longer fit: a Unix socket path holds at
+---most 104 bytes on macOS (108 on Linux), and the child's own server (`<run>/nvim.<pid>.0`) or a plugin's pipe below
+---`tempname()` (`<tmp>/nvim.<user>/XXXXXX/0`) add some 40 to the sandbox. A runner's temp dir on macOS
+---(`/var/folders/../T/nvim.runner/XXXXXX`) is that long already: `serverstart()` failed in a sheet child.
+M.SOCKET_BASE_MAX = 56
+
+---The folder a sandbox goes below: `base`, or `/tmp` on POSIX when `base/name` would make the socket paths below
+---it too long (`M.SOCKET_BASE_MAX`). Windows (named pipes) keeps `base`, and so does a child of a child (a base
+---inside a sandbox): its writes are confined to that sandbox, and the outer one below /tmp leaves it room enough.
+---@param base string
+---@param name string
+---@param windows? boolean default: this system
+---@return string
+function M.sandbox_base(base, name, windows)
+  if windows == nil then
+    windows = is_windows
+  end
+  if windows or base:find("/testing%-child%-") or #base + 1 + #name <= M.SOCKET_BASE_MAX then
+    return base
+  end
+  return "/tmp"
+end
+
 ---@class Testing.Child.Environment
 ---@field env table<string, string>
 ---@field dropped_env string[]
@@ -173,8 +196,9 @@ end
 ---@return Testing.Child.Environment
 function M.environment(spec)
   seq = seq + 1
-  local base = long_form(spec.base or parent_tmp())
   local name = spec.name or ("testing-child-%d-%d"):format(vim.fn.getpid(), seq)
+  -- a base the caller names is kept; the parent's temp dir may be too long for a socket below it (macOS)
+  local base = spec.base and long_form(spec.base) or M.sandbox_base(long_form(parent_tmp()), name)
   local sandbox = (base:gsub("\\", "/"):gsub("/+$", "")) .. "/" .. name
   local dirs, sandbox_vars, drop =
     env_mod.sandbox_env(sandbox, { isolate_home = spec.isolate_home == true })
