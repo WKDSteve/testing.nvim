@@ -1517,6 +1517,32 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     end
     phase:begin()
   end
+  -- a run that is quiet for a while says what it waits for (`testing.run.heartbeat`): the files still running
+  local hb = (sv.heartbeat or require("testing.run.heartbeat").new)()
+  hb:phase(("running %d spec file(s)"):format(#prep.run_files))
+  do
+    local prev_start, prev_case, prev_done =
+      common.on_file_start, common.on_case, common.on_file_done
+    common.on_file_start = function(rel)
+      hb:file_start(rel)
+      if prev_start then
+        prev_start(rel)
+      end
+    end
+    common.on_case = function(case)
+      hb:beat()
+      if prev_case then
+        prev_case(case)
+      end
+    end
+    common.on_file_done = function(rel)
+      hb:file_done(rel)
+      if prev_done then
+        prev_done(rel)
+      end
+    end
+  end
+  hb:start()
   ---@type { rel: string, text: string }[]
   local held_output = {}
   local ok, report
@@ -1597,6 +1623,7 @@ function M.execute_run(plan, sv, run_opts, err, ev)
     end
   end
   release()
+  hb:stop()
   if not ok then
     err("testing: internal error: " .. tostring(report))
     return M.EXIT_INFRA

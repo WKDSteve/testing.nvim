@@ -245,6 +245,12 @@ An option that is accepted by the parser but not implemented is **refused** with
 
 Reporters and the IR are described in [OUTPUT-FORMATS.md](OUTPUT-FORMATS.md).
 
+A run that has nothing new to say for 30 s (no file started or done, no case) writes one line on **stderr** naming
+what it waits for: `testing: still working after 95 s, nothing new for 30 s: running 3 spec file(s); still running:
+TESTS/x_spec.lua (42 s)`, then again every 30 s while it stays quiet. It comes from a timer, so it speaks while the run
+waits for its children (isolated files, the default); a spec that runs in this process (`--isolated=none`) and keeps
+Lua busy holds it back until it is done.
+
 ### `testing budget`
 
 ```sh
