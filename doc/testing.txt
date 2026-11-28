@@ -305,6 +305,8 @@ base reaches (`CLEAN quick`); it is no proof of the tree: before the push one
 full `ci commit HEAD --base=@{upstream} -- --cached`. On Windows `--wsl` runs
 the check in WSL2 (about ten times faster; docs/CI.md, "Check a commit");
 `--quick` goes there by itself where WSL2 is, `--no-wsl` keeps it on Windows.
+A profile without a suite step (process steps only) has nothing to select:
+`--quick` runs all of its steps there.
 `ci commit {rev}... --recall` runs nothing: what is kept about the commits.
 `ci land [{rev}]` pushes a commit to a check branch `ci/<repo>-<sha>`, waits
 for the hosted CI and moves main to it only when that is green (needs

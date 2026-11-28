@@ -387,7 +387,8 @@ push (its clean result is the proof the hook takes); a red tip is narrowed down 
 selection of its own after `--` (`--affected`, `--changed`, `--since`, `--file`, `--only`). A commit whose diff reaches
 no spec file (a change of the workflow only) gets its own verdict, `nothing-affected` (exit `0`): the other steps ran
 and are green, the suite ran nothing (`ci commit abc1234 NOTHING-AFFECTED quick full 4 steps, the suite reached no spec
-file exit 0`). It is no proof of the tree either.
+file exit 0`). It is no proof of the tree either. A profile without a suite step (process steps only, see "Native
+apps") has no spec files to select: `--quick` passes no `--affected` there and every step of the profile runs.
 
 Braces that got lost on the way in are put back: Git Bash (`bash.exe`) started by a program that is not itself an MSYS
 one (node's `execFileSync`, Python, PowerShell) expands `{...}` in its own arguments before `scripts/test.sh` runs, so
@@ -820,6 +821,13 @@ ci = {
 A worktree has no `target/` and no `node_modules`: set `CARGO_TARGET_DIR` to the checkout's `target` in the
 environment that starts the run (cargo locks it, so two builds wait for each other rather than collide) and the
 first build is an incremental one; pnpm links from its store. The machine-wide queue still applies.
+
+`testing ci commit <sha> --quick` works here too, but there is no suite to narrow: without a suite step `--quick`
+selects nothing and runs **every step** of the profile (`--profile=`, else `ci.default`), with no `--affected`. What
+stays of `--quick` is the rest: its own lane in the queue, WSL2 by itself on Windows (`--no-wsl` keeps it there, which
+a Windows-only build needs), the word `quick` in the verdict, and no proof of the tree kept. So a cheap quick check of
+such a repository is a profile of the cheap steps, named: `ci = { default = "full", profiles = { quick = { "fmt",
+"check", "unit" }, full = { "quick", "build", "test" } }, ... }` and `testing ci commit HEAD --quick --profile=quick`.
 
 ## The pre-push hook
 

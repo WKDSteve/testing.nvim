@@ -71,6 +71,7 @@ M.USAGE = table.concat({
   "  --keep            leave the snapshots (git worktrees) in place and name them",
   "  --include-docs    run a commit that changes only documentation too",
   "  --quick           only the spec files the diff to the base reaches (--affected); never a proof of the tree",
+  "                    (a profile without a suite step runs all of its steps)",
   "  --recall          run nothing: what is kept about the commits (verdicts of earlier checks, proofs of their tree)",
   "  --wsl             run the check in WSL2 (about ten times faster than on Windows); not with --repos-root",
   "                    (--quick of one repository goes there by itself where WSL2 is; --no-wsl keeps it on Windows)",
@@ -658,6 +659,34 @@ function M.base_steps(red_steps, head_doc)
   return steps, true
 end
 
+---Does the profile (nil: the pipeline's default) of the pipeline in `tree` run a suite step? `--quick` selects through
+---the suite (`--affected`); a pipeline of process steps only has nothing to select. The snapshot of a trusted
+---repository is trusted (its `.testing.lua` passed `trust.check_commit_file`; the child gets `TESTING_TRUST=1`), so the
+---gate is not asked about the snapshot's path here either.
+---@param tree string
+---@param profile? string
+---@return boolean|nil has nil when the pipeline or the profile cannot be read: the child run says why
+function M.profile_has_suite(tree, profile)
+  local trust = require("testing.trust")
+  local prev = trust.arm(nil)
+  local okl, pipeline = pcall(require("testing.ci.schema").load, tree)
+  trust.arm(prev)
+  if not okl or type(pipeline) ~= "table" then
+    return nil
+  end
+  local names = pipeline.profiles and pipeline.profiles[profile or pipeline.default]
+  if type(names) ~= "table" then
+    return nil
+  end
+  for _, n in ipairs(names) do
+    local step = pipeline.steps[n]
+    if step and step.inprocess == "run" then
+      return true
+    end
+  end
+  return false
+end
+
 ---The suite options without the `--affected` of `--quick`: at the base the diff to itself is empty, so the base takes
 ---the red files of the commit (`base_suite_args`), or the whole suite when those cannot be named.
 ---@param suite_args string[]
@@ -938,8 +967,18 @@ run_check = function(root, sha, args, say, snaps, r, base, mem)
   -- of the main checkout (`testing.cache.store.repo_key`), shared with the base and with runs in the working tree
   local suite_args = args.suite_args
   if args.quick and base then
-    -- what the diff to the base reaches; a root commit has no base and runs everything
-    suite_args = vim.list_extend(vim.deepcopy(suite_args), { "--affected=" .. base })
+    -- what the diff to the base reaches; a root commit has no base and runs everything. A profile without a suite
+    -- step (process steps only: a native app) has no spec files to select: it runs whole, still a quick run (its
+    -- lane, no proof kept), and `testing ci` would refuse an `--affected` with no suite step to take it
+    if M.profile_has_suite(head_snap.tree, args.profile) == false then
+      say(
+        ("ci commit %s: --quick: the profile has no suite step, all of its steps run"):format(
+          sha:sub(1, 7)
+        )
+      )
+    else
+      suite_args = vim.list_extend(vim.deepcopy(suite_args), { "--affected=" .. base })
+    end
     r.quick = true
   end
   local code, head_doc, tail = M.run_ci(head_snap, root, extra, suite_args)

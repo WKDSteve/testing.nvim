@@ -1007,6 +1007,64 @@ return function(H)
       false,
       "a step skipped for another reason is no nothing-affected run"
     )
+
+    -- a pipeline of process steps only (a native app, tasks-desktop): --quick has no spec file to select, so the
+    -- profile runs whole, without the --affected that `testing ci` refuses when no suite step takes it
+    local native = vim.fs.normalize(vim.fn.tempname()) .. "-ci-commit-native"
+    vim.fn.mkdir(native, "p")
+    vim.fn.writefile({
+      "return { ci = {",
+      '  default = "full",',
+      '  profiles = { quick = { "fmt" }, full = { "quick", "test" }, lua = { "fmt", "suite" } },',
+      "  steps = {",
+      '    fmt = { run = { "cargo", "fmt", "--check" } },',
+      '    test = { run = { "cargo", "test" } },',
+      '    suite = { preset = "suite" },',
+      "  },",
+      "} }",
+    }, native .. "/.testing.lua")
+    eq(commit.profile_has_suite(native, nil), false, "native: the default profile has no suite")
+    eq(commit.profile_has_suite(native, "quick"), false, "native: nor has quick")
+    eq(commit.profile_has_suite(native, "lua"), true, "native: a profile with the suite has one")
+    eq(commit.profile_has_suite(native, "nope"), nil, "native: an unknown profile: the child says")
+    local create_before, run_ci_before = snapshot.create, commit.run_ci
+    snapshot.create = function(_, sha)
+      return { root = tmp, sha = sha, dir = tmp, tree = native, state = tmp }
+    end
+    commit.run_ci = function(snap, _, extra, suite_args)
+      seen[#seen + 1] = { sha = snap.sha:sub(1, 1), extra = extra, suite = suite_args }
+      return 0,
+        {
+          profile = "full",
+          steps = { { name = "fmt", state = "green" }, { name = "test", state = "green" } },
+        },
+        ""
+    end
+    seen, kept = {}, 0
+    local native_said = {}
+    r = commit.check(tmp, ("f"):rep(40), quick_args, function(line)
+      native_said[#native_said + 1] = line
+    end)
+    eq(seen[1].suite, { "--cached" }, "native quick: no --affected, the suite options as given")
+    eq({ r.verdict, r.quick }, { "clean", true }, "native quick: clean, still a quick run")
+    eq(kept, 0, "native quick: no proof of the tree")
+    has(
+      table.concat(native_said, "\n"),
+      "no suite step, all of its steps run",
+      "native quick: says so"
+    )
+    seen = {}
+    local lua_args = commit.parse({ ("0"):rep(40), "--quick", "--profile=lua" })
+    lua_args.state_dir = tmp
+    commit.check(tmp, ("0"):rep(40), lua_args, function() end)
+    eq(
+      seen[1].suite,
+      { "--affected=" .. base_sha },
+      "native quick, a profile with the suite: --affected"
+    )
+    snapshot.create, commit.run_ci = create_before, run_ci_before
+    vim.fn.delete(native, "rf")
+
     snapshot_run.keep = saved_keep
     local bad, why = commit.parse({ "HEAD", "--quick", "--", "--file", "x" })
     eq(bad, nil, "quick: refuses a selection of its own")
