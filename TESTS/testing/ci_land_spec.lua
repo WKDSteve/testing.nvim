@@ -27,6 +27,7 @@ return function(H)
 
   ---One scenario: `o.states` are the answers of the remote, one per look; `o.base` main before, `o.moved_after` the
   ---main after a green run; `o.workflow` the text of the commit's workflow file.
+  local real_git = land.deps.git
   local function scenario(o, argv)
     local w = { pushes = {}, fetches = 0, base = o.base or BASE, looks = 0, said = {} }
     local clock = 1000
@@ -59,7 +60,18 @@ return function(H)
         return 0, o.workflow or 'on:\n  push:\n    branches: [main, "ci/**"]\n', ""
       elseif cmd == "push" then
         w.pushes[#w.pushes + 1] = table.concat(args, " ")
+        -- `o.push_fail[branch]`: that push fails with { code, stderr }
+        local target = args[#args]:match(":refs/heads/(.+)$")
+        local f = o.push_fail and target and o.push_fail[target]
+        if f then
+          return f[1], "", f[2]
+        end
         return 0, "", ""
+      elseif cmd == "ls-remote" then
+        -- `o.remote_refs[branch]`: where the branch is on the remote
+        local ref = args[#args]:gsub("^refs/heads/", "")
+        local at = o.remote_refs and o.remote_refs[ref]
+        return 0, at and (at .. "\trefs/heads/" .. ref .. "\n") or "", ""
       end
       return 1, "", "unexpected git " .. table.concat(args, " ")
     end
@@ -138,6 +150,66 @@ return function(H)
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")
   has(w.text, "CI-10:", "green: while the hosted CI runs, the line of rule CI-10")
+
+  -- a push that ran out of time (or failed) but arrived: land asks the remote and goes on
+  do
+    local green = {
+      { overall = "no_run" },
+      { overall = "success", run = { url = "https://x/run/9" } },
+    }
+    local TIMEOUT = "git push did not finish within 10 min"
+    local late_main = scenario({
+      states = green,
+      push_fail = { main = { 124, TIMEOUT } },
+      remote_refs = { main = SHA },
+    })
+    eq(late_main.code, 0, "late push of main, arrived: landed")
+    has(late_main.text, "reported " .. TIMEOUT .. ", but", "late push of main: says what happened")
+    has(late_main.text, "landed on main", "late push of main: ... and that it landed")
+    local lost_main = scenario({ states = green, push_fail = { main = { 124, TIMEOUT } } })
+    eq(lost_main.code, 1, "late push of main, not arrived: red")
+    has(lost_main.text, "failed: " .. TIMEOUT, "late push of main: the time limit, not nil")
+    eq(lost_main.text:find("nil", 1, true), nil, "late push of main: never 'nil'")
+    local late_check = scenario({
+      states = green,
+      push_fail = { [CHECK] = { 1, "remote hung up" } },
+      remote_refs = { [CHECK] = SHA },
+    })
+    eq(late_check.code, 0, "failed push of the check branch, arrived: goes on and lands")
+    has(late_check.text, "but " .. SHA:sub(1, 7) .. " is there", "failed check push: says so")
+    local other = scenario({
+      states = green,
+      push_fail = { [CHECK] = { 1, "remote hung up" } },
+      remote_refs = { [CHECK] = ("f"):rep(40) },
+    })
+    eq(other.code, land.EXIT_INFRA, "failed check push, the branch on another commit: infra")
+  end
+
+  -- the real git call: a wait that gives no result (a hook process kept the pipes after the kill) is a time limit
+  do
+    local saved_system = vim.system
+    vim.system = function()
+      return {
+        wait = function()
+          return nil
+        end,
+      }
+    end
+    local c, _, e = real_git("E:/x", { "push", "origin", "x" })
+    vim.system = function()
+      return {
+        wait = function()
+          return { code = 124, signal = 9, stdout = "", stderr = "" }
+        end,
+      }
+    end
+    local c2, _, e2 = real_git("E:/x", { "push", "origin", "x" })
+    vim.system = saved_system
+    eq(c, 124, "git: no result is the time limit (124)")
+    has(e, "did not finish within 10 min", "git: ... said so, not nil")
+    eq(c2, 124, "git: killed at the limit")
+    has(e2, "git push did not finish", "git: ... said so too")
+  end
 
   -- a run GitHub skipped by the marker in the commit text (no run, `skipped`): only documentation may land that way
   do

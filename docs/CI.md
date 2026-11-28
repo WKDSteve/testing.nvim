@@ -593,6 +593,10 @@ The first red system ends the wait, even while other systems still run (they sho
 is then `land: red (<system> <state>, ...); <remote>/<branch> does not move, nothing landed`.
 Green means the run is completed: while it is still in progress, jobs that are all green so far are no verdict (a job
 created later or the run's own conclusion could still be red).
+A push (of the check branch or of `<branch>`) runs the pre-push hook and may take minutes on a loaded machine; one that
+fails or does not finish within 10 minutes (`git push did not finish within 10 min`) is not taken as failed blindly:
+`land` asks the remote (`git ls-remote`), and when the branch is on the commit it says `the push ... reported ..., but
+<sha> is there` and goes on (waits for the run, or lands).
 A check branch whose commit text carries the CI's skip marker gets no run at all (`testing ci remote` says `skipped`
 with no run): nothing was checked. Such a commit lands only when it changes documentation and nothing else (the files
 `ci commit` reads as `DOCS-ONLY`), and the last line says `landed on <branch> WITHOUT a hosted run (docs only, skipped by

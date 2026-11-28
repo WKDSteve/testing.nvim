@@ -77,6 +77,11 @@ local function on_branch(run)
   return type(run) == "table" and type(run.branch) == "string" and (" on " .. run.branch) or ""
 end
 
+---How long a git call of land may take: a push runs the pre-push hook (the fast pipeline of the commit), which may
+---wait in the queue of testing.nvim behind heavy runs. A push that takes longer is not taken as failed blindly: land
+---asks the remote where the ref is (`arrived`).
+M.GIT_TIMEOUT_MS = 600000
+
 ---Replaced by a spec: processes, GitHub and the clock.
 M.deps = {
   ---@param dir string
@@ -90,10 +95,19 @@ M.deps = {
       -- a push runs the pre-push hook (the fast pipeline of the commit): minutes, not seconds
       return vim
         .system(vim.list_extend({ "git", "-C", dir }, args), { text = true, env = env })
-        :wait(600000)
+        :wait(M.GIT_TIMEOUT_MS)
     end)
-    if not ok or not res then
+    if not ok then
       return 127, "", tostring(res)
+    end
+    -- killed at the limit (124), or no result at all: a process of the hook kept the pipes open after the kill
+    if not res or (res.code == 124 and (res.signal or 0) ~= 0) then
+      return 124,
+        res and res.stdout or "",
+        ("git %s did not finish within %d min"):format(
+          tostring(args[1]),
+          math.floor(M.GIT_TIMEOUT_MS / 60000)
+        )
     end
     return res.code or 1, res.stdout or "", res.stderr or ""
   end,
@@ -322,6 +336,13 @@ function M.run(args, say, state_dir)
   end
   local short = sha:sub(1, 7)
   local upstream = args.remote .. "/" .. args.branch
+  ---Did a push that failed or ran out of time arrive anyway? The ref on the remote names the commit.
+  ---@param ref string A branch name.
+  ---@return boolean
+  local function arrived(ref)
+    local c, o = git("ls-remote", args.remote, "refs/heads/" .. ref)
+    return c == 0 and (o or ""):match("^(%x+)") == sha
+  end
 
   ---Is `<remote>/<branch>` (fetched now) an ancestor of the commit? "same", "ancestor", "moved" or nil, problem.
   local function where()
@@ -474,7 +495,15 @@ function M.run(args, say, state_dir)
   if not all_green_before then
     say(("land: %s -> %s, the hosted CI checks it"):format(short, check))
     code, _, err = git("push", "--quiet", args.remote, sha .. ":refs/heads/" .. check)
-    if code ~= 0 then
+    if code ~= 0 and arrived(check) then
+      say(
+        ("land: the push of %s reported %s, but %s is there: the hosted CI checks it"):format(
+          check,
+          vim.trim(err),
+          short
+        )
+      )
+    elseif code ~= 0 then
       say(("land: the push of %s failed: %s"):format(check, vim.trim(err)))
       return M.EXIT_INFRA
     end
@@ -732,7 +761,15 @@ function M.run(args, say, state_dir)
       { "push", "--quiet", args.remote, sha .. ":refs/heads/" .. args.branch },
       { [hook.LAND_PUSH_ENV] = "1" }
     )
-    if code ~= 0 then
+    if code ~= 0 and arrived(args.branch) then
+      say(
+        ("land: the push to %s reported %s, but %s is there"):format(
+          args.branch,
+          vim.trim(err),
+          short
+        )
+      )
+    elseif code ~= 0 then
       say(
         ("land: %s is green, but the push to %s failed: %s"):format(
           short,
