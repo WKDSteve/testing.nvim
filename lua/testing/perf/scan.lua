@@ -123,6 +123,32 @@ function M.alias_of(code)
   )
 end
 
+---An alias handed on to another name: `x = mod` or `local x = mod` after `local ok, mod = pcall(require, "m")` (the
+---soft dependency of gopath.nvim: `local x; do local ok, mod = pcall(require, ...); if ok then x = mod end end`, then
+---`x(path)`). Adds `x` to `aliases` with the module of `mod`, until nothing new comes (a chain).
+---@param lines string[]
+---@param aliases table<string, string> alias -> module, filled in place
+function M.rebound(lines, aliases)
+  local changed = true
+  local rounds = 0
+  while changed and rounds < 5 do
+    changed, rounds = false, rounds + 1
+    for _, line in ipairs(lines) do
+      local code = M.code_of(line)
+      if code then
+        local lhs, rhs = code:match("^%s*local%s+([%w_]+)%s*=%s*([%w_]+)%s*$")
+        if not lhs then
+          lhs, rhs = code:match("^%s*([%w_]+)%s*=%s*([%w_]+)%s*$")
+        end
+        if lhs and rhs and lhs ~= rhs and aliases[rhs] and not aliases[lhs] then
+          aliases[lhs] = aliases[rhs]
+          changed = true
+        end
+      end
+    end
+  end
+end
+
 ---The names a file gives `vim.fn` and its process functions: `local fn = vim.fn` (`tables.fn`: `fn.system(` and
 ---`fn.systemlist(` start a process) and `local system = vim.fn.system` (`funcs.system = "vim.fn.system"`: `system(`
 ---does). The patterns of `M.PATTERNS` know `vim.fn.system(` only in full (mdview.nvim, reposcope.nvim).
@@ -310,6 +336,7 @@ local function analyse(lines)
       end
     end
   end
+  M.rebound(lines, aliases)
   local mv = modvar:gsub("%p", "%%%0")
   local fn_al = M.vim_fn_aliases(lines)
   local fn_ctx = { tables = fn_al.tables, funcs = fn_al.funcs }
@@ -568,6 +595,7 @@ function M.sites(root, spawning)
           end
         end
       end
+      M.rebound(lines, aliases)
       -- a spawning function bound to a name: `local x = git.status`, `M.x = git.status`,
       -- `local x = require("m").f` (no call on that line)
       for _, line in ipairs(lines) do

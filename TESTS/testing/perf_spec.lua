@@ -431,6 +431,46 @@ return function(H)
       "end",
       "return M",
     })
+    -- a soft dependency (gopath.nvim): `pcall(require, <function module>)` handed on to another name, then called
+    do
+      local soft = tmp .. "/soft.nvim"
+      write("soft.nvim/lua/soft/revealer.lua", {
+        "local M = {}",
+        "local reveal_in_fm",
+        "do",
+        "  local ok, mod = pcall(require, 'lib.nvim.cross.reveal_in_fm')",
+        "  if ok then",
+        "    reveal_in_fm = mod",
+        "  end",
+        "end",
+        "function M.reveal(path)",
+        "  return reveal_in_fm(path)",
+        "end",
+        "return M",
+      })
+      write("soft.nvim/lua/soft/opener.lua", {
+        "local M = {}",
+        "local ok, opener = pcall(require, 'lib.nvim.cross.open_default')",
+        "local lib_opener = ok and opener or nil",
+        "local other = opener",
+        "function M.open(path)",
+        "  other(path)",
+        "end",
+        "return M",
+      })
+      local soft_spawning = {
+        ["lib.nvim.cross.reveal_in_fm"] = { __call = true },
+        ["lib.nvim.cross.open_default"] = { __call = true },
+      }
+      local got = vim.tbl_map(function(s)
+        return ("%s:%d %s"):format(s.file, s.line, s.what)
+      end, scan.sites(soft, soft_spawning))
+      table.sort(got)
+      eq(got, {
+        "lua/soft/opener.lua:6 lib.nvim.cross.open_default",
+        "lua/soft/revealer.lua:10 lib.nvim.cross.reveal_in_fm",
+      }, "a pcall(require) module handed on to another name is a site where it is called")
+    end
     local sites = scan.sites(root, spawning)
     eq(
       vim.tbl_map(function(s)
