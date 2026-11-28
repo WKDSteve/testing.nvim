@@ -332,6 +332,8 @@ function M.install(opts)
     jobs = {},
     running = {},
     orig = {},
+    term_calls = 0,
+    terms = {},
     config_dir = config_dir and (config_dir:gsub("\\", "/"):gsub("/+$", "")) or nil,
   }
   local O = S.orig
@@ -458,7 +460,15 @@ function M.install(opts)
             return user_exit(job, code, event)
           end
         end
-        local job = orig(cmd, jopts)
+        -- a terminal job (`termopen`, `jobstart({ term = true })`) fires TermOpen inside the call: counted here, not
+        -- again as an Ex start
+        S.term_calls = S.term_calls + 1
+        local called, job = pcall(orig, cmd, jopts)
+        S.term_calls = S.term_calls - 1
+        if not called then
+          finish(id, t0, -1)
+          error(job, 0)
+        end
         if type(job) == "number" and job > 0 then
           S.jobs[job] = id
           local ok, pid = pcall(vim.fn.jobpid, job)
@@ -472,6 +482,8 @@ function M.install(opts)
       end
     end
   end
+
+  M.install_ex()
 
   O.jobwait = vim.fn.jobwait
   vim.fn.jobwait = function(jobs, ...)
@@ -633,6 +645,87 @@ function M.reaches(records)
   return out
 end
 
+---The Ex commands whose start passes no Lua primitive (`quickfix` names of QuickFixCmdPre); `:grep` only with an
+---outside 'grepprg'.
+M.EX_QUICKFIX = {
+  make = "makeprg",
+  lmake = "makeprg",
+  grep = "grepprg",
+  lgrep = "grepprg",
+  grepadd = "grepprg",
+  lgrepadd = "grepprg",
+}
+
+---Starts through an Ex command (`:terminal`, `:!`, `:{range}!`, `:r !`, `:w !`, `:make`, `:grep`): no Lua primitive is
+---called, so their autocmds record them, from inside the command, where the stack still holds the line that ran
+---it. `:terminal`: TermOpen to TermClose (not a terminal of `termopen`/`jobstart`, counted there). `:make`/`:grep`:
+---QuickFixCmdPre to Post, synchronous. `:!`: ShellCmdPost/ShellFilterPost come after the command only, so it is a
+---synchronous start without a duration (`ms = 0`).
+function M.install_ex()
+  if not S then
+    return
+  end
+  local group = vim.api.nvim_create_augroup("testing_perf_trace_ex", { clear = true })
+  S.augroup = group
+  vim.api.nvim_create_autocmd("TermOpen", {
+    group = group,
+    callback = function(ev)
+      if not S or S.term_calls > 0 then
+        return
+      end
+      local chan = vim.bo[ev.buf].channel
+      local ok, info = pcall(vim.api.nvim_get_chan_info, chan)
+      local argv = ok and type(info) == "table" and info.argv or { vim.o.shell }
+      local id = start("ex.terminal", argv, { sync = false })
+      S.terms[ev.buf] = { id = id, t0 = now_us() }
+      local pok, pid = pcall(vim.fn.jobpid, chan)
+      if pok then
+        write({ ev = "pid", id = id, pid = pid })
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("TermClose", {
+    group = group,
+    callback = function(ev)
+      local t = S and S.terms[ev.buf]
+      if t then
+        S.terms[ev.buf] = nil
+        finish(t.id, t.t0, vim.v.event and vim.v.event.status or nil)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("QuickFixCmdPre", {
+    group = group,
+    callback = function(ev)
+      local opt = S and M.EX_QUICKFIX[ev.match]
+      if not opt or (opt == "grepprg" and vim.o.grepprg == "internal") then
+        return
+      end
+      S.quickfix = { id = start("ex." .. ev.match, vim.o[opt], { sync = true }), t0 = now_us() }
+    end,
+  })
+  vim.api.nvim_create_autocmd("QuickFixCmdPost", {
+    group = group,
+    callback = function()
+      local q = S and S.quickfix
+      if q then
+        S.quickfix = nil
+        finish(q.id, q.t0, vim.v.shell_error)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "ShellCmdPost", "ShellFilterPost" }, {
+    group = group,
+    callback = function()
+      -- `:make`/`:grep` run their shell too: counted from QuickFixCmdPre already
+      if S and not S.quickfix then
+        local id = start("ex.!", vim.o.shell, { sync = true })
+        finish(id, now_us(), vim.v.shell_error)
+      end
+    end,
+  })
+end
+
 ---Put every primitive back and close the file. Safe to call twice.
 function M.uninstall()
   if not S then
@@ -655,6 +748,9 @@ function M.uninstall()
   end
   set(io_lib, "popen", O.popen)
   set(os_lib, "execute", O.execute)
+  if S.augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, S.augroup)
+  end
   pcall(S.fd.close, S.fd)
   S = nil
 end

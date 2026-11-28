@@ -265,9 +265,94 @@ return function(H)
     end, f), 1, "a freeze for the vim.wait")
   end
 
+  -- ── the trace: a start through an Ex command (:terminal, :!, :make) passes no Lua primitive ──
+  do
+    local trace = require("testing.perf.trace")
+    local out = tmp .. "/trace-ex.jsonl"
+    local exe = vim.v.progpath
+    local saved = {}
+    for _, o in ipairs({
+      "shell",
+      "shellcmdflag",
+      "shellxquote",
+      "shellquote",
+      "shellpipe",
+      "makeprg",
+    }) do
+      saved[o] = vim.o[o]
+    end
+    -- the editor's own default shell of the system (the suite may inherit a bash with the flags of cmd.exe)
+    if vim.fn.has("win32") == 1 then
+      vim.o.shell, vim.o.shellcmdflag, vim.o.shellxquote, vim.o.shellquote =
+        "cmd.exe", "/s /c", '"', ""
+      vim.o.shellpipe = ">%s 2>&1"
+    else
+      vim.o.shell, vim.o.shellcmdflag, vim.o.shellxquote, vim.o.shellquote = "sh", "-c", "", ""
+      vim.o.shellpipe = "2>&1| tee"
+    end
+    local quoted = '"' .. exe .. '"'
+    vim.o.makeprg = quoted .. " --version"
+    assert(trace.install({ out = out }))
+    vim.cmd("tabnew")
+    vim.cmd("terminal " .. quoted .. " --version")
+    local term_buf = vim.api.nvim_get_current_buf()
+    vim.wait(20000, function()
+      return vim.fn.jobwait({ vim.bo[term_buf].channel }, 0)[1] ~= -1
+    end, 20)
+    vim.cmd("silent !" .. quoted .. " --version")
+    vim.cmd("silent make")
+    -- a terminal of jobstart({ term = true }) counts once, as jobstart
+    vim.cmd("enew")
+    local tjob = vim.fn.jobstart({ exe, "--version" }, { term = true })
+    vim.fn.jobwait({ tjob }, 20000)
+    vim.wait(200)
+    trace.uninstall()
+    vim.cmd("silent! tabclose!")
+    for o, v in pairs(saved) do
+      vim.o[o] = v
+    end
+    local spawns = trace.fold(trace.read(out))
+    eq(
+      vim.tbl_map(function(s)
+        return s.kind
+      end, spawns),
+      { "ex.terminal", "ex.!", "ex.make", "jobstart" },
+      ":terminal, :!, :make once each; a terminal of jobstart({ term = true }) only as jobstart"
+    )
+    local term = spawns[1] or {}
+    has(term.argv or "", "--version", ":terminal: the command of its job")
+    ok(term.pid ~= nil and term.ms ~= nil, ":terminal: its pid and its end (TermClose)")
+    has(term.site or "", "perf_spec.lua", ":terminal: the site is the line that ran the command")
+    ok((spawns[2] or {}).sync == true, ":!: synchronous")
+    has((spawns[2] or {}).site or "", "perf_spec.lua", ":!: the line that ran it")
+    has((spawns[3] or {}).argv or "", "--version", ":make: 'makeprg'")
+    ok((spawns[3] or {}).ms ~= nil, ":make: from QuickFixCmdPre to Post")
+    local left, autocmds = pcall(vim.api.nvim_get_autocmds, { group = "testing_perf_trace_ex" })
+    ok(not left or #autocmds == 0, "uninstall removes the autocmds")
+  end
+
   -- ── the scan ───────────────────────────────────────────────────────────
   do
     local scan = require("testing.perf.scan")
+    -- a start through an Ex command: the text of vim.cmd, its abbreviations, a modifier, a part after `|`
+    for line, want in pairs({
+      ['vim.cmd("terminal")'] = "vim.cmd(terminal)",
+      ['vim.cmd("botright 15split | term")'] = "vim.cmd(terminal)",
+      ["vim.cmd [[silent !make]]"] = "vim.cmd(!)",
+      ['vim.cmd("%!sort")'] = "vim.cmd(!)",
+      ["vim.cmd(\"'<,'>!fmt\")"] = "vim.cmd(!)",
+      ['vim.cmd("r !date")'] = "vim.cmd(!)",
+      ["vim.cmd.terminal()"] = "vim.cmd(terminal)",
+      ['vim.cmd({ cmd = "make", args = {} })'] = "vim.cmd(make)",
+      ['vim.api.nvim_command("lgrep foo")'] = "vim.cmd(grep)",
+      ['vim.cmd("w!")'] = "nil",
+      ['vim.cmd("q!")'] = "nil",
+      ['vim.cmd("normal! gg")'] = "nil",
+      ['vim.cmd("set termguicolors")'] = "nil",
+      ['print("vim.cmd(terminal)")'] = "nil",
+    }) do
+      eq(tostring(scan.match(line)), want, "an Ex start: " .. line)
+    end
     eq(scan.code_of("  -- vim.system({})"), nil, "a comment line")
     eq(
       scan.code_of('local a = "--x" -- vim.system()'),

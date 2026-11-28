@@ -38,8 +38,11 @@ snapshot is a failure and is never written. On top of that:
 
 * **The spawn trace** (`testing.perf.trace`). The child installs it before the project's minimal init (the job field
   `preload` of the RPC child, `testing.child.rpc_init`), so the starts of a plugin's `setup()` are seen too. It wraps
-  `vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `vim.uv.spawn`, `io.popen` and `os.execute` and
-  writes per start: when (monotonic clock), the kind, the redacted argv (temporary folders as `<TMP>`), whether the
+  `vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `vim.uv.spawn`, `io.popen` and `os.execute`,
+  and records the starts of Ex commands through their autocmds: `:terminal` (TermOpen to TermClose, `ex.terminal`;
+  a terminal of `termopen`/`jobstart` counts only there), `:make`/`:grep` with an outside program (QuickFixCmdPre to
+  Post, `ex.make`, `ex.grep`) and `:!`, `:{range}!`, `:r !`, `:w !` (`ex.!`: ShellCmdPost/ShellFilterPost come after the
+  command only, so it is synchronous without a duration). It writes per start: when (monotonic clock), the kind, the redacted argv (temporary folders as `<TMP>`), whether the
   editor waited for it (`sync`, a `wait()`, a `jobwait()`, an `io.popen` until its handle is closed, a `vim.wait` while
   the process runs: the keys wait as long, so it goes to the newest process that ran in it, never to a language
   server; a `vim.wait` with no process running is none) and how long, how long the process ran, its directory
@@ -75,7 +78,9 @@ The same call in a loop is one line with a count (grouped by kind, program and c
 
 `testing.perf.scan` lists the **spawn sites** of the repository's `lua/` and `plugin/`: a line that calls a primitive
 (`vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `uv.spawn`, `io.popen`, `os.execute`,
-`vim.lsp.start`; also handed to `pcall` as a value, `pcall(vim.system, argv)`, and also wrapped onto the next line after
+`vim.lsp.start`; an Ex command that starts a process in the text of `vim.cmd(...)`, `vim.cmd [[...]]`,
+`nvim_command(...)`, `vim.cmd.terminal()` or `vim.cmd({ cmd = "make" })`: `terminal`, `make`, `grep` (their
+abbreviations, also after a modifier or a `|`) and `!`; also handed to `pcall` as a value, `pcall(vim.system, argv)`, and also wrapped onto the next line after
 `(` or `vim`), or a function of lib.nvim that starts a process. Which functions of lib.nvim those are is computed from
 lib.nvim itself, **per function**: a top-level function (stylua's layout: the definition and its `end` at column 0)
 whose body calls a primitive, or a spawning function of its own module or of a module it requires (a fixpoint). So

@@ -49,6 +49,127 @@ M.PATTERNS = {
 
 M.DIRS = { "lua", "plugin" }
 
+---Ex commands that start a process (`:terminal`, `:make`, `:grep`), by every abbreviation Vim accepts; `!` (a shell
+---command, a filter, `:r !`, `:w !`) is found apart.
+M.EX_STARTS = {
+  ter = "terminal",
+  term = "terminal",
+  termi = "terminal",
+  termin = "terminal",
+  termina = "terminal",
+  terminal = "terminal",
+  mak = "make",
+  make = "make",
+  lmak = "make",
+  lmake = "make",
+  gr = "grep",
+  gre = "grep",
+  grep = "grep",
+  lgr = "grep",
+  lgre = "grep",
+  lgrep = "grep",
+  grepa = "grep",
+  grepadd = "grep",
+  lgrepa = "grep",
+  lgrepadd = "grep",
+}
+
+---Modifiers in front of an Ex command (`silent !x`, `botright vsplit | terminal`).
+M.EX_MODIFIERS = {
+  "sil!?",
+  "silent!?",
+  "noa",
+  "noautocmd",
+  "keepalt",
+  "keepj",
+  "keepjumps",
+  "lockmarks",
+  "keepmarks",
+  "keeppatterns",
+  "vert",
+  "vertical",
+  "hor",
+  "horizontal",
+  "bo",
+  "botright",
+  "to",
+  "topleft",
+  "abo",
+  "aboveleft",
+  "bel",
+  "belowright",
+  "tab",
+  "%d*tab",
+}
+
+---What an Ex command line starts: `terminal`, `make`, `grep`, `!`, or nil. Each part between `|` counts (a `!` takes
+---the rest of the line).
+---@param ex string
+---@return string|nil
+function M.ex_kind(ex)
+  for part in (ex .. "|"):gmatch("([^|]*)|") do
+    local c = part:gsub("^[%s:]+", "")
+    local stripped = true
+    while stripped do
+      stripped = false
+      for _, m in ipairs(M.EX_MODIFIERS) do
+        local rest = c:match("^" .. m .. "%s+(.*)$")
+        if rest then
+          c, stripped = rest, true
+          break
+        end
+      end
+    end
+    -- a range in front (`%!sort`, `'<,'>!fmt`, `1,5!x`), then `!`; `r !x`, `w !x`
+    if c:match("^[%%%d,.;$'<>+%-]*%s*!") or c:match("^r%a*%s*!") or c:match("^w%a*%s*!") then
+      if not c:match("^[%a]+!") then -- `w!` / `q!` force, not a shell
+        return "!"
+      end
+    end
+    local word = c:match("^(%a+)")
+    if word and M.EX_STARTS[word] then
+      return M.EX_STARTS[word]
+    end
+  end
+  return nil
+end
+
+---What a line starts through an Ex command, or nil: `vim.cmd("terminal")`, `vim.cmd([[!make]])`, `vim.cmd "grep x"`,
+---`vim.api.nvim_command("...")`, `vim.cmd.terminal()`, `vim.cmd({ cmd = "make" })`. Looks at the text of the string, so
+---it runs on the code before its strings are blanked.
+---@param code string
+---@return string|nil what `vim.cmd(terminal)`, `vim.cmd(!)`, ...
+function M.ex_start(code)
+  local fn = code:match("vim%.cmd%.([%a]+)%s*%(")
+  if fn and M.EX_STARTS[fn] then
+    return ("vim.cmd(%s)"):format(M.EX_STARTS[fn])
+  end
+  local table_cmd = code:match("vim%.cmd%s*%(%s*{.-%f[%w_]cmd%s*=%s*[\"']([%a!]+)[\"']")
+  if table_cmd then
+    local kind = table_cmd == "!" and "!" or M.EX_STARTS[table_cmd]
+    if kind then
+      return ("vim.cmd(%s)"):format(kind)
+    end
+  end
+  for _, call in ipairs({ "vim%.cmd", "nvim_command", "vim%.api%.nvim_exec2?" }) do
+    local texts = {}
+    -- a quoted string (`vim.cmd("x")`, `vim.cmd 'x'`) and a long one (`vim.cmd([[x]])`, to its end or the line's)
+    for quote, rest in code:gmatch(call .. "%s*%(?%s*([\"'])(.*)") do
+      texts[#texts + 1] = rest:match("^(.-)" .. quote) or rest
+    end
+    for rest in code:gmatch(call .. "%s*%(?%s*%[=*%[(.*)") do
+      texts[#texts + 1] = rest:match("^(.-)%]=*%]") or rest
+    end
+    for _, text in ipairs(texts) do
+      local kind = M.ex_kind(text)
+      if kind then
+        return ("vim.cmd(%s)"):format(kind)
+      end
+    end
+  end
+  return nil
+end
+
 ---A comment in a library above a function that starts a process only on some paths (an option, a data path, a
 ---factory whose object starts later, a fallback): `-- testing-perf: conditional: only without silent = true`.
 ---An unreached call of it is listed apart, not as a gap of the sheets.
@@ -201,6 +322,10 @@ function M.match(line, ctx)
     if bare:find(p[1]) then
       return p[2]
     end
+  end
+  local ex = M.ex_start(code)
+  if ex then
+    return ex
   end
   if not ctx then
     return nil
@@ -386,6 +511,9 @@ local function analyse(lines)
           if code:find(p[1]) then
             cur.direct = true
           end
+        end
+        if not cur.direct and M.ex_start(code) then
+          cur.direct = true
         end
         -- `vim.fn` under a name of the file (`local fn = vim.fn`, `local system = vim.fn.system`)
         if not cur.direct and M.match(body, fn_ctx) then
