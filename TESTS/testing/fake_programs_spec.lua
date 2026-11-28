@@ -78,6 +78,34 @@ return function(H)
   run(fake, "open", {})
   eq(fake:calls("open")[3] and fake:calls("open")[3].argv, {}, "no argument at all")
 
+  -- calls at the same time: each record arrives whole (the `.cmd` stand-in wrote line by line, and a second call
+  -- lost its lines to the lock or mixed them into the other's record)
+  for round = 1, 3 do
+    fake:reset()
+    local jobs = {}
+    fake:with_path(function()
+      local exe = vim.fn.exepath("open")
+      for i = 1, 8 do
+        jobs[i] = vim.system({ exe, "n" .. i, "--k=" .. round }, { text = true })
+      end
+    end)
+    for _, j in ipairs(jobs) do
+      j:wait(20000)
+    end
+    local seen = {}
+    for _, c in ipairs(fake:calls("open")) do
+      seen[#seen + 1] = table.concat(c.argv, " ")
+    end
+    table.sort(seen)
+    local want = {}
+    for i = 1, 8 do
+      want[i] = ("n%d --k=%d"):format(i, round)
+    end
+    table.sort(want)
+    eq(seen, want, "8 calls at once, round " .. round .. ": 8 whole records")
+  end
+  fake:reset()
+
   -- the Windows command line rules, on every system
   for _, case in ipairs({
     { "", {} },

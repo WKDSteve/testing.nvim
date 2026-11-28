@@ -116,23 +116,38 @@ local function cmd_script(name, spec, log)
   end
   -- The arguments as one raw line (`%*`), split by `M.split_cmdline` when read: `%1` and `shift` split at `=`, `,`
   -- and `;` too, and `if "%~1"==""` ended the list at an empty argument. Read back through delayed expansion, so
-  -- what the line holds is not parsed by cmd a second time. The redirection first: `echo x 1>>log` would take the
-  -- `1` of an argument for the handle.
+  -- what the line holds is not parsed by cmd a second time.
+  -- The record goes out in ONE block (`(...)>>log`, the file opened once): line by line, a call at the same time lost
+  -- its lines to the lock of the other ("the process cannot access the file") or mixed them into the other's record.
+  -- A block that finds the log locked is tried again; `call ... 2>nul` keeps that message off the stand-in's stderr.
   local lines = {
     "@echo off",
     "setlocal DisableDelayedExpansion",
-    ('>>"%s" echo(program=%s'):format(win_log, name),
-    ('>>"%s" echo(cwd=%%CD%%'):format(win_log),
     'set "TESTING_FAKE_ARGS="',
     "set TESTING_FAKE_ARGS=%*",
     "setlocal EnableDelayedExpansion",
-    ('>>"%s" echo(args=!TESTING_FAKE_ARGS!'):format(win_log),
+    "set /a TESTING_FAKE_TRY=0",
+    ":testing_fake_write",
+    "call :testing_fake_record 2>nul && goto testing_fake_written",
+    "set /a TESTING_FAKE_TRY+=1",
+    "if !TESTING_FAKE_TRY! lss 2000 goto testing_fake_write",
+    ":testing_fake_written",
     "endlocal",
-    ('>>"%s" echo(end'):format(win_log),
   }
   vim.list_extend(lines, echo_lines(spec.stdout))
   vim.list_extend(lines, echo_lines(spec.stderr, true))
   lines[#lines + 1] = ("exit /b %d"):format(spec.exit_code or 0)
+  vim.list_extend(lines, {
+    ":testing_fake_record",
+    "(",
+    ("echo(program=%s"):format(name),
+    "echo(cwd=!CD!",
+    "echo(args=!TESTING_FAKE_ARGS!",
+    "echo(end",
+    -- a redirection that fails sets no ERRORLEVEL, but `||` sees it
+    (')>>"%s" || exit /b 1'):format(win_log),
+    "exit /b 0",
+  })
   return table.concat(lines, "\r\n") .. "\r\n"
 end
 
