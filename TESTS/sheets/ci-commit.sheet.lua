@@ -62,6 +62,22 @@ return {
       note = "complete the commit argument like a person (all matches); input, keys would leave the command line",
     },
     {
+      wait = [[vim.fn.getcmdline():find("HEAD", 1, true) ~= nil]],
+      note = "the first completion offers HEAD at once: git is asked in the background, the editor never waits",
+    },
+    {
+      wait = [[(function()
+        local u = require("testing.bindings.usrcmds")
+        return #u.recent_commits(u.resolve_root(nil, vim.api.nvim_buf_get_name(0))) >= 3
+      end)()]],
+      timeout = 10000,
+      note = "git has answered in the background",
+    },
+    {
+      input = "<C-u>Testing ci commit <C-a>",
+      note = "complete again, as a person who presses the key a moment later",
+    },
+    {
       wait = [[vim.fn.getcmdline():find("HEAD [%x]+ [%x]+") ~= nil]],
       timeout = 10000,
       note = "the completion offers HEAD and the two commits of the repository",

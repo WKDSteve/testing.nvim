@@ -414,23 +414,51 @@ function M.lint_run(ctx)
   end
 end
 
+---Replaced by a spec: how `recent_commits` starts git (`vim.system` with a callback, never waited for).
+M.recent_system = vim.system
+
+---Seconds an answer of `recent_commits` is kept before git is asked again.
+M.RECENT_TTL_S = 10
+
+---@type table<string, { list?: string[], at?: integer, loading?: boolean }>
+local recent = {}
+
+---Forget the kept answers of `recent_commits` (specs).
+function M.recent_reset()
+  recent = {}
+end
+
 ---The latest commits of a repository for the completion: `HEAD` and the short SHAs of the last 30, newest first.
----Git is asked in the project root; an error or a directory that is no repository gives only `HEAD`.
+---Never waits for git: the answer comes from a cache per root, and git is asked in the background when the cache is
+---empty or older than `M.RECENT_TTL_S` (the next <Tab> has it). Waiting froze the editor on every <Tab> (109 ms
+---measured, up to the 2 s timeout). An error or a directory that is no repository gives only `HEAD`.
 ---@param root string
 ---@return string[]
 function M.recent_commits(root)
-  local out = { "HEAD" }
-  local ok, res = pcall(function()
-    return vim
-      .system({ "git", "log", "-n", "30", "--format=%h", "--no-color" }, { cwd = root, text = true })
-      :wait(2000)
-  end)
-  if ok and res and res.code == 0 then
-    for line in (res.stdout or ""):gmatch("[^%s]+") do
-      out[#out + 1] = line
+  local k = vim.fs.normalize(root)
+  local c = recent[k] or {}
+  recent[k] = c
+  if not c.loading and (not c.at or os.time() - c.at >= M.RECENT_TTL_S) then
+    c.loading = true
+    local ok = pcall(
+      M.recent_system,
+      { "git", "log", "-n", "30", "--format=%h", "--no-color" },
+      { cwd = root, text = true, timeout = 5000 },
+      function(res)
+        local list = { "HEAD" }
+        if res and res.code == 0 then
+          for line in (res.stdout or ""):gmatch("[^%s]+") do
+            list[#list + 1] = line
+          end
+        end
+        c.list, c.at, c.loading = list, os.time(), false
+      end
+    )
+    if not ok then
+      c.list, c.at, c.loading = { "HEAD" }, os.time(), false
     end
   end
-  return out
+  return vim.deepcopy(c.list or { "HEAD" })
 end
 
 ---`:Testing ci repos`: the pipelines of the repositories of `ci.repos` (setup option) in one child.
