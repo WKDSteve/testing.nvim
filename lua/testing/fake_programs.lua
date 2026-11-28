@@ -75,18 +75,20 @@ end
 ---@param log string
 ---@return string
 local function posix_script(name, spec, log)
+  -- The whole record is put together first and appended with ONE printf (one write to a file opened for appending):
+  -- a printf per line let calls at the same time mix their lines into each other's records.
+  local stdin = spec.stdin
+      and ' while IFS= read -r l || [ -n "$l" ]; do printf \'stdin=%s\\n\' "$l"; done;'
+    or ""
   local lines = {
     "#!/bin/sh",
     ("log=%s"):format(sq(log)),
-    ('{ printf \'program=%%s\\n\' %s; printf \'cwd=%%s\\n\' "$(pwd)"; for a in "$@"; do printf \'arg=%%s\\n\' "$a"; done; } >> "$log"'):format(
-      sq(name)
+    ("rec=$(printf 'program=%%s\\n' %s; printf 'cwd=%%s\\n' \"$(pwd)\"; for a in \"$@\"; do printf 'arg=%%s\\n' \"$a\"; done;%s printf 'end')"):format(
+      sq(name),
+      stdin
     ),
+    'printf \'%s\\n\' "$rec" >> "$log"',
   }
-  if spec.stdin then
-    lines[#lines + 1] =
-      'while IFS= read -r l || [ -n "$l" ]; do printf \'stdin=%s\\n\' "$l" >> "$log"; done'
-  end
-  lines[#lines + 1] = "printf 'end\\n' >> \"$log\""
   if spec.stdout and spec.stdout ~= "" then
     lines[#lines + 1] = ("printf '%%s' %s"):format(sq(spec.stdout))
   end
