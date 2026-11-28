@@ -331,6 +331,58 @@ return function(H)
     ok(not left or #autocmds == 0, "uninstall removes the autocmds")
   end
 
+  -- ── the trace follows into an editor the measured one starts with a script (nvim -l) ──
+  do
+    local trace = require("testing.perf.trace")
+    local dir = tmp .. "/trace-child"
+    vim.fn.mkdir(dir, "p")
+    local out = dir .. "/t.jsonl"
+    local exe = vim.v.progpath
+    local kid = dir .. "/kid.lua"
+    vim.fn.writefile({
+      "vim.fn.system({ vim.v.progpath, '--version' })",
+      "vim.system({ vim.v.progpath, '--version' }):wait()",
+    }, kid)
+    eq(
+      trace.inject({ exe, "-l", kid }),
+      { exe, "-l", kid },
+      "inject: nothing while no trace is installed"
+    )
+    assert(trace.install({ out = out }))
+    local injected = trace.inject({ exe, "--headless", "-l", kid, "-l" })
+    eq(
+      { injected[2], injected[3], injected[5], #injected },
+      { "--headless", "--cmd", "-l", 7 },
+      "inject: --cmd right before the first -l"
+    )
+    eq(trace.inject(injected), injected, "inject: an argv that has it stays")
+    eq(trace.inject({ "git", "-l" }), { "git", "-l" }, "inject: another program stays")
+    eq(
+      trace.inject({ exe, "--version" }),
+      { exe, "--version" },
+      "inject: an editor without a script stays"
+    )
+    local r = vim
+      .system({ exe, "-n", "-i", "NONE", "--headless", "-u", "NONE", "-l", kid }, { text = true })
+      :wait(30000)
+    trace.uninstall()
+    eq(r.code, 0, "the child ran")
+    eq(#trace.child_files(out), 1, "the child wrote its own trace file")
+    local spawns = trace.fold_all(out)
+    eq(
+      vim.tbl_map(function(s)
+        return ("%s %s"):format(s.kind, tostring(s.child))
+      end, spawns),
+      { "vim.system nil", "fn.system true", "vim.system true" },
+      "the child's starts follow the start of the child, in time order"
+    )
+    has(spawns[2].site or "", "kid.lua:1", "the child's start names the child's line")
+    ok(
+      not (spawns[1].argv or ""):find("--cmd", 1, true),
+      "the argv of the child is the one the caller gave"
+    )
+  end
+
   -- ── the scan ───────────────────────────────────────────────────────────
   do
     local scan = require("testing.perf.scan")

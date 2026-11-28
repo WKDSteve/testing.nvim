@@ -185,6 +185,9 @@ local function run_sheet(o, root, s, rel, tree)
   end
   local trace_file = o.dir .. "/" .. s.id .. ".jsonl"
   os.remove(trace_file)
+  for _, child in ipairs(require("testing.perf.trace").child_files(trace_file)) do
+    os.remove(child)
+  end
   local spawn = M.spawn_opts(trace_file, o.real)
   local session_mod = o.session or require("testing.sheet.session")
   local mark0 = tree:count()
@@ -243,7 +246,8 @@ local function run_sheet(o, root, s, rel, tree)
       config_from = r.config_dir
     end
   end
-  local spawns = require("testing.perf.trace").fold(records)
+  -- with the starts of the editors the measured one started with a script (their own files next to it)
+  local spawns = require("testing.perf.trace").fold_all(trace_file)
   local config_to = s.config == "user" and o.user_config_dir or nil
   local per = require("testing.perf.tree").per_process(samples)
   local last = samples[#samples]
@@ -278,6 +282,9 @@ local function run_sheet(o, root, s, rel, tree)
     return a.pid < b.pid
   end)
   if not o.keep_traces then
+    for _, child in ipairs(require("testing.perf.trace").child_files(trace_file)) do
+      os.remove(child)
+    end
     os.remove(trace_file)
   end
   return res

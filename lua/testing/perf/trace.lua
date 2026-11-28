@@ -297,7 +297,7 @@ local function timed(kind, orig)
     end
     local id = start(kind, cmd, { sync = true })
     local t0 = now_us()
-    local res = { pcall(orig, cmd, ...) }
+    local res = { pcall(orig, M.inject(cmd), ...) }
     finish(id, t0, kind:match("system") and vim.v.shell_error or nil)
     if not res[1] then
       error(res[2], 0)
@@ -306,7 +306,75 @@ local function timed(kind, orig)
   end
 end
 
----@param opts? { out: string, config_dir?: string, real?: string }
+---The folder this checkout of testing.nvim is in (`<root>/lua/testing/perf/trace.lua`).
+local function own_root()
+  local src = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("\\", "/")
+  return (src:gsub("/lua/testing/perf/trace%.lua$", ""))
+end
+
+---The `--cmd` that installs this trace in a child editor before its `-l` script runs: its own file next to the
+---measured editor's (one writer per file). This checkout's `testing.*` modules come from a loader at the END of
+---`package.loaders`: the plugin's own modules (testing.nvim's among them, through the path its script sets) are
+---found first, and the trace still finds what it loads later (`testing.core.ledger`).
+---@param base string
+---@return string
+function M.child_cmd(base)
+  local lua_dir = own_root() .. "/lua"
+  return table.concat({
+    ("lua local d = %q"):format(lua_dir),
+    "table.insert(package.loaders or package.searchers, function(n) "
+      .. "if n:sub(1, 8) ~= 'testing.' then return nil end "
+      .. "local f = package.searchpath(n, d .. '/?.lua;' .. d .. '/?/init.lua') "
+      .. "if f then return assert(loadfile(f)) end end)",
+    ("pcall(function() require('testing.perf.trace').install({ out = %q .. vim.uv.os_getpid() .. '.jsonl', base = %q }) end)"):format(
+      base .. ".child-",
+      base
+    ),
+  }, "; ")
+end
+
+---An editor the measured one starts with a script (`nvim ... -l <script>`: testing.nvim's own runs, tasks, rules)
+---gets the trace too: `--cmd` before the `-l`. Nothing else is changed; an argv that already has it stays.
+---@param argv any a list: the program, then its arguments
+---@return any
+function M.inject(argv)
+  if not S or type(argv) ~= "table" or type(argv[1]) ~= "string" then
+    return argv
+  end
+  local prog = argv[1]:gsub("\\", "/"):match("([^/]+)$") or ""
+  if not prog:lower():match("^nvim%.?e?x?e?$") then
+    return argv
+  end
+  local at
+  for i = 2, #argv do
+    if argv[i] == "-l" then
+      at = i
+      break
+    end
+    if
+      argv[i] == "--cmd"
+      and type(argv[i + 1]) == "string"
+      and argv[i + 1]:find("testing.perf.trace", 1, true)
+    then
+      return argv
+    end
+  end
+  if not at then
+    return argv
+  end
+  local out = {}
+  for i = 1, at - 1 do
+    out[#out + 1] = argv[i]
+  end
+  out[#out + 1] = "--cmd"
+  out[#out + 1] = M.child_cmd(S.base)
+  for i = at, #argv do
+    out[#out + 1] = argv[i]
+  end
+  return out
+end
+
+---@param opts? { out: string, base?: string, config_dir?: string, real?: string }
 ---@return boolean ok, string|nil err
 function M.install(opts)
   if S then
@@ -327,6 +395,8 @@ function M.install(opts)
   end
   S = {
     fd = fd,
+    -- the file the children's traces are named after (`<base>.child-<pid>.jsonl`): the measured editor's own file
+    base = opts.base or opts.out,
     lines = 0,
     next_id = 0,
     jobs = {},
@@ -354,7 +424,7 @@ function M.install(opts)
     end
     local id = start("vim.system", cmd, extra)
     S.outer = { kind = "vim.system", id = id }
-    local ok, obj = pcall(O.system, cmd, sopts, on_exit)
+    local ok, obj = pcall(O.system, M.inject(cmd), sopts, on_exit)
     S.outer = nil
     if not ok then
       finish(id, now_us(), -1)
@@ -405,6 +475,13 @@ function M.install(opts)
       or function(code)
         finish(id, t0, code)
       end
+    -- an editor with a script gets the trace (`M.inject`; a vim.system has done it already)
+    if type(sopts) == "table" then
+      local argv = M.inject(vim.list_extend({ path }, sopts.args or {}))
+      if #argv ~= #(sopts.args or {}) + 1 then
+        sopts = vim.tbl_extend("force", sopts, { args = vim.list_slice(argv, 2) })
+      end
+    end
     local handle, pid, errname = O.spawn(path, sopts, wrapped)
     if type(pid) == "number" then
       write({ ev = "pid", id = id, pid = pid })
@@ -463,7 +540,7 @@ function M.install(opts)
         -- a terminal job (`termopen`, `jobstart({ term = true })`) fires TermOpen inside the call: counted here, not
         -- again as an Ex start
         S.term_calls = S.term_calls + 1
-        local called, job = pcall(orig, cmd, jopts)
+        local called, job = pcall(orig, M.inject(cmd), jopts)
         S.term_calls = S.term_calls - 1
         if not called then
           finish(id, t0, -1)
@@ -779,6 +856,39 @@ function M.read(path)
   return out
 end
 
+---The child traces of a trace file (`<path>.child-<pid>.jsonl`, the editors the measured one started with a script).
+---@param path string
+---@return string[]
+function M.child_files(path)
+  local dir, name = vim.fs.dirname(path), vim.fs.basename(path)
+  local out = {}
+  for entry, kind in vim.fs.dir(dir) do
+    if kind == "file" and entry:sub(1, #name + 7) == name .. ".child-" then
+      out[#out + 1] = dir .. "/" .. entry
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+---The starts of a trace file and of its children's traces, each folded on its own (ids count per editor), in the
+---order they started (one monotonic clock for every process of the machine).
+---@param path string
+---@return Testing.Perf.Spawn[]
+function M.fold_all(path)
+  local all = M.fold(M.read(path))
+  for _, child in ipairs(M.child_files(path)) do
+    for _, s in ipairs(M.fold(M.read(child))) do
+      s.child = true
+      all[#all + 1] = s
+    end
+  end
+  table.sort(all, function(a, b)
+    return (a.us or 0) < (b.us or 0)
+  end)
+  return all
+end
+
 ---The starts of a trace with their end, wait and pid folded in: one table per process.
 ---@param records table[]
 ---@return Testing.Perf.Spawn[]
@@ -803,6 +913,7 @@ function M.fold(records)
   ---@field cpu? number seconds, from the process tree
   ---@field alive_at_end? boolean
   ---@field stack? string[] every caller up the stack (`file:line`, innermost first)
+  ---@field child? boolean started in an editor the measured one started with a script (its own trace file)
   local by_id, list, by_id_sync = {}, {}, {}
   for _, r in ipairs(records) do
     if r.ev == "install" then

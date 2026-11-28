@@ -51,6 +51,13 @@ snapshot is a failure and is never written. On top of that:
   * `origin`: the first frame outside lib.nvim too (the plugin's own line), `plugin`: its repository.
   * A start asked for by a sheet step itself (an RPC chunk, `<nvim>`, before any plugin frame) or by a file below
     `TESTS/` is the sheet's **preparation** (`plugin = "sheet"`): counted apart, never a finding.
+* **Editors the plugin starts with a script** (`nvim ... -l <script>`: testing.nvim's own runs, tasks, rules): the
+  trace puts `--cmd "lua ..."` in front of the `-l`, so that editor installs the same trace before its script runs and
+  writes its starts to a file of its own (`<trace>.child-<pid>.jsonl`, one writer per file); the run reads them with
+  the measured editor's (`fold_all`), on the same monotonic clock, so they fall into the step they ran in. The argv
+  recorded for the start of that editor is the one the plugin gave. The trace's modules come from a loader at the end
+  of the child's `package.loaders`: the plugin's own modules are found first. An editor without `-l` (an `--embed`
+  child, a plain `nvim --version`) is left as it is.
 * **The steps**: their bounds are taken in the parent; every start falls into a step and the size it ran at (`start`
   before the first step of a size: that size's child booting with the plugin's setup; `after` after the last).
   A `burst` counts per step and size. A live sheet's guard wraps the trace; its frames are not taken for the caller.
