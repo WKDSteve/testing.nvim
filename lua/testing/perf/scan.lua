@@ -123,6 +123,29 @@ function M.alias_of(code)
   )
 end
 
+---The names a file gives `vim.fn` and its process functions: `local fn = vim.fn` (`tables.fn`: `fn.system(` and
+---`fn.systemlist(` start a process) and `local system = vim.fn.system` (`funcs.system = "vim.fn.system"`: `system(`
+---does). The patterns of `M.PATTERNS` know `vim.fn.system(` only in full (mdview.nvim, reposcope.nvim).
+---@param lines string[]
+---@return { tables: table<string, boolean>, funcs: table<string, string> }
+function M.vim_fn_aliases(lines)
+  local out = { tables = {}, funcs = {} }
+  for _, line in ipairs(lines) do
+    local code = M.code_of(line)
+    if code then
+      local tbl = code:match("^%s*local%s+([%w_]+)%s*=%s*vim%.fn%s*$")
+      if tbl then
+        out.tables[tbl] = true
+      end
+      local name, fn = code:match("^%s*local%s+([%w_]+)%s*=%s*vim%.fn%.(system[%w]*)%s*$")
+      if name and (fn == "system" or fn == "systemlist") then
+        out.funcs[name] = "vim.fn." .. fn
+      end
+    end
+  end
+  return out
+end
+
 ---What a line starts, or nil: a primitive, a call on an alias of a spawning module (`git.run_async(`), a call on
 ---such a module required in place (`require("lib.nvim.git").run_async(`).
 ---@param line string
@@ -144,6 +167,15 @@ function M.match(line, ctx)
   end
   if not ctx then
     return nil
+  end
+  -- `vim.fn` under a name of the file (`M.vim_fn_aliases`): `fn.system(`, `fn.systemlist(`
+  for tbl in pairs(ctx.tables or {}) do
+    local t = tbl:gsub("%p", "%%%0")
+    for _, fn in ipairs({ "systemlist", "system" }) do
+      if bare:find("%f[%w_.:]" .. t .. "%." .. fn .. "%s*%(") then
+        return "vim.fn." .. fn
+      end
+    end
   end
   -- a spawning function bound to a name of the plugin: `local resolve = path.resolve` -> `resolve(`, a field
   -- `M.request = helper.request` -> `.request(` / `:request(`
@@ -263,6 +295,8 @@ local function analyse(lines)
     end
   end
   local mv = modvar:gsub("%p", "%%%0")
+  local fn_al = M.vim_fn_aliases(lines)
+  local fn_ctx = { tables = fn_al.tables, funcs = fn_al.funcs }
   local fns, exported, callable = {}, {}, nil
   local cur
   for n, line in ipairs(lines) do
@@ -295,6 +329,10 @@ local function analyse(lines)
           if code:find(p[1]) then
             cur.direct = true
           end
+        end
+        -- `vim.fn` under a name of the file (`local fn = vim.fn`, `local system = vim.fn.system`)
+        if not cur.direct and M.match(body, fn_ctx) then
+          cur.direct = true
         end
         local bare = M.strip_strings(code)
         for at, fname in bare:gmatch("()%f[%w_]([%w_]+)%s*%(") do
@@ -541,7 +579,17 @@ function M.sites(root, spawning)
           end
         end
       end
-      local ctx = { aliases = aliases, spawning = spawning or {}, funcs = funcs, fields = fields }
+      local fn_al = M.vim_fn_aliases(lines)
+      for name, what in pairs(fn_al.funcs) do
+        funcs[name] = funcs[name] or what
+      end
+      local ctx = {
+        aliases = aliases,
+        spawning = spawning or {},
+        funcs = funcs,
+        fields = fields,
+        tables = fn_al.tables,
+      }
       local fn_name, fn_local -- the function the current line is in (the nearest definition above), and its kind
       for n, line in ipairs(lines) do
         local loc = line:match("^local%s+function%s+([%w_]+)%s*%(")

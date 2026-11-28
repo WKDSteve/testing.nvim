@@ -286,6 +286,29 @@ return function(H)
     eq(scan.match("local h = b.spawn(spec)"), nil, "a method named spawn is no uv.spawn")
     eq(scan.match("local h = uv.spawn(path, opts, cb)"), "uv.spawn", "uv.spawn is")
     eq(scan.match("local h = vim.uv.spawn(path, opts, cb)"), "uv.spawn", "vim.uv.spawn too")
+    -- vim.fn through a name of the file: `local fn = vim.fn` -> `fn.system(`, `local system = vim.fn.system` ->
+    -- `system(` (mdview.nvim, reposcope.nvim)
+    do
+      local file = {
+        "local fn = vim.fn",
+        "local system = vim.fn.system",
+        "local M = {}",
+        "function M.a() return fn.system({ 'curl', 'x' }) end",
+        "function M.b() local out = fn.systemlist({ 'git', 'log' }) end",
+        "function M.c() local r = system('ls') end",
+        "function M.d() local f = fn.system end",
+        "function M.e() other.system('x') end",
+        "return M",
+      }
+      local al = scan.vim_fn_aliases(file)
+      local ctx = { tables = al.tables, funcs = al.funcs }
+      eq(scan.match(file[4], ctx), "vim.fn.system", "fn.system( through local fn = vim.fn")
+      eq(scan.match(file[5], ctx), "vim.fn.systemlist", "fn.systemlist( too")
+      eq(scan.match(file[6], ctx), "vim.fn.system", "system( through local system = vim.fn.system")
+      eq(scan.match(file[7], ctx), nil, "a field read fn.system without a call is none")
+      eq(scan.match(file[8], ctx), nil, "M.system of another module is none")
+      eq(scan.match(file[4]), nil, "without the aliases of the file: none (as before)")
+    end
     eq(
       scan.joined({ "  local ok, s = pcall(", "    vim.system,", "  )" }, 1),
       "  local ok, s = pcall(vim.system,",
