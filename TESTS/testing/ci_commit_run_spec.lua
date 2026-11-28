@@ -90,5 +90,17 @@ return function(H)
     )
   end
 
+  -- a pipeline of process steps only (a native app): --quick has no suite to narrow, every step of the profile runs
+  -- (before: `--affected` went to a run without a suite step, a usage error, exit 2)
+  do
+    local native_cfg = (S.CFG:gsub("full = { 'suite', 'gate' }", "full = { 'gate' }"))
+    has(native_cfg, "full = { 'gate' }", "native: the fixture has no suite step")
+    local nroot = S.project("native", { [".testing.lua"] = native_cfg, ["gate.txt"] = "green\n" })
+    local n2 = S.commit(nroot, { ["lua/proj/y.lua"] = "return 2\n" }, "a change")
+    local r = call(nroot, n2, "--quick", "--no-wsl", "--agent")
+    eq(r.code, 0, "native --quick: exit 0, no usage error")
+    has(r.first, "ci commit " .. n2:sub(1, 7) .. " CLEAN quick", "native --quick: clean, quick")
+  end
+
   S.cleanup()
 end
