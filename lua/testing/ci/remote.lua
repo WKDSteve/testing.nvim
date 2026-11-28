@@ -433,6 +433,9 @@ end
 ---The version of a stored runs list: 2 since runs carry `head_branch` (`testing ci land`, `pick_run`).
 M.RUNS_V = 2
 
+---The version of a stored jobs list: 1 since jobs carry `refused` (the runner guard refused them, `guard`).
+M.JOBS_V = 1
+
 ---How many of the latest runs the plain (unfiltered) list is asked for, when the list filtered by commit has no run of
 ---the workflow: GitHub leaves a run that waits for a runner out of the filtered lists.
 M.ALL_PER_PAGE = "30"
@@ -776,6 +779,7 @@ local function read_cache(path)
         run_updated_at = text(j.run_updated_at, 40),
         etag = type(j.etag) == "string" and j.etag or nil,
         list = list,
+        v = j.v == M.JOBS_V and M.JOBS_V or nil,
       }
     end
   end
@@ -912,6 +916,10 @@ local function fetch(rec, ctx, done)
   ---@param run table
   local function with_run(run)
     local jc = cache.jobs and cache.jobs.run_id == run.id and cache.jobs or nil
+    -- a list of an older version lacks a field the classification reads: asked afresh, without its ETag
+    if jc and jc.v ~= M.JOBS_V then
+      jc = nil
+    end
     -- a completed run whose stored jobs list lags behind it (a job still running in it) is asked for afresh,
     -- without its ETag: a 304 on that ETag would bring the lagging list back, round after round
     if jc and run.status == "completed" and not all_completed(jc.list) then
@@ -957,6 +965,7 @@ local function fetch(rec, ctx, done)
             -- the new list (a later 304 on it would bring the old list back)
             etag = res2.not_modified and (res2.etag or (jc and jc.etag)) or res2.etag,
             list = jobs,
+            v = M.JOBS_V,
           }
           M.classify(rec, run, vim.deepcopy(jobs), ctx.non_gating[rec], ctx.now)
           finish()

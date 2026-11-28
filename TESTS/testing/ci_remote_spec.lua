@@ -1617,6 +1617,35 @@ return function(H)
     -- the second asking comes from the cache: the flag survives it
     local again = vim.json.decode(run({ "--json", dirs.guard }).out).repos[1]
     eq(again.guard, "refused", "guard: also from the cache")
+    -- a jobs list stored before the jobs carried `refused` (no version) is asked anew once: the flag comes back
+    for _, cf in ipairs(vim.fn.glob(state .. "/testing/ci-remote/*.json", true, true)) do
+      local fh = assert(io.open(cf, "rb"))
+      local stored = vim.json.decode(fh:read("*a"))
+      fh:close()
+      if type(stored.jobs) == "table" then
+        stored.jobs.v = nil
+        for _, j in ipairs(stored.jobs.list or {}) do
+          j.refused = nil
+        end
+      end
+      fh = assert(io.open(cf, "wb"))
+      fh:write(vim.json.encode(stored))
+      fh:close()
+    end
+    local old_cache = vim.json.decode(run({ "--json", dirs.guard }).out).repos[1]
+    eq(
+      old_cache.guard,
+      "refused",
+      "guard: an unversioned jobs list is asked anew, the flag is back"
+    )
+    local job_asks = 0
+    for _, r in ipairs(requests) do
+      if r.path == R .. "guard/actions/runs/120/jobs" then
+        job_asks = job_asks + 1
+        eq(r.etag, nil, "guard: ... asked without If-None-Match")
+      end
+    end
+    eq(job_asks, 1, "guard: ... once")
 
     -- setup_failed: only a failed setup with nothing run after it
     eq(remote.setup_failed(steps_refused), true, "setup_failed: the hook refused the job")
