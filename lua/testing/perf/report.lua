@@ -8,7 +8,7 @@
 --- * `memory`     a process whose working set peaked above `memory_mb`;
 --- * `cpu`        a process that used more than `cpu_s` CPU seconds;
 --- * `left`       a process the plugin started that still runs after the last step (an LSP server is named as such);
---- * `repeat`     the same command line again within `repeat_ms` in one sheet (a missing cache).
+--- * `repeat`     the same command line in the same directory again within `repeat_ms` in one sheet (a missing cache).
 ---
 --- Starts of the sheet's own preparation (`plugin = "sheet"`, or a start in a `lua` step without any plugin frame) are
 --- counted apart and never a finding. Coverage: the spawn sites of `testing.perf.scan` the run reached; the catalog's
@@ -180,7 +180,9 @@ function M.findings(repo, sh, t)
         per_step[key] = per_step[key] or { n = 0, sp = sp }
         per_step[key].n = per_step[key].n + 1
       end
-      local prev = last_seen[sp.argv]
+      -- the same command in the same directory: in another one it may answer differently (a project's toolchain)
+      local same = sp.argv .. "\0" .. (sp.cwd or "")
+      local prev = last_seen[same]
       if prev and sp.us and prev.us and (sp.us - prev.us) / 1000 < t.repeat_ms then
         add(
           "repeat",
@@ -190,7 +192,7 @@ function M.findings(repo, sh, t)
           ("same command again after %d ms"):format((sp.us - prev.us) / 1000)
         )
       end
-      last_seen[sp.argv] = sp
+      last_seen[same] = sp
     end
   end
   for _, e in pairs(per_step) do

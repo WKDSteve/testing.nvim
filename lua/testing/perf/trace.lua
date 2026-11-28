@@ -9,7 +9,7 @@
 ---
 --- and writes a line per start into `opts.out` (appended, flushed at once, so a child that is killed keeps its lines):
 ---
----   { ev = "start", id, us, kind, argv, sync?, pid?, site?, origin?, plugin }
+---   { ev = "start", id, us, kind, argv, cwd, sync?, pid?, site?, origin?, plugin }
 ---   { ev = "end", id, us, ms, code? }       -- a process ended (its exit callback) or a synchronous call returned
 ---   { ev = "wait", id, us, ms }             -- `vim.system(...):wait()` blocked the editor this long
 ---
@@ -223,12 +223,17 @@ local function start(kind, cmd, extra)
   S.next_id = S.next_id + 1
   local id = S.next_id
   local site, origin, plugin, stack = callers()
+  -- the directory it ran in (`cwd` of the call, else the editor's): the same command in another project is no repeat
+  -- (`rustc --print sysroot` answers per project). `uv.cwd`: a start may come from a callback, where `getcwd` is not
+  -- allowed
+  local cwd = extra and extra.cwd or uv.cwd()
   local rec = vim.tbl_extend("force", {
     ev = "start",
     id = id,
     us = now_us(),
     kind = kind,
     argv = argv_text(cmd),
+    cwd = type(cwd) == "string" and (cwd:gsub("\\", "/")) or nil,
     site = site,
     origin = origin,
     plugin = plugin,
@@ -295,10 +300,10 @@ function M.install(opts)
     if not S then
       return O.system(cmd, sopts, on_exit)
     end
-    local extra = nil
+    local extra = { cwd = type(sopts) == "table" and sopts.cwd or nil }
     if on_exit ~= nil then
       -- with a callback nobody waits; without one, a wait() decides (the `wait` record)
-      extra = { sync = false }
+      extra.sync = false
     end
     local id = start("vim.system", cmd, extra)
     S.outer = { kind = "vim.system", id = id }
@@ -335,7 +340,7 @@ function M.install(opts)
       for _, a in ipairs((sopts and sopts.args) or {}) do
         argv[#argv + 1] = a
       end
-      id = start("uv.spawn", argv, { sync = false })
+      id = start("uv.spawn", argv, { sync = false, cwd = sopts and sopts.cwd or nil })
     end
     local t0 = now_us()
     local wrapped = on_exit
@@ -387,7 +392,11 @@ function M.install(opts)
         if not S then
           return orig(cmd, jopts)
         end
-        local id = start(name == "jobstart" and "jobstart" or "termopen", cmd, { sync = false })
+        local id = start(
+          name == "jobstart" and "jobstart" or "termopen",
+          cmd,
+          { sync = false, cwd = type(jopts) == "table" and jopts.cwd or nil }
+        )
         local t0 = now_us()
         jopts = vim.tbl_extend("force", {}, jopts or {})
         local user_exit = jopts.on_exit
@@ -604,6 +613,7 @@ function M.fold(records)
   ---@field us integer start, microseconds of the monotonic clock
   ---@field kind string
   ---@field argv string
+  ---@field cwd? string the directory it ran in
   ---@field sync? boolean
   ---@field pid? integer
   ---@field ms? number how long it ran (nil: still running when the trace ended)
@@ -628,6 +638,7 @@ function M.fold(records)
         us = r.us,
         kind = r.kind,
         argv = r.argv,
+        cwd = r.cwd,
         sync = r.sync,
         pid = r.pid,
         site = r.site,

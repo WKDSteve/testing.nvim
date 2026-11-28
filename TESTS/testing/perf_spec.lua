@@ -47,7 +47,7 @@ return function(H)
       "real() reads the list"
     )
     local exe = vim.v.progpath
-    local obj = vim.system({ exe, "--version" }, { text = true })
+    local obj = vim.system({ exe, "--version" }, { text = true, cwd = tmp })
     local done = obj:wait(20000)
     eq(done.code, 0, "vim.system still works")
     vim.fn.system({ exe, "--version" })
@@ -78,6 +78,11 @@ return function(H)
       { "vim.system", "fn.system", "jobstart" },
       "one start each: vim.system and its uv.spawn are folded"
     )
+    local function slash(p)
+      return (p:gsub("[/\\]+", "/"):lower())
+    end
+    eq(slash(spawns[1].cwd or ""), slash(tmp), "cwd: the directory a vim.system was given")
+    eq(slash(spawns[2].cwd or ""), slash(vim.uv.cwd()), "cwd: else the editor's")
     local sys, fsys, js = spawns[1], spawns[2], spawns[3]
     ok(sys.pid and sys.ms and sys.ms >= 0, "vim.system: pid and the end from the spawn's exit")
     ok(
@@ -621,6 +626,23 @@ return function(H)
     eq(by.cpu[1].value, 12, "cpu")
     eq(#by.left, 1, "left running: not the language server")
     eq(by["repeat"][1].count, 1, "a repeat within 2 s, not the one 15 min later")
+    -- the same command in another directory is no repeat (`rustc --print sysroot` answers per project), in the same
+    -- one it is
+    local function repeats(cwd_b)
+      local f2 = report.findings("p.nvim", {
+        id = "c",
+        steps = { { n = 1, action = "lua" } },
+        spawns = {
+          { plugin = "p", step = 1, argv = "rustc --print sysroot", cwd = "/a", us = 1000 },
+          { plugin = "p", step = 1, argv = "rustc --print sysroot", cwd = cwd_b, us = 90000 },
+        },
+      })
+      return #vim.tbl_filter(function(x)
+        return x.kind == "repeat"
+      end, f2)
+    end
+    eq(repeats("/b"), 0, "repeat: the same argv in another cwd is none")
+    eq(repeats("/a"), 1, "repeat: the same argv in the same cwd is one")
     eq(by.burst[1].value, 9, "nine starts of the plugin in one step")
     local sized = { id = "s", steps = { { n = 1, action = "keys" } }, spawns = {} }
     for _, size in ipairs({ "80x24", "120x40" }) do
