@@ -30,19 +30,16 @@ return {
     id = "testing.cache",
     title = "--cached skips the specs whose inputs did not change; --changed runs the ones a change touches",
     docs = "docs/CACHE.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing run), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.guards",
     title = "Guards fail a run that writes files, starts processes, prompts or leaves state behind",
     docs = "docs/GUARDS.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing run), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.init",
     title = "testing init writes .testing.lua, scripts/test.sh, the hooks and the CI workflow of a project",
     docs = "docs/CLI.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing init), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.ci",
@@ -97,27 +94,23 @@ return {
     title = "testing conformance checks a repository against the rules and gates",
     surface = { "command:Testing conformance" },
     docs = "docs/CONFORMANCE.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing conformance), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.surface",
     title = "testing surface says which commands, keymaps and autocommands the specs exercise",
     surface = { "command:Testing surface" },
     docs = "docs/SURFACE.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing surface), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.budget",
     title = "testing budget measures the performance budgets of a project against their baseline",
     surface = { "command:Testing budget" },
     docs = "docs/PERFORMANCE.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI, also behind :Testing budget), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.sheets",
     title = "Test sheets run a scripted session in a child editor; testing sheets report says what each feature has",
     docs = "docs/SHEETS.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (testing sheets run, the suite's sheet cases), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.sheet-step",
@@ -136,7 +129,6 @@ return {
     id = "testing.history",
     title = "testing history and stats show the results of a project and what the heavy runs cost",
     docs = "docs/CLI.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (testing history, testing stats), which the trace of testing perf does not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.lint",
@@ -155,8 +147,6 @@ return {
     id = "testing.callers",
     title = "testing callers finds the callers of a removed or renamed export in every checkout before a push",
     docs = "docs/CLI.md",
-    perf = "skip:runs in the child nvim -l scripts/testing.lua (the CLI only), which the trace of testing perf does "
-      .. "not follow (testing.nvim/testing-perf-trace-folgt-nicht-in-die-kind-nvim-des-plugins)",
   },
   {
     id = "testing.perf",
