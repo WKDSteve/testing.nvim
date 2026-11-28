@@ -116,13 +116,15 @@ M.deps = {
   ---@param sha string
   ---@param state_dir string
   ---@param workflow? string Another workflow's name (`ci.workflow.land.also`); nil: the CI workflow.
+  ---@param token? string The token an earlier round of this land used (before the adapter's own sources).
   ---@return table rec
-  remote = function(dir, sha, state_dir, workflow)
-    local recs = require("testing.ci.remote").collect(
+  ---@return string|nil token The token this round used, for the next one.
+  remote = function(dir, sha, state_dir, workflow, token)
+    local recs, info = require("testing.ci.remote").collect(
       { { dir = dir, from_root = false } },
-      { state_dir = state_dir, sha = sha, workflow = workflow }
+      { state_dir = state_dir, sha = sha, workflow = workflow, token = token }
     )
-    return recs[1] or { overall = "unknown", note = "no record" }
+    return recs[1] or { overall = "unknown", note = "no record" }, info and info.token or token
   end,
   ---The other workflows a land waits for: `ci.workflow.land.also` of the checkout's `.testing.lua`.
   ---@param dir string
@@ -336,6 +338,11 @@ function M.run(args, say, state_dir)
   end
   local short = sha:sub(1, 7)
   local upstream = args.remote .. "/" .. args.branch
+  -- The GitHub token of the first round that had one, for every later round of this land: `gh auth token` is asked
+  -- once, and a lookup that fails in the middle of the wait (seen under load, and in a session where it stayed empty)
+  -- no longer turns a round into `unknown (could not ask: no GitHub token)`.
+  ---@type string|nil
+  local token
   ---Did a push that failed or ran out of time arrive anyway? The ref on the remote names the commit.
   ---@param ref string A branch name.
   ---@return boolean
@@ -458,7 +465,7 @@ function M.run(args, say, state_dir)
   local before = {}
   local all_green_before = true
   for i, wf in ipairs(workflows) do
-    before[i] = d.remote(root, sha, state_dir, wf or nil)
+    before[i], token = d.remote(root, sha, state_dir, wf or nil, token)
     if not done_green(before[i]) then
       all_green_before = false
     end
@@ -536,7 +543,8 @@ function M.run(args, say, state_dir)
     ---@return string state
     ---@return table rec
     local function look(wf, i)
-      local rec = d.remote(root, sha, state_dir, wf or nil)
+      local rec
+      rec, token = d.remote(root, sha, state_dir, wf or nil, token)
       local state = rec.overall or "unknown"
       local run = type(rec.run) == "table" and rec.run or nil
       if run and earlier(run, before[i]) then

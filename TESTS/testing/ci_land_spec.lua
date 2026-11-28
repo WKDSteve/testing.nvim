@@ -103,6 +103,13 @@ return function(H)
       w.asked = sha
       return o.states[math.min(w.looks, #o.states)]
     end
+    -- the token each look is handed (`-` none), and the one a look used: the first look finds `tok-1`
+    w.tokens = {}
+    local look = land.deps.remote
+    land.deps.remote = function(dir, sha, state_dir, wf, tok)
+      w.tokens[#w.tokens + 1] = tok or "-"
+      return look(dir, sha, state_dir, wf), tok or "tok-1"
+    end
     land.deps.sleep = function() end
     land.deps.now = function()
       clock = clock + 31
@@ -150,6 +157,11 @@ return function(H)
   has(w.text, "https://x/run/1", "green: ... with the run")
   has(w.text, ": running", "green: the states on the way")
   has(w.text, "CI-10:", "green: while the hosted CI runs, the line of rule CI-10")
+  eq(w.tokens[1], "-", "token: the first look finds its own")
+  ok(#w.tokens >= 3, "token: several looks")
+  for i = 2, #w.tokens do
+    eq(w.tokens[i], "tok-1", "token: look " .. i .. " is handed the token of the first")
+  end
 
   -- a push that ran out of time (or failed) but arrived: land asks the remote and goes on
   do
