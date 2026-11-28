@@ -30,6 +30,21 @@ jobs:
           repository: WKDSteve/lib.nvim
           path: .deps/lib.nvim
           ref: ci-verified
+      # The same checkouts as ci.yml gives the suite (TESTS/testing/nightly_deps_spec.lua keeps them in step): the test
+      # sheet testing.tests-view-pipeline shows the view tests in filetree.nvim, which needs ui.nvim; under CI a feature
+      # sheet that misses them fails.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/filetree.nvim
+          path: .deps/filetree.nvim
+          ref: ci-verified
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          repository: WKDSteve/ui.nvim
+          path: .deps/ui.nvim
+          ref: ci-verified
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
         with:
           neovim: true
