@@ -141,14 +141,20 @@ steps = {
 },
 ```
 
-A name with `.exe` (`powershell.exe`, `explorer.exe`) is for WSL, where a feature calls Windows programs through
-interop: there the stand-in catches the call before Windows runs it. On Windows itself the stand-in is a `.cmd` file
-and only the bare name (`powershell`) reaches it, so a sheet that runs on both lists both.
+The child sends every start of a stand-in straight to it (`testing.fake_redirect`, installed before the minimal init):
+by its bare name, as `<name>.exe` (`explorer.exe`, `rundll32.exe`, a WSL call through interop) or by its path in the
+folder. On Windows the start goes to a recorder that is a real program (`nvim -l`), not to the `.cmd` file: cmd.exe
+never parses the arguments, so `&`, `|`, `<`, `>`, `^`, `%`, quotes and line breaks arrive as given and no part of an
+argument runs as a command, and a bare `vim.uv.spawn("curl")` reaches the stand-in instead of the real `curl.exe`.
+A name with `.exe` in `fakes` stands only for that name; the bare name covers both.
 
 `read(dir, program?)` gives `{ program, argv, cwd }` per call, in order. It proves what would be called, not what the
-system does with it: keep one `manual` line for the real effect. Known limit on Windows: an argument without blanks
-that holds `&`, `|`, `<`, `>` or `^`, or one with a line break, does not reach a `.cmd` stand-in as given (`=`, `,`, `;`
-and empty arguments do).
+system does with it: keep one `manual` line for the real effect. Covered are `vim.system`, `vim.uv.spawn`,
+`vim.fn.system`/`systemlist`/`jobstart`/`termopen` called from Lua and the first word of a command string
+(`io.popen`, `os.execute`, a string to `vim.fn.system`; the rest of the string goes to the shell as it would for the
+real program). Not covered: a start from Vimscript (`system()`, `:!`) or one another program makes; on Windows that
+one finds the `.cmd` stand-in on the `PATH`, and an argument without blanks that holds `&`, `|`, `<`, `>` or `^`
+does not reach it as given.
 
 ### The environment of the child
 

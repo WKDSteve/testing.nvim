@@ -243,6 +243,8 @@ return function(H)
   local ALLOWED = {
     ["lua/testing/guard/process_net.lua"] = true, -- wraps those very functions to judge them
     ["lua/testing/perf/trace.lua"] = true, -- wraps them too, to record each start (`testing perf`)
+    -- wraps them in a sheet child, to send a stood-in program's start to its stand-in (`fakes`)
+    ["lua/testing/fake_redirect.lua"] = true,
   }
   local scanned, offenders, used = 0, {}, {}
   for _, path in ipairs(H.glob(root .. "/lua/**/*.lua")) do

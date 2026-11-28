@@ -162,4 +162,144 @@ return function(H)
   local dir = fake.dir
   fake:close()
   eq(vim.fn.isdirectory(dir), 0, "close: the folder is gone")
+
+  -- testing.fake_redirect: a start of a stand-in goes straight to it, so no part of an argument is run (on Windows
+  -- cmd.exe ran `marker=1` of `x&marker=1` as a command) and a call of `<name>.exe` or a bare `uv.spawn` reaches it
+  local redirect = require("testing.fake_redirect")
+  local rf = fp.new({ "tfopener", "tfmarker", tfanswer = { stdout = "picked", exit_code = 3 } })
+  local tricky =
+    { "x&tfmarker=1", "a|b", "<c>", "^d", "%PATH%", "2", "e=f,g;h", 'q"uote', "", "two words" }
+  if platform.is_windows() then
+    -- (a POSIX stand-in writes one argument per line, a line break does not survive there)
+    tricky[#tricky + 1] = "line\nbreak"
+  end
+  local orig_system = vim.system
+  eq(redirect.install({ dir = rf.dir }), true, "redirect: installs for a folder of stand-ins")
+  local res = vim.system(vim.list_extend({ "tfopener" }, tricky), { text = true }):wait(20000)
+  eq(res.code, 0, "redirect: vim.system ran the stand-in")
+  eq(
+    rf:calls("tfopener")[1] and rf:calls("tfopener")[1].argv,
+    tricky,
+    "redirect: every argument as given"
+  )
+  eq(#rf:calls("tfmarker"), 0, "redirect: no part of an argument ran as a command")
+
+  -- calls at the same time through the redirect: each record whole (the recorder takes the lock folder too)
+  rf:reset()
+  local par = {}
+  for i = 1, 8 do
+    par[i] = vim.system({ "tfopener", "p" .. i, "--q" }, { text = true })
+  end
+  for _, j in ipairs(par) do
+    j:wait(30000)
+  end
+  local pseen = vim.tbl_map(function(c)
+    return table.concat(c.argv, " ")
+  end, rf:calls("tfopener"))
+  table.sort(pseen)
+  eq(
+    pseen,
+    { "p1 --q", "p2 --q", "p3 --q", "p4 --q", "p5 --q", "p6 --q", "p7 --q", "p8 --q" },
+    "redirect: 8 calls at once, 8 whole records"
+  )
+  eq(
+    vim.uv.fs_stat(rf.dir .. "/calls.log.lock"),
+    nil,
+    "redirect: the lock folder is gone afterwards"
+  )
+
+  rf:reset()
+  eq(vim.system({ "tfopener.exe", "u" }):wait(20000).code, 0, "redirect: <name>.exe")
+  eq(
+    rf:calls("tfopener")[1] and rf:calls("tfopener")[1].argv,
+    { "u" },
+    "redirect: <name>.exe reaches the stand-in"
+  )
+
+  rf:reset()
+  local done = false
+  local handle = vim.uv.spawn("tfopener", { args = { "s&t" } }, function()
+    done = true
+  end)
+  eq(handle ~= nil, true, "redirect: a bare uv.spawn finds the stand-in")
+  vim.wait(20000, function()
+    return done
+  end, 20)
+  if handle then
+    handle:close()
+  end
+  eq(
+    rf:calls("tfopener")[1] and rf:calls("tfopener")[1].argv,
+    { "s&t" },
+    "redirect: uv.spawn recorded"
+  )
+
+  rf:reset()
+  local out = vim.fn.system({ "tfanswer", "k" })
+  eq({ vim.v.shell_error, out }, { 3, "picked" }, "redirect: the stand-in's stdout and exit code")
+  -- a command string: io.popen goes to cmd.exe on Windows whatever 'shell' says
+  rf:reset()
+  local ph = assert(io.popen("tfopener plain words"))
+  ph:read("*a")
+  ph:close()
+  eq(
+    rf:calls("tfopener")[1] and rf:calls("tfopener")[1].argv,
+    { "plain", "words" },
+    "redirect: a command string to io.popen, its first word"
+  )
+  -- ... and a string to vim.fn.system goes to 'shell': quoted for that shell
+  rf:reset()
+  local saved_shell = {
+    shell = vim.o.shell,
+    shellcmdflag = vim.o.shellcmdflag,
+    shellxquote = vim.o.shellxquote,
+    shellquote = vim.o.shellquote,
+  }
+  if platform.is_windows() then
+    vim.o.shell, vim.o.shellcmdflag, vim.o.shellxquote, vim.o.shellquote =
+      "cmd.exe", "/s /c", '"', ""
+  else
+    vim.o.shell, vim.o.shellcmdflag, vim.o.shellxquote, vim.o.shellquote = "sh", "-c", "", ""
+  end
+  vim.fn.system("tfopener 'one' two")
+  for k, v in pairs(saved_shell) do
+    vim.o[k] = v
+  end
+  eq(
+    rf:calls("tfopener")[1] and rf:calls("tfopener")[1].argv,
+    platform.is_windows() and { "'one'", "two" } or { "one", "two" },
+    "redirect: a command string to vim.fn.system"
+  )
+  eq(
+    redirect.shell_kind("C:/Program Files/PowerShell/7/pwsh.exe"),
+    "pwsh",
+    "shell_kind: pwsh by path"
+  )
+  eq(redirect.shell_kind("powershell -NoLogo"), "pwsh", "shell_kind: with arguments")
+  eq(redirect.shell_kind("CMD.EXE"), "cmd", "shell_kind: cmd")
+  eq(redirect.shell_kind("/bin/bash"), "sh", "shell_kind: anything else")
+  eq(
+    redirect.line("tfopener a", "pwsh"):sub(1, 2),
+    "& ",
+    "redirect: PowerShell runs the quoted path through its call operator"
+  )
+  eq(
+    redirect.argv({ "git", "status" }),
+    { "git", "status" },
+    "redirect: another program is left as it is"
+  )
+  eq(
+    redirect.argv({ vim.fn.getcwd() .. "/tfopener", "x" })[1],
+    vim.fn.getcwd() .. "/tfopener",
+    "redirect: a path outside the folder of the stand-ins is left as it is"
+  )
+  redirect.uninstall()
+  eq(vim.system == orig_system, true, "redirect: uninstall puts vim.system back")
+  eq(redirect.match("tfopener"), nil, "redirect: nothing matches after uninstall")
+  eq(
+    select(1, redirect.install({ dir = rf.dir .. "/none" })),
+    false,
+    "redirect: a folder without specs.json"
+  )
+  rf:close()
 end

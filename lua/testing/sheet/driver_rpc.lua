@@ -451,6 +451,12 @@ function M.new(s, opts, ctx)
       prompts = s.prompts == "real" and "real" or "cancel",
       args = M.command_line(s.args, size),
     }, opts.spawn or {})
+    if fake then
+      -- the starts of the stand-ins go straight to them (past cmd.exe and the `.exe` search on Windows); installed
+      -- FIRST, so a spawn trace of `opts.spawn` (`testing perf`) wraps it and still sees the call as the plugin made it
+      local preload = { { module = "testing.fake_redirect", opts = { dir = fake.dir } } }
+      spawn.preload = vim.list_extend(preload, spawn.preload or {})
+    end
     -- a spawn that raises is a failure of this size, not an error out of `run` (expect hands the
     -- verdict to the harness, it must not throw past it)
     local spawned, c, err = pcall(require("testing.rpc").spawn, spawn)

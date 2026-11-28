@@ -83,26 +83,40 @@ return function(H)
     "the child found the stand-in and the step read the call"
   )
 
-  -- POSIX (WSL among them): a name with .exe is a stand-in like any other, so a feature that calls
-  -- `powershell.exe` through Windows interop reaches the stand-in and not Windows. On Windows the stand-in is a .cmd
-  -- file and a call of `x.exe` would not find it: there the bare name is the one to stand in for.
-  if vim.fn.has("win32") == 0 then
-    local exe = assert(sheet.validate(sheet_of({
-      fakes = { "powershell.exe" },
-      steps = {
-        {
-          lua = "_G.fake_code = vim.system({ 'powershell.exe', '-File', 'x.ps1' }, { text = true }):wait(10000).code",
-        },
-        {
-          expect = "_G.fake_code == 0 and vim.deep_equal(require('testing.fake_programs').read(vim.env.TESTING_FAKES, "
-            .. "'powershell.exe')[1].argv, { '-File', 'x.ps1' })",
-          note = "powershell.exe was the stand-in",
-        },
+  -- a name with .exe is a stand-in like any other (WSL calls Windows programs through interop as `powershell.exe`),
+  -- and a call of `<name>.exe` reaches the stand-in of the bare name on every system (`testing.fake_redirect`: on
+  -- Windows the call does not look for a `.cmd`, and cmd.exe would run the part of an argument after `&`)
+  local exe = assert(sheet.validate(sheet_of({
+    fakes = { "powershell.exe", "tfopen", "tfmark" },
+    steps = {
+      {
+        lua = "_G.fake_code = vim.system({ 'powershell.exe', '-File', 'x.ps1' }, { text = true }):wait(10000).code",
       },
-    })))
-    local rexe = sheet.run(exe, { root = root, ci = true })
-    eq({ rexe.status, rexe.failures }, { "pass", {} }, "a .exe stand-in on POSIX")
-  end
+      {
+        expect = "_G.fake_code == 0 and vim.deep_equal(require('testing.fake_programs').read(vim.env.TESTING_FAKES, "
+          .. "'powershell.exe')[1].argv, { '-File', 'x.ps1' })",
+        note = "powershell.exe was the stand-in",
+      },
+      {
+        lua = "_G.fake_code = vim.system({ 'tfopen.exe', 'http://x.test/?a=1&tfmark=1', 'b|c' }):wait(10000).code",
+      },
+      {
+        expect = "_G.fake_code == 0 and vim.deep_equal(require('testing.fake_programs').read(vim.env.TESTING_FAKES, "
+          .. "'tfopen')[1].argv, { 'http://x.test/?a=1&tfmark=1', 'b|c' })",
+        note = "tfopen.exe reached the stand-in of tfopen, its arguments whole",
+      },
+      {
+        expect = "#require('testing.fake_programs').read(vim.env.TESTING_FAKES, 'tfmark') == 0",
+        note = "no part of an argument ran as a command",
+      },
+    },
+  })))
+  local rexe = sheet.run(exe, { root = root, ci = true })
+  eq(
+    { rexe.status, rexe.failures },
+    { "pass", {} },
+    "a .exe call and an argument with & reach the stand-in"
+  )
 
   -- a sheet without the field finds no stand-in folder
   local plain =

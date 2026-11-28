@@ -79,6 +79,9 @@ return {
         "osascript",
         "trash",
         "xdg-open",
+        -- fake_programs_spec: the stand-ins `testing.fake_redirect` starts by their path (POSIX)
+        "tfopener",
+        "tfanswer",
         -- sheet_app_spec: a batch file of its own on the PATH, to see that a bare name finds it (Windows)
         "shim-tool",
         -- sheet_native_host_spec: the real run registers its fixture host under HKCU\Software\Chromium and the

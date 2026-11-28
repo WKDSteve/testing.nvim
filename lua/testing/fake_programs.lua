@@ -15,9 +15,10 @@
 ---   fake:close()
 ---
 --- A child editor gets the folder through `fake:path()` (the value for its `PATH`). Stand-ins are `.cmd` files on
---- Windows and `sh` scripts elsewhere. Known limits on Windows: cmd itself still parses the command line before the
---- stand-in runs, so an argument without blanks that holds `&`, `|`, `<`, `>` or `^`, or one with a line break, does
---- not arrive as given (an argument with a blank is quoted and arrives whole).
+--- Windows and `sh` scripts elsewhere. Known limits on Windows: cmd itself parses the command line before a `.cmd`
+--- stand-in runs, so an argument without blanks that holds `&`, `|`, `<`, `>` or `^` does not arrive as given (and the
+--- part after `&` runs as a command), and a call of `<name>.exe` or a bare `uv.spawn` does not find a `.cmd` at all.
+--- A sheet's child is past both: `testing.fake_redirect` sends its starts to a recorder that is a real program.
 
 local uv = vim.uv or vim.loop
 
@@ -87,7 +88,11 @@ local function posix_script(name, spec, log)
       sq(name),
       stdin
     ),
+    -- `>>` alone is not atomic on every file system (a network or 9p folder mixed two records): a lock folder,
+    -- given up after about 20 s so a killed stand-in cannot hold the others forever
+    'i=0; while ! mkdir "$log.lock" 2>/dev/null; do i=$((i+1)); [ "$i" -gt 2000 ] && break; sleep 0.01 2>/dev/null || sleep 1; done',
     'printf \'%s\\n\' "$rec" >> "$log"',
+    'rmdir "$log.lock" 2>/dev/null',
   }
   if spec.stdout and spec.stdout ~= "" then
     lines[#lines + 1] = ("printf '%%s' %s"):format(sq(spec.stdout))
@@ -171,6 +176,8 @@ function M.new(programs)
   write(log, "")
   local names = vim.tbl_keys(specs)
   table.sort(names)
+  -- what `testing.fake_redirect` and its recorder need: the names, and what each stand-in answers
+  write(dir .. "/specs.json", vim.json.encode(vim.tbl_isempty(specs) and vim.empty_dict() or specs))
   for _, name in ipairs(names) do
     if windows() then
       write(dir .. "/" .. name .. ".cmd", cmd_script(name, specs[name], log))
@@ -309,6 +316,10 @@ function Fake:calls(program)
       cur.cwd = value
     elseif cur and key == "arg" then
       cur.argv[#cur.argv + 1] = value
+    elseif cur and key == "argq" then
+      -- one argument as a JSON string (`scripts/fake_record.lua`): any character, a line break too
+      local ok, a = pcall(vim.json.decode, value)
+      cur.argv[#cur.argv + 1] = ok and type(a) == "string" and a or value
     elseif cur and key == "args" then
       cur.argv = M.split_cmdline(value)
     elseif cur and key == "stdin" then
