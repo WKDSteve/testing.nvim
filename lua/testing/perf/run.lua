@@ -139,6 +139,21 @@ function M.spawn_opts(trace_file, real)
   }
 end
 
+---Does a start still run after the last step (`left`)? A start the trace saw end (its `end` record, the same clock as
+---the steps) ran after the last step only when it ended after it; only a start without an end goes by the last sample
+---of the process tree, which may lie up to an interval before the end (insights.nvim: a `rg` that ended 210 ms before
+---the end of the sheet was "left", seen in the last sample).
+---@param sp Testing.Perf.Spawn
+---@param alive table<integer, boolean> the pids of the last sample
+---@param t_end? integer microseconds: the end of the last step
+---@return boolean
+function M.alive_at_end(sp, alive, t_end)
+  if sp.ms and sp.us and t_end then
+    return sp.us + sp.ms * 1000 > t_end
+  end
+  return sp.pid ~= nil and alive[sp.pid] == true
+end
+
 ---@param o table
 ---@param root string
 ---@param s Testing.Sheet
@@ -236,6 +251,8 @@ local function run_sheet(o, root, s, rel, tree)
   for _, p in ipairs(last and last.procs or {}) do
     alive[p.pid] = true
   end
+  local t_end = #res.steps > 0 and res.steps[#res.steps].t1 or nil
+  local ended_before = {}
   for _, sp in ipairs(spawns) do
     sp.step, sp.size = M.step_of(res.steps, sp.us)
     if config_to then
@@ -245,13 +262,16 @@ local function run_sheet(o, root, s, rel, tree)
     local p = sp.pid and per[sp.pid]
     if p then
       sp.peak, sp.cpu = p.peak, p.cpu
-      sp.alive_at_end = alive[sp.pid] == true
+    end
+    sp.alive_at_end = M.alive_at_end(sp, alive, t_end)
+    if sp.pid and not sp.alive_at_end then
+      ended_before[sp.pid] = true
     end
   end
   res.spawns = spawns
   res.reaches = require("testing.perf.trace").reaches(records)
   for _, p in pairs(per) do
-    p.alive_at_end = alive[p.pid] == true
+    p.alive_at_end = alive[p.pid] == true and not ended_before[p.pid]
     res.procs[#res.procs + 1] = p
   end
   table.sort(res.procs, function(a, b)

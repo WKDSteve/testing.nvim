@@ -625,6 +625,27 @@ return function(H)
     eq(by.memory[1].value, 400, "memory in MB")
     eq(by.cpu[1].value, 12, "cpu")
     eq(#by.left, 1, "left running: not the language server")
+    -- left: a start that ended before the end of the last step is not left, even when the last sample (up to an
+    -- interval earlier) still saw it; one that ends after it is; without an end, the last sample decides
+    local run_mod = require("testing.perf.run")
+    local alive = { [7] = true }
+    local t_end = 10e6
+    eq(
+      run_mod.alive_at_end({ pid = 7, us = 9e6, ms = 790 }, alive, t_end),
+      false,
+      "left: ended 210 ms before the end, though the last sample saw it"
+    )
+    eq(
+      run_mod.alive_at_end({ pid = 7, us = 9e6, ms = 1500 }, alive, t_end),
+      true,
+      "left: ended after the last step"
+    )
+    eq(
+      run_mod.alive_at_end({ pid = 7, us = 9e6 }, alive, t_end),
+      true,
+      "left: no end, in the last sample"
+    )
+    eq(run_mod.alive_at_end({ pid = 8, us = 9e6 }, alive, t_end), false, "left: no end, not in it")
     eq(by["repeat"][1].count, 1, "a repeat within 2 s, not the one 15 min later")
     -- the same command in another directory is no repeat (`rustc --print sysroot` answers per project), in the same
     -- one it is
