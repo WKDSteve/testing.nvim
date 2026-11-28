@@ -409,6 +409,37 @@ return function(H)
       has(table.concat(problems, "\n"), needle, msg)
     end
     refused({ bogus = 1 }, "unknown key bogus", "an unknown key")
+    -- an unknown key may be one a newer testing.nvim knows: the running checkout and its commit are named
+    do
+      local saved = workflow.running
+      workflow.running = function()
+        return "E:/repos/testing.nvim", "a7a788600000"
+      end
+      local _, problems = workflow.validate({ name = "x", luals2 = { version = "1" } })
+      local nested = select(
+        2,
+        workflow.validate({ name = "x", go = { version_file = "go.mod", used_by = "a", x = 1 } })
+      )
+      local _, other = workflow.validate({ name = "a/b" })
+      workflow.running = saved
+      local text = table.concat(problems, "\n")
+      has(text, "unknown key luals2", "stale: the key")
+      has(
+        text,
+        "E:/repos/testing.nvim at a7a788600000",
+        "stale: the running checkout and its commit"
+      )
+      has(text, "git pull", "stale: how to update it")
+      has(text, "TESTING_NVIM_DIR", "stale: ... or which checkout to take")
+      has(table.concat(nested, "\n"), "newer testing.nvim", "stale: a nested unknown key too")
+      eq(
+        table.concat(other, "\n"):find("newer testing.nvim", 1, true),
+        nil,
+        "stale: no hint without an unknown key"
+      )
+      local dir = workflow.running()
+      eq(type(dir), "string", "running: the checkout of this testing.nvim")
+    end
     refused({ platform = { "suite" } }, ".name", "no name (the directory never names the workflow)")
     refused({ name = "a/b" }, ".name", "a name with a slash")
     refused({ platform = {} }, ".platform", "no platform step")

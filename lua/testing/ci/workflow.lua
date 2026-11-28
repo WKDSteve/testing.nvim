@@ -741,9 +741,40 @@ function M.validate(raw)
     end
   end
   if #problems > 0 then
+    for _, p in ipairs(problems) do
+      if p:find(": unknown key ", 1, true) then
+        problems[#problems + 1] = M.stale_hint()
+        break
+      end
+    end
     return nil, problems
   end
   return cfg, problems
+end
+
+---Replaced by a spec: the checkout of the testing.nvim that runs, and its commit (nil when git cannot tell).
+---@return string dir
+---@return string|nil sha
+M.running = function()
+  local dir = require("testing.deps").self_dir()
+  local ok, res = pcall(function()
+    return vim
+      .system({ "git", "-C", dir, "rev-parse", "--short=12", "HEAD" }, { text = true })
+      :wait(5000)
+  end)
+  local sha = ok and res and res.code == 0 and vim.trim(res.stdout or "") or nil
+  return dir, sha ~= "" and sha or nil
+end
+
+---The line after an unknown key: a typo, or a key a newer testing.nvim knows than the one that runs (a shared
+---checkout that was not pulled; the commit's `.testing.lua` was written against a newer one).
+---@return string
+function M.stale_hint()
+  local dir, sha = M.running()
+  return (
+    "ci.workflow: an unknown key is a typo, or a key of a newer testing.nvim than the one that runs (%s at %s): "
+    .. "update it (git pull there) or point TESTING_NVIM_DIR at a newer checkout"
+  ):format(dir, sha or "an unknown commit")
 end
 
 ---Width of the comment above the checkouts: the workflows of rules.nvim and tasks.nvim wrapped it there by hand, and
