@@ -328,6 +328,26 @@ return function(H)
       )
       eq(scan.match(sys[5], sctx), "vim.system", "run( after local run = vim.system")
       eq(scan.match(sys[7], sctx), nil, "a name bound to something else is none")
+      -- a spawning function of a module alias handed to pcall as a value (ai.nvim's transport)
+      local mctx = {
+        aliases = { curl = "lib.nvim.net.curl" },
+        spawning = { ["lib.nvim.net.curl"] = { fetch_json = true, fetch_stream = true } },
+      }
+      eq(
+        scan.match("  local ok = pcall(curl.fetch_json, url, {}, cb)", mctx),
+        "lib.nvim.net.curl.fetch_json",
+        "pcall(curl.fetch_json, ...)"
+      )
+      eq(
+        scan.match("  local ok, p = pcall(curl.fetch_stream, url, {", mctx),
+        "lib.nvim.net.curl.fetch_stream",
+        "pcall(curl.fetch_stream, ... on a wrapped line"
+      )
+      eq(
+        scan.match("  local ok = pcall(curl.encode, x)", mctx),
+        nil,
+        "pcall of a function of the module that starts nothing: none"
+      )
     end
     eq(
       scan.joined({ "  local ok, s = pcall(", "    vim.system,", "  )" }, 1),

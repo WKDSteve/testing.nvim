@@ -222,6 +222,12 @@ function M.match(line, ctx)
         return mod .. "." .. fn
       end
     end
+    -- handed to pcall as a value: `pcall(curl.fetch_json, url, opts, cb)` (ai.nvim's transport)
+    for fn in bare:gmatch("x?pcall%s*%(%s*" .. a .. "%.([%w_]+)%s*[,%)]") do
+      if fns[fn] then
+        return mod .. "." .. fn
+      end
+    end
     if fns.__call and bare:find("%f[%w_]" .. a .. "%s*%(") then
       return mod
     end
