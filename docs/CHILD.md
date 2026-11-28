@@ -53,7 +53,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `prompts` | `"cancel"` | `input()`, `confirm()`, ... answer "cancelled" (`"real"`: left alone; a test sheet with `prompts = "real"` sets it) |
 | `notify_passthrough` | `true` | `vim.notify` is captured AND passed on |
 | `track_schedule` | `true` | count scheduled callbacks (for `settle`) |
-| `ts_sync` | `true` | treesitter parses synchronously (`vim.g._ts_force_sync_parsing`, unless the child already set it) |
+| `ts_sync` | `true` (`false` with `user_config`) | treesitter parses synchronously (`vim.g._ts_force_sync_parsing`, unless the child already set it); a real config and `testing perf` parse in steps as a real editor |
 | `guard` | `{ repo = root }` | config for `testing.guard.install`; `false` installs no guard |
 | `size` | `{ rows = 24, cols = 80 }` | screen size used by `screen()` |
 | `trace_dir`, `run_dir`, `trace_name` | temp dir | where the trace goes, see Trace |

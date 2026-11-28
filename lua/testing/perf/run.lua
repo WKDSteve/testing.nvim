@@ -122,6 +122,23 @@ local function map_config(place, from, to)
   return place
 end
 
+---The options of the measured child: the spawn trace before the minit, and treesitter parsing in steps as in a real
+---editor (`ts_sync = false`; a sheet child parses synchronously, which would show the parse as one long freeze).
+---@param trace_file string
+---@param real? string[]
+---@return table
+function M.spawn_opts(trace_file, real)
+  return {
+    preload = {
+      {
+        module = "testing.perf.trace",
+        opts = { out = trace_file, real = real and table.concat(real, ",") or nil },
+      },
+    },
+    ts_sync = false,
+  }
+end
+
 ---@param o table
 ---@param root string
 ---@param s Testing.Sheet
@@ -153,14 +170,7 @@ local function run_sheet(o, root, s, rel, tree)
   end
   local trace_file = o.dir .. "/" .. s.id .. ".jsonl"
   os.remove(trace_file)
-  local spawn = {
-    preload = {
-      {
-        module = "testing.perf.trace",
-        opts = { out = trace_file, real = o.real and table.concat(o.real, ",") or nil },
-      },
-    },
-  }
+  local spawn = M.spawn_opts(trace_file, o.real)
   local session_mod = o.session or require("testing.sheet.session")
   local mark0 = tree:count()
   local t_start = now_us()

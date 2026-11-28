@@ -42,6 +42,18 @@ local uv = vim.uv or vim.loop
 M.CALL_TIMEOUT_MS = 10000
 ---Default time the editor may take to start and run the project's init (ms).
 M.BOOT_TIMEOUT_MS = 20000
+
+---Does the child parse treesitter synchronously (`ts_sync`)? As given; without a word, yes for a minimal init (a
+---settle on a loaded machine is not held up by the stepwise parse) and no for the user's real config (`user_config`:
+---it behaves as the real editor, a measuring run sees the real parse).
+---@param opts Testing.Rpc.Opts
+---@return boolean
+function M.ts_sync_of(opts)
+  if opts.ts_sync ~= nil then
+    return opts.ts_sync == true
+  end
+  return opts.user_config == nil
+end
 ---How long `kill` waits for the process to end before it is abandoned (ms).
 M.REAP_MS = 10000
 ---How long `restart({ quit = true })` waits for the editor to quit by itself (ms).
@@ -121,7 +133,7 @@ end
 ---@field prompts? "cancel"|"real" `input()`/`confirm()` answer "cancelled" (default) or are left alone.
 ---@field notify_passthrough? boolean Also run the original `vim.notify` (default true).
 ---@field track_schedule? boolean Count scheduled callbacks for `settle` (default true).
----@field ts_sync? boolean Treesitter parses synchronously in the child (`vim.g._ts_force_sync_parsing`; default true).
+---@field ts_sync? boolean Treesitter parses synchronously in the child (`vim.g._ts_force_sync_parsing`; default true, but false with `user_config`: a real config behaves as in a real editor).
 ---@field guard? table|false Config for `testing.guard.install` (default `{}`; false: none).
 ---@field trace_dir? string Where a trace file goes on timeout/crash (default `<tmp>/testing-traces`).
 ---@field run_dir? string Run directory: a trace below it is reported as `<RUN>/...`.
@@ -873,7 +885,7 @@ local function start(S, async_cb)
         prompts = opts.prompts,
         notify_passthrough = opts.notify_passthrough,
         track_schedule = opts.track_schedule,
-        ts_sync = opts.ts_sync,
+        ts_sync = M.ts_sync_of(opts),
         guard = opts.guard == nil and { repo = S.root } or opts.guard,
       },
     },

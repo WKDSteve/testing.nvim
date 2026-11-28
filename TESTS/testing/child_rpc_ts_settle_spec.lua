@@ -16,6 +16,18 @@ return function(H)
       msg .. " (got " .. tostring(haystack):sub(1, 500) .. ")"
     )
   end
+  -- who parses synchronously: a minimal init yes, the user's real config and a measuring run (`testing perf`) not
+  local rpc = require("testing.rpc")
+  eq(rpc.ts_sync_of({}), true, "ts_sync_of: on by default")
+  eq(rpc.ts_sync_of({ user_config = {} }), false, "ts_sync_of: off for the user's real config")
+  eq(rpc.ts_sync_of({ user_config = {}, ts_sync = true }), true, "ts_sync_of: as given")
+  eq(rpc.ts_sync_of({ ts_sync = false }), false, "ts_sync_of: off as given")
+  eq(
+    require("testing.perf.run").spawn_opts("/t.jsonl").ts_sync,
+    false,
+    "perf: the measured child parses in steps, as a real editor"
+  )
+
   if not pcall(vim.treesitter.language.add, "markdown") then
     print("n/a  no markdown parser for treesitter in this editor")
     return
