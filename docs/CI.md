@@ -772,8 +772,8 @@ repository keeps one worktree (`<temp or state>/testing/snap/warm-<key>/tree`, `
 moved to the next commit with `checkout --force --detach` and `clean -ffdx`, so its content is exactly the commit's
 while only the files that differ are written. On Windows the first read of each new file is what costs: tasks-vault
 (7863 files) took 33 to 36 s per push on a fresh worktree and 3.7 to 4 s on the warm one (2026-11-21). A lock beside
-it (`warm-<key>.lock`, with the pid; a dead holder's lock is taken over) keeps it to one run; a second run at the same
-time takes a fresh snapshot as before. `sweep` removes a warm snapshot nobody used for seven days. `testing ci commit`
+it (`warm-<key>.lock`, with the pid; a dead holder's lock is taken over, a lock whose pid is not written yet counts as
+held for a minute) keeps it to one run; a second run at the same time takes a fresh snapshot as before. `sweep` removes a warm snapshot nobody used for seven days. `testing ci commit`
 still uses fresh snapshots.
 
 **A red run answers for its tree a while.** A red, complete run leaves `<tree>-<profile>.red.json` beside the proofs

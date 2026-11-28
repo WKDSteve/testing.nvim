@@ -213,6 +213,17 @@ return function(H)
     ok(c ~= nil, "warm: a dead holder's lock is taken over")
     eq(vim.fn.filereadable(lock .. ".takeover"), 0, "warm: the takeover mark is gone afterwards")
     snapshot.remove(c)
+    -- a lock without a pid yet (created, its pid not written: a loaded machine) is held, never taken over: two runs
+    -- in one tree, and the first one saw "HEAD moved during the run"
+    S.write(lock, "")
+    eq(snapshot.warm(root, next_sha, opts), nil, "warm: a young lock without a pid is held")
+    eq(vim.fn.filereadable(lock), 1, "warm: ... and stays")
+    -- ... until it is older than the grace: a crash between the open and the write left it
+    local old = os.time() - snapshot.LOCK_EMPTY_GRACE_S - 5
+    vim.uv.fs_utime(lock, old, old)
+    local d = snapshot.warm(root, next_sha, opts)
+    ok(d ~= nil, "warm: an old lock without a pid is taken over")
+    snapshot.remove(d)
   end
 
   -- a new commit: another tree, the proof is for the old one

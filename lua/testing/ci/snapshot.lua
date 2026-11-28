@@ -223,6 +223,25 @@ local function alive(pid)
   return ok == 0 or (type(err) == "string" and err:find("EPERM", 1, true) ~= nil)
 end
 
+---Seconds a lock without a readable pid counts as held: the exclusive open and the write of the pid are two steps, and
+---on a loaded machine (a virus scan of the new file) the lock is empty for a while. Only a lock that stayed without a
+---pid this long is a crash's leftover.
+M.LOCK_EMPTY_GRACE_S = 60
+
+---Does a live run hold the lock? A lock whose pid cannot be read yet is held while it is young (`LOCK_EMPTY_GRACE_S`):
+---taking it over then put two runs into one tree, and the first saw "HEAD moved during the run".
+---@param lock string
+---@return boolean
+local function lock_held(lock)
+  local okd, doc = pcall(vim.json.decode, require("lib.nvim.fs.read")(lock) or "")
+  local pid = okd and type(doc) == "table" and tonumber(doc.pid) or nil
+  if pid then
+    return alive(pid)
+  end
+  local st = vim.uv.fs_stat(lock)
+  return st ~= nil and os.time() - st.mtime.sec <= M.LOCK_EMPTY_GRACE_S
+end
+
 ---Take the lock of a warm snapshot; a lock whose process is gone is taken over.
 ---@param lock string
 ---@return boolean
@@ -232,9 +251,7 @@ local function take_lock(lock)
   if create(lock, body) then
     return true
   end
-  local okd, doc = pcall(vim.json.decode, require("lib.nvim.fs.read")(lock) or "")
-  local pid = okd and type(doc) == "table" and tonumber(doc.pid) or nil
-  if pid and alive(pid) then
+  if lock_held(lock) then
     return false
   end
   -- a dead holder's lock: only the run that makes the takeover mark may remove it, so two runs that both saw the dead
@@ -249,10 +266,8 @@ local function take_lock(lock)
     return false
   end
   -- read again under the mark: another run may have taken it over just before
-  local okd2, doc2 = pcall(vim.json.decode, require("lib.nvim.fs.read")(lock) or "")
-  local pid2 = okd2 and type(doc2) == "table" and tonumber(doc2.pid) or nil
   local taken = false
-  if not (pid2 and alive(pid2)) then
+  if not lock_held(lock) then
     os.remove(lock)
     taken = create(lock, body) and true or false
   end
