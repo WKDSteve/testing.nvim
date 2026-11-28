@@ -598,7 +598,8 @@ with no run): nothing was checked. Such a commit lands only when it changes docu
 `ci commit` reads as `DOCS-ONLY`), and the last line says `landed on <branch> WITHOUT a hosted run (docs only, skipped by
 marker)`, never "green on the hosted CI". A commit that changes code stops with `skipped by marker in the commit text,
 but code changed: <remote>/<branch> stays; reword the commit and land again` (exit 1); a quoted marker in a commit
-body is enough to cause it. A real run whose jobs were all skipped is a run and lands as green.
+body is enough to cause it. A commit that changes no file against the branch stops the same way, saying `and the commit
+changes no file: nothing to land`. A real run whose jobs were all skipped is a run and lands as green.
 
 Before the check branch is pushed, `land` looks at the runs of the commit once. Is the newest push run of every awaited
 workflow green and completed already (an earlier `land` of the same commit gave up, or its push of `<branch>` failed),
