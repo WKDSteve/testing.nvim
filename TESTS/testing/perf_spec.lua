@@ -493,6 +493,28 @@ return function(H)
       { 7 },
       "the tail call of M.d is reached through its caller"
     )
+    -- a COPY of the plugin (a sheet minit copied `lua/` to a temp folder, color_my_ascii.nvim): the same file counts
+    -- for the root's, and the copy is named; a copy with other content does not count
+    do
+      local src = vim.fn.readfile(root .. "/lua/plug/init.lua")
+      local copy = write("copy-of-plug/lua/plug/init.lua", src)
+      local copy_dir = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(copy)))
+      local cc = scan.coverage(sites, { { stack = { copy .. ":6" } } }, root, false)
+      eq(
+        vim.tbl_map(function(s)
+          return s.line
+        end, cc.covered),
+        { 6 },
+        "a frame in a copy of the plugin reaches the root's site"
+      )
+      eq(cc.copies, { vim.fs.normalize(copy_dir) }, "... and the copy is named")
+      local other = vim.deepcopy(src)
+      other[1] = "-- another state"
+      local changed = write("changed-plug/lua/plug/init.lua", other)
+      local co = scan.coverage(sites, { { stack = { changed .. ":6" } } }, root, false)
+      eq(#co.covered, 0, "a copy with other content does not count (its lines may be elsewhere)")
+      eq(co.copies, nil, "... and is not named")
+    end
     local reached = scan.coverage(
       sites,
       {},

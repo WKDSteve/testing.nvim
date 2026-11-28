@@ -666,6 +666,54 @@ function M.relative(place, root, ci)
   return nil
 end
 
+---A frame in a COPY of the project (`<somewhere>/lua/<mod>/x.lua` outside the root, the same file as the root's
+---`lua/<mod>/x.lua`): the root's file. A sheet minit that copies `lua/` and `plugin/` to a temp folder (so that
+---`plugin/` writes no `doc/tags` into the checkout) ran the plugin from there, and no site counted as reached
+---(color_my_ascii.nvim). Only a file with the same content: another state would put the lines elsewhere. The folder of
+---the copy goes into `copies` (for a note), `cache` keeps what was compared.
+---@param place string|nil `file:line`
+---@param root string
+---@param copies table<string, boolean>
+---@param cache table<string, string|false>
+---@return string|nil rel `lua/<mod>/x.lua:<line>`
+function M.copy_relative(place, root, copies, cache)
+  if not place then
+    return nil
+  end
+  local p = place:gsub("\\", "/")
+  local file, line = p:match("^(.*):(%d+)$")
+  if not file then
+    return nil
+  end
+  local base, rel = file:match("^(.*)/(lua/.+)$")
+  if not base then
+    base, rel = file:match("^(.*)/(plugin/.+)$")
+  end
+  if not base then
+    return nil
+  end
+  local key = file
+  if cache[key] == nil then
+    local r = vim.fs.normalize(root):gsub("/+$", "")
+    local function slurp(path)
+      local f = io.open(path, "rb")
+      if not f then
+        return nil
+      end
+      local t = f:read("*a")
+      f:close()
+      return t
+    end
+    local own = slurp(r .. "/" .. rel)
+    local theirs = own and slurp(file)
+    cache[key] = (own and theirs and own == theirs) and rel or false
+    if cache[key] then
+      copies[base] = true
+    end
+  end
+  return cache[key] and (cache[key] .. ":" .. line) or nil
+end
+
 ---The line of a file below the root (cached for one coverage).
 local function line_at(cache, root, rel, n)
   if cache[rel] == nil then
@@ -694,8 +742,9 @@ end
 function M.coverage(sites, spawns, root, ci, reaches)
   local hit, frames = {}, {}
   local seen = {}
+  local copies, copy_cache = {}, {}
   local function take(place)
-    local rel = M.relative(place, root, ci)
+    local rel = M.relative(place, root, ci) or M.copy_relative(place, root, copies, copy_cache)
     if rel and not seen[rel] then
       seen[rel] = true
       hit[ci and rel:lower() or rel] = true
@@ -795,10 +844,13 @@ function M.coverage(sites, spawns, root, ci, reaches)
       missing[#missing + 1] = site
     end
   end
+  local copy_list = vim.tbl_keys(copies)
+  table.sort(copy_list)
   return {
     covered = covered,
     missing = missing,
     ratio = #sites > 0 and (#covered / #sites) or nil,
+    copies = #copy_list > 0 and copy_list or nil,
   }
 end
 

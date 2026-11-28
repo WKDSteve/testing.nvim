@@ -97,6 +97,11 @@ were reached; an unreached site is a functionality without a sheet, a sheet that
 In a linked Git worktree the repository is named after its main checkout, and the dependencies the main checkout
 resolves are passed to the child editors (`$<NAME>_DIR`), as `ci commit` does.
 
+A sheet minit that loads the plugin from a COPY (it copies `lua/` and `plugin/` to a temp folder) puts the frames
+outside the repository: a frame in a file of the same content as the repository's `lua/...`/`plugin/...` counts for
+that file, and the report says so (`Hinweis: Starts aus einer Kopie des Plugins (...)`). A copy with other content
+does not count.
+
 The report also lists the functionalities of the catalog (`TESTS/sheets/features.lua`) without a sheet.
 
 ## Real or a stand-in (`--real`)

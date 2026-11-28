@@ -478,6 +478,8 @@ function M.document(run, t)
       sheets = sheets,
       unloadable = rr.unloadable,
       missing_sites = (rr.coverage or {}).missing,
+      -- the folders a sheet ran a copy of the plugin from (its minit copied `lua/`): counted for the root's files
+      copies = (rr.coverage or {}).copies,
       catalog = {
         total = gaps.total,
         error = rr.catalog_error,
@@ -680,6 +682,14 @@ function M.markdown(doc, base)
           ("| %s | – | lädt nicht | – | – | %s |"):format(
             cell(u.rel),
             cell(u.error:sub(1, 160))
+          )
+        )
+      end
+      if r.copies then
+        add()
+        add(
+          ("Hinweis: Starts aus einer Kopie des Plugins (%s): den gleichen Dateien des Repos zugeordnet; das minit lädt das Plugin nicht aus dem Checkout."):format(
+            table.concat(r.copies, ", ")
           )
         )
       end
