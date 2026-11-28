@@ -16,7 +16,15 @@ if ! command -v nvim >/dev/null 2>&1; then
   echo "testing: nvim is not on the PATH: nothing ran" >&2
   exit 3
 fi
-nvim -n -i NONE --headless -u NONE -l "$here/../scripts/testing.lua" "$@"
+script="$here/../scripts/testing.lua"
+# Git Bash (MSYS): nvim is a native Windows program that does not know `/e/...`; MSYS converts such an argument only
+# while MSYS_NO_PATHCONV is unset, so the Windows form (`E:/...`) is handed over in any case. Linux/macOS: as is.
+case $(uname -s 2>/dev/null) in
+MINGW* | MSYS*)
+  win=$(CDPATH='' cd -- "$here/.." && pwd -W 2>/dev/null) && script="$win/scripts/testing.lua"
+  ;;
+esac
+nvim -n -i NONE --headless -u NONE -l "$script" "$@"
 rc=$?
 case $rc in
 0 | 1 | 2 | 3) ;;
