@@ -37,6 +37,35 @@ function M.prompt_failure(prompt)
   )
 end
 
+---How many of the last lines of the screen a failure behind a prompt quotes.
+M.PROMPT_LINES = 6
+
+---What the screen says when `err` is a call that waits behind a prompt of the child (`testing.rpc.prompt_of`): the
+---last lines that are not blank, read from what the attached UI was told (no call into the child, which waits), as
+---` (the screen says: a | b | c)`. Empty for another error or a screen that cannot be read. A hit-enter prompt at the
+---start of a real config named only its kind, and the message that caused it was gone by the next run.
+---@param child table
+---@param err any
+---@return string
+function M.prompt_screen(child, err)
+  if not require("testing.rpc").prompt_of(err) or type(child.ui_screen) ~= "function" then
+    return ""
+  end
+  local ok, scr = pcall(child.ui_screen)
+  if not ok or type(scr) ~= "table" or type(scr.lines) ~= "table" then
+    return ""
+  end
+  local lines = {}
+  for _, l in ipairs(scr.lines) do
+    local t = vim.trim(tostring(l))
+    if t ~= "" then
+      lines[#lines + 1] = t:sub(1, 200)
+    end
+  end
+  lines = vim.list_slice(lines, math.max(1, #lines - M.PROMPT_LINES + 1))
+  return #lines > 0 and (" (the screen says: " .. table.concat(lines, " | ") .. ")") or ""
+end
+
 ---Whether the error of a child's start is a time limit that ran out (the boot call, or the first `nvim_ui_attach`),
 ---not an error the child reported: on a busy machine (a build, a runner, a low CPU priority) the child of a whole
 ---config is not slow because of the sheet.
@@ -424,7 +453,12 @@ function M.new(s, opts, ctx)
         local met, rerr = pcall(child.lua_get, req.lua)
         if not met then
           answer = {
-            failure = ("%s: requires %q raised: %s"):format(tag, req.lua, tostring(rerr)),
+            failure = ("%s: requires %q raised: %s%s"):format(
+              tag,
+              req.lua,
+              tostring(rerr),
+              M.prompt_screen(child, rerr)
+            ),
           }
           return
         end

@@ -391,6 +391,27 @@ return function(H)
         { true, "pass", {} },
         "args and restart: every step passes"
       )
+      -- a child that stands in a hit-enter prompt (a message of the start, here of the probe itself): the failure
+      -- names what the screen says, not only "hit-enter prompt"
+      req.requires = {
+        {
+          -- the text is put together in the child: the failure quotes this code, the screen has the whole line
+          lua = [[(function()
+            local l = {}
+            for i = 1, 3 do
+              l[i] = ("screen" .. "-said-%d"):format(i * 7)
+            end
+            vim.api.nvim_echo({ { table.concat(l, "\n") } }, true, {})
+            vim.cmd("redraw")
+            return true
+          end)()]],
+          reason = "r",
+        },
+      }
+      local pr = sheet.run(req, { root = root, ci = false, update = false })
+      local pf = table.concat(pr.failures or {}, "\n")
+      has(pf, "prompt", "a probe behind a prompt fails the sheet (" .. pf .. ")")
+      has(pf, "screen-said-14", "... and the failure names what the screen says")
       req.requires = { { lua = "error('boom')", reason = "r" } }
       has(
         sheet.run(req, { root = root, ci = false, update = false }).failures[1],
