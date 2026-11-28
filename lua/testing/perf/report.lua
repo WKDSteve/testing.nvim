@@ -203,7 +203,14 @@ function M.findings(repo, sh, t)
   local function add(kind, sp, value, unit, text)
     local place = sp.origin or sp.site or "?"
     local program = M.program(sp.argv or "")
-    local key = table.concat({ kind, program, place, sp.plugin or "?" }, "\0")
+    local parts = { kind, program, place, sp.plugin or "?" }
+    if kind == "repeat" then
+      -- a repeat is about one command: the same line asking six repositories (`git -C <repo> status`) is six
+      -- commands, not one asked six times (gitsuite.nvim read 15 as "15 times per repository")
+      parts[#parts + 1] = sp.argv or ""
+      parts[#parts + 1] = sp.cwd or ""
+    end
+    local key = table.concat(parts, "\0")
     local g = groups[key]
     if not g then
       g = {
@@ -278,11 +285,16 @@ function M.findings(repo, sh, t)
       if repo_key and M.git_write(sp.argv or "") then
         written[repo_key] = (written[repo_key] or 0) + 1
       end
+      -- and the same input: a filter that reads another text on stdin answers differently (`stdin` of the trace: a
+      -- digest of the text, `?` when it was written later and is not known; that one is never the same)
+      local stdin = sp.stdin == "?" and ("?" .. tostring(sp.id)) or (sp.stdin or "")
       local same = sp.argv
         .. "\0"
         .. (sp.cwd or "")
         .. "\0"
         .. tostring(repo_key and written[repo_key] or 0)
+        .. "\0"
+        .. stdin
       local prev = last_seen[same]
       if prev and sp.us and prev.us and (sp.us - prev.us) / 1000 < t.repeat_ms then
         add(

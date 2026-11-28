@@ -787,6 +787,58 @@ return function(H)
     end
     eq(repeats("/b"), 0, "repeat: the same argv in another cwd is none")
     eq(repeats("/a"), 1, "repeat: the same argv in the same cwd is one")
+    -- the same command with another text on stdin is no repeat (a filter, casedesk.nvim); with the same text it is;
+    -- a stdin written later (`?`) is never the same
+    local function stdin_repeats(a, b)
+      local f3 = report.findings("p.nvim", {
+        id = "i",
+        steps = { { n = 1, action = "lua" } },
+        spawns = {
+          { id = 1, plugin = "p", step = 1, argv = "nvim --clean -l f.lua", stdin = a, us = 1000 },
+          { id = 2, plugin = "p", step = 1, argv = "nvim --clean -l f.lua", stdin = b, us = 9000 },
+        },
+      })
+      return #vim.tbl_filter(function(x)
+        return x.kind == "repeat"
+      end, f3)
+    end
+    eq(stdin_repeats("5:0a1b2c3d", "7:00ffee11"), 0, "repeat: another stdin is none")
+    eq(stdin_repeats("5:0a1b2c3d", "5:0a1b2c3d"), 1, "repeat: the same stdin is one")
+    eq(stdin_repeats("?", "?"), 0, "repeat: a stdin written later is never the same")
+    -- one call site asking two repositories: one line per command, each with its own count (gitsuite.nvim)
+    local two = {}
+    for i, r in ipairs({ "/r/alpha", "/r/bravo", "/r/alpha", "/r/bravo", "/r/alpha" }) do
+      two[#two + 1] = {
+        plugin = "p",
+        step = 1,
+        argv = "git -C " .. r .. " status",
+        origin = "status.lua:222",
+        us = 1000 + i * 100,
+      }
+    end
+    local rep = vim.tbl_filter(
+      function(x)
+        return x.kind == "repeat"
+      end,
+      report.findings("p.nvim", { id = "r", steps = { { n = 1, action = "keys" } }, spawns = two })
+    )
+    local counts = {}
+    for _, x in ipairs(rep) do
+      counts[x.argv] = x.count
+    end
+    eq(
+      counts,
+      { ["git -C /r/alpha status"] = 2, ["git -C /r/bravo status"] = 1 },
+      "repeat: one line per repository, with its own count"
+    )
+    -- the trace keeps a digest of a text on stdin, never the text
+    local trace = require("testing.perf.trace")
+    eq(trace.stdin_of("abc"), trace.digest("abc"), "stdin_of: a text is its digest")
+    eq(trace.stdin_of({ "a", "b" }), trace.digest("a\nb"), "stdin_of: lines joined")
+    eq(trace.stdin_of(true), "?", "stdin_of: written later")
+    eq(trace.stdin_of(nil), nil, "stdin_of: none")
+    ok(trace.digest("abc") ~= trace.digest("abd"), "digest: another text, another digest")
+    eq(trace.digest(("x"):rep(100000)):match("^(%d+):"), "100000", "digest: with the length")
     -- a git that changes the repository between two reads makes the second read needed (filetree.nvim: status,
     -- `git add`, status); two reads with only reads between are a repeat
     local function git_repeats(between)

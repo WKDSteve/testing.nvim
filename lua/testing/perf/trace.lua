@@ -44,6 +44,8 @@ end
 ---@field outer? { kind: string, id: integer }
 ---@field orig table<string, any>
 ---@field config_dir? string
+---@field running table<integer, boolean> the starts nobody waits for yet (a `vim.wait` meanwhile waits for them)
+---@field in_wait? integer how deep the trace is in a `wait()` of `vim.system` (its own `vim.wait` is not counted)
 ---@type Testing.Perf.TraceState|nil
 local S
 
@@ -215,6 +217,34 @@ local function argv_text(cmd)
   return text
 end
 
+---A short digest of a text: its length and a 32-bit hash (djb2: every product stays below 2^38, exact in a Lua
+---number), `<len>:<hex>`. Runs in a fast callback too (no `vim.fn`); the text is not kept, only whether two inputs
+---were the same.
+---@param s string
+---@return string
+function M.digest(s)
+  local h = 5381
+  for i = 1, #s do
+    h = (h * 33 + s:byte(i)) % 4294967296
+  end
+  return ("%d:%08x"):format(#s, h)
+end
+
+---What `stdin` of a `vim.system` call is for the trace: `M.digest` of a text (a list of lines joined as the call
+---writes them), `?` when the data is written later (`stdin = true`), nil for none.
+---@param stdin any
+---@return string|nil
+function M.stdin_of(stdin)
+  if type(stdin) == "string" then
+    return M.digest(stdin)
+  elseif type(stdin) == "table" then
+    return M.digest(table.concat(vim.tbl_map(tostring, stdin), "\n"))
+  elseif stdin == true then
+    return "?"
+  end
+  return nil
+end
+
 ---@param kind string
 ---@param cmd any
 ---@param extra? table
@@ -309,7 +339,10 @@ function M.install(opts)
     if not S then
       return O.system(cmd, sopts, on_exit)
     end
-    local extra = { cwd = type(sopts) == "table" and sopts.cwd or nil }
+    local extra = {
+      cwd = type(sopts) == "table" and sopts.cwd or nil,
+      stdin = type(sopts) == "table" and M.stdin_of(sopts.stdin) or nil,
+    }
     if on_exit ~= nil then
       -- with a callback nobody waits; without one, a wait() decides (the `wait` record)
       extra.sync = false
@@ -657,6 +690,7 @@ function M.fold(records)
   ---@field kind string
   ---@field argv string
   ---@field cwd? string the directory it ran in
+  ---@field stdin? string what it got on stdin: `M.digest` of the text, `?` written later (not known), nil none
   ---@field sync? boolean
   ---@field pid? integer
   ---@field ms? number how long it ran (nil: still running when the trace ended)
@@ -682,6 +716,7 @@ function M.fold(records)
         kind = r.kind,
         argv = r.argv,
         cwd = r.cwd,
+        stdin = r.stdin,
         sync = r.sync,
         pid = r.pid,
         site = r.site,

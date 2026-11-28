@@ -66,7 +66,7 @@ snapshot is a failure and is never written. On top of that:
 | `cpu` | a process used more CPU than | 10 s |
 | `left` | a process the plugin started still runs after the last step (language servers are not counted) | |
 | `burst` | more starts of the plugin in one step than | 5 |
-| `repeat` | the same command line again in the same directory (`cwd` of the start) within, unless a git that may change that repository (`add`, `reset`, `commit`, ...: any subcommand but a read such as `status`, `diff`, `log`) ran between | 2000 ms |
+| `repeat` | the same command line again in the same directory (`cwd` of the start) and with the same input on stdin (a digest of it; one written later is never the same) within, one line per command line (`git -C a` and `git -C b` of one call site are two), unless a git that may change that repository (`add`, `reset`, `commit`, ...: any subcommand but a read such as `status`, `diff`, `log`) ran between | 2000 ms |
 
 The same call in a loop is one line with a count (grouped by kind, program and calling line). The thresholds are
 `require("testing.perf.report").THRESHOLDS`.
