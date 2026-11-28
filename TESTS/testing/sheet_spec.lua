@@ -329,6 +329,19 @@ return function(H)
       local rc = sheet.run(feat, { root = root, ci = true, update = false, getenv = under_ci })
       eq({ rc.ok, rc.status }, { false, "fail" }, "a feature sheet skipped under CI is red")
       has(rc.failures[1], "skipped under CI (plugin X is not beside it)", "the failure says why")
+      -- a feature sheet with `config = "user"` runs the user's installed config, which CI never has: a skip there,
+      -- as for a live sheet, never red (lsp.nvim's lensline sheet could not carry its feature)
+      local user_feat = vim.deepcopy(req)
+      user_feat.feature = "demo.view"
+      user_feat.config = "user"
+      user_feat.minit = nil
+      user_feat.requires = nil
+      local ru = sheet.run(user_feat, { root = root, ci = true, update = false, getenv = under_ci })
+      eq(
+        { ru.ok, ru.status },
+        { true, "skip" },
+        "a config=user feature sheet under CI is a skip (" .. vim.inspect(ru.failures) .. ")"
+      )
       local off = function(name)
         return name == "CI" and "false" or nil
       end
