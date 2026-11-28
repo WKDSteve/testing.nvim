@@ -101,7 +101,7 @@ M.deps = {
       return 127, "", tostring(res)
     end
     -- killed at the limit (124), or no result at all: a process of the hook kept the pipes open after the kill
-    if not res or (res.code == 124 and (res.signal or 0) ~= 0) then
+    if not res or res.code == 124 then
       return 124,
         res and res.stdout or "",
         ("git %s did not finish within %d min"):format(

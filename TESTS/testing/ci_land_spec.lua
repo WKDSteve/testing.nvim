@@ -199,7 +199,7 @@ return function(H)
     vim.system = function()
       return {
         wait = function()
-          return { code = 124, signal = 9, stdout = "", stderr = "" }
+          return { code = 124, signal = 0, stdout = "", stderr = "" }
         end,
       }
     end
