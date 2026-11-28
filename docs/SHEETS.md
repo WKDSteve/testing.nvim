@@ -155,6 +155,9 @@ and empty arguments do).
 The child of an rpc sheet gets the environment of a spec child: the built-in safe names, the `*_DIR` of the
 dependencies, and the names in `env_allow` of the project's `.testing.lua` (`{ "MAGICK_*" }` for an ImageMagick that
 finds its modules through `MAGICK_HOME`). Secrets and `NVIM*` never; `fakes`, `live` and `config = "user"` add theirs.
+In a linked Git worktree (`.claude/worktrees/<name>`, no sibling checkouts beside it) the dependencies the main
+checkout resolves are set as `$<NAME>_DIR` while the sheet runs (`testing sheets run`, `sheets step`, the suite), as
+`testing perf` does; a value set already wins.
 
 ### The user's installed config (`config = "user"`)
 

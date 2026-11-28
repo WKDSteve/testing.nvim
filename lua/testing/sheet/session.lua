@@ -50,6 +50,7 @@ end
 ---@field opts table
 ---@field root string
 ---@field driver? table `testing.sheet.driver_rpc` or `testing.sheet.browser`; none for a manual sheet.
+---@field provided? string[] the `$<NAME>_DIR` this session set for a worktree (`testing.perf.run.provide_deps`)
 ---@field failures string[]
 ---@field snapshots string[]
 ---@field skipped? string
@@ -94,6 +95,14 @@ function M.open(s, opts)
     size_done = false,
     closed = false,
   }, Session)
+  -- a linked worktree (`.claude/worktrees/<name>`) has no sibling checkouts: the dependencies the main checkout
+  -- resolves go to the child as `$<NAME>_DIR` while this session lasts, as `testing perf` does (docmap.nvim: the child
+  -- of `sheets run` died without lib.nvim); what is set already stays, `close` takes back what was set here
+  local perf_run = require("testing.perf.run")
+  local main = perf_run.main_checkout(self.root)
+  if main then
+    self.provided = perf_run.provide_deps(self.root, main, vim.fs.basename(main))
+  end
   local ctx = {
     root = self.root,
     snapshots = self.snapshots,
@@ -269,6 +278,10 @@ function Session:close()
   if self.driver then
     pcall(self.driver.close_size)
     pcall(self.driver.close)
+  end
+  if self.provided then
+    require("testing.perf.run").restore_deps(self.provided)
+    self.provided = nil
   end
 end
 
