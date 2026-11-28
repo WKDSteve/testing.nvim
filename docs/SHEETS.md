@@ -657,7 +657,8 @@ return {
   of its own, detached); it says the pid of the program, so the sheet works in the program's window, and ends with
   the program's exit code. There is no stdout, so it takes no `ready`. A console program gets a console without a
   window (a real link would show one). On other systems the program starts as usual.
-* One app for the whole sheet, all sizes. At the end its stdin is closed, then the whole process tree is ended.
+* One app for the whole sheet, all sizes. At the end its stdin is closed, then the whole process tree is ended, and the
+  next sheet starts only after the app's process has ended (up to 5 s): its ports are free again.
 * An app that does not build, does not start or does not get ready fails the sheet, with what it said.
 * Each step of `build` may take 10 minutes; `build_timeout_ms` (a whole number, at most an hour) gives the app another
   limit, for a release build that takes longer when the machine is busy. A step past it fails the sheet with

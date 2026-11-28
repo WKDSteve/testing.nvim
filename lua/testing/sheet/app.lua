@@ -37,6 +37,9 @@ M.BUILD_MAX_MS = 3600000
 M.TIMEOUT_SLACK_MS = 50
 M.READY_MS = 30000
 M.STOP_MS = 2000
+
+---How long `stop` waits for the end of an app it killed.
+M.KILL_WAIT_MS = 5000
 ---How long a program with a window is watched for ending at once (a second instance that hands over).
 M.EARLY_MS = 1500
 ---How long the steps of `cleanup` may take together.
@@ -403,6 +406,7 @@ end
 ---@field window? string A part of the title of its window.
 ---@field window_ms? integer How long the desktop engine waits for that window (its driver's default: 30 s).
 ---@field stop fun() The whole process tree and the folder go away. Safe to call twice.
+---@field ended? fun(): boolean Has the app's process ended (its exit seen)? Not with `prepare_only`.
 ---@field argv? string[] With `prepare_only`: the program and its arguments, filled in, the program resolved.
 ---@field env? table<string, string> With `prepare_only`: its environment, filled in.
 
@@ -488,6 +492,12 @@ function M.start(name, root, opts)
       end, 20)
       if exit_code == nil then
         kill_app_tree(proc)
+        -- on every way, not only the walk of the Windows process table (which waits per process): the fallback
+        -- (`testing.child.kill_tree` and a kill of the root, the only way off Windows) returned while the app still
+        -- held its ports, and the app of the next sheet found them taken
+        vim.wait(M.KILL_WAIT_MS, function()
+          return exit_code ~= nil
+        end, 20)
       end
     end
     -- what the app left outside its tree (a window another program opened for it): best effort, never a failure
@@ -635,7 +645,16 @@ function M.start(name, root, opts)
       vars[spec.ready.as] = matched
     end
   end
-  return { vars = vars, stop = stop, pid = pid, window = spec.window, window_ms = spec.window_ms },
+  return {
+    vars = vars,
+    stop = stop,
+    ended = function()
+      return exit_code ~= nil
+    end,
+    pid = pid,
+    window = spec.window,
+    window_ms = spec.window_ms,
+  },
     nil
 end
 

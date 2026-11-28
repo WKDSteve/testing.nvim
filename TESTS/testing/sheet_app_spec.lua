@@ -317,6 +317,26 @@ f:close()
     ok(vim.uv.kill(pid, 0) ~= 0, "stop ends it")
     ok(vim.uv.fs_stat(temp) == nil, "... and takes the folder")
 
+    -- the fallback kill (no walk of the Windows process table; the only way off Windows): stop returns only after the
+    -- app has ended, so the app of the next sheet does not find its ports still taken. `good` ignores its stdin, so
+    -- stop kills it.
+    do
+      local winproc = require("testing.child.winproc")
+      local saved_load, saved_stop = winproc.load, app.STOP_MS
+      winproc.load = function()
+        return nil
+      end
+      app.STOP_MS = 100
+      local fb, fb_err = app.start("good", root)
+      ok(fb ~= nil, "fallback: it starts: " .. tostring(fb_err))
+      if fb then
+        ok(not fb.ended(), "fallback: it runs")
+        fb.stop()
+        ok(fb.ended(), "fallback: stop returns after the app ended")
+      end
+      winproc.load, app.STOP_MS = saved_load, saved_stop
+    end
+
     local _, e1 = app.start("nosuch", root)
     has(e1, "no app nosuch", "an app that is not described")
     local _, e2 = app.start("bad", root)
