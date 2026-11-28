@@ -792,6 +792,109 @@ return function(H)
       { "9 run", "11 a", "16 nil" },
       "the function around a site is the top-level one; a field alias only on its table; no site in a string; no double site"
     )
+    -- a library function that starts only on some paths (`require_tool` with `silent = true`, a health report without
+    -- a python_module, a factory): marked in the library, its unreached calls are listed apart, not as gaps
+    write("lib5.nvim/lua/lib/nvim/deps/init.lua", {
+      "local M = {}",
+      "---Check a tool.",
+      "-- testing-perf: conditional: only without silent = true",
+      "function M.require_tool(p, bin, opts)",
+      "  if not opts.silent then",
+      "    vim.fn.system({ 'pm' })",
+      "  end",
+      "end",
+      "function M.always()",
+      "  return vim.system({ 'y' })",
+      "end",
+      "function M.via()",
+      "  return M.require_tool('p', 'b', {})",
+      "end",
+      "function M.both()",
+      "  M.require_tool('p', 'b', {})",
+      "  vim.system({ 'z' })",
+      "end",
+      "-- testing-perf: conditional: a comment two lines above is not the mark",
+      "",
+      "function M.plain()",
+      "  return vim.system({ 'w' })",
+      "end",
+      "return M",
+    })
+    write("lib5.nvim/lua/lib/nvim/health/init.lua", {
+      'local deps = require("lib.nvim.deps")',
+      "local M = {}",
+      "function M.report()",
+      "  return deps.require_tool('p', 'b', {})",
+      "end",
+      "return M",
+    })
+    local sp5 = scan.spawning_modules(tmp .. "/lib5.nvim")
+    eq(
+      {
+        sp5["lib.nvim.deps"].require_tool,
+        sp5["lib.nvim.deps"].via,
+        sp5["lib.nvim.health"].report,
+        sp5["lib.nvim.deps"].always,
+        sp5["lib.nvim.deps"].both,
+        sp5["lib.nvim.deps"].plain,
+      },
+      {
+        "only without silent = true",
+        "only without silent = true",
+        "only without silent = true",
+        true,
+        true,
+        true,
+      },
+      "conditional: the mark, through a call in the module and in another; a primitive of its own makes it unconditional"
+    )
+    local root5 = tmp .. "/plug5.nvim"
+    write("plug5.nvim/lua/plug5/init.lua", {
+      'local deps = require("lib.nvim.deps")',
+      'local health = require("lib.nvim.health")',
+      "local M = {}",
+      "function M.a() deps.require_tool('plug5', 'x', { silent = true }) end",
+      "function M.b() health.report() end",
+      "function M.c() deps.always() end",
+      "return M",
+    })
+    local sites5 = scan.sites(root5, sp5)
+    eq(
+      vim.tbl_map(function(s)
+        return ("%d %s"):format(s.line, tostring(s.conditional))
+      end, sites5),
+      { "4 only without silent = true", "5 only without silent = true", "6 nil" },
+      "a site of a conditional function carries the reason"
+    )
+    local cov5 = scan.coverage(sites5, {}, root5, false)
+    eq({
+      #cov5.covered,
+      vim.tbl_map(function(s)
+        return s.line
+      end, cov5.missing),
+      vim.tbl_map(function(s)
+        return s.line
+      end, cov5.conditional or {}),
+      cov5.ratio,
+    }, { 0, { 6 }, { 4, 5 }, 0 }, "coverage: unreached conditional sites apart, not in the ratio")
+    local cov5b = scan.coverage(
+      sites5,
+      { { site = root5 .. "/lua/plug5/init.lua:4", stack = {} } },
+      root5,
+      false
+    )
+    eq(
+      { #cov5b.covered, cov5b.conditional and #cov5b.conditional or 0 },
+      { 1, 1 },
+      "coverage: a reached conditional site is covered"
+    )
+    local rep5 = require("testing.perf.report")
+    local s5 = rep5.summary({ repo = "plug5", sheets = {}, sites = sites5, coverage = cov5 })
+    eq(
+      { s5.sites, s5.covered, s5.conditional },
+      { 1, 0, 2 },
+      "summary: conditional sites are not counted"
+    )
     -- a linked worktree: its main checkout from the .git file
     write("wt/.git", { "gitdir: E:/repos/plug.nvim/.git/worktrees/x1" })
     eq(

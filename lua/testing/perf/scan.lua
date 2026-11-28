@@ -48,6 +48,11 @@ M.PATTERNS = {
 }
 
 M.DIRS = { "lua", "plugin" }
+
+---A comment in a library above a function that starts a process only on some paths (an option, a data path, a
+---factory whose object starts later, a fallback): `-- testing-perf: conditional: only without silent = true`.
+---An unreached call of it is listed apart, not as a gap of the sheets.
+M.CONDITIONAL = "^%s*%-%-+%s*testing%-perf:%s*conditional:?%s*(.-)%s*$"
 ---Files read at most (a vendored tree must not make the scan endless).
 M.MAX_FILES = 5000
 
@@ -342,7 +347,13 @@ local function analyse(lines)
   local fn_ctx = { tables = fn_al.tables, funcs = fn_al.funcs }
   local fns, exported, callable = {}, {}, nil
   local cur
+  -- `-- testing-perf: conditional: <why>` in the comments right above a definition (`M.CONDITIONAL`)
+  local pending
   for n, line in ipairs(lines) do
+    local mark = line:match(M.CONDITIONAL)
+    if mark then
+      pending = vim.trim(mark) ~= "" and vim.trim(mark) or "starts a process only sometimes"
+    end
     local exp = line:match("^function%s+" .. mv .. "[%.:]([%w_]+)%s*%(")
       or line:match("^" .. mv .. "%.([%w_]+)%s*=%s*function%s*%(")
     local loc = line:match("^local%s+function%s+([%w_]+)%s*%(")
@@ -353,7 +364,7 @@ local function analyse(lines)
     local body
     if exp or loc then
       local key = exp and ("." .. exp) or loc
-      cur = { direct = false, locals = {}, ext = {} }
+      cur = { direct = false, locals = {}, ext = {}, cond = pending }
       fns[key] = cur
       if exp then
         exported[exp] = key
@@ -364,6 +375,9 @@ local function analyse(lines)
       cur = nil
     elseif cur then
       body = M.joined(lines, n)
+    end
+    if not mark and not line:match("^%s*%-%-") then
+      pending = nil -- only the comment block right above a definition carries it
     end
     if cur and body then
       local code = M.code_of(body)
@@ -453,9 +467,11 @@ end
 
 ---The functions of a library's modules that start processes: `spawning[module][fn] = true` (`__call` for a callable
 ---module). A function spawns when its body calls a primitive, a spawning function of its own module, or one of a
----required module (a fixpoint). Cached per root for the life of this editor.
+---required module (a fixpoint). A function that starts only on some paths (`-- testing-perf: conditional: <why>`
+---above its definition, or one that spawns only through such a function) has the reason instead of `true`.
+---Cached per root for the life of this editor.
 ---@param lib_root string
----@return table<string, table<string, boolean>>
+---@return table<string, table<string, true|string>>
 function M.spawning_modules(lib_root)
   lib_root = vim.fs.normalize(lib_root):gsub("/+$", "")
   if spawning_cache[lib_root] then
@@ -528,18 +544,81 @@ function M.spawning_modules(lib_root)
       break
     end
   end
+  -- strong[mod][key]: starts on every path the scan can see, i.e. without a function marked conditional on the way
+  -- (`-- testing-perf: conditional: <why>`); a spawning function that is not strong is conditional, with the reason
+  -- of the marked function it goes through
+  local strong, why = {}, {}
+  for mod, a in pairs(mods) do
+    strong[mod], why[mod] = {}, {}
+    for key, fn in pairs(a.fns) do
+      if fn.cond then
+        why[mod][key] = fn.cond
+      elseif fn.direct then
+        strong[mod][key] = true
+      end
+    end
+  end
+  local function callees(mod, a, fn)
+    local out = {}
+    for name in pairs(fn.locals) do
+      local target = name
+      if name:sub(1, 1) == "." then
+        target = a.exported[name:sub(2)] or name
+      end
+      out[#out + 1] = { mod, target }
+    end
+    for _, e in ipairs(fn.ext) do
+      local ea = mods[e.mod]
+      local key = ea and ea.exported[e.fn]
+      if key then
+        out[#out + 1] = { e.mod, key }
+      end
+    end
+    return out
+  end
+  for _ = 1, 10000 do
+    local grew = false
+    for mod, a in pairs(mods) do
+      for key, fn in pairs(a.fns) do
+        if spawns[mod][key] and not fn.cond then
+          for _, c in ipairs(callees(mod, a, fn)) do
+            local cm, ck = c[1], c[2]
+            if not strong[mod][key] and strong[cm] and strong[cm][ck] then
+              strong[mod][key], grew = true, true
+            end
+            if not why[mod][key] and why[cm] and why[cm][ck] then
+              why[mod][key], grew = why[cm][ck], true
+            end
+          end
+        end
+      end
+    end
+    if not grew then
+      break
+    end
+  end
+  local function value(mod, key)
+    if not spawns[mod][key] then
+      return nil
+    end
+    if strong[mod][key] then
+      return true
+    end
+    return why[mod][key] or "starts a process only sometimes"
+  end
   local out = {}
   for mod, a in pairs(mods) do
     local fns
     for ex, key in pairs(a.exported) do
-      if spawns[mod][key] then
+      local v = value(mod, key)
+      if v then
         fns = fns or {}
-        fns[ex] = true
+        fns[ex] = v
       end
     end
     if a.callable and spawns[mod].__call then
       fns = fns or {}
-      fns.__call = true
+      fns.__call = value(mod, "__call")
     end
     out[mod] = fns
   end
@@ -659,10 +738,20 @@ function M.sites(root, spawning)
         end
         if what then
           local text = vim.trim(line)
+          local cond
+          local cmod, cfn = what:match("^(.*)%.([%w_]+)$")
+          local sp = spawning or {}
+          if cmod and sp[cmod] and type(sp[cmod][cfn]) == "string" then
+            cond = sp[cmod][cfn]
+          elseif sp[what] and type(sp[what].__call) == "string" then
+            cond = sp[what].__call
+          end
           out[#out + 1] = {
             file = rel,
             line = n,
             what = what,
+            -- a library function that starts a process only on some paths: unreached, it is no gap of the sheets
+            conditional = cond,
             text = #text > 120 and (text:sub(1, 117) .. "...") or text,
             -- a wrapped call may be reported on its next line at run time
             span = wrapped and 2 or nil,
@@ -940,7 +1029,7 @@ function M.coverage(sites, spawns, root, ci, reaches)
       end
     end
   end
-  local covered, missing = {}, {}
+  local covered, missing, conditional = {}, {}, {}
   for _, site in ipairs(sites) do
     local reached = false
     if site.tail_fn then
@@ -957,16 +1046,21 @@ function M.coverage(sites, spawns, root, ci, reaches)
     end
     if reached then
       covered[#covered + 1] = site
+    elseif site.conditional then
+      conditional[#conditional + 1] = site
     else
       missing[#missing + 1] = site
     end
   end
+  local counted = #covered + #missing
   local copy_list = vim.tbl_keys(copies)
   table.sort(copy_list)
   return {
     covered = covered,
     missing = missing,
-    ratio = #sites > 0 and (#covered / #sites) or nil,
+    -- unreached calls of a library function that starts only on some paths: listed apart, not counted
+    conditional = #conditional > 0 and conditional or nil,
+    ratio = counted > 0 and (#covered / counted) or nil,
     copies = #copy_list > 0 and copy_list or nil,
   }
 end

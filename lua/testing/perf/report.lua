@@ -420,8 +420,10 @@ function M.summary(rr, t)
     blocked_ms = 0,
     peak = 0,
     findings = 0,
-    sites = #(rr.sites or {}),
+    -- an unreached call of a library function that starts only on some paths is not counted (`conditional`)
+    sites = #(rr.sites or {}) - #((rr.coverage or {}).conditional or {}),
     covered = #((rr.coverage or {}).covered or {}),
+    conditional = #((rr.coverage or {}).conditional or {}),
   }
   for _, sh in ipairs(rr.sheets) do
     if sh.status == "pass" or sh.status == "fail" or sh.status == "skip" then
@@ -478,6 +480,7 @@ function M.document(run, t)
       sheets = sheets,
       unloadable = rr.unloadable,
       missing_sites = (rr.coverage or {}).missing,
+      conditional_sites = (rr.coverage or {}).conditional,
       -- the folders a sheet ran a copy of the plugin from (its minit copied `lua/`): counted for the root's files
       copies = (rr.coverage or {}).copies,
       catalog = {
@@ -727,6 +730,23 @@ function M.markdown(doc, base)
             break
           end
           add(("- `%s:%d` %s"):format(site.file, site.line, site.what))
+        end
+      end
+      local conditional = r.conditional_sites or {}
+      if #conditional > 0 then
+        add()
+        add(
+          ("Bedingte Startstellen, nicht erreicht (%d; die lib-Funktion startet nur unter einer Bedingung, nicht gezählt):"):format(
+            #conditional
+          )
+        )
+        add()
+        for i, site in ipairs(conditional) do
+          if i > 40 then
+            add(("- … und %d weitere (JSON)"):format(#conditional - 40))
+            break
+          end
+          add(("- `%s:%d` %s: %s"):format(site.file, site.line, site.what, site.conditional))
         end
       end
       if #r.catalog.without_sheet > 0 then

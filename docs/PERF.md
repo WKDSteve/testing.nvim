@@ -84,6 +84,19 @@ a site, `autocmd.create(...)` is not, and `require("m").f` without a call (a fie
 function bound to a name of the plugin (`local status = git.status`, `M.request = helper.request`) makes its calls
 sites. A primitive inside a string literal (an error message) is no site; `xpcall` counts like `pcall`.
 
+A library function that starts a process only on some paths (an option turns it off, `require_tool(..., { silent =
+true })`; only for some data, a `python_module` in a health report; a factory whose object starts later; a fallback)
+says so in a comment in the comment block right above its definition:
+
+```lua
+-- testing-perf: conditional: only without silent = true
+function M.require_tool(plugin, bin, opts)
+```
+
+A function that spawns only through such a function is conditional too, with the same reason; one with a start of its
+own on another path is not. An unreached call of a conditional function is listed apart in the report (`Bedingte
+Startstellen`, `conditional_sites` in the JSON) and not counted in the reached sites; a reached one counts as reached.
+
 A site is **reached** when any frame of a start's stack lies on it: the start's `site`, its `origin` and every
 caller up to 16 frames (a call into the plugin's own wrapper counts). A wrapped call counts on its next line too.
 A **tail call** (`return git.refs(...)`) loses its frame at run time; it counts as reached when a frame on a stack
