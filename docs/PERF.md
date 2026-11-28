@@ -109,6 +109,13 @@ A function that spawns only through such a function is conditional too, with the
 own on another path is not. An unreached call of a conditional function is listed apart in the report (`Bedingte
 Startstellen`, `conditional_sites` in the JSON) and not counted in the reached sites; a reached one counts as reached.
 
+The **clipboard** is such a hint too: `vim.fn.getreg("+")`, `setreg("*", ...)` (also `fn.getreg`, `pcall(vim.fn.getreg,
+name)`) and `vim.cmd('normal! "+y')` start a program through Neovim's clipboard provider when the machine's provider
+is one (win32yank, pbcopy, xclip, wl-copy; not a `g:clipboard` of Lua functions). They are listed as conditional sites
+`clipboard getreg(+)`; a register from a variable (`getreg(name)`, `setreg(vim.v.register, ...)`) is listed the same
+way, since it can be `+`. Another register (`getreg("a")`, `getreg()`) is no site. The trace does not see the
+provider's start (it runs in Vimscript), so such a site stays a hint.
+
 A site is **reached** when any frame of a start's stack lies on it: the start's `site`, its `origin` and every
 caller up to 16 frames (a call into the plugin's own wrapper counts). A wrapped call counts on its next line too.
 A **tail call** (`return git.refs(...)`) loses its frame at run time; it counts as reached when a frame on a stack

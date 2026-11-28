@@ -170,6 +170,70 @@ function M.ex_start(code)
   return nil
 end
 
+---Why a clipboard access is only a hint: Neovim's clipboard provider starts a program for `+` and `*` only when the
+---machine's provider is one (win32yank, pbcopy, xclip, wl-copy; not `g:clipboard` with Lua functions, not OSC 52).
+M.CLIPBOARD_LITERAL =
+  "starts a program only through a clipboard provider that runs one (win32yank, pbcopy, xclip)"
+M.CLIPBOARD_VARIABLE =
+  "register from a variable: starts a program only when it is + or * and the provider runs one"
+
+---A register access that may start the clipboard provider, or nil: `vim.fn.getreg("+")`, `fn.setreg("*", x)`,
+---`pcall(vim.fn.getreg, name)`, `vim.cmd('normal! "+y')`. A register named by a literal other than `+`/`*` (or no
+---register) is none; one named by a variable is a hint. Returns the call and why it is only conditional.
+---@param code string the code of the line, strings kept
+---@param tables? table<string, boolean> names of `vim.fn` in the file (`local fn = vim.fn`)
+---@return string|nil what, string|nil why
+function M.clipboard(code, tables)
+  -- most lines have neither: skip the string blanking (it runs on every line without a site)
+  if not code:find("etreg", 1, true) and not code:find("norm", 1, true) then
+    return nil
+  end
+  local bare = M.strip_strings(code)
+  local args = {}
+  for _, fn in ipairs({ "getreg", "setreg" }) do
+    -- `vim.fn.getreg(` / `fn.getreg(`: the first argument up to `,` or `)`
+    local from = 1
+    while true do
+      local s, e, prefix = bare:find("%f[%w_]([%w_]+)%." .. fn .. "%s*%(", from)
+      if not s then
+        break
+      end
+      if prefix == "fn" or (tables or {})[prefix] then
+        args[#args + 1] = { fn, vim.trim(code:sub(e + 1):match("^([^,%)]*)")) }
+      end
+      from = e + 1
+    end
+    -- handed to pcall: `pcall(vim.fn.getreg, name)`, `pcall(fn.setreg, "+", lines)`
+    local s, e = bare:find("x?pcall%s*%(%s*[%w_.]*%f[%w_]fn%." .. fn .. "%s*,")
+    if s then
+      args[#args + 1] = { fn, vim.trim(code:sub(e + 1):match("^([^,%)]*)")) }
+    end
+  end
+  local hint
+  for _, a in ipairs(args) do
+    local fn, arg = a[1], a[2]
+    local lit = arg:match("^[\"']([^\"']*)[\"']$") or arg:match("^%[%[(.-)%]%]$")
+    if lit == "+" or lit == "*" then
+      return ("clipboard %s(%s)"):format(fn, lit), M.CLIPBOARD_LITERAL
+    elseif not lit and arg ~= "" and not arg:match("^%d+$") then
+      hint = hint or { ("clipboard %s(%s)"):format(fn, arg), M.CLIPBOARD_VARIABLE }
+    end
+  end
+  -- a Normal-mode command on a clipboard register inside an Ex command: `normal! "+y`, `norm "*p`
+  for _, call in ipairs({ "vim%.cmd", "nvim_command", "vim%.api%.nvim_exec2?" }) do
+    if bare:find(call) then
+      local reg = code:match(call .. '.-norm%a*!?%s+\\?["]([%+%*])')
+      if reg then
+        return ("clipboard normal(%s)"):format(reg), M.CLIPBOARD_LITERAL
+      end
+    end
+  end
+  if hint then
+    return hint[1], hint[2]
+  end
+  return nil
+end
+
 ---A comment in a library above a function that starts a process only on some paths (an option, a data path, a
 ---factory whose object starts later, a fallback): `-- testing-perf: conditional: only without silent = true`.
 ---An unreached call of it is listed apart, not as a gap of the sheets.
@@ -864,9 +928,16 @@ function M.sites(root, spawning)
           what = M.match(joined)
           wrapped = what ~= nil
         end
+        local cond
+        if not what then
+          -- a register access that may start the clipboard provider: a hint, counted apart like a conditional site
+          local code = M.code_of(line)
+          if code then
+            what, cond = M.clipboard(code, fn_al.tables)
+          end
+        end
         if what then
           local text = vim.trim(line)
-          local cond
           local cmod, cfn = what:match("^(.*)%.([%w_]+)$")
           local sp = spawning or {}
           if cmod and sp[cmod] and type(sp[cmod][cfn]) == "string" then

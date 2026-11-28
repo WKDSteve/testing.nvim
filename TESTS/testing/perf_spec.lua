@@ -1032,6 +1032,49 @@ return function(H)
       { 1, 0, 2 },
       "summary: conditional sites are not counted"
     )
+    -- the clipboard provider: `getreg("+")` / `setreg("*")` start a program with win32yank, pbcopy, xclip; a hint
+    local root6 = tmp .. "/plug6.nvim"
+    write("plug6.nvim/lua/plug6/init.lua", {
+      "local M = {}",
+      "local fn = vim.fn",
+      'function M.a() return vim.fn.getreg("+") end',
+      "function M.b(l) vim.fn.setreg('*', l, 'l') end",
+      "function M.c(name) local ok, t = pcall(vim.fn.getreg, name) end",
+      "function M.d() return vim.fn.getreg('a') end",
+      "function M.e() return fn.getreg() end",
+      "function M.f() vim.cmd('normal! \"+yy') end",
+      "function M.g() vim.notify(\"vim.fn.getreg('+') failed\") end",
+      'function M.h(x) return x.getreg("+") end',
+      'function M.i() return fn.setreg(vim.v.register, "x") end',
+      "return M",
+    })
+    local sites6 = scan.sites(root6, {})
+    eq(
+      vim.tbl_map(function(s)
+        return ("%d %s %s"):format(
+          s.line,
+          s.what,
+          s.conditional == scan.CLIPBOARD_LITERAL and "literal"
+            or s.conditional == scan.CLIPBOARD_VARIABLE and "variable"
+            or tostring(s.conditional)
+        )
+      end, sites6),
+      {
+        "3 clipboard getreg(+) literal",
+        "4 clipboard setreg(*) literal",
+        "5 clipboard getreg(name) variable",
+        "8 clipboard normal(+) literal",
+        "11 clipboard setreg(vim.v.register) variable",
+      },
+      "clipboard: + and * as a hint, a register from a variable as a hint; another register, a string, x.getreg: none"
+    )
+    local s6 = rep5.summary({
+      repo = "plug6",
+      sheets = {},
+      sites = sites6,
+      coverage = scan.coverage(sites6, {}, root6, false),
+    })
+    eq({ s6.sites, s6.conditional }, { 0, 5 }, "summary: clipboard hints are not counted as gaps")
     -- a linked worktree: its main checkout from the .git file
     write("wt/.git", { "gitdir: E:/repos/plug.nvim/.git/worktrees/x1" })
     eq(
