@@ -282,6 +282,42 @@ require("lazy").setup({
     })
     eq(skipped.status, "skip", "on CI: a skip")
     has(skipped.skipped, "on CI", "... with the reason")
+
+    -- 5. the project IS a config (`sheets.user_config = "root"`): its root, not the installed one, even when the
+    -- caller names another (a worktree of the nvim config, the commit `ci commit` checks)
+    local cfg_root = base .. "/cfg-worktree"
+    write(cfg_root .. "/init.lua", "vim.g.from_the_root = 'worktree'\n")
+    write(cfg_root .. "/.testing.lua", 'return { sheets = { user_config = "root" } }\n')
+    local s3 = assert(sheet.validate({
+      id = "uc.root",
+      title = "The root is the config",
+      config = "user",
+      sizes = { { rows = 10, cols = 60 } },
+      steps = {
+        { expect = "vim.g.from_the_root == 'worktree'", note = "the init of the root ran" },
+        { expect = "vim.g.user_config_mod == nil", note = "not the installed config" },
+      },
+    }))
+    s3.path = cfg_root .. "/TESTS/sheets/uc-root.sheet.lua"
+    local res3 = sheet.run(s3, { root = cfg_root, getenv = getenv, ci = false })
+    eq(
+      { res3.status, res3.failures },
+      { "pass", {} },
+      "sheets.user_config = root: the root is the config"
+    )
+    -- any other value is said, not ignored
+    write(cfg_root .. "/.testing.lua", 'return { sheets = { user_config = "worktree" } }\n')
+    local res4 = sheet.run(s3, { root = cfg_root, getenv = getenv, ci = false })
+    eq(res4.status, "fail", "another value of sheets.user_config: red")
+    has(table.concat(res4.failures or {}, "\n"), 'the only value is "root"', "... and says which")
+    -- without the key: the installed config, as before
+    write(cfg_root .. "/.testing.lua", "return {}\n")
+    local res5 = sheet.run(s3, { root = cfg_root, getenv = getenv, ci = false })
+    eq(
+      res5.status,
+      "fail",
+      "without the key: the installed config (its init does not set the root's value)"
+    )
   end
 
   vim.fn.delete(base, "rf")

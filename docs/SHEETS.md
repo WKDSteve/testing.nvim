@@ -193,7 +193,11 @@ return {
   `NVIM_LISTEN_ADDRESS` (the calling editor) stay out, `NVIM_APPNAME` and `NVIM_LOG_FILE` are the harness's. The
   determinism of every child holds: `TZ=UTC` and a C locale.
 * **A skip, never green**, on CI (`CI` set, not `0` or `false`) and where there is no `init.lua`/`init.vim`; the
-  reason says which. The workstation rule and the trust gate of the project root are those of every sheet.
+  reason says which. The workstation rule and the trust gate of the project root are those of every sheet. A feature
+  sheet with `config = "user"` is a skip on CI too, not red: no workflow has the user's config.
+* **A project that is a Neovim config** (the nvim config itself) sets `sheets = { user_config = "root" }` in its
+  `.testing.lua`: its `config = "user"` sheets then run on the root of the run, a worktree or the commit `ci commit`
+  checks, not on the installed config. `"root"` is the only value; another one fails the sheet.
 * A real config starts and draws slower: one call may take 30 s, the start 60 s. `settle` rarely fits (a config
   keeps timers running); `wait` for what the step needs. `v:errmsg` is set by a `silent!` too: look at `:messages`.
 * **A start that runs out of time is marked, not hidden.** When the child of an rpc sheet does not start in time (the

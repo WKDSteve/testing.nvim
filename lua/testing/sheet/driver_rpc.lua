@@ -386,8 +386,33 @@ function M.new(s, opts, ctx)
     local user
     if s.config == "user" then
       -- the user's installed config, read only; where there is none (CI) the sheet is a skip, never green
+      local uc = require("testing.child.user_config")
+      local getenv = opts.getenv or os.getenv
+      -- the project IS a Neovim config (`sheets.user_config = "root"` in its .testing.lua): the root of the run is the
+      -- config, a worktree or the commit `ci commit` checks, not the installed one in %LOCALAPPDATA%\nvim
+      local mode = not loaded.error
+          and type(loaded.config.sheets) == "table"
+          and loaded.config.sheets.user_config
+        or nil
+      if mode ~= nil and mode ~= "root" then
+        return {
+          failure = ('%s: sheets.user_config in .testing.lua is %s: the only value is "root"'):format(
+            s.id,
+            vim.inspect(mode)
+          ),
+        }
+      end
+      if mode == "root" then
+        local base = getenv
+        getenv = function(name)
+          if name == uc.CONFIG_ENV then
+            return ctx.root
+          end
+          return base(name)
+        end
+      end
       local why
-      user, why = require("testing.child.user_config").locate(opts.getenv)
+      user, why = uc.locate(getenv)
       if not user then
         return { skip = why }
       end
