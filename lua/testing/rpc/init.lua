@@ -658,10 +658,19 @@ local function start(S, async_cb)
   local extra_env = vim.deepcopy(opts.extra_env or {})
   if not prepend then
     prepend = { self_dir }
-    local lib = deps.resolve("lib.nvim", S.root)
+    -- the lib.nvim of the project (itself when it is lib.nvim, or the one it resolves) before the runner's, as
+    -- `run.options.child_rtp` (`testing.deps.project_lib`): in a worktree of lib.nvim, `$LIB_NVIM_DIR` names the main
+    -- checkout, and the child loaded that one instead of the worktree's code
+    local runner_lib = deps.resolve("lib.nvim", self_dir)
+    local own = deps.resolve("lib.nvim", S.root)
+    local lib = deps.project_lib(S.root, own and { own } or {}, runner_lib) or runner_lib
     if lib then
       prepend[#prepend + 1] = lib.dir
       extra_env[deps.env_name("lib.nvim")] = extra_env[deps.env_name("lib.nvim")] or lib.dir
+    end
+    -- the runner's behind it: what the runner needs and the project's lib.nvim lacks still comes from there
+    if runner_lib and lib and not deps.same_dir(runner_lib.dir, lib.dir) then
+      prepend[#prepend + 1] = runner_lib.dir
     end
     extra_env[deps.env_name("testing.nvim")] = extra_env[deps.env_name("testing.nvim")] or self_dir
     -- The project's minit looks for every dependency it declares. Without a sibling checkout or
