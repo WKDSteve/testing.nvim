@@ -1102,15 +1102,9 @@ local function range_shas(root, range)
   then
     return nil, ("--range=%s: expected <from>..<to>"):format(range)
   end
-  local code, out, err = git(
-    {
-      "rev-list",
-      "--reverse",
-      snapshot.unbrace(root, a) .. ".." .. snapshot.unbrace(root, b),
-      "--",
-    },
-    root
-  )
+  -- with a format: a `".."` literal reads as a path out of the project to the cache scanner
+  local spec = ("%s..%s"):format(snapshot.unbrace(root, a), snapshot.unbrace(root, b))
+  local code, out, err = git({ "rev-list", "--reverse", spec, "--" }, root)
   if code ~= 0 then
     return nil, ("--range=%s: %s"):format(range, vim.trim(err))
   end
