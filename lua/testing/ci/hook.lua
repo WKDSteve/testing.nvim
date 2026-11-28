@@ -138,6 +138,10 @@ function M.text(o)
   local read_refs = {
     'refs="$(cat)"',
     'echo "$refs" | testing_ci hook guard || exit 1',
+    -- the workstation runs no check (`testing.machine`), only the guard above: the hosted CI checks what it pushes
+    'case "$(printf %s "${NVIM_MACHINE_ROLE:-}" | tr -d "[:space:]" | tr "[:upper:]" "[:lower:]")" in',
+    '  workstation) echo "pre-push: on the workstation only the land guard runs; the hosted CI checks the push" >&2; exit 0 ;;',
+    "esac",
   }
   if o.auto_trust then
     read_refs[#read_refs + 1] =

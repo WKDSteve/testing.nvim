@@ -653,11 +653,16 @@ On a case-sensitive file system nothing is folded.
 On the Tricentis workstation (`NVIM_MACHINE_ROLE=workstation`, trimmed, any case) nothing unsigned may be built or
 started (EDR). `testing.machine` is the one place that decides; the command line (`testing.cli`) and the editor
 (`:Testing ci`, `:Testing ci repos`) ask it. Allowed there: `export`, `call`, `stats`, `callers`, `ci remote`, `ci overview`,
-`ci verify --json`, `lint` without `--fix`, and the help; `sheets run` and `sheets step` pass and run only manual
+`ci verify --json`, `ci hook` (install, remove, status, guard: they read git and write the hook file), `lint` without
+`--fix`, and the help; `sheets run` and `sheets step` pass and run only manual
 sheets there, decided once the sheets are loaded ([SHEETS.md](SHEETS.md)). Everything else (`run`, `fast`, `ci` with a
 run, `ci repos`, `migrate`, ...) is refused with exit `2`, a message, and nothing started. A value that is neither
 `workstation` nor `default` is refused as a typo, for every command. `TESTING_ALLOW_WORKSTATION=1` lifts the refusal
 where it is allowed on purpose (the same switch as `testing sheets run`).
+
+The pre-push hook (`testing ci hook install`) belongs in the checkouts there too: on the workstation it runs only the
+land guard (a direct push of `main` in a land repository is refused, [CI.md](CI.md)) and then lets the push go out,
+since no check may run there; the hosted CI checks it. Without the hook a push from there lands on `main` unchecked.
 
 `testing export` writes the same folder as on the private machine; without local runs only the CI state is in it and
 `local` is `null`. `ci remote` takes only `$TESTING_GITHUB_TOKEN` there, a fine-grained read-only token (Actions and

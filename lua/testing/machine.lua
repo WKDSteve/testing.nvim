@@ -98,6 +98,12 @@ function M.allowed(argv)
     if sub == "verify" then
       return has("--json"), "ci verify without --json"
     end
+    -- the pre-push hook: install/remove/status write or read a file of the hooks folder, `guard` reads the workflow
+    -- at the pushed commit through git; none starts a run. Without them a checkout there had no land guard at all
+    -- (docmap.nvim on 2026-11-21: two commits pushed straight to main from there, main red)
+    if sub == "hook" then
+      return true, "ci hook"
+    end
     if sub == nil or sub:sub(1, 1) == "-" then
       return false, "ci"
     end

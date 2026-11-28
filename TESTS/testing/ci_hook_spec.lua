@@ -390,10 +390,10 @@ return function(H)
     ---@return integer code
     ---@return string[] calls
     ---@return boolean guarded The hook asked `testing ci hook guard`.
-    local function push(stdin)
+    local function push(stdin, env)
       os.remove(log)
       local res = vim
-        .system({ snapshot_bash, script }, { cwd = root, text = true, stdin = stdin })
+        .system({ snapshot_bash, script }, { cwd = root, text = true, stdin = stdin, env = env })
         :wait(30000)
       local calls, guarded = {}, false
       for line in (read(log) or ""):gmatch("[^\r\n]+") do
@@ -460,6 +460,26 @@ return function(H)
     code, calls, guarded = push(line("refs/heads/main", head, "refs/heads/main"))
     eq(calls[1], "verify", "snapshot hook: after a passing guard the steps run as before")
     eq({ code, guarded }, { 0, true }, "snapshot hook: the guard is asked on every push")
+
+    -- the workstation runs no check (testing.machine refuses it): only the guard, then the push goes out
+    local ws = { NVIM_MACHINE_ROLE = " WorkStation " }
+    write_hook(1, head)
+    code, calls, guarded = push(line("refs/heads/main", head, "refs/heads/main"), ws)
+    eq(
+      { code, #calls, guarded },
+      { 0, 0, true },
+      "snapshot hook on the workstation: the guard, no step, the push goes out"
+    )
+    write_hook(0, nil, 1)
+    code, calls, guarded = push(line("refs/heads/main", head, "refs/heads/main"), ws)
+    eq(
+      { code, #calls, guarded },
+      { 1, 0, true },
+      "snapshot hook on the workstation: a refusing guard still blocks"
+    )
+    write_hook(1, head)
+    code = push(line("refs/heads/main", head, "refs/heads/main"), { NVIM_MACHINE_ROLE = "default" })
+    eq(code, 1, "snapshot hook on the private machine: the red step still blocks")
   end
 
   -- the guard itself: a direct push of main in a land repository (its workflow runs on ci/**) is refused

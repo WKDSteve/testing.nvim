@@ -36,6 +36,10 @@ return function(H)
     { "ci", "remote" },
     { "ci", "overview", "--no-remote" },
     { "ci", "verify", "--json" },
+    -- the pre-push hook and its land guard (they read git and write the hook file; no run)
+    { "ci", "hook", "install" },
+    { "ci", "hook", "guard" },
+    { "ci", "hook", "status" },
     { "lint" },
     { "--help" },
     -- they decide themselves after loading the sheets: only manual ones run there (sheet_spec, sheet_session_spec)
