@@ -68,6 +68,55 @@ return function(H)
   )
   has(script, "head_of 'x.nvim' '/mnt/e/repos/x.nvim' 9>&- ||", "script: the repository itself")
   has(script, "core.autocrlf=false", "script: no CRLF in the mirror")
+
+  -- a broken mirror (fzf-lua, "possible repository corruption") is cloned again, the check goes on: the shell
+  -- functions of the script, run for real against a mirror whose objects are gone
+  do
+    local bash = vim.fn.has("win32") == 1 and "C:/Program Files/Git/bin/bash.exe"
+      or vim.fn.exepath("bash")
+    if bash == "" or vim.fn.executable(bash) ~= 1 then
+      print("n/a  no bash to run the mirror functions")
+    else
+      local fns = script:match("(fetch_win%(%) {\n.-\n}\nsync%(%) {\n.-\n})")
+      ok(fns ~= nil, "script: fetch_win and sync")
+      local base = vim.fs.normalize(vim.fn.tempname()) .. "-mirror"
+      local src, mirror = base .. "/src", base .. "/M"
+      vim.fn.mkdir(src, "p")
+      vim.fn.mkdir(mirror, "p")
+      local function git(dir, ...)
+        return vim
+          .system({ "git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ... }, { text = true })
+          :wait()
+      end
+      git(src, "init", "-q")
+      git(src, "commit", "-q", "--allow-empty", "-m", "one")
+      local sh = base .. "/run.sh"
+      local f = assert(io.open(sh, "wb"))
+      f:write('M="$1"\n' .. (fns or "") .. '\nsync dep "$2" || { echo FAILED; exit 3; }\necho OK\n')
+      f:close()
+      local function run()
+        return vim.system({ bash, sh, mirror, src }, { text = true }):wait(60000)
+      end
+      local first = run()
+      has(first.stdout, "OK", "sync: a fresh mirror is cloned (" .. tostring(first.stderr) .. ")")
+      git(src, "commit", "-q", "--allow-empty", "-m", "two")
+      vim.fn.delete(mirror .. "/dep/.git/objects", "rf")
+      local broken = run()
+      has(
+        broken.stdout,
+        "OK",
+        "sync: a mirror without its objects is cloned again, not 'cannot mirror'"
+      )
+      has(broken.stderr, "could not fetch: cloned again", "sync: ... and it says so")
+      local head = vim.trim(git(src, "rev-parse", "HEAD").stdout or "")
+      eq(
+        vim.trim(git(mirror .. "/dep", "rev-parse", "refs/remotes/win/HEAD").stdout or ""),
+        head,
+        "sync: the new mirror has the source's newest commit"
+      )
+      vim.fn.delete(base, "rf")
+    end
+  end
   local lock_at, first_sync = script:find("flock -w ", 1, true), script:find("head_of '", 1, true)
   ok(
     lock_at and first_sync and lock_at < first_sync,

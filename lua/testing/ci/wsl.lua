@@ -222,11 +222,18 @@ function M.script(o)
   -- one check at a time per mirror: a second one would check the dependencies out under the running suite
   vim.list_extend(lines, M.lock_lines())
   vim.list_extend(lines, {
-    "sync() {",
-    '  if [ ! -d "$M/$1/.git" ]; then git -c core.autocrlf=false clone -q "$2" "$M/$1" || return 1; fi',
+    "fetch_win() {",
     -- HEAD too: a detached HEAD of the Windows checkout is on no branch
     '  git -C "$M/$1" -c core.autocrlf=false fetch -q --force "$2" "+refs/heads/*:refs/remotes/win/*" '
-      .. '"+HEAD:refs/remotes/win/HEAD" || return 1',
+      .. '"+HEAD:refs/remotes/win/HEAD"',
+    "}",
+    "sync() {",
+    '  if [ ! -d "$M/$1/.git" ]; then git -c core.autocrlf=false clone -q "$2" "$M/$1" || return 1; fi',
+    -- a mirror that cannot fetch (seen: "possible repository corruption" of fzf-lua, 2026-11-25) is cloned again,
+    -- not left to end every check with "cannot mirror"; it is a cache of the Windows checkout, nothing is lost
+    '  fetch_win "$1" "$2" && return 0',
+    '  echo "testing: wsl: the mirror of $1 could not fetch: cloned again" >&2',
+    '  rm -rf "$M/$1" && git -c core.autocrlf=false clone -q "$2" "$M/$1" && fetch_win "$1" "$2" || return 1',
     "}",
     -- HEAD is read BEFORE the fetch: another session committing in between would else name a commit not fetched
     "head_of() {",
