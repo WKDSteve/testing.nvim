@@ -381,4 +381,37 @@ return function(H)
   )
   wsl.run_bash = saved_run
   vim.fn.delete(tmp, "rf")
+
+  -- a dependency checkout behind what the hosted CI takes (`origin/ci-verified`, else `origin/main`) is named before
+  -- the run: the mirror follows its HEAD, and an old dependency made fixed findings look like regressions
+  do
+    local dir = vim.fs.normalize(vim.fn.tempname()) .. "-behind"
+    vim.fn.mkdir(dir, "p")
+    local function g(...)
+      local res = vim.system({ "git", "-C", dir, ... }, { text = true }):wait()
+      assert(res.code == 0, table.concat({ ... }, " ") .. ": " .. (res.stderr or ""))
+      return vim.trim(res.stdout or "")
+    end
+    g("init", "-q")
+    g("config", "user.email", "t@example.invalid")
+    g("config", "user.name", "t")
+    g("config", "commit.gpgsign", "false")
+    g("commit", "-q", "--allow-empty", "-m", "one")
+    local one = g("rev-parse", "HEAD")
+    g("commit", "-q", "--allow-empty", "-m", "two")
+    g("commit", "-q", "--allow-empty", "-m", "three")
+    local three = g("rev-parse", "HEAD")
+    g("update-ref", "refs/remotes/origin/ci-verified", three)
+    g("checkout", "-q", "--detach", one)
+    local said = wsl.behind({ ["dep.nvim"] = dir })
+    eq(#said, 1, "behind: a checkout behind ci-verified is named")
+    has(said[1], "dep.nvim is 2 commit(s) behind origin/ci-verified", "behind: ... with the count")
+    has(said[1], three:sub(1, 7), "behind: ... and the commit it lacks")
+    g("checkout", "-q", "--detach", three)
+    eq(wsl.behind({ ["dep.nvim"] = dir }), {}, "behind: a checkout on ci-verified is not")
+    -- a checkout with commits of its own ahead is not behind
+    g("commit", "-q", "--allow-empty", "-m", "four")
+    eq(wsl.behind({ ["dep.nvim"] = dir }), {}, "behind: a checkout ahead of ci-verified is not")
+    vim.fn.delete(dir, "rf")
+  end
 end

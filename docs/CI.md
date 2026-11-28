@@ -323,7 +323,10 @@ virus scanner make a suite whose spec files start editors slow: testing.nvim's w
 about 650 s on Windows on the same PC (2026-11-09). `testing ci commit <rev>... --wsl` keeps a mirror below
 `~/.cache/testing-wsl/` inside WSL (the Linux file system; a checkout below `/mnt/c` is as slow as Windows), fetches the
 repository and its dependencies from the Windows checkouts (the dependencies at their committed HEAD: their uncommitted
-changes are not seen), runs the ordinary `ci commit` there and prints its report and exit code here. A checkout that is a linked worktree
+changes are not seen), runs the ordinary `ci commit` there and prints its report and exit code here. A dependency
+checkout whose HEAD lies behind `origin/ci-verified` (else `origin/main`, as last fetched) is named before the run
+(`testing: wsl: lib.nvim is 3 commit(s) behind origin/ci-verified ...: git -C <dir> pull brings it up`): the mirror
+follows that HEAD, and an old dependency makes findings fixed there look like regressions. A checkout that is a linked worktree
 (`git worktree add`, one per parallel session) is mirrored from the shared repository at the worktree's HEAD: its
 `.git` file names a Windows path git in WSL cannot follow; when WSL cannot reach that repository, one line says so. The revisions
 (`HEAD`, a branch, `@{upstream}`, both ends of `--range`, `--base`) are turned into commit ids here first: in the mirror

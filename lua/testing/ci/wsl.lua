@@ -298,6 +298,49 @@ function M.script(o)
   return table.concat(lines, "\n") .. "\n"
 end
 
+---The refs a dependency is compared with, the first that exists: what the hosted CI takes (`ci-verified`), else main.
+M.UPSTREAM_REFS = { "origin/ci-verified", "origin/main" }
+
+---Which dependency checkouts stand behind what the hosted CI takes? The mirror follows the HEAD of the Windows checkout,
+---so a checkout nobody pulled runs the check with an old dependency, and a finding fixed there looks like a regression.
+---Only local refs (as last fetched), no network.
+---@param deps table<string, string> name -> Windows path of the checkout.
+---@return string[] lines One per checkout that lies behind, sorted by name.
+function M.behind(deps)
+  local function git(dir, ...)
+    local argv = { "git", "-C", dir, ... }
+    local ok, res = pcall(function()
+      return vim.system(argv, { text = true }):wait(10000)
+    end)
+    if not ok or not res or res.code ~= 0 then
+      return nil
+    end
+    return vim.trim(res.stdout or "")
+  end
+  local names = vim.tbl_keys(deps)
+  table.sort(names)
+  local lines = {}
+  for _, name in ipairs(names) do
+    local dir = deps[name]
+    local head = git(dir, "rev-parse", "HEAD")
+    for _, ref in ipairs(head and M.UPSTREAM_REFS or {}) do
+      local tip = git(dir, "rev-parse", "--verify", "--quiet", ref .. "^{commit}")
+      if tip and tip ~= "" then
+        -- behind: HEAD is an ancestor of the tip; a checkout with commits of its own ahead is not ours to judge
+        if tip ~= head and git(dir, "merge-base", "--is-ancestor", head, tip) then
+          local n = git(dir, "rev-list", "--count", head .. ".." .. tip) or "?"
+          lines[#lines + 1] = (
+            "testing: wsl: %s is %s commit(s) behind %s (%s at %s, the checkout at %s): the run uses the old one; "
+            .. "git -C %s pull brings it up"
+          ):format(name, n, ref, ref, tip:sub(1, 7), head:sub(1, 7), dir)
+        end
+        break
+      end
+    end
+  end
+  return lines
+end
+
 ---Run `ci commit` in WSL and hand back its document.
 ---@param root string The repository (Windows path).
 ---@param argv string[] The arguments of the inner `ci commit` (revisions, `--quick`, `-- <suite options>`, ...).
@@ -319,6 +362,10 @@ function M.run(root, argv, deps)
     json = json,
     worktrees = worktrees,
   })
+  -- before the run: a stale dependency is named first, not found later behind a REGRESSION
+  for _, line in ipairs(M.behind(deps)) do
+    io.stderr:write(line .. "\n")
+  end
   local code, _, err = M.run_bash(script, 2 * 60 * 60 * 1000)
   local f = io.open(json, "rb")
   local text = f and f:read("*a")
