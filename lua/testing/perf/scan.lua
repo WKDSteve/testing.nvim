@@ -798,7 +798,7 @@ function M.coverage(sites, spawns, root, ci, reaches)
   -- function of its own file; a qualified one (`x.f(`, `x:f(`) a field function of the module `x` stands for: an alias
   -- `local x = require("<module>")` of the caller's file, the module table of the caller's own file, or
   -- `require("<module>").f(` in place. `vim.ui.open(` is no call of a plugin's `M.open`.
-  local qualified, plain, cache, file_aliases = {}, {}, {}, {}
+  local qualified, plain, cache, file_aliases, file_bound = {}, {}, {}, {}, {}
   local base = vim.fs.normalize(root):gsub("/+$", "")
   local function aliases_of(file)
     if not file_aliases[file] then
@@ -825,29 +825,118 @@ function M.coverage(sites, spawns, root, ci, reaches)
         end
         t.M = t.M or own
       end
+      -- names bound to a module function (`local f = require("m").f`, `local f = alias.f`, `require("m")["f"]`):
+      -- `f(` is a call of `m.f` (reposcope.nvim's `safe_execute_shell_async`)
+      local bound = {}
+      for _, l in ipairs(cache[file] or {}) do
+        local c = M.code_of(l)
+        if c then
+          local name, mod, fn = c:match(
+            "^%s*local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*%.([%w_]+)%s*$"
+          )
+          if not name then
+            name, mod, fn = c:match(
+              "^%s*local%s+([%w_]+)%s*=%s*require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*%[%s*[\"']([%w_]+)[\"']%s*%]%s*$"
+            )
+          end
+          if not name then
+            local q
+            name, q, fn = c:match("^%s*local%s+([%w_]+)%s*=%s*([%w_]+)%.([%w_]+)%s*$")
+            mod = q and t[q]
+          end
+          if name and mod and fn then
+            bound[name] = mod .. "\0" .. fn
+          end
+        end
+      end
       file_aliases[file] = t
+      file_bound[file] = bound
     end
-    return file_aliases[file]
+    return file_aliases[file], file_bound[file]
   end
-  for _, fr in ipairs(frames) do
-    local text = line_at(cache, base, fr.file, fr.line)
-    local code = text and M.code_of(text) or ""
+  ---The qualified calls of a piece of code of `file` (a frame's line, the body of a reached function): `require("m").f(`,
+  ---`alias.f(`, `pcall(alias.f, ...)` (tasks.nvim: `pcall(M.spawn, cmd, ...)`), and a bound name `f(`.
+  ---@param file string
+  ---@param code string
+  ---@param add fun(key: string)
+  local function calls_in(file, code, add)
     for mod, name in
       code:gmatch("require%s*%(?%s*[\"']([%w_%.@%-]+)[\"']%s*%)?%s*[%.:]([%w_]+)%s*%(")
     do
-      qualified[mod .. "\0" .. name] = true
+      add(mod .. "\0" .. name)
     end
     local bare = M.strip_strings(code)
-    local al = aliases_of(fr.file)
+    local al, bound = aliases_of(file)
     for q, name in bare:gmatch("([%w_]+)[%.:]([%w_]+)%s*%(") do
       if al[q] then
-        qualified[al[q] .. "\0" .. name] = true
+        add(al[q] .. "\0" .. name)
+      end
+    end
+    for q, name in bare:gmatch("x?pcall%s*%(%s*([%w_]+)%.([%w_]+)%s*[,%)]") do
+      if al[q] then
+        add(al[q] .. "\0" .. name)
       end
     end
     for at, name in bare:gmatch("()%f[%w_]([%w_]+)%s*%(") do
       local before = at > 1 and bare:sub(at - 1, at - 1) or ""
+      if before ~= "." and before ~= ":" and bound[name] then
+        add(bound[name])
+      end
+    end
+  end
+  local pending = {}
+  local function add_qualified(key)
+    if not qualified[key] then
+      qualified[key] = true
+      pending[#pending + 1] = key
+    end
+  end
+  for _, fr in ipairs(frames) do
+    local text = line_at(cache, base, fr.file, fr.line)
+    local code = text and M.code_of(text) or ""
+    calls_in(fr.file, code, add_qualified)
+    local bare = M.strip_strings(code)
+    for at, name in bare:gmatch("()%f[%w_]([%w_]+)%s*%(") do
+      local before = at > 1 and bare:sub(at - 1, at - 1) or ""
       if before ~= "." and before ~= ":" then
         plain[fr.file .. "\0" .. name] = true
+      end
+    end
+  end
+  -- a facade: a reached module function whose body hands on by a tail call (`function M.play(p) return
+  -- require("media.core.play").play(p) end`) has no frame of its own either; what it returns into is reached too
+  local rounds = 0
+  while #pending > 0 and rounds < 1000 do
+    rounds = rounds + 1
+    local key = table.remove(pending)
+    local mod, fn = key:match("^(.-)%z(.*)$")
+    for _, rel in ipairs({
+      "lua/" .. mod:gsub("%.", "/") .. ".lua",
+      "lua/" .. mod:gsub("%.", "/") .. "/init.lua",
+    }) do
+      line_at(cache, base, rel, 1)
+      local lines = cache[rel] or {}
+      for i, l in ipairs(lines) do
+        local def = l:match("^function%s+[%w_]+[%.:]([%w_]+)%s*%(")
+          or l:match("^[%w_]+%.([%w_]+)%s*=%s*function%s*%(")
+        if def == fn then
+          -- the body: the definition line after its signature, then up to its `end` at column 0
+          local body = { (l:gsub("^.-%b()", "", 1)) }
+          if not l:match("%send%s*$") then
+            for j = i + 1, math.min(#lines, i + 200) do
+              if lines[j] == "end" or lines[j]:match("^end[%s%)]") then
+                break
+              end
+              body[#body + 1] = lines[j]
+            end
+          end
+          for _, b in ipairs(body) do
+            local code = M.code_of(b) or ""
+            for tail in code:gmatch("return%s+(.*)") do
+              calls_in(rel, tail, add_qualified)
+            end
+          end
+        end
       end
     end
   end

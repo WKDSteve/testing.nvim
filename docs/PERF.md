@@ -88,7 +88,10 @@ A site is **reached** when any frame of a start's stack lies on it: the start's 
 caller up to 16 frames (a call into the plugin's own wrapper counts). A wrapped call counts on its next line too.
 A **tail call** (`return git.refs(...)`) loses its frame at run time; it counts as reached when a frame on a stack
 calls the function it is in: a local function by an unqualified call in its own file, a module function by a call
-through an alias of that module (`require`d in the caller's file, or the file's own module table). `return
+through an alias of that module (`require`d in the caller's file, or the file's own module table), through a name
+bound to that function (`local f = require("m").f`, `local f = alias.f`), or by handing it to `pcall` as a value
+(`pcall(M.spawn, ...)`). A reached module function that hands on by a tail call itself (a facade, `function M.play(p)
+return require("x.core").play(p) end`) reaches what it returns into, chain after chain. `return
 vim.system(...):wait()` is no tail call of the site (the chained method is). A `vim.lsp.start` is recorded as a *reach* even when it starts no process (an
 in-process server whose `cmd` is a function). It is a heuristic on purpose: it finds the candidates, the run proves which
 were reached; an unreached site is a functionality without a sheet, a sheet that does not go far enough, or a case for

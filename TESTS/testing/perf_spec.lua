@@ -555,6 +555,81 @@ return function(H)
       eq(#co.covered, 0, "a copy with other content does not count (its lines may be elsewhere)")
       eq(co.copies, nil, "... and is not named")
     end
+    -- tail-call sites reached on three more ways: a name bound to the module function (reposcope.nvim), the function
+    -- handed to pcall as a value (tasks.nvim), a facade that hands on by a tail call itself (media.nvim)
+    do
+      local tc = tmp .. "/tc.nvim"
+      local tc_spawning = { ["lib.nvim.run"] = { go = true } }
+      write("tc.nvim/lua/tc/protection.lua", {
+        "local M = {}",
+        "function M.safe(cmd)",
+        "  return require('lib.nvim.run').go(cmd)",
+        "end",
+        "function M.spawn(cmd)",
+        "  return require('lib.nvim.run').go(cmd)",
+        "end",
+        "return M",
+      })
+      write("tc.nvim/lua/tc/executor.lua", {
+        "local safe = require('tc.protection').safe",
+        "local M = {}",
+        "function M.run(cmd)",
+        "  safe(cmd)",
+        "end",
+        "return M",
+      })
+      write("tc.nvim/lua/tc/stale.lua", {
+        "local P = require('tc.protection')",
+        "local M = {}",
+        "function M.run(cmd)",
+        "  local ok = pcall(P.spawn, cmd)",
+        "end",
+        "return M",
+      })
+      write("tc.nvim/lua/tc/core/play.lua", {
+        "local M = {}",
+        "function M.play(p)",
+        "  return require('lib.nvim.run').go(p)",
+        "end",
+        "return M",
+      })
+      write("tc.nvim/lua/tc/init.lua", {
+        "local M = {}",
+        "function M.play(p) return require('tc.core.play').play(p) end",
+        "return M",
+      })
+      write("tc.nvim/lua/tc/cmds.lua", {
+        "local M = {}",
+        "function M.go(p)",
+        "  local ok = require('tc').play(p)",
+        "end",
+        "return M",
+      })
+      local tc_sites = scan.sites(tc, tc_spawning)
+      local function reached_by(frame)
+        local cv = scan.coverage(tc_sites, { { stack = { tc .. "/" .. frame } } }, tc, false)
+        local out = vim.tbl_map(function(s)
+          return ("%s:%d"):format(s.file, s.line)
+        end, cv.covered)
+        table.sort(out)
+        return out
+      end
+      eq(
+        reached_by("lua/tc/executor.lua:4"),
+        { "lua/tc/protection.lua:3" },
+        "a call through a name bound to the module function reaches its tail call"
+      )
+      eq(
+        reached_by("lua/tc/stale.lua:4"),
+        { "lua/tc/protection.lua:6" },
+        "pcall(P.spawn, ...) reaches the tail call of M.spawn"
+      )
+      eq(
+        reached_by("lua/tc/cmds.lua:3"),
+        { "lua/tc/core/play.lua:3" },
+        "a facade that hands on by a tail call: the call behind it is reached"
+      )
+    end
     local reached = scan.coverage(
       sites,
       {},
