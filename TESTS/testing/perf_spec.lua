@@ -308,6 +308,26 @@ return function(H)
       eq(scan.match(file[7], ctx), nil, "a field read fn.system without a call is none")
       eq(scan.match(file[8], ctx), nil, "M.system of another module is none")
       eq(scan.match(file[4]), nil, "without the aliases of the file: none (as before)")
+      -- vim.system under a name: `local system = (opts.system or vim.system)`, then `pcall(system, ...)` on the next
+      -- line (testing.nvim's own bindings/child.lua), and the bare alias (the nvim config)
+      local sys = {
+        "  local system = (opts.system or vim.system) --[[@as function]]",
+        "  local ok, started =",
+        "    pcall(system, argv, { cwd = root }, finish)",
+        "local run = vim.system",
+        "  run({ 'git', 'clone', url, target }, {}, cb)",
+        "local other = opts.run or helper.go",
+        "  other({ 'x' })",
+      }
+      local sa = scan.vim_fn_aliases(sys)
+      local sctx = { tables = sa.tables, funcs = sa.funcs }
+      eq(
+        scan.match(sys[3], sctx),
+        "vim.system",
+        "pcall(system, ...) after (opts.system or vim.system)"
+      )
+      eq(scan.match(sys[5], sctx), "vim.system", "run( after local run = vim.system")
+      eq(scan.match(sys[7], sctx), nil, "a name bound to something else is none")
     end
     eq(
       scan.joined({ "  local ok, s = pcall(", "    vim.system,", "  )" }, 1),

@@ -141,6 +141,12 @@ function M.vim_fn_aliases(lines)
       if name and (fn == "system" or fn == "systemlist") then
         out.funcs[name] = "vim.fn." .. fn
       end
+      -- `local system = vim.system`, `local system = (opts.system or vim.system)`, `... = a or vim.system`
+      local sys = code:match("^%s*local%s+([%w_]+)%s*=%s*vim%.system%s*$")
+        or code:match("^%s*local%s+([%w_]+)%s*=%s*%(?[%w_.%s]-%f[%w_]or%s+vim%.system%s*%)?%s*$")
+      if sys then
+        out.funcs[sys] = "vim.system"
+      end
     end
   end
   return out
@@ -181,6 +187,10 @@ function M.match(line, ctx)
   -- `M.request = helper.request` -> `.request(` / `:request(`
   for name, what in pairs(ctx.funcs or {}) do
     if bare:find("%f[%w_]" .. name .. "%s*%(") and not bare:find("[%.:]" .. name .. "%s*%(") then
+      return what
+    end
+    -- the name handed to pcall as a value: `pcall(system, argv, ...)`
+    if bare:find("x?pcall%s*%(%s*" .. name .. "%s*[,%)]") then
       return what
     end
   end
