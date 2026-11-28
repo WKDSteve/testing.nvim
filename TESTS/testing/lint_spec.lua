@@ -560,7 +560,7 @@ os.exit(code)
     )
     eq(
       last_call(),
-      "luacheck --formatter plain --codes lua/proj/mod.lua lua/proj/new.lua --exclude-files .deps/** .luarocks/**",
+      "luacheck --formatter plain --codes lua/proj/mod.lua lua/proj/new.lua --exclude-files .deps/** .luarocks/** .claude/**",
       "changed: the files replace the paths of the args; the options follow them"
     )
     -- the real luacheck reads that argv: `--exclude-files` takes many globs, so files after it would be globs too

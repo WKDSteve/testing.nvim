@@ -86,10 +86,11 @@ local PRESETS = {
     -- one finding per line, `file:line:col: (W211) message`, without colours
     fixed = { "--formatter", "plain", "--codes" },
     -- `.deps/` holds the checkouts of the dependencies and `.luarocks/` the rocks the generated workflow installs
-    -- luacheck with (docs/WORKFLOW-CI.md): their code is not the project's. stylua skips hidden folders by itself,
+    -- luacheck with (docs/WORKFLOW-CI.md): their code is not the project's, nor is `.claude/` (the worktrees of other
+    -- sessions of the desktop app inside the checkout). stylua skips hidden folders by itself,
     -- luacheck does not; a command-line `--exclude-files` adds to the `exclude_files` of .luacheckrc instead of
     -- replacing them.
-    args = { ".", "--exclude-files", ".deps/**", ".luarocks/**" },
+    args = { ".", "--exclude-files", ".deps/**", ".luarocks/**", ".claude/**" },
     needs = { "luacheck" },
     version_argv = { "luacheck", "--version" },
     efm = "%f:%l:%c: %m",

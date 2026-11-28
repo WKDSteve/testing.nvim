@@ -299,18 +299,24 @@ return function(H)
       [".luacheckrc"] = 'std = "luajit"\nexclude_files = { "skip.lua" }\n',
       [".deps/dep.nvim/lua/dep/init.lua"] = "leaked_global = 1\n",
       [".luarocks/share/lua/5.4/rock.lua"] = "rock_global = 1\n",
+      -- a worktree of another session inside the checkout (the desktop app's `.claude/worktrees/<name>`)
+      [".claude/worktrees/other/lua/proj/init.lua"] = "worktree_global = 1\n",
       ["skip.lua"] = "excluded_global = 1\n",
     })
     local p = schema.load(root)
     local argv = table.concat(p.steps.luacheck.argv, " ")
     has(
       argv,
-      "--exclude-files .deps/** .luarocks/**",
-      "deps lint: the argv leaves .deps and .luarocks out"
+      "--exclude-files .deps/** .luarocks/** .claude/**",
+      "deps lint: the argv leaves .deps, .luarocks and .claude out"
     )
     if vim.fn.executable("luacheck") == 1 then
       local res = run(root, "--step=luacheck")
-      eq(res.code, 0, "deps lint: green with a bad file in .deps (" .. res.out .. res.err .. ")")
+      eq(
+        res.code,
+        0,
+        "deps lint: green with a bad file in .deps and .claude (" .. res.out .. res.err .. ")"
+      )
       write(root .. "/lua/proj/bad.lua", "own_global = 1\n")
       res = run(root, "--step=luacheck")
       eq(res.code, 1, "deps lint: the project's own file is still checked")
