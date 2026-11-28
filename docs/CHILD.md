@@ -53,6 +53,7 @@ pipe on Windows, a socket in the private `XDG_RUNTIME_DIR` elsewhere), nothing h
 | `prompts` | `"cancel"` | `input()`, `confirm()`, ... answer "cancelled" (`"real"`: left alone; a test sheet with `prompts = "real"` sets it) |
 | `notify_passthrough` | `true` | `vim.notify` is captured AND passed on |
 | `track_schedule` | `true` | count scheduled callbacks (for `settle`) |
+| `ts_sync` | `true` | treesitter parses synchronously (`vim.g._ts_force_sync_parsing`, unless the child already set it) |
 | `guard` | `{ repo = root }` | config for `testing.guard.install`; `false` installs no guard |
 | `size` | `{ rows = 24, cols = 80 }` | screen size used by `screen()` |
 | `trace_dir`, `run_dir`, `trace_name` | temp dir | where the trace goes, see Trace |
@@ -139,7 +140,13 @@ returns `true` after **two consecutive quiet probes**. A probe is quiet when:
    **baseline** taken right after the minit. nvim's own `signal`, `async`, `tty`, `idle`, `check`, `prepare`
    handles are ignored.
 
-Otherwise it returns `false, "not idle after N ms: handles (timer=1)"` (`raise = true` raises that).
+Otherwise it returns `false, "not idle after N ms: handles (timer=1)"` (`raise = true` raises that). A pending
+`vim.schedule` is named by where it was scheduled: `scheduled 1; scheduled_by (vim/treesitter/languagetree.lua:600=1)`.
+
+Treesitter parses in steps of 3 ms and schedules the next one, so a long buffer with a highlighter kept `settle` at
+`scheduled 1` on a loaded machine although the plugin was done. The child therefore parses synchronously
+(`ts_sync`, default on: `vim.g._ts_force_sync_parsing = true`; the highlights are the same). A spec about the
+stepwise parse itself starts the child with `ts_sync = false` or sets the variable back to `false`.
 **What it cannot know:** a callback scheduled through a reference to `vim.schedule` taken before the
 boot ran (a plugin's `local schedule = vim.schedule` at load time); work a plugin has not started yet (a
 debounce that arms its timer on the next event); work in other processes; a plugin that keeps a

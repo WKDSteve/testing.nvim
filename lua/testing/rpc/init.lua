@@ -121,6 +121,7 @@ end
 ---@field prompts? "cancel"|"real" `input()`/`confirm()` answer "cancelled" (default) or are left alone.
 ---@field notify_passthrough? boolean Also run the original `vim.notify` (default true).
 ---@field track_schedule? boolean Count scheduled callbacks for `settle` (default true).
+---@field ts_sync? boolean Treesitter parses synchronously in the child (`vim.g._ts_force_sync_parsing`; default true).
 ---@field guard? table|false Config for `testing.guard.install` (default `{}`; false: none).
 ---@field trace_dir? string Where a trace file goes on timeout/crash (default `<tmp>/testing-traces`).
 ---@field run_dir? string Run directory: a trace below it is reported as `<RUN>/...`.
@@ -863,6 +864,7 @@ local function start(S, async_cb)
         prompts = opts.prompts,
         notify_passthrough = opts.notify_passthrough,
         track_schedule = opts.track_schedule,
+        ts_sync = opts.ts_sync,
         guard = opts.guard == nil and { repo = S.root } or opts.guard,
       },
     },

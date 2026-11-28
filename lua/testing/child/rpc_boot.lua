@@ -47,6 +47,7 @@ local state = {
   handles = {},
   jobs = 0,
   pending = 0,
+  from = {}, ---@type table<integer, string> id of a pending callback -> where it was scheduled
   guard = "absent",
   prompts = "cancel",
   notify_passthrough = true,
@@ -105,15 +106,34 @@ local function job_count()
   return n
 end
 
----Count the scheduled callbacks that have not run yet. Callbacks scheduled through a reference to
----`vim.schedule` taken before `install` are not counted (documented limit of `settle`).
+---Where a function was called from, short: `vim/treesitter/languagetree.lua:600` (the path below `lua/`), else the
+---file name with its line.
+---@param info? debuginfo
+---@return string
+local function short_where(info)
+  if not info then
+    return "?"
+  end
+  local src = tostring(info.source or "?"):gsub("^@", ""):gsub("\\", "/")
+  src = src:match("/lua/(.+)$") or src:match("([^/]+)$") or src
+  return ("%s:%s"):format(src:sub(-80), tostring(info.currentline or "?"))
+end
+
+---Count the scheduled callbacks that have not run yet, and where each was scheduled (`settle` names it). Callbacks
+---scheduled through a reference to `vim.schedule` taken before `install` are not counted (documented limit of
+---`settle`).
 local function track_schedule()
   local orig = vim.schedule
+  local seq = 0
   ---@diagnostic disable-next-line: duplicate-set-field
   vim.schedule = function(fn)
     state.pending = state.pending + 1
+    seq = seq + 1
+    local id = seq
+    state.from[id] = short_where(debug.getinfo(2, "Sl"))
     return orig(function()
       state.pending = state.pending - 1
+      state.from[id] = nil
       return fn()
     end)
   end
@@ -171,6 +191,8 @@ end
 ---@field prompts? "cancel"|"real" Default "cancel".
 ---@field notify_passthrough? boolean Also call the original `vim.notify` (default true).
 ---@field track_schedule? boolean Wrap `vim.schedule` to count pending callbacks (default true).
+---@field ts_sync? boolean Treesitter parses synchronously (`vim.g._ts_force_sync_parsing`, unless already set;
+---default true): its chunked parse (3 ms, then `vim.schedule`) would keep `settle` busy on a loaded machine.
 ---@field guard? table|false Config handed to `testing.guard.install` (default `{}`; `false`: no guard).
 
 ---Install the captures and take the baselines. Call once, after the project's minimal init ran.
@@ -211,6 +233,9 @@ function M.install(opts)
   if opts.track_schedule ~= false then
     track_schedule()
   end
+  if opts.ts_sync ~= false and vim.g._ts_force_sync_parsing == nil then
+    vim.g._ts_force_sync_parsing = true
+  end
 
   state.cwd = uv.cwd()
   state.snap = snapshot()
@@ -229,6 +254,7 @@ function M.rebaseline()
   state.handles = handle_counts()
   state.jobs = job_count()
   state.pending = 0
+  state.from = {}
 end
 
 ---What keeps the editor busy right now. Empty table = quiet. One probe; the parent
@@ -255,6 +281,18 @@ function M.settle_state()
   end
   if state.pending > 0 then
     busy.scheduled = state.pending
+    local by, n = {}, 0
+    for _, where in pairs(state.from) do
+      if not by[where] then
+        n = n + 1
+      end
+      if n <= 5 or by[where] then
+        by[where] = (by[where] or 0) + 1
+      end
+    end
+    if next(by) then
+      busy.scheduled_by = by
+    end
   end
   local over = {}
   for t, n in pairs(handle_counts()) do

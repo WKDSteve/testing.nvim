@@ -838,6 +838,9 @@ return {
   sheet on a markdown buffer that `settle`s after opening it fails. Put `{ rebaseline = true }` after the step that set
   the plugin up (the file is open, its `FileType` ran): that timer is the new quiet, anything started later still
   counts. Never call the internal `require("testing.child.rpc_boot").rebaseline()` from a `lua` step.
+* `not idle ...: scheduled 1; scheduled_by (...)` names where the pending `vim.schedule` came from. Treesitter's
+  stepwise parse is not one of them: the child parses synchronously (`vim.g._ts_force_sync_parsing`, see
+  [CHILD.md](CHILD.md)), so a sheet on a markdown or code buffer needs no recipe of its own.
 * To run one sheet while you work on it: `testing sheets run --sheet <id>` (one line of result), or
   `testing sheets step <id> --run` to see each step.
 
