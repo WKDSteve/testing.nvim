@@ -65,8 +65,11 @@ end
 pcall(vim.fn.setenv, "TESTING_CHILD_JOB", vim.NIL)
 pcall(vim.fn.setenv, "TESTING_CHILD_BOOT", vim.NIL)
 
-for _, dir in ipairs(job.rtp_prepend or {}) do
-  vim.opt.rtp:prepend(dir)
+-- the FIRST entry of `rtp_prepend` ends up first on the runtimepath (the list is read from its end), as in
+-- `testing.child.rpc_init`: in order, the last entry came first, and a copy of a plugin listed after the project hid it
+local prepend = job.rtp_prepend or {}
+for i = #prepend, 1, -1 do
+  vim.opt.rtp:prepend(prepend[i])
 end
 for _, dir in ipairs(job.rtp or {}) do
   vim.opt.rtp:append(dir)
