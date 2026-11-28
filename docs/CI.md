@@ -596,8 +596,10 @@ Green means the run is completed: while it is still in progress, jobs that are a
 created later or the run's own conclusion could still be red).
 A push (of the check branch or of `<branch>`) runs the pre-push hook and may take minutes on a loaded machine; one that
 fails or does not finish within 10 minutes (`git push did not finish within 10 min`) is not taken as failed blindly:
-`land` asks the remote (`git ls-remote`), and when the branch is on the commit it says `the push ... reported ..., but
-<sha> is there` and goes on (waits for the run, or lands).
+`land` asks the remote (`git ls-remote`), and when the branch is on the commit, or on a later commit that contains it
+(a parallel push moved it on; fetched and checked with `git merge-base --is-ancestor`), it says `the push ... reported
+..., but <sha> is there` and goes on (waits for the run, or lands). A push that fails without a message names its exit
+code (`exit 128 without a message`).
 A check branch whose commit text carries the CI's skip marker gets no run at all (`testing ci remote` says `skipped`
 with no run): nothing was checked. Such a commit lands only when it changes documentation and nothing else (the files
 `ci commit` reads as `DOCS-ONLY`), and the last line says `landed on <branch> WITHOUT a hosted run (docs only, skipped by

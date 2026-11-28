@@ -343,12 +343,30 @@ function M.run(args, say, state_dir)
   -- no longer turns a round into `unknown (could not ask: no GitHub token)`.
   ---@type string|nil
   local token
-  ---Did a push that failed or ran out of time arrive anyway? The ref on the remote names the commit.
+  ---Did a push that failed or ran out of time arrive anyway? The ref on the remote names the commit, or a commit
+  ---after it: a parallel push may have moved the branch on between our push and this look (`FALLEN-07`).
   ---@param ref string A branch name.
   ---@return boolean
   local function arrived(ref)
     local c, o = git("ls-remote", args.remote, "refs/heads/" .. ref)
-    return c == 0 and (o or ""):match("^(%x+)") == sha
+    local tip = c == 0 and (o or ""):match("^(%x+)") or nil
+    if not tip then
+      return false
+    end
+    if tip == sha then
+      return true
+    end
+    -- fetched, the tip is a local object: does it contain the commit?
+    return git("fetch", "--quiet", args.remote, "refs/heads/" .. ref) == 0
+      and git("merge-base", "--is-ancestor", sha, tip) == 0
+  end
+  ---The reason of a failed git call, never empty: a push that ends non-zero without a word names its exit code.
+  ---@param c integer
+  ---@param e string|nil
+  ---@return string
+  local function reason(c, e)
+    local text = vim.trim(e or "")
+    return text ~= "" and text or ("exit %s without a message"):format(tostring(c))
   end
 
   ---Is `<remote>/<branch>` (fetched now) an ancestor of the commit? "same", "ancestor", "moved" or nil, problem.
@@ -506,12 +524,12 @@ function M.run(args, say, state_dir)
       say(
         ("land: the push of %s reported %s, but %s is there: the hosted CI checks it"):format(
           check,
-          vim.trim(err),
+          reason(code, err),
           short
         )
       )
     elseif code ~= 0 then
-      say(("land: the push of %s failed: %s"):format(check, vim.trim(err)))
+      say(("land: the push of %s failed: %s"):format(check, reason(code, err)))
       return M.EXIT_INFRA
     end
     pushed = true
@@ -773,7 +791,7 @@ function M.run(args, say, state_dir)
       say(
         ("land: the push to %s reported %s, but %s is there"):format(
           args.branch,
-          vim.trim(err),
+          reason(code, err),
           short
         )
       )
@@ -782,7 +800,7 @@ function M.run(args, say, state_dir)
         ("land: %s is green, but the push to %s failed: %s"):format(
           short,
           args.branch,
-          vim.trim(err)
+          reason(code, err)
         )
       )
       drop_check()

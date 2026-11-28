@@ -53,6 +53,10 @@ return function(H)
         end
         return 0, "", ""
       elseif cmd == "merge-base" then
+        -- `o.contains`: a tip on the remote that has the commit in its history (a branch moved on after our push)
+        if o.contains and args[3] == SHA and args[4] == o.contains then
+          return 0, "", ""
+        end
         return args[3] == BASE and 0 or 1, "", ""
       elseif cmd == "diff" then
         return 0, table.concat(o.changed or { "lua/x.lua" }, "\0"), ""
@@ -195,6 +199,24 @@ return function(H)
       remote_refs = { [CHECK] = ("f"):rep(40) },
     })
     eq(other.code, land.EXIT_INFRA, "failed check push, the branch on another commit: infra")
+    -- main moved on past the commit before land looked (a parallel push on top of ours): landed, not red
+    local MOVED_ON = ("d"):rep(40)
+    local moved_on = scenario({
+      states = green,
+      push_fail = { main = { 1, "" } },
+      remote_refs = { main = MOVED_ON },
+      contains = MOVED_ON,
+    })
+    eq(moved_on.code, 0, "push of main failed, main moved on past the commit: landed")
+    has(moved_on.text, "landed on main", "main moved on past the commit: says it landed")
+    -- a push that ends non-zero without a word: the message names the exit code, never an empty reason or nil
+    local silent = scenario({ states = green, push_fail = { main = { 128, "" } } })
+    eq(silent.code, 1, "silent failed push of main: red")
+    has(
+      silent.text,
+      "failed: exit 128 without a message",
+      "silent failed push: names the exit code"
+    )
   end
 
   -- the real git call: a wait that gives no result (a hook process kept the pipes after the kill) is a time limit
