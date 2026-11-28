@@ -51,8 +51,12 @@ return function(H)
   local during = vim.env[VAR]
   sess:close()
   local after = vim.env[VAR]
+  -- the real path on both sides: on macOS the temp folder /var/... is /private/var/... once git resolved it
+  local function real(p)
+    return vim.fs.normalize(vim.uv.fs_realpath(p) or p):lower()
+  end
   ok(
-    during ~= nil and vim.fs.normalize(during):lower() == vim.fs.normalize(dep):lower(),
+    during ~= nil and real(during) == real(dep),
     "open: the sibling of the main checkout as " .. VAR .. " (" .. tostring(during) .. ")"
   )
   eq(after, nil, "close: taken back")
