@@ -105,8 +105,11 @@ local function is_runtime(src)
     or p:find("testing/perf/trace.lua", 1, true) ~= nil
     -- a live sheet's guard is installed after the trace and wraps it: its frames are no caller either
     or p:find("/lua/testing/guard/", 1, true) ~= nil
-    -- runtime-analysis's telemetry wraps vim.system in the user's config: a wrapper, not the caller
-    or p:find("/lua/runtime-analysis/telemetry/", 1, true) ~= nil
+    -- runtime-analysis's telemetry wraps the functions it counts (vim.system too, in the user's config): its wrapper
+    -- frames are no caller. Only the files that build the wrappers: the rest of `telemetry/` (`command.lua`,
+    -- `:RATelemetry open`) starts processes of its own and must count when runtime-analysis.nvim is measured
+    or p:find("/lua/runtime-analysis/telemetry/registry.lua", 1, true) ~= nil
+    or p:find("/lua/runtime-analysis/telemetry/init.lua", 1, true) ~= nil
 end
 
 M._is_runtime = is_runtime

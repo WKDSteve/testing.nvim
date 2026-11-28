@@ -163,6 +163,18 @@ return function(H)
       "the guard is no caller"
     )
     ok(not trace._is_runtime("@E:/repos/foo.nvim/lua/foo/init.lua"), "a plugin is")
+    -- runtime-analysis's telemetry: the wrappers it builds are no caller, its commands are (they start processes)
+    local ra = "@E:/repos/runtime-analysis.nvim/lua/runtime-analysis/telemetry/"
+    ok(
+      trace._is_runtime(ra .. "registry.lua"),
+      "telemetry: the wrapper of registry.lua is no caller"
+    )
+    ok(trace._is_runtime(ra .. "init.lua"), "telemetry: nor that of init.lua")
+    ok(
+      not trace._is_runtime(ra .. "command.lua"),
+      "telemetry: :RATelemetry (command.lua) is a caller"
+    )
+    ok(not trace._is_runtime(ra .. "report.lua"), "telemetry: so is the report")
     local refolded = trace.fold({
       { ev = "install" },
       { ev = "start", id = 1, us = 1, kind = "a", argv = "a" },
