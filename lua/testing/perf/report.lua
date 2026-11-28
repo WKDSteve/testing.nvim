@@ -42,6 +42,96 @@ M.LSP_NAMES = {
   "harper",
 }
 
+---The git subcommands that only read the repository: between two equal reads they change nothing, so the second one
+---is still a repeat. Every other subcommand (add, reset, commit, checkout, stash, ...) may change what a read answers.
+M.GIT_READS = {
+  status = true,
+  diff = true,
+  log = true,
+  ["rev-parse"] = true,
+  ["rev-list"] = true,
+  show = true,
+  ["ls-files"] = true,
+  ["ls-tree"] = true,
+  ["cat-file"] = true,
+  ["for-each-ref"] = true,
+  blame = true,
+  grep = true,
+  ["merge-base"] = true,
+  ["symbolic-ref"] = true,
+  ["check-ignore"] = true,
+  ["describe"] = true,
+  ["shortlog"] = true,
+  ["name-rev"] = true,
+  ["show-ref"] = true,
+  version = true,
+}
+
+---The words of a git command line and the index of its subcommand (after `-C <dir>`, `-c <k=v>` and the other
+---global options), nil when the line is no git call.
+---@param argv string
+---@return string[]|nil words
+---@return integer|nil sub
+local function git_words(argv)
+  local words = vim.split(vim.trim(argv), "%s+")
+  local prog = (words[1] or ""):gsub("\\", "/"):match("([^/]+)$") or ""
+  prog = prog:lower():gsub("%.exe$", "")
+  if prog ~= "git" then
+    return nil
+  end
+  local i = 2
+  while words[i] do
+    local w = words[i]
+    if w == "-C" or w == "-c" or w == "--git-dir" or w == "--work-tree" or w == "--namespace" then
+      i = i + 2
+    elseif w:sub(1, 1) == "-" then
+      i = i + 1
+    else
+      return words, i
+    end
+  end
+  return words, nil
+end
+
+---The repository a git command line is about: its `-C <dir>` (the last one), else `cwd`; nil for no git call.
+---@param argv string
+---@param cwd? string
+---@return string|nil
+function M.git_dir(argv, cwd)
+  local words = git_words(argv)
+  if not words then
+    return nil
+  end
+  local dir = cwd or ""
+  for i = 2, #words - 1 do
+    if words[i] == "-C" then
+      dir = words[i + 1]
+    end
+  end
+  return (dir:gsub("\\", "/"):gsub("/+$", ""))
+end
+
+---Does a git command line (may) change the repository? Any subcommand not in `M.GIT_READS`, and `config` without
+---`--get`/`--list`; false for no git call or one without a subcommand.
+---@param argv string
+---@return boolean
+function M.git_write(argv)
+  local words, sub = git_words(argv)
+  if not (words and sub) then
+    return false
+  end
+  local name = words[sub]
+  if name == "config" then
+    for i = sub + 1, #words do
+      if words[i]:match("^%-%-get") or words[i] == "--list" or words[i] == "-l" then
+        return false
+      end
+    end
+    return true
+  end
+  return not M.GIT_READS[name]
+end
+
 ---@param text string|nil
 ---@return boolean
 function M.is_lsp(text)
@@ -146,6 +236,8 @@ function M.findings(repo, sh, t)
   end
   local per_step = {}
   local last_seen = {}
+  ---@type table<string, integer> repository -> how often a git changed it so far in this sheet
+  local written = {}
   for _, sp in ipairs(sh.spawns or {}) do
     if not M.is_preparation(sp, sh.steps or {}) then
       if sp.blocked_ms and sp.blocked_ms > t.freeze_ms then
@@ -180,8 +272,17 @@ function M.findings(repo, sh, t)
         per_step[key] = per_step[key] or { n = 0, sp = sp }
         per_step[key].n = per_step[key].n + 1
       end
-      -- the same command in the same directory: in another one it may answer differently (a project's toolchain)
-      local same = sp.argv .. "\0" .. (sp.cwd or "")
+      -- the same command in the same directory: in another one it may answer differently (a project's toolchain); a
+      -- git that changed that repository since (`M.git_write`) makes the next read needed, it is no repeat
+      local repo_key = M.git_dir(sp.argv or "", sp.cwd)
+      if repo_key and M.git_write(sp.argv or "") then
+        written[repo_key] = (written[repo_key] or 0) + 1
+      end
+      local same = sp.argv
+        .. "\0"
+        .. (sp.cwd or "")
+        .. "\0"
+        .. tostring(repo_key and written[repo_key] or 0)
       local prev = last_seen[same]
       if prev and sp.us and prev.us and (sp.us - prev.us) / 1000 < t.repeat_ms then
         add(

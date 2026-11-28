@@ -643,6 +643,41 @@ return function(H)
     end
     eq(repeats("/b"), 0, "repeat: the same argv in another cwd is none")
     eq(repeats("/a"), 1, "repeat: the same argv in the same cwd is one")
+    -- a git that changes the repository between two reads makes the second read needed (filetree.nvim: status,
+    -- `git add`, status); two reads with only reads between are a repeat
+    local function git_repeats(between)
+      local spawns = {
+        { plugin = "p", step = 1, argv = "git -C /r status --porcelain", cwd = "/x", us = 1000 },
+      }
+      for i, a in ipairs(between) do
+        spawns[#spawns + 1] = { plugin = "p", step = 1, argv = a, cwd = "/x", us = 1000 + i * 10 }
+      end
+      spawns[#spawns + 1] =
+        { plugin = "p", step = 1, argv = "git -C /r status --porcelain", cwd = "/x", us = 90000 }
+      return #vim.tbl_filter(
+        function(x)
+          return x.kind == "repeat"
+        end,
+        report.findings("p.nvim", {
+          id = "g",
+          steps = { { n = 1, action = "keys" } },
+          spawns = spawns,
+        })
+      )
+    end
+    eq(git_repeats({ "git -C /r add -- a.txt" }), 0, "repeat: a git add between two status: none")
+    eq(
+      git_repeats({ "git -c core.quotepath=off -C /r reset -q -- a.txt" }),
+      0,
+      "... a reset neither"
+    )
+    eq(git_repeats({}), 1, "repeat: two status alone: one")
+    eq(
+      git_repeats({ "git -C /r log -1", "git -C /r rev-parse HEAD" }),
+      1,
+      "... reads between: still one"
+    )
+    eq(git_repeats({ "git -C /other add x" }), 1, "... a write in another repository: still one")
     eq(by.burst[1].value, 9, "nine starts of the plugin in one step")
     local sized = { id = "s", steps = { { n = 1, action = "keys" } }, spawns = {} }
     for _, size in ipairs({ "80x24", "120x40" }) do
