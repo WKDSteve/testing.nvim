@@ -207,6 +207,9 @@ end
 ---@field case Testing.Result.Case The first case of the group.
 ---@field assertion? Testing.Result.Assertion Its first failed assertion.
 ---@field more_assertions integer Further failed assertions of that case.
+---@field before? table The first failed assertion of a case that ended with an error after it (the assertions of a
+---busted case collect: the body ran on into the error, and the check that failed first is the clue).
+---@field before_where? string Where `before` is.
 ---@field key string
 
 ---Group the red cases by status, message and top frame, in first-seen order.
@@ -227,7 +230,7 @@ local function failure_groups(result, o)
         end
       end
       local a = failed[1]
-      local message, where, about
+      local message, where, about, before, before_where
       if
         a
         and (c.status == "fail" or c.status == "xpass" or c.status == "error")
@@ -246,6 +249,12 @@ local function failure_groups(result, o)
         local frame = c.error and error_location(root, tostring(message), c.error.traceback, c.file)
         where = frame and relpath(root, frame)
           or (relpath(root, c.file) .. (c.line and (":" .. c.line) or ""))
+        if a and c.error then
+          before = a
+          local line = a.line or c.line
+          before_where =
+            oneline(relpath(root, a.file or c.file) .. (line and (":" .. line) or ""), o.line_max)
+        end
       end
       message = oneline(strip_root(root, first_line(message)), o.line_max)
       where = oneline(where, o.line_max)
@@ -261,7 +270,9 @@ local function failure_groups(result, o)
           count = 1,
           case = c,
           assertion = about,
-          more_assertions = about and math.max(0, #failed - 1) or 0,
+          more_assertions = (about or before) and math.max(0, #failed - 1) or 0,
+          before = before,
+          before_where = before_where,
           key = key,
         }
         by_key[key] = g
@@ -565,6 +576,15 @@ local function text_entry(g, result, o, short)
         and not (g.assertion.expected or g.assertion.actual)
       then
         lines[#lines + 1] = "  diff: " .. oneline(g.assertion.diff, o.line_max)
+      end
+    end
+    if g.before then
+      lines[#lines + 1] = ("  failed before the error: %s  %s"):format(
+        g.before_where,
+        oneline(g.before.msg or g.before.kind or "failed", o.line_max)
+      )
+      for _, l in ipairs(value_lines(g.before, o)) do
+        lines[#lines + 1] = "    " .. l
       end
     end
     if g.more_assertions > 0 then

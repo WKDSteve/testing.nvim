@@ -151,7 +151,56 @@ return function(H)
   })
   ok(ec ~= nil, "an error case with a failed assertion")
   local eal = agent.render(ea, { command = CMD })
-  eq(#eal, 4, "its assertions are not listed under the error")
+  -- the first failed check before the error is named under it (the assertions of a busted case collect: the body
+  -- ran on into a later error, and only the error was printed; terminal.nvim, 2026-11-21, hid its cause that way)
+  eq(#eal, 5, "the error, and the failed check before it")
+  eq(eal[3], "  TESTS/q_spec.lua:3: boom", "the error's message first")
+  eq(
+    eal[4],
+    "  failed before the error: TESTS/q_spec.lua  earlier",
+    "then the check that failed before it"
+  )
+  local eb = new_run()
+  F.add(eb, {
+    file = "TESTS/r_spec.lua",
+    name = "r",
+    status = "error",
+    error = {
+      message = "TESTS/r_spec.lua:9: attempt to call field 'on_exit' (a nil value)",
+      traceback = "",
+    },
+    assertions = {
+      {
+        ok = false,
+        kind = "eq",
+        msg = "setup started a process",
+        expected = "0",
+        actual = "1",
+        line = 4,
+      },
+      { ok = false, kind = "eq", msg = "second", expected = "a", actual = "b", line = 5 },
+    },
+  })
+  local ebl = joined(agent.render(eb, { command = CMD }))
+  has(
+    ebl,
+    "failed before the error: TESTS/r_spec.lua:4  setup started a process",
+    "eq before the error"
+  )
+  has(ebl, "expected: 0", "... with its values")
+  has(ebl, "(+1 more failed assertion(s) in this case)", "... and the count of the others")
+  local plain = new_run()
+  F.add(plain, {
+    file = "TESTS/s_spec.lua",
+    name = "s",
+    status = "error",
+    error = { message = "TESTS/s_spec.lua:2: boom", traceback = "" },
+  })
+  eq(
+    joined(agent.render(plain, { command = CMD })):find("failed before", 1, true),
+    nil,
+    "an error without a failed check: nothing more"
+  )
 
   -- multi-line values: the first differing line with its context ---------------------------------------------------------
   local m = new_run()

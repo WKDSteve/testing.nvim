@@ -248,7 +248,9 @@ more: 12 failure group(s) (30 case(s)) not shown (budget 4000 chars); all of the
   they keep the verdict of the cases.
 * **One entry per cause**: failures with the same status, message (first line) and top frame (the assertion site, or
   the first frame of the traceback) are one entry with a counter (`ERROR x40`), the first case, and the hint that the
-  rest is in the `--json` file. Several failed assertions of one case: the first, plus a count.
+  rest is in the `--json` file. Several failed assertions of one case: the first, plus a count. A case that ended with
+  an error after a failed check (busted assertions collect, so the body runs on) names that check under the error:
+  `failed before the error: <file>:<line>  <message>`, with its values.
 * **`expected` / `actual`**, one line each; multi-line values are cut to the first differing line with one line of
   context before it.
 * **`rerun:`** the entry script as it was called, the arguments of the run without what selects or shows (`--file`,
