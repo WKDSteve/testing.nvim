@@ -194,6 +194,44 @@ return function(H)
     vim.uv.fs_rmdir(link)
   end
 
+  -- run in a linked worktree of plug.nvim: its main checkout below the fleet holds the old files (another state of the
+  -- project itself), not a caller; a real caller in another checkout still counts
+  do
+    local wt = vim.fs.normalize(S.project()) .. "/wt"
+    run(plug, "worktree", "add", "-q", "--detach", wt, "HEAD")
+    S.write(
+      wt .. "/lua/plug/a.lua",
+      "local M = {}\nfunction M.renamed() end\nfunction M.keep() end\nreturn M\n"
+    )
+    S.write(
+      wt .. "/lua/plug/user.lua",
+      'local a = require("plug.a")\nreturn function() a.renamed() end\n'
+    )
+    local out = {}
+    local wcode = callers.main({ "--base=HEAD" }, {
+      out = function(s)
+        out[#out + 1] = s
+      end,
+      err = function(s)
+        out[#out + 1] = "ERR " .. s
+      end,
+      cwd = wt,
+      getenv = function(name)
+        return ({ REPOS_DIR = fleet })[name]
+      end,
+    })
+    local wtext = table.concat(out, "\n")
+    eq(wcode, callers.EXIT_FOUND, "worktree: the real caller in another checkout is found")
+    has(wtext, "CALLERS | 1 calls", "worktree: one call, of other.nvim")
+    has(wtext, "/other.nvim/lua/other/init.lua:1", "worktree: ... the other checkout")
+    ok(
+      not wtext:find(vim.fs.normalize(plug) .. "/lua/plug/user.lua", 1, true),
+      "worktree: the main checkout of the same repository is no caller (" .. wtext .. ")"
+    )
+    has(wtext, "main checkout of this repository", "worktree: and it says why it was left out")
+    run(plug, "worktree", "remove", "--force", wt)
+  end
+
   code, text = main({ "--base=HEAD" }, { REPOS_DIR = fleet })
   eq(code, callers.EXIT_FOUND)
   has(text, "note: NVIM_CONFIG_DIR is not set")

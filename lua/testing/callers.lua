@@ -15,7 +15,8 @@
 ---    changed one the exports it no longer has (`function M.name(`, `M.name = ...` at the start of a line, `M` being
 ---    the table the file returns).
 --- 2. **Who calls it.** Every `*.lua` and `*.vim` file below the roots: the project itself, each checkout directly
----    below `$REPOS_DIR` (linked worktrees skipped: they are copies), and `$NVIM_CONFIG_DIR`; `--roots` replaces the
+---    below `$REPOS_DIR` (linked worktrees skipped: they are copies; run in a linked worktree, the main checkout of
+---    the same repository is skipped too: it is the project in another state), and `$NVIM_CONFIG_DIR`; `--roots` replaces the
 ---    fleet with the named directories, `--no-fleet` looks at the project only. A call is `require("mod").name`,
 ---    `X.name` / `X:name` after `local X = require("mod")` (or `pcall(require, "mod")`, `require("mod").sub`), a
 ---    field chain through a facade (`g.commands.open` after `local g = require("gopath")` is the field `open` of
@@ -232,6 +233,14 @@ function M.roots(root, opts)
   if opts.no_fleet then
     return list, notes
   end
+  -- the shared repository of the project: run in a linked worktree, the main checkout of the same repository is the
+  -- project itself in another state (the old files the worktree changes), not a caller
+  local function real(p)
+    local k = norm(vim.uv.fs_realpath(p) or p)
+    return require("testing.platform").is_case_insensitive() and k:lower() or k
+  end
+  local common = M.io.git(root, { "rev-parse", "--path-format=absolute", "--git-common-dir" })
+  local own = common and vim.trim(common) ~= "" and real(vim.trim(common)) or nil
   local repos = getenv("REPOS_DIR")
   if repos and repos ~= "" and vim.fn.isdirectory(repos) == 1 then
     local names = {}
@@ -246,7 +255,13 @@ function M.roots(root, opts)
       -- a checkout of its own: `.git` is a directory (a linked worktree has a `.git` file and is a copy)
       local st = vim.uv.fs_stat(dir .. "/.git")
       if st and st.type == "directory" then
-        add(dir)
+        if own and real(dir .. "/.git") == own and real(dir) ~= real(root) then
+          notes[#notes + 1] = ("%s is the main checkout of this repository (the project in another state): not looked at"):format(
+            dir
+          )
+        else
+          add(dir)
+        end
       end
     end
   else
