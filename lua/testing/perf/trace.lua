@@ -240,10 +240,18 @@ local function start(kind, cmd, extra)
     stack = stack,
   }, extra or {})
   write(rec)
+  -- a start nobody waits for yet: a `vim.wait` while it runs is the editor waiting for it (`M.install`); not a
+  -- language server, which runs the whole session and is waited for by nobody
+  if rec.sync ~= true and not require("testing.perf.report").is_lsp(rec.argv) then
+    S.running[id] = true
+  end
   return id
 end
 
 local function finish(id, t0, code, ev)
+  if S and (ev or "end") == "end" then
+    S.running[id] = nil
+  end
   local us = now_us()
   write({ ev = ev or "end", id = id, us = us, ms = (us - t0) / 1000, code = code })
 end
@@ -289,6 +297,7 @@ function M.install(opts)
     lines = 0,
     next_id = 0,
     jobs = {},
+    running = {},
     orig = {},
     config_dir = config_dir and (config_dir:gsub("\\", "/"):gsub("/+$", "")) or nil,
   }
@@ -317,7 +326,14 @@ function M.install(opts)
       local wait = obj.wait
       obj.wait = function(self, ...)
         local t0 = now_us()
+        -- `wait()` runs `vim.wait` itself: counted here, as its own record, not again by the `vim.wait` of the trace
+        if S then
+          S.in_wait = (S.in_wait or 0) + 1
+        end
         local r = { wait(self, ...) }
+        if S then
+          S.in_wait = S.in_wait - 1
+        end
         if S then
           write({ ev = "wait", id = id, us = now_us(), ms = (now_us() - t0) / 1000 })
         end
@@ -437,6 +453,32 @@ function M.install(opts)
         write({ ev = "wait", id = id, us = now_us(), ms = ms })
         ms = 0
       end
+    end
+    return unpack(r, 1, table.maxn(r))
+  end
+
+  -- `vim.wait` while a process the editor started runs: the user's keys wait as long as for `:wait()` (insights.nvim
+  -- pumps `vim.wait` for the callback of `vim.system`, mdview.nvim for a socket); the time goes to the newest process
+  -- that ran in it, as a `wait` record. A `vim.wait` with no process running (a timer) is no process's freeze.
+  O.wait = vim.wait
+  vim.wait = function(...)
+    if not S or (S.in_wait or 0) > 0 then
+      return O.wait(...)
+    end
+    local newest
+    for id in pairs(S.running) do
+      newest = math.max(newest or 0, id)
+    end
+    local t0 = now_us()
+    local r = { O.wait(...) }
+    if S and newest then
+      write({
+        ev = "wait",
+        id = newest,
+        us = now_us(),
+        ms = (now_us() - t0) / 1000,
+        by = "vim.wait",
+      })
     end
     return unpack(r, 1, table.maxn(r))
   end
@@ -571,6 +613,7 @@ function M.uninstall()
     end
   end
   vim.fn.jobwait = O.jobwait
+  vim.wait = O.wait
   if O.lsp_start then
     vim.lsp.start = O.lsp_start
   end

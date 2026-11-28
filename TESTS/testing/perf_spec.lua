@@ -93,9 +93,11 @@ return function(H)
       fsys.sync == true and fsys.blocked_ms and fsys.blocked_ms > 0,
       "vim.fn.system is synchronous"
     )
+    ok(js.ms ~= nil and js.pid ~= nil, "jobstart: its end and pid")
+    -- the vim.wait above that waits for its exit is the editor waiting for it (the keys wait too)
     ok(
-      js.sync == false and js.ms ~= nil and js.pid ~= nil,
-      "jobstart: asynchronous with its end and pid"
+      js.sync == true and (js.blocked_ms or 0) > 0,
+      "jobstart: the vim.wait for its exit counts as waiting"
     )
     has(sys.argv, "--version", "the argv")
     has(sys.site or "", "perf_spec.lua", "the site is the line that asked")
@@ -191,6 +193,64 @@ return function(H)
       "gitsigns.nvim",
       "lazy"
     )
+  end
+
+  -- ── the trace: a vim.wait while a started process runs is the editor waiting for it ──
+  do
+    local trace = require("testing.perf.trace")
+    local out = tmp .. "/trace-wait.jsonl"
+    assert(trace.install({ out = out }))
+    local exe = vim.v.progpath
+    local slow =
+      { exe, "--headless", "-u", "NONE", "-n", "-i", "NONE", "+lua vim.uv.sleep(300)", "+qa!" }
+    -- insights.nvim: start with a callback, then pump vim.wait until it came (the keys wait all that time)
+    local done = false
+    vim.system(slow, { text = true }, function()
+      done = true
+    end)
+    vim.wait(20000, function()
+      return done
+    end, 10)
+    -- a vim.wait with no process running (a timer) is no process's freeze
+    vim.wait(150, function()
+      return false
+    end, 10)
+    -- :wait() runs vim.wait itself: counted once
+    local obj = vim.system(slow, { text = true })
+    obj:wait(20000)
+    trace.uninstall()
+    ok(vim.wait ~= nil and not trace.installed(), "vim.wait is back")
+    local records = trace.read(out)
+    local spawns = trace.fold(records)
+    eq(#spawns, 2, "two starts")
+    ok(
+      (spawns[1].blocked_ms or 0) >= 100,
+      "vim.wait for the callback: blocked (" .. tostring(spawns[1].blocked_ms) .. " ms)"
+    )
+    eq(spawns[1].sync, true, "... and counted as waited for")
+    local by_vim_wait = 0
+    for _, r in ipairs(records) do
+      if r.ev == "wait" and r.by == "vim.wait" then
+        by_vim_wait = by_vim_wait + 1
+      end
+    end
+    eq(by_vim_wait, 1, "one vim.wait record: not the timer's, not the one inside :wait()")
+    ok(
+      (spawns[2].blocked_ms or 0) <= (spawns[2].ms or 0) + 50,
+      "wait(): blocked once, not twice ("
+        .. tostring(spawns[2].blocked_ms)
+        .. " of "
+        .. tostring(spawns[2].ms)
+        .. " ms)"
+    )
+    local f = require("testing.perf.report").findings("p.nvim", {
+      id = "w",
+      steps = { { n = 1, action = "keys" } },
+      spawns = { vim.tbl_extend("force", spawns[1], { plugin = "p", step = 1 }) },
+    })
+    eq(#vim.tbl_filter(function(x)
+      return x.kind == "freeze"
+    end, f), 1, "a freeze for the vim.wait")
   end
 
   -- ── the scan ───────────────────────────────────────────────────────────

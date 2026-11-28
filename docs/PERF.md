@@ -40,8 +40,10 @@ snapshot is a failure and is never written. On top of that:
   `preload` of the RPC child, `testing.child.rpc_init`), so the starts of a plugin's `setup()` are seen too. It wraps
   `vim.system`, `vim.fn.system`/`systemlist`, `jobstart`, `termopen`, `vim.uv.spawn`, `io.popen` and `os.execute` and
   writes per start: when (monotonic clock), the kind, the redacted argv (temporary folders as `<TMP>`), whether the
-  editor waited for it (`sync`, a `wait()`, a `jobwait()`, an `io.popen` until its handle is closed) and how long,
-  how long the process ran, its pid, and the caller:
+  editor waited for it (`sync`, a `wait()`, a `jobwait()`, an `io.popen` until its handle is closed, a `vim.wait` while
+  the process runs: the keys wait as long, so it goes to the newest process that ran in it, never to a language
+  server; a `vim.wait` with no process running is none) and how long, how long the process ran, its directory
+  (`cwd`), its pid, and the caller:
   * `site`: the first frame outside Neovim's runtime (maybe inside lib.nvim),
   * `origin`: the first frame outside lib.nvim too (the plugin's own line), `plugin`: its repository.
   * A start asked for by a sheet step itself (an RPC chunk, `<nvim>`, before any plugin frame) or by a file below
