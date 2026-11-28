@@ -711,9 +711,12 @@ function M.run(args, say, state_dir)
         return M.EXIT_INFRA
       end
       if not only_docs or n == 0 then
+        local what = n == 0 and "and the commit changes no file: nothing to land"
+          or "but code changed"
         say(
-          ("land: %s: skipped by marker in the commit text, but code changed: %s stays; reword the commit and land again"):format(
+          ("land: %s: skipped by marker in the commit text, %s: %s stays; reword the commit and land again"):format(
             short,
+            what,
             upstream
           )
         )

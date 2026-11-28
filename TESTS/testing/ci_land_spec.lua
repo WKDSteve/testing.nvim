@@ -154,6 +154,19 @@ return function(H)
     for _, p in ipairs(code_change.pushes) do
       eq(p:find(":refs/heads/main", 1, true), nil, "skipped + code: main is not pushed")
     end
+    -- an empty diff (a commit that changes nothing against main) stops too, but no code changed
+    local empty = scenario({ states = { skipped }, changed = {} })
+    eq(empty.code, 1, "skipped + empty diff: land stops")
+    has(
+      empty.text,
+      "skipped by marker in the commit text, and the commit changes no file: nothing to land",
+      "skipped + empty diff: says so"
+    )
+    eq(empty.text:find("code changed", 1, true), nil, "skipped + empty diff: no code changed")
+    has(empty.text, "main stays", "skipped + empty diff: ... and that main stays")
+    for _, p in ipairs(empty.pushes) do
+      eq(p:find(":refs/heads/main", 1, true), nil, "skipped + empty diff: main is not pushed")
+    end
     local docs = scenario({ states = { skipped }, changed = { "README.md", "docs/CI.md" } })
     eq(docs.code, 0, "skipped + docs only: lands")
     has(
